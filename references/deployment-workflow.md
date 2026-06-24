@@ -17,7 +17,7 @@ If state has resources, require one:
 ```bash
 P2P_EXISTING_STATE_ACTION=continue
 P2P_EXISTING_STATE_ACTION=destroy
-P2P_WORKDIR=$HOME/.p2p-matrix/deploy-new
+P2P_WORKDIR=$HOME/.direxio/deploy-new
 ```
 
 ## Destroy
@@ -28,7 +28,7 @@ From the repository root:
 bash scripts/destroy.sh
 ```
 
-Destroy terminates the recorded EC2 instance, releases the Elastic IP, deletes the security group and key pair, then removes the corresponding local deploy workdir under `~/.p2p-matrix`. This prevents stale `state.json` files from being treated as active deployments later.
+Destroy terminates the recorded EC2 instance, releases the Elastic IP, deletes the security group and key pair, then removes the corresponding local deploy workdir under `~/.direxio`. This prevents stale `state.json` files from being treated as active deployments later.
 
 Use `P2P_KEEP_WORKDIR=1 bash scripts/destroy.sh` only when preserving local state files for debugging; if used, report that the workdir still exists.
 
@@ -91,4 +91,4 @@ access_token
 as_url
 ```
 
-All fields are written to `~/.p2p-matrix/nodes/<agent_node_id>/credentials.json` with mode `0600`.
+All fields are written to `~/.direxio/nodes/<service_id>/credentials.json` with mode `0600`.

@@ -10,7 +10,7 @@
 - **S3_PROVISION**: 创建 EC2、密钥对、安全组、Elastic IP，渲染 cloud-init。默认镜像 `MESSAGE_SERVER_IMAGE=direxio/message-server:latest`。
 - **S4_BOOTSTRAP_STACK**: 等 cloud-init 安装 Docker 并启动 `postgres:18 + message-server + caddy + coturn`，轮询 `https://<domain>/healthz`。
 - **S5_INIT_TOKENS**: SSH 读取 `/opt/p2p/bootstrap.json`，归一化 `password`、`access_token`、`agent_token`、`agent_room_id`。
-- **S6_WIRE_LOCAL**: 写 `~/.p2p-matrix/nodes/<agent_node_id>/credentials.json` 和节点 env，记录当前 agent runtime。
+- **S6_WIRE_LOCAL**: 写 `~/.direxio/nodes/<service_id>/credentials.json` 和服务 env，记录当前 agent runtime。
 - **S7_VERIFY_E2E**: 验证 `/_p2p`、Matrix versions、well-known、owner.json+CORS、TURN。
 
 ## 云端 compose
@@ -29,7 +29,7 @@
 
 - IM 地址: `https://<domain>`
 - 登录密码: `password`
-- 本地凭据: `~/.p2p-matrix/nodes/<agent_node_id>/credentials.json`
+- 本地服务凭据: `~/.direxio/nodes/<service_id>/credentials.json`
 - 环境变量: `DIREXIO_DOMAIN`、`DIREXIO_AGENT_TOKEN`、`DIREXIO_AGENT_ROOM_ID`
 - 集成目标: `@direxio/local-mcp` 和 `@direxio/agent-plugins`
 - AWS 信息: region、instance id、Elastic IP、SSH 命令、state.json、destroy 命令

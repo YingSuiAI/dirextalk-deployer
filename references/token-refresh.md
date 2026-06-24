@@ -25,9 +25,9 @@ EC2 机器内 `/opt/p2p/bootstrap.json`:
 ssh -i <key.pem> ubuntu@<ip> 'sudo cat /opt/p2p/bootstrap.json' > bootstrap.json
 ```
 
-## 本地凭据
+## 本地服务凭据
 
-`~/.p2p-matrix/nodes/<agent_node_id>/credentials.json`:
+`~/.direxio/nodes/<service_id>/credentials.json`:
 
 ```json
 {
@@ -48,10 +48,10 @@ ssh -i <key.pem> ubuntu@<ip> 'sudo cat /opt/p2p/bootstrap.json' > bootstrap.json
 权限必须是 `0600`:
 
 ```bash
-chmod 600 ~/.p2p-matrix/nodes/<agent_node_id>/credentials.json
+chmod 600 ~/.direxio/nodes/<service_id>/credentials.json
 ```
 
-S6 也会写 `~/.p2p-matrix/nodes/<agent_node_id>/env`，当前 MCP/plugin 变量为 `DIREXIO_DOMAIN`、`DIREXIO_AGENT_TOKEN`、`DIREXIO_AGENT_ROOM_ID` 和 `DIREXIO_AGENT_NODE_ID`。
+S6 也会写 `~/.direxio/nodes/<service_id>/env`，当前 MCP/plugin 变量为 `DIREXIO_DOMAIN`、`DIREXIO_AGENT_TOKEN`、`DIREXIO_AGENT_ROOM_ID` 和 `DIREXIO_AGENT_NODE_ID`。
 
 ## 验证
 

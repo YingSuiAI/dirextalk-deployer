@@ -26,7 +26,7 @@ If a project target exists, install or update this skill as a Git clone at the r
 
 Use this skill when the user asks to deploy, resume, verify, destroy, repair, or wire a P2P-IM Matrix server. The instructions are runtime-neutral and can be followed by Claude, Codex/OpenAI, Gemini, Cursor, Copilot, OpenClaw, Hermes, or another agent that can run shell commands and read files.
 
-For local agent integration after deployment, S6 writes node-specific credentials and environment files under `~/.p2p-matrix/nodes/<agent_node_id>/`. It does not write root-level compatibility credentials, shell profiles, or Windows user environment variables.
+For local agent integration after deployment, S6 writes service-specific credentials and environment files under `~/.direxio/nodes/<service_id>/`, where `service_id` is derived from the deployed domain. It does not write root-level compatibility credentials, shell profiles, or Windows user environment variables.
 
 ```bash
 DIREXIO_DOMAIN=https://<DOMAIN>
@@ -46,7 +46,7 @@ DIREXIO_AGENT_INSTALL=recommend
 DIREXIO_AGENT_INSTALL_MODE=recommended
 ```
 
-`DIREXIO_AGENT_INSTALL` may be `skip`, `recommend`, or `auto`. Only `auto` attempts to run `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --node-id <agent_node_id> --credentials-file ~/.p2p-matrix/nodes/<agent_node_id>/credentials.json --write`; the default `recommend` records and prints the command without mutating agent config. Gateway installs restart only the process for the same node id; other local Direxio nodes keep running.
+`DIREXIO_AGENT_INSTALL` may be `skip`, `recommend`, or `auto`. Only `auto` attempts to run `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --node-id <agent_node_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --write`; the default `recommend` records and prints the command without mutating agent config. Gateway installs restart only the process for the same node id; other local Direxio nodes keep running.
 
 ## Core Rule
 
@@ -67,7 +67,7 @@ Use `DOMAIN_MODE=route53` only when the domain is in Route53 and the user confir
 1. Read `references/tooling.md`; inspect the user OS and install or prepare missing `bash`, `aws`, `jq`, `ssh`, `scp`, and `curl` only after approval.
 2. Inspect DNS, AWS credentials, region defaults, local tooling, and existing deployment state before asking the user anything that can be discovered automatically.
 3. Present one complete deployment configuration and request one consolidated confirmation covering the final domain and irreversible binding, DNS mode, AWS region and billing, credentials source, instance type, message-server image, required installs, and existing-state action.
-4. Apply the approved existing-state action for `${P2P_WORKDIR:-$HOME/.p2p-matrix/deploy}/state.json`: continue, destroy, or use a new workdir.
+4. Apply the approved existing-state action for `${P2P_WORKDIR:-$HOME/.direxio/deploy}/state.json`: continue, destroy, or use a new workdir.
 5. Run `scripts/orchestrate.sh` with the confirmed environment. Let the state machine own AWS calls, state, polling, cloud-init, token/password handling, verification, and destroy behavior.
 6. For `DOMAIN_MODE=user`, pause when the script emits an Elastic IP and ask the user to set:
 
@@ -81,7 +81,7 @@ Use `DOMAIN_MODE=route53` only when the domain is in Route53 and the user confir
 
 ## Destroy Flow
 
-Use `scripts/destroy.sh` for teardown. After AWS resources are terminated and released, destroy removes the corresponding local deploy workdir under `~/.p2p-matrix` so stale state cannot block or mislead the next deployment. It leaves unrelated node credential directories intact.
+Use `scripts/destroy.sh` for teardown. After AWS resources are terminated and released, destroy removes the corresponding local deploy workdir under `~/.direxio` so stale state cannot block or mislead the next deployment. It leaves unrelated node credential directories intact.
 
 If an operator needs to preserve local state files for debugging, run destroy with `P2P_KEEP_WORKDIR=1` and explicitly report that the stale workdir remains.
 
@@ -130,9 +130,10 @@ After S7 passes, report:
 IM URL       : https://<DOMAIN>
 password     : <login password>
 agent_node_id: <agent_node_id>
-node_dir      : ~/.p2p-matrix/nodes/<agent_node_id>
-agent_token  : written to ~/.p2p-matrix/nodes/<agent_node_id>/credentials.json
-agent_room_id: written to ~/.p2p-matrix/nodes/<agent_node_id>/credentials.json
+service_id   : <service_id>
+service_dir  : ~/.direxio/nodes/<service_id>
+agent_token  : written to ~/.direxio/nodes/<service_id>/credentials.json
+agent_room_id: written to ~/.direxio/nodes/<service_id>/credentials.json
 mcp package  : @direxio/local-mcp
 plugins pkg  : @direxio/agent-plugins
 env vars      : DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID persisted
@@ -148,7 +149,7 @@ state.json   : <state path>
 Destroy      : bash scripts/destroy.sh
 ```
 
-Mention that AWS resources keep billing until destroyed. User-managed DNS and purchased domains are not removed by destroy. After destroy, report which `~/.p2p-matrix` deploy workdir was removed or, if `P2P_KEEP_WORKDIR=1` was used, which one remains.
+Mention that AWS resources keep billing until destroyed. User-managed DNS and purchased domains are not removed by destroy. After destroy, report which `~/.direxio` deploy workdir was removed or, if `P2P_KEEP_WORKDIR=1` was used, which one remains.
 
 Then ask one concise follow-up in the user's language:
 
@@ -161,7 +162,7 @@ If the user agrees, use the runtime's native configuration path where available.
 ```text
 command: npx
 args: ["-y", "@direxio/local-mcp@latest"]
-env: DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID
+env: DIREXIO_CREDENTIALS_FILE, DIREXIO_AGENT_NODE_ID
 ```
 
 For OpenClaw and Hermes, prefer native long-process integration. For Claude Code, Cursor, Gemini, and Copilot, use MCP-only unless the user supplies a local command for an external `generic-cli` gateway.

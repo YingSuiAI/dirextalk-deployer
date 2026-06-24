@@ -12,8 +12,15 @@ mkdir -p "$HOME"
 # shellcheck disable=SC1090
 source "$ROOT/scripts/phases/s6_wire_local.sh"
 
+unset DIREXIO_HOME
+[ "$(_direxio_home)" = "$HOME/.direxio" ]
+[ "$(DIREXIO_HOME="$tmp/custom-direxio" _direxio_home)" = "$tmp/custom-direxio" ]
+[ "$(_direxio_service_id "https://IM.Example.com:8443/_p2p")" = "im.example.com-8443" ]
+[ "$(_direxio_service_dir "https://IM.Example.com:8443/_p2p")" = "$HOME/.direxio/nodes/im.example.com-8443" ]
+
 envfile=$(_write_agent_env_file "https://im.example.com" "agent-token" "access-token" "!agent:im.example.com")
 
+[ "$envfile" = "$HOME/.direxio/env" ]
 grep -q 'DIREXIO_DOMAIN=https://im.example.com' "$envfile"
 grep -q 'DIREXIO_AGENT_TOKEN=agent-token' "$envfile"
 grep -q 'DIREXIO_AGENT_ROOM_ID=\\!agent:im.example.com' "$envfile"
@@ -54,15 +61,15 @@ fi
 [ "$(_agent_global_skill_install_path claude-code)" = '${CLAUDE_HOME:-$HOME/.claude}/skills/direxio-deployer' ]
 [ "$(_agent_global_skill_install_path generic)" = '$HOME/.agent/skills/direxio-deployer' ]
 
-[ "$(CODEX_HOME= _agent_mcp_config_path codex)" = "$HOME/.codex/direxio-agent/.mcp.json" ]
-[ "$(CODEX_HOME=/mnt/c/Users/84960/.codex _agent_mcp_config_path codex)" = "/mnt/c/Users/84960/.codex/direxio-agent/.mcp.json" ]
-[ "$(_agent_mcp_config_path claude-code)" = "$HOME/.claude/direxio-agent/.mcp.json" ]
-[ "$(_agent_mcp_config_path openclaw)" = "$HOME/.openclaw/direxio/mcp.json" ]
-[ "$(_agent_mcp_config_path hermes)" = "$HOME/.hermes/direxio.mcp.json" ]
-[ "$(_agent_mcp_config_path cursor)" = "$XDG_CONFIG_HOME/direxio-agent/cursor.mcp.json" ]
-[ "$(_agent_mcp_config_path copilot)" = "$XDG_CONFIG_HOME/direxio-agent/copilot.mcp.json" ]
-[ "$(_agent_mcp_config_path gemini)" = "$HOME/.gemini/direxio.settings.json" ]
-[ "$(_agent_mcp_config_path unknown)" = "$XDG_CONFIG_HOME/direxio-agent/mcp.json" ]
+[ "$(CODEX_HOME= _agent_mcp_config_path codex codex-im)" = "$HOME/.codex/direxio-agent/nodes/codex-im/mcp.json" ]
+[ "$(CODEX_HOME=/mnt/c/Users/84960/.codex _agent_mcp_config_path codex codex-im)" = "/mnt/c/Users/84960/.codex/direxio-agent/nodes/codex-im/mcp.json" ]
+[ "$(_agent_mcp_config_path claude-code codex-im)" = "$HOME/.claude/direxio-agent/nodes/codex-im/mcp.json" ]
+[ "$(_agent_mcp_config_path openclaw codex-im)" = "$HOME/.openclaw/direxio/nodes/codex-im/mcp.json" ]
+[ "$(_agent_mcp_config_path hermes codex-im)" = "$HOME/.hermes/direxio/nodes/codex-im/mcp.json" ]
+[ "$(_agent_mcp_config_path cursor codex-im)" = "$XDG_CONFIG_HOME/direxio-agent/nodes/codex-im/cursor.mcp.json" ]
+[ "$(_agent_mcp_config_path copilot codex-im)" = "$XDG_CONFIG_HOME/direxio-agent/nodes/codex-im/copilot.mcp.json" ]
+[ "$(_agent_mcp_config_path gemini codex-im)" = "$HOME/.gemini/direxio/nodes/codex-im/settings.json" ]
+[ "$(_agent_mcp_config_path unknown codex-im)" = "$XDG_CONFIG_HOME/direxio-agent/nodes/codex-im/mcp.json" ]
 
 [ "$(_agent_project_mcp_target cursor)" = "PROJECT_ROOT/.cursor/mcp.json" ]
 [ "$(_agent_project_mcp_target copilot)" = "PROJECT_ROOT/.github/copilot/mcp.json" ]
@@ -77,9 +84,9 @@ copilot_summary=$(_agent_install_target_summary copilot "$(_agent_mcp_config_pat
 [[ "$copilot_summary" == *"PROJECT_ROOT/.github/copilot/mcp.json"* ]]
 [[ "$copilot_summary" == *"PROJECT_ROOT/.github/copilot/skills/direxio-deployer"* ]]
 
-install_command=$(_agent_install_command hermes native "$HOME/.p2p-matrix/credentials.json")
+install_command=$(_agent_install_command hermes native "$HOME/.direxio/nodes/im.example.com/credentials.json")
 case "$install_command" in
-  *"direxio-agent-install"*"--platform hermes"*"--mode native"*"--credentials-file"*"--write"*) ;;
+  *"direxio-agent-install"*"--platform hermes"*"--mode native"*"--credentials-file"*"im.example.com/credentials.json"*"--write"*) ;;
   *)
     echo "install command did not include expected platform/mode/credentials/write flags: $install_command" >&2
     exit 1

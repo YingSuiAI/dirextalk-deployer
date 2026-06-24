@@ -1,11 +1,32 @@
 #!/usr/bin/env bash
-# S6 WIRE_LOCAL_CLIENT - write node-scoped credentials and Direxio MCP/plugin env.
+# S6 WIRE_LOCAL_CLIENT - write service-scoped credentials and Direxio MCP/plugin env.
 #
-#   ① ~/.p2p-matrix/nodes/<agent_node_id>/credentials.json
-#   ② ~/.p2p-matrix/nodes/<agent_node_id>/env
+#   ① ~/.direxio/nodes/<service_id>/credentials.json
+#   ② ~/.direxio/nodes/<service_id>/env
 #   ③ MCP/plugin install guidance for the detected current agent runtime
 #
 # Tokens change on every rebuild, so local credentials and MCP/plugin env must be refreshed.
+
+_direxio_home() {
+  printf '%s\n' "${DIREXIO_HOME:-$HOME/.direxio}"
+}
+
+_direxio_service_id() {
+  local raw=$1 host
+  host=${raw#http://}
+  host=${host#https://}
+  host=${host%%/*}
+  case "$host" in
+    *:*) host="${host%%:*}-${host#*:}" ;;
+  esac
+  printf '%s\n' "$host" | tr '[:upper:]' '[:lower:]' | sed -E 's/:/-/g; s/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/^$/direxio-service/'
+}
+
+_direxio_service_dir() {
+  local service_id
+  service_id=$(_direxio_service_id "$1")
+  printf '%s/nodes/%s\n' "$(_direxio_home)" "$service_id"
+}
 
 _detect_agent_runtime() {
   if [ -n "${DIREXIO_AGENT_PLATFORM:-}" ] && [ "${DIREXIO_AGENT_PLATFORM:-}" != "auto" ]; then
@@ -86,17 +107,17 @@ _agent_global_skill_install_path() {
 }
 
 _agent_mcp_config_path() {
-  local runtime=$1 config_home
+  local runtime=$1 node_id=${2:-direxio-agent} config_home
   config_home=$(_agent_config_home)
   case "$runtime" in
-    codex) printf '%s/direxio-agent/.mcp.json\n' "${CODEX_HOME:-$HOME/.codex}" ;;
-    claude-code) printf '%s/.claude/direxio-agent/.mcp.json\n' "$HOME" ;;
-    openclaw) printf '%s/.openclaw/direxio/mcp.json\n' "$HOME" ;;
-    hermes) printf '%s/.hermes/direxio.mcp.json\n' "$HOME" ;;
-    cursor) printf '%s/direxio-agent/cursor.mcp.json\n' "$config_home" ;;
-    copilot) printf '%s/direxio-agent/copilot.mcp.json\n' "$config_home" ;;
-    gemini) printf '%s/.gemini/direxio.settings.json\n' "$HOME" ;;
-    generic|unknown|*) printf '%s/direxio-agent/mcp.json\n' "$config_home" ;;
+    codex) printf '%s/direxio-agent/nodes/%s/mcp.json\n' "${CODEX_HOME:-$HOME/.codex}" "$node_id" ;;
+    claude-code) printf '%s/.claude/direxio-agent/nodes/%s/mcp.json\n' "$HOME" "$node_id" ;;
+    openclaw) printf '%s/.openclaw/direxio/nodes/%s/mcp.json\n' "$HOME" "$node_id" ;;
+    hermes) printf '%s/.hermes/direxio/nodes/%s/mcp.json\n' "$HOME" "$node_id" ;;
+    cursor) printf '%s/direxio-agent/nodes/%s/cursor.mcp.json\n' "$config_home" "$node_id" ;;
+    copilot) printf '%s/direxio-agent/nodes/%s/copilot.mcp.json\n' "$config_home" "$node_id" ;;
+    gemini) printf '%s/.gemini/direxio/nodes/%s/settings.json\n' "$HOME" "$node_id" ;;
+    generic|unknown|*) printf '%s/direxio-agent/nodes/%s/mcp.json\n' "$config_home" "$node_id" ;;
   esac
 }
 
@@ -146,8 +167,7 @@ _agent_install_command() {
 }
 
 _print_runtime_install_summary() {
-  local runtime=$1 mode=$2 mcp_path project_mcp
-  mcp_path=$(_agent_mcp_config_path "$runtime")
+  local runtime=$1 mode=$2 mcp_path=$3 project_mcp
   project_mcp=$(_agent_project_mcp_target "$runtime")
   case "$runtime:$mode" in
     openclaw:native)
@@ -257,7 +277,7 @@ _maybe_auto_install_agent() {
 }
 
 _write_agent_env_file() {
-  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$HOME/.p2p-matrix/env"} node_id=${6:-}
+  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$(_direxio_home)/env"} node_id=${6:-}
   mkdir -p "$(dirname "$envfile")"
   umask 077
   {
@@ -299,7 +319,7 @@ _write_credentials_file() {
 }
 
 _persist_agent_env() {
-  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$HOME/.p2p-matrix/env"} node_id=${6:-}
+  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$(_direxio_home)/env"} node_id=${6:-}
   envfile=$(_write_agent_env_file "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id")
   [ -n "$node_id" ] && export DIREXIO_AGENT_NODE_ID="$node_id"
   export DIREXIO_DOMAIN="$asurl"
@@ -310,11 +330,11 @@ _persist_agent_env() {
 }
 
 _print_mcp_plugin_guidance() {
-  local runtime=$1 asurl=$2 cred=$3 envfile=$4 policy=$5 mode=$6 install_command=$7
+  local runtime=$1 asurl=$2 cred=$3 envfile=$4 policy=$5 mode=$6 install_command=$7 node_id=$8
   local skill_path global_skill_path mcp_config_path install_target_summary
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
-  mcp_config_path=$(_agent_mcp_config_path "$runtime")
+  mcp_config_path=$(_agent_mcp_config_path "$runtime" "$node_id")
   install_target_summary=$(_agent_install_target_summary "$runtime" "$mcp_config_path")
   if [ "$policy" = "skip" ]; then
     warn "Direxio MCP/plugin install guidance skipped by DIREXIO_AGENT_INSTALL=skip."
@@ -336,20 +356,19 @@ Target summary:         $install_target_summary
 Use this stdio MCP server in the current agent config:
   command: npx
   args:    ["-y", "@direxio/local-mcp@latest"]
-  env:     DIREXIO_DOMAIN=$asurl
-           DIREXIO_AGENT_TOKEN=<read from $cred>
-           DIREXIO_AGENT_ROOM_ID=<read from $cred>
+  env:     DIREXIO_CREDENTIALS_FILE=$cred
+           DIREXIO_AGENT_NODE_ID=$node_id
 
 Gateway native send is also available without MCP:
   npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "\$DIREXIO_AGENT_ROOM_ID" --message "hello"
 EOF
-  _print_runtime_install_summary "$runtime" "$mode"
+  _print_runtime_install_summary "$runtime" "$mode" "$mcp_config_path"
 }
 
 run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and Direxio MCP/plugin env"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
-  local node_id node_dir node_cred workspace
+  local node_id service_dir node_cred workspace service_id
   local skill_path global_skill_path mcp_config_path install_target_summary
   domain=$(state_get domain)
   asurl=$(state_get as_url)
@@ -366,23 +385,25 @@ run_phase() {
 
   runtime=$(_detect_agent_runtime)
   node_id=$(_agent_node_id "$runtime" "$domain" "$agent_room_id")
-  node_dir="$HOME/.p2p-matrix/nodes/$node_id"
-  node_cred="$node_dir/credentials.json"
-  envfile="$node_dir/env"
+  service_id=$(_direxio_service_id "${asurl:-$domain}")
+  service_dir=$(_direxio_service_dir "${asurl:-$domain}")
+  node_cred="$service_dir/credentials.json"
+  envfile="$service_dir/env"
   workspace=${DIREXIO_AGENT_WORKSPACE:-${PWD:-$HOME}}
 
-  # 1) Node-specific credential file.
+  # 1) Service-specific credential file.
   _write_credentials_file "$node_cred" "$domain" "$asurl" "$token" "$password" "$access_token" "$agent_room_id" "$node_id"
   ok "Wrote $node_cred (0600)."
 
-  # 2) Persistent node environment for the current Direxio MCP and plugin.
+  # 2) Persistent service environment for the current Direxio MCP and plugin.
   if ! envfile=$(_persist_agent_env "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id"); then
     phase_set S6_WIRE_LOCAL failed "persistent env write failed"
     fail "failed to persist Direxio MCP/plugin env vars."
   fi
   state_set agent_env_file "$envfile" 2>/dev/null || true
   state_set agent_node_id "$node_id" 2>/dev/null || true
-  state_set agent_node_dir "$node_dir" 2>/dev/null || true
+  state_set agent_service_id "$service_id" 2>/dev/null || true
+  state_set agent_service_dir "$service_dir" 2>/dev/null || true
   state_set agent_credentials_file "$node_cred" 2>/dev/null || true
   state_set agent_workspace "$workspace" 2>/dev/null || true
 
@@ -393,7 +414,7 @@ run_phase() {
   install_command=$(_agent_install_command "$runtime" "$install_mode" "$node_cred" "$node_id" "$workspace")
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
-  mcp_config_path=$(_agent_mcp_config_path "$runtime")
+  mcp_config_path=$(_agent_mcp_config_path "$runtime" "$node_id")
   install_target_summary=$(_agent_install_target_summary "$runtime" "$mcp_config_path")
   state_set agent_runtime "$runtime" 2>/dev/null || true
   state_set agent_install_policy "$install_policy" 2>/dev/null || true
@@ -406,9 +427,9 @@ run_phase() {
   state_set direxio_mcp_package "@direxio/local-mcp" 2>/dev/null || true
   state_set direxio_agent_plugins_package "@direxio/agent-plugins" 2>/dev/null || true
   state_set direxio_plugin_repo "@direxio/agent-plugins" 2>/dev/null || true
-  _print_mcp_plugin_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command"
+  _print_mcp_plugin_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command" "$node_id"
   _maybe_auto_install_agent "$install_policy" "$runtime" "$install_mode" "$node_cred" "$install_command" "$node_id" "$workspace"
 
-  phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;env_file=$envfile;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;mcp_config=$mcp_config_path;mcp_package=@direxio/local-mcp"
+  phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;env_file=$envfile;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;mcp_config=$mcp_config_path;mcp_package=@direxio/local-mcp"
   return 0
 }

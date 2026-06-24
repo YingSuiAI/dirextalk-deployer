@@ -3,9 +3,11 @@
 After deployment, ops writes:
 
 ```text
-~/.p2p-matrix/nodes/<agent_node_id>/credentials.json
-~/.p2p-matrix/nodes/<agent_node_id>/env
+~/.direxio/nodes/<service_id>/credentials.json
+~/.direxio/nodes/<service_id>/env
 ```
+
+`service_id` is derived from the deployed service domain, for example `im.example.com` or `im.example.com-8443`.
 
 Expected shape:
 
@@ -47,7 +49,8 @@ agent_install_policy
 agent_install_mode
 agent_install_command
 agent_node_id
-agent_node_dir
+agent_service_id
+agent_service_dir
 agent_credentials_file
 agent_env_file
 agent_workspace
@@ -68,7 +71,7 @@ DIREXIO_AGENT_ROOM_ID=!agent:im.example.com
 DIREXIO_AGENT_NODE_ID=codex-im-example-com-<hash>
 ```
 
-`DIREXIO_*` is the only local integration contract for current MCP and plugin wiring. S6 does not write shell profiles, Windows user environment variables, or root-level compatibility env files; callers should source the node-specific env file explicitly.
+`DIREXIO_*` is the only local integration contract for current MCP and plugin wiring. S6 does not write shell profiles, Windows user environment variables, or root-level compatibility env files; callers should source the service-specific env file explicitly.
 
 ## MCP Server
 
@@ -79,9 +82,8 @@ Use `@direxio/local-mcp` as a stdio MCP server:
   "command": "npx",
   "args": ["-y", "@direxio/local-mcp@latest"],
   "env": {
-    "DIREXIO_DOMAIN": "https://im.example.com",
-    "DIREXIO_AGENT_TOKEN": "<agent_token>",
-    "DIREXIO_AGENT_ROOM_ID": "!agent:im.example.com"
+    "DIREXIO_CREDENTIALS_FILE": "/home/me/.direxio/nodes/im.example.com/credentials.json",
+    "DIREXIO_AGENT_NODE_ID": "codex-im-example-com-<hash>"
   }
 }
 ```
@@ -91,7 +93,7 @@ Use `@direxio/local-mcp` as a stdio MCP server:
 `direxio-agent-gateway` can send without MCP. It calls `/_p2p/command` action `mcp.messages.send` directly:
 
 ```bash
-source ~/.p2p-matrix/nodes/<agent_node_id>/env
+source ~/.direxio/nodes/<service_id>/env
 npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "$DIREXIO_AGENT_ROOM_ID" --message "hello"
 ```
 
@@ -109,7 +111,7 @@ Defaults:
 
 - `DIREXIO_AGENT_PLATFORM=auto` detects Codex, Claude Code, Gemini, Cursor, Copilot, OpenClaw, Hermes, or falls back to `unknown`.
 - `DIREXIO_AGENT_INSTALL=recommend` prints and records the command only.
-- `DIREXIO_AGENT_INSTALL=auto` runs `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --platform <runtime> --mode <mode> --node-id <agent_node_id> --workspace <agent_workspace> --credentials-file ~/.p2p-matrix/nodes/<agent_node_id>/credentials.json --write`.
+- `DIREXIO_AGENT_INSTALL=auto` runs `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --platform <runtime> --mode <mode> --node-id <agent_node_id> --workspace <agent_workspace> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --write`.
 - `DIREXIO_AGENT_INSTALL_MODE=recommended` maps OpenClaw/Hermes to `native`, Codex/generic to `gateway`, and non-long-process platforms to `mcp`.
 
 Platform guidance:

@@ -28,8 +28,8 @@ See `references/agent-targets.md` for the full runtime matrix, global fallbacks,
 - The backend image is `direxio/message-server`; Matrix and P2P APIs share port 8008.
 - The backend uses `password` for IM login; local credentials retain `access_token` and agent-specific `agent_token`.
 - Public multi-node channel routing is client-provided through target `_p2p` base URLs; the deployer no longer writes a fixed remote-node table.
-- After deployment, S6 persists `DIREXIO_DOMAIN`, `DIREXIO_AGENT_TOKEN`, `DIREXIO_AGENT_ROOM_ID`, and `DIREXIO_AGENT_NODE_ID` under `~/.p2p-matrix/nodes/<agent_node_id>/`, then records `@direxio/local-mcp`, `@direxio/agent-plugins`, runtime-specific skill clone paths, and MCP/config payload targets.
-- Post-deploy agent installation is controlled by `DIREXIO_AGENT_INSTALL=skip|recommend|auto`; the default is `recommend`. Only `auto` attempts to run `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --node-id <agent_node_id> --credentials-file ~/.p2p-matrix/nodes/<agent_node_id>/credentials.json --write`. Gateway mode restarts only the matching node gateway.
+- After deployment, S6 persists `DIREXIO_DOMAIN`, `DIREXIO_AGENT_TOKEN`, `DIREXIO_AGENT_ROOM_ID`, and `DIREXIO_AGENT_NODE_ID` under the domain-derived `~/.direxio/nodes/<service_id>/`, then records `@direxio/local-mcp`, `@direxio/agent-plugins`, runtime-specific skill clone paths, and node-scoped MCP/config payload targets.
+- Post-deploy agent installation is controlled by `DIREXIO_AGENT_INSTALL=skip|recommend|auto`; the default is `recommend`. Only `auto` attempts to run `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --node-id <agent_node_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --write`. Gateway mode restarts only the matching node gateway.
 - The gateway has native `mcp.messages.send` support through `/_p2p/command`; it does not require `@direxio/local-mcp` for room replies.
 
 ## Minimal Command
@@ -88,7 +88,7 @@ OpenClaw and Hermes should prefer native long-process integration. Claude Code, 
 Gateway native send test:
 
 ```bash
-source ~/.p2p-matrix/nodes/<agent_node_id>/env
+source ~/.direxio/nodes/<service_id>/env
 npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "$DIREXIO_AGENT_ROOM_ID" --message "hello"
 ```
 

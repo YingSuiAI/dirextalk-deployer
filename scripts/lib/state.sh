@@ -4,7 +4,7 @@
 # Sourced by orchestrate.sh and phases/*.sh. All state.json reads/writes go
 # through this file to keep structure and fields consistent. Requires jq.
 #
-# state.json path: $P2P_WORKDIR/state.json (default ~/.p2p-matrix/deploy/).
+# state.json path: $P2P_WORKDIR/state.json (default ~/.direxio/deploy/).
 #
 # PHASES order is the state-machine execution order.
 
@@ -21,7 +21,7 @@ PHASES=(
 )
 
 # Paths.
-P2P_WORKDIR=${P2P_WORKDIR:-$HOME/.p2p-matrix/deploy}
+P2P_WORKDIR=${P2P_WORKDIR:-${DIREXIO_WORKDIR:-$HOME/.direxio/deploy}}
 STATE_JSON="$P2P_WORKDIR/state.json"
 
 # Timestamp helper.

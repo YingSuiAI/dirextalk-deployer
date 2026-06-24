@@ -80,7 +80,7 @@ deployment, delete or disable it after the deployment succeeds and replace it
 with a dedicated IAM user/role based on `references/iam-policy.json`.
 
 Do not store AWS AK/SK in skill files, docs, or committed repo files. Treat
-`state.json`, `outputs.json`, and `~/.p2p-matrix/nodes/<agent_node_id>/credentials.json` as local
+`state.json`, `outputs.json`, and `~/.direxio/nodes/<service_id>/credentials.json` as local
 secrets because they contain the portal/agent token after S5.
 
 ## What To Report At Handoff
@@ -89,7 +89,7 @@ Always report:
 
 - IM URL.
 - Portal token or where it was written.
-- `~/.p2p-matrix/nodes/<agent_node_id>/credentials.json` status and profile shape.
+- `~/.direxio/nodes/<service_id>/credentials.json` status and profile shape.
 - AWS region, EC2 instance ID, public IP, security group, state path, SSH command.
 - Destroy command and billing reminder.
 - Any manual DNS record the user owns outside Route53.

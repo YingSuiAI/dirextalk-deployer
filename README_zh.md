@@ -26,8 +26,8 @@
 - 当前后端是 `direxio/message-server` 单体服务，Matrix 与 P2P API 共用 8008。
 - 当前后端使用 `password` 作为 IM 登录信息；本地凭据保留统一的 `access_token` 和 agent 专用的 `agent_token`。
 - 多节点公开频道互通由客户端请求参数携带目标节点 `_p2p` 基地址，部署器不再写入固定远端节点表。
-- 部署完成后会按节点持久化当前 MCP 和插件所需的 `DIREXIO_DOMAIN`、`DIREXIO_AGENT_TOKEN`、`DIREXIO_AGENT_ROOM_ID`、`DIREXIO_AGENT_NODE_ID` 到 `~/.p2p-matrix/nodes/<agent_node_id>/`，并记录 `@direxio/local-mcp`、`@direxio/agent-plugins`、runtime-specific skill clone 目录和 MCP/config payload 目标。
-- 部署器支持部署后 agent 安装策略：`DIREXIO_AGENT_INSTALL=skip|recommend|auto`，默认 `recommend`。只有 `auto` 会尝试执行 `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --node-id <agent_node_id> --credentials-file ~/.p2p-matrix/nodes/<agent_node_id>/credentials.json --write`。gateway 模式只会重启同一节点的 gateway，不影响其他本地节点。
+- 部署完成后会按服务域名持久化当前 MCP 和插件所需的 `DIREXIO_DOMAIN`、`DIREXIO_AGENT_TOKEN`、`DIREXIO_AGENT_ROOM_ID`、`DIREXIO_AGENT_NODE_ID` 到 `~/.direxio/nodes/<service_id>/`，并记录 `@direxio/local-mcp`、`@direxio/agent-plugins`、runtime-specific skill clone 目录和按节点隔离的 MCP/config payload 目标。
+- 部署器支持部署后 agent 安装策略：`DIREXIO_AGENT_INSTALL=skip|recommend|auto`，默认 `recommend`。只有 `auto` 会尝试执行 `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --node-id <agent_node_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --write`。gateway 模式只会重启同一节点的 gateway，不影响其他本地节点。
 - gateway 原生内置 `mcp.messages.send` 发送能力，会直接调用 `/_p2p/command`，不依赖 `@direxio/local-mcp`。
 
 ## 最小命令
@@ -88,7 +88,7 @@ S6 会在 `state.json` 里记录 `agent_skill_install_path`、`agent_global_skil
 部署后可直接用 gateway 原生发送测试消息：
 
 ```bash
-source ~/.p2p-matrix/nodes/<agent_node_id>/env
+source ~/.direxio/nodes/<service_id>/env
 npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "$DIREXIO_AGENT_ROOM_ID" --message "hello"
 ```
 

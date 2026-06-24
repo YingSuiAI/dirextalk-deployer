@@ -2,7 +2,7 @@
 # destroy.sh - remove AWS resources recorded by deployment state.
 #
 # Source:
-#   1. $P2P_WORKDIR/state.json written by orchestrate.sh; default ~/.p2p-matrix/deploy/
+#   1. $P2P_WORKDIR/state.json written by orchestrate.sh; default ~/.direxio/deploy/
 #   2. explicit argument: bash destroy.sh /path/to/state.json
 #
 # Order: terminate instance -> release EIP -> delete security group -> delete key pair
@@ -11,7 +11,7 @@
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-P2P_WORKDIR=${P2P_WORKDIR:-$HOME/.p2p-matrix/deploy}
+P2P_WORKDIR=${P2P_WORKDIR:-${DIREXIO_WORKDIR:-$HOME/.direxio/deploy}}
 
 log() { echo -e "\033[33m[destroy]\033[0m $*"; }
 
@@ -24,7 +24,7 @@ if [ -z "$SRC" ]; then
 fi
 [ -f "$SRC" ] || { echo "$SRC not found."; exit 1; }
 SRC_DIR=$(cd "$(dirname "$SRC")" && pwd -P)
-P2P_ROOT=$(cd "$HOME/.p2p-matrix" 2>/dev/null && pwd -P || printf '%s' "$HOME/.p2p-matrix")
+P2P_ROOT=$(cd "${DIREXIO_HOME:-$HOME/.direxio}" 2>/dev/null && pwd -P || printf '%s' "${DIREXIO_HOME:-$HOME/.direxio}")
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to parse state.json."; exit 1; }
 REGION=$(jq -r '.region // empty' "$SRC")

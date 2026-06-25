@@ -16,7 +16,7 @@ volumes:
 
 services:
   postgres:
-    image: postgres:18
+    image: postgres:18-alpine
     networks: [p2p-net]
     environment:
       POSTGRES_USER: direxio_message_server
@@ -76,7 +76,7 @@ services:
       - message-data:/var/direxio-message-server
       - /opt/p2p:/opt/p2p
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8008/_p2p/health >/dev/null"]
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8008/_p2p/health >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 30

@@ -22,7 +22,7 @@ json_string() {
 wait_for_message_server() {
   log "waiting for message-server /_p2p/health ..."
   for i in $(seq 1 90); do
-    if $COMPOSE exec -T message-server curl -fsS http://127.0.0.1:8008/_p2p/health >/dev/null 2>&1; then
+    if $COMPOSE exec -T message-server wget -qO- --timeout=5 http://127.0.0.1:8008/_p2p/health >/dev/null 2>&1; then
       log "message-server is healthy."
       return 0
     fi

@@ -423,7 +423,7 @@ mcp config    : <agent_mcp_config_path>
 skill clone   : <agent_skill_install_path>
 target summary: <agent_install_target_summary>
 gateway send  : npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "$DIREXIO_AGENT_ROOM_ID" --message "hello"
-Hermes gateway: ~/.direxio/nodes/<service_id>/hermes-gateway/start_gateway.sh (Hermes only)
+Hermes gateway: ~/.direxio/nodes/<service_id>/hermes-gateway/start_gateway.sh (Hermes only; auto-started by S7 when agent_runtime=hermes)
 AWS region   : <region>
 EC2          : <instance-id> (<public-ip>)
 SSH          : ssh -i <key-file> ubuntu@<public-ip>

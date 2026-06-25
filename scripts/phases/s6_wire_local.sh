@@ -687,8 +687,8 @@ Use this stdio MCP server in the current agent config:
   command: npx
   args:    ["-y", "-p", "@direxio/local-mcp@latest", "direxio-mcp"]
   env:     DIREXIO_DOMAIN=$asurl
-           DIREXIO_AGENT_TOKEN=<secret from $envfile>
-           DIREXIO_AGENT_ROOM_ID=<room id from $envfile>
+           DIREXIO_AGENT_TOKEN=<secret from $cred>
+           DIREXIO_AGENT_ROOM_ID=<room id from $cred>
            DIREXIO_AGENT_NODE_ID=$node_id
 
 Gateway native send is also available without MCP:

@@ -184,6 +184,32 @@ _agent_config_home() {
   printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}"
 }
 
+_codex_home_for_runtime() {
+  local detected
+  if [ -n "${CODEX_HOME:-}" ]; then
+    printf '%s\n' "$CODEX_HOME"
+    return 0
+  fi
+  detected=$(_codex_home_from_active_context)
+  if [ -n "$detected" ]; then
+    printf '%s\n' "$detected"
+    return 0
+  fi
+  printf '%s/.codex\n' "$HOME"
+}
+
+_codex_home_from_active_context() {
+  local part
+  printf '%s:%s\n' "${PATH:-}" "${PWD:-}" | tr ':;' '\n' | while IFS= read -r part; do
+    case "$part" in
+      */.codex/tmp|*/.codex/tmp/*)
+        printf '%s/.codex\n' "${part%%/.codex*}"
+        return 0
+        ;;
+    esac
+  done | head -n 1
+}
+
 _agent_skill_install_path() {
   local runtime=$1
   case "$runtime" in
@@ -216,7 +242,7 @@ _agent_mcp_config_path() {
   local runtime=$1 node_id=${2:-direxio-agent} config_home
   config_home=$(_agent_config_home)
   case "$runtime" in
-    codex) printf '%s/direxio-agent/nodes/%s/mcp.json\n' "${CODEX_HOME:-$HOME/.codex}" "$node_id" ;;
+    codex) printf '%s/direxio-agent/nodes/%s/mcp.json\n' "$(_codex_home_for_runtime)" "$node_id" ;;
     claude-code) printf '%s/.claude/direxio-agent/nodes/%s/mcp.json\n' "$HOME" "$node_id" ;;
     openclaw) printf '%s/.openclaw/direxio/nodes/%s/mcp.json\n' "$HOME" "$node_id" ;;
     hermes) printf '%s/.hermes/direxio/nodes/%s/mcp.json\n' "$HOME" "$node_id" ;;
@@ -296,6 +322,7 @@ EOF
 Recommended Codex install:
   mount @direxio/agent-plugins Codex plugin templates and run direxio-agent-gateway with codex-app-server.
   MCP payload target: $mcp_path
+  On Windows-native Codex, start the gateway from Windows PowerShell, set HOME=\$env:USERPROFILE, CODEX_HOME=\$env:USERPROFILE\\.codex, XDG_CONFIG_HOME=\$env:USERPROFILE\\.config, and set DIREXIO_CODEX_COMMAND to the real codex.exe path when PATH resolves to a restricted WindowsApps alias.
 EOF
       ;;
     cursor:mcp)
@@ -468,8 +495,10 @@ Target summary:         $install_target_summary
 
 Use this stdio MCP server in the current agent config:
   command: npx
-  args:    ["-y", "@direxio/local-mcp@latest"]
-  env:     DIREXIO_CREDENTIALS_FILE=$cred
+  args:    ["-y", "-p", "@direxio/local-mcp@latest", "direxio-mcp"]
+  env:     DIREXIO_DOMAIN=$asurl
+           DIREXIO_AGENT_TOKEN=<secret from $envfile>
+           DIREXIO_AGENT_ROOM_ID=<room id from $envfile>
            DIREXIO_AGENT_NODE_ID=$node_id
 
 Gateway native send is also available without MCP:

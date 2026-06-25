@@ -237,7 +237,7 @@ agent_token  : written to ~/.direxio/nodes/<service_id>/credentials.json
 agent_room_id: written to ~/.direxio/nodes/<service_id>/credentials.json
 mcp package  : @direxio/local-mcp
 plugins pkg  : @direxio/agent-plugins
-env vars      : DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID persisted
+env vars      : DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID, DIREXIO_AGENT_NODE_ID persisted
 install mode  : policy=<skip|recommend|auto> mode=<mcp|native|gateway> status=<...>
 mcp config    : <agent_mcp_config_path>
 skill clone   : <agent_skill_install_path>
@@ -262,11 +262,11 @@ If the user agrees, use the runtime's native configuration path where available.
 
 ```text
 command: npx
-args: ["-y", "@direxio/local-mcp@latest"]
-env: DIREXIO_CREDENTIALS_FILE, DIREXIO_AGENT_NODE_ID
+args: ["-y", "-p", "@direxio/local-mcp@latest", "direxio-mcp"]
+env: DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID, DIREXIO_AGENT_NODE_ID
 ```
 
-For OpenClaw and Hermes, prefer native long-process integration. For Claude Code, Cursor, Gemini, and Copilot, use MCP-only unless the user supplies a local command for an external `generic-cli` gateway.
+Do not configure `@direxio/local-mcp` through credential-file indirection unless the package version being installed documents that support. Current published local MCP wiring reads the direct `DIREXIO_*` environment. For OpenClaw and Hermes, prefer native long-process integration. For Claude Code, Cursor, Gemini, and Copilot, use MCP-only unless the user supplies a local command for an external `generic-cli` gateway. For Windows-native Codex, launch gateway from Windows PowerShell and use `%USERPROFILE%`, `$env:CODEX_HOME`, `$env:XDG_CONFIG_HOME`, and a discovered `DIREXIO_CODEX_COMMAND`; never publish or template a machine-specific user path.
 
 ## References
 

@@ -25,7 +25,7 @@ S6 writes service-specific credentials to `~/.direxio/nodes/<service_id>/credent
 
 | Runtime | Recommended mode | Generated MCP/config payload | Project config target or native step |
 | --- | --- | --- | --- |
-| Codex | `gateway` | `${CODEX_HOME:-$HOME/.codex}/direxio-agent/nodes/<agent_node_id>/mcp.json` | Use `@direxio/agent-plugins` Codex gateway with `codex-app-server` plus MCP payload. In WSL, Windows Codex uses `/mnt/c/Users/<user>/.codex`. |
+| Codex | `gateway` | `${CODEX_HOME:-$HOME/.codex}/direxio-agent/nodes/<agent_node_id>/mcp.json` | Use `@direxio/agent-plugins` Codex gateway with `codex-app-server` plus MCP payload. In WSL, infer Windows Codex home only from active `.codex/tmp` paths or set `CODEX_HOME=/mnt/c/Users/<user>/.codex`; do not use a project-local `.codex/skills` clone as user config. |
 | Claude Code | `mcp` | `$HOME/.claude/direxio-agent/nodes/<agent_node_id>/mcp.json` | Use `platforms/claude-code/direxio-agent`, for example `claude --plugin-dir ./platforms/claude-code/direxio-agent`. |
 | Gemini | `mcp` | `$HOME/.gemini/direxio/nodes/<agent_node_id>/settings.json` | Merge `platforms/gemini/settings.json` into Gemini settings. |
 | Cursor | `mcp` | `${XDG_CONFIG_HOME:-$HOME/.config}/direxio-agent/nodes/<agent_node_id>/cursor.mcp.json` | Copy or merge into `PROJECT_ROOT/.cursor/mcp.json`. |
@@ -38,6 +38,6 @@ S6 writes service-specific credentials to `~/.direxio/nodes/<service_id>/credent
 
 - `DIREXIO_AGENT_INSTALL=skip`: write credentials/env only.
 - `DIREXIO_AGENT_INSTALL=recommend`: write credentials/env, record target paths, and print commands without mutating agent config.
-- `DIREXIO_AGENT_INSTALL=auto`: run `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --platform <runtime> --mode <mode> --node-id <agent_node_id> --workspace <agent_workspace> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --write`. Gateway mode restarts only the matching node gateway and leaves other nodes alone.
+- `DIREXIO_AGENT_INSTALL=auto`: run `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --platform <runtime> --mode <mode> --node-id <agent_node_id> --workspace <agent_workspace> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --write`. Gateway mode restarts only the matching node gateway and leaves other nodes alone. Generated MCP payloads must launch `@direxio/local-mcp` with direct `DIREXIO_DOMAIN`, `DIREXIO_AGENT_TOKEN`, `DIREXIO_AGENT_ROOM_ID`, and `DIREXIO_AGENT_NODE_ID` environment variables, or through a wrapper that exports those variables.
 
 Use `DIREXIO_AGENT_PLATFORM=<runtime>` to override detection, and `DIREXIO_AGENT_INSTALL_MODE=mcp|native|gateway` only when the user chooses a non-default runtime mode.

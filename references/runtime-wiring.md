@@ -80,13 +80,27 @@ Use `@direxio/local-mcp` as a stdio MCP server:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "@direxio/local-mcp@latest"],
+  "args": ["-y", "-p", "@direxio/local-mcp@latest", "direxio-mcp"],
   "env": {
-    "DIREXIO_CREDENTIALS_FILE": "/home/me/.direxio/nodes/im.example.com/credentials.json",
+    "DIREXIO_DOMAIN": "https://im.example.com",
+    "DIREXIO_AGENT_TOKEN": "<agent-token>",
+    "DIREXIO_AGENT_ROOM_ID": "!agent:im.example.com",
     "DIREXIO_AGENT_NODE_ID": "codex-im-example-com-<hash>"
   }
 }
 ```
+
+Current published local MCP wiring reads direct `DIREXIO_*` environment
+variables. Do not generate a credential-file-only MCP payload unless the
+installed `@direxio/local-mcp` version explicitly documents that contract. If an
+agent config should not contain the token, use a small launcher wrapper that
+loads the service-scoped credentials/env file and then exports the same direct
+`DIREXIO_*` variables before executing the MCP server.
+
+For Windows-native agents, prefer `%USERPROFILE%\.direxio\nodes\<service_id>`
+and `%USERPROFILE%\.codex` style paths in templates and scripts. Deployment
+docs may show `%USERPROFILE%` or `$env:USERPROFILE`; they must not publish a
+specific operator's home directory.
 
 ## Gateway Native Send
 
@@ -98,6 +112,21 @@ npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "$DIRE
 ```
 
 MCP is for active tools mounted into an agent. Gateway passive replies and manual `send` do not depend on `@direxio/local-mcp`.
+
+Windows-native Codex should start gateway from Windows PowerShell, not WSL, when
+the current Codex app is a Windows process. Use environment-derived paths:
+
+```powershell
+$env:HOME = $env:USERPROFILE
+$env:CODEX_HOME = Join-Path $env:USERPROFILE '.codex'
+$env:XDG_CONFIG_HOME = Join-Path $env:USERPROFILE '.config'
+$codexBin = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin') -Filter codex.exe -Recurse -ErrorAction SilentlyContinue |
+  Select-Object -First 1 -ExpandProperty FullName
+if ($codexBin) { $env:DIREXIO_CODEX_COMMAND = $codexBin }
+```
+
+Set `DIREXIO_CODEX_COMMAND` when `codex` resolves to a restricted WindowsApps
+alias or any path that cannot be spawned by the gateway process.
 
 ## Install Parameters
 
@@ -128,7 +157,7 @@ Defaults:
 Platform guidance:
 
 - OpenClaw and Hermes: prefer native long-process integration using `/_p2p/events` and `mcp.messages.send`.
-- Codex: prefer gateway with `codex-app-server`; when Codex runs from Windows under WSL, `CODEX_HOME=/mnt/c/.../.codex` is the MCP/config target.
+- Codex: prefer gateway with `codex-app-server`; when Codex runs from Windows and the deployer is invoked through WSL, infer the Windows Codex home from active `.codex/tmp` paths or set `CODEX_HOME=/mnt/c/Users/<user>/.codex` explicitly. Do not treat a project-local `PROJECT_ROOT/.codex/skills` clone as the Codex user config home.
 - Claude Code, Cursor, Gemini, and Copilot: use MCP-only unless the user supplies a local prompt command for `generic-cli`.
 - Cursor repository target: copy or merge the generated MCP payload into `PROJECT_ROOT/.cursor/mcp.json`.
 - Copilot repository target: use read-only MCP by default at `PROJECT_ROOT/.github/copilot/mcp.json`; enable write-capable tools only with repository owner approval.

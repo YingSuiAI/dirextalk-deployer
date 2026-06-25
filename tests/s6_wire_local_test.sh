@@ -99,8 +99,21 @@ assert_active_runtime codex .codex/tmp PATH="/tmp/.codex/tmp/codex-arg123:/usr/b
 [ "$(_agent_global_skill_install_path claude-code)" = '${CLAUDE_HOME:-$HOME/.claude}/skills/direxio-deployer' ]
 [ "$(_agent_global_skill_install_path generic)" = '$HOME/.agent/skills/direxio-deployer' ]
 
-[ "$(CODEX_HOME= _agent_mcp_config_path codex codex-im)" = "$HOME/.codex/direxio-agent/nodes/codex-im/mcp.json" ]
-[ "$(CODEX_HOME=/mnt/c/Users/84960/.codex _agent_mcp_config_path codex codex-im)" = "/mnt/c/Users/84960/.codex/direxio-agent/nodes/codex-im/mcp.json" ]
+codex_mcp_fallback=$(
+  unset CODEX_HOME
+  PATH="/usr/bin:/bin"
+  mkdir -p "$tmp/neutral"
+  cd "$tmp/neutral"
+  _agent_mcp_config_path codex codex-im
+)
+[ "$codex_mcp_fallback" = "$HOME/.codex/direxio-agent/nodes/codex-im/mcp.json" ]
+[ "$(CODEX_HOME=/mnt/c/Users/alice/.codex _agent_mcp_config_path codex codex-im)" = "/mnt/c/Users/alice/.codex/direxio-agent/nodes/codex-im/mcp.json" ]
+codex_mcp_from_active_path=$(
+  unset CODEX_HOME
+  cd "$tmp/neutral"
+  PATH="/mnt/c/Users/alice/.codex/tmp/arg0:/usr/bin:/bin" _agent_mcp_config_path codex codex-im
+)
+[ "$codex_mcp_from_active_path" = "/mnt/c/Users/alice/.codex/direxio-agent/nodes/codex-im/mcp.json" ]
 [ "$(_agent_mcp_config_path claude-code codex-im)" = "$HOME/.claude/direxio-agent/nodes/codex-im/mcp.json" ]
 [ "$(_agent_mcp_config_path openclaw codex-im)" = "$HOME/.openclaw/direxio/nodes/codex-im/mcp.json" ]
 [ "$(_agent_mcp_config_path hermes codex-im)" = "$HOME/.hermes/direxio/nodes/codex-im/mcp.json" ]
@@ -131,10 +144,24 @@ case "$install_command" in
     ;;
 esac
 
-stale_node_id=$(DIREXIO_AGENT_NODE_ID=codex-dm6 _agent_node_id codex dm4.direxio.ai '!agent:dm4.direxio.ai')
-[[ "$stale_node_id" == codex-dm4.direxio.ai-* ]]
+stale_node_id=$(DIREXIO_AGENT_NODE_ID=codex-old.example.test _agent_node_id codex new.example.test '!agent:new.example.test')
+[[ "$stale_node_id" == codex-new.example.test-* ]]
 
-matching_node_id=$(DIREXIO_AGENT_NODE_ID=codex-dm4.direxio.ai-123 _agent_node_id codex dm4.direxio.ai '!agent:dm4.direxio.ai')
-[ "$matching_node_id" = "codex-dm4.direxio.ai-123" ]
+matching_node_id=$(DIREXIO_AGENT_NODE_ID=codex-new.example.test-123 _agent_node_id codex new.example.test '!agent:new.example.test')
+[ "$matching_node_id" = "codex-new.example.test-123" ]
+
+guidance=$(
+  _print_mcp_plugin_guidance codex https://im.example.com "$HOME/.direxio/nodes/im.example.com/credentials.json" "$HOME/.direxio/nodes/im.example.com/env" recommend gateway "install command" codex-im 2>&1 >/dev/null
+)
+[[ "$guidance" == *"DIREXIO_DOMAIN"* ]]
+[[ "$guidance" == *"DIREXIO_AGENT_TOKEN"* ]]
+[[ "$guidance" == *"DIREXIO_AGENT_ROOM_ID"* ]]
+[[ "$guidance" == *"DIREXIO_AGENT_NODE_ID"* ]]
+[[ "$guidance" == *"DIREXIO_CODEX_COMMAND"* ]]
+bad_mcp_env_name="DIREXIO_CREDENTIALS""_FILE"
+if [[ "$guidance" == *"$bad_mcp_env_name"* ]]; then
+  echo "MCP guidance must not use $bad_mcp_env_name; @direxio/local-mcp expects direct DIREXIO_* env" >&2
+  exit 1
+fi
 
 echo "s6 wire local ok"

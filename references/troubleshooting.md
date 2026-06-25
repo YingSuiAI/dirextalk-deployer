@@ -2,6 +2,17 @@
 
 先 ssh 上机器，主战场是 cloud-init 日志和 compose 状态。
 
+## 本轮 MCP / gateway 问题复盘
+
+这类问题优先从运行环境归属开始排查，不要先改云端服务:
+
+- 当前对话在 Windows 原生 Codex 中时，不要在 WSL 里启动 gateway。WSL 只能用于部署脚本或辅助命令；gateway 要跟随实际 agent 进程所在的 OS。
+- runtime 检测要看 active-process 信号和 `.codex/tmp` 这类当前会话路径，不能因为历史存在 `~/.hermes`、`~/.codex` 等目录就判定当前 agent。
+- `DIREXIO_AGENT_NODE_ID` 不能复用旧部署的值。脚本只接受包含当前域名的 node id；跨域复用必须显式设置 force。
+- `@direxio/local-mcp` 当前按 direct `DIREXIO_DOMAIN`、`DIREXIO_AGENT_TOKEN`、`DIREXIO_AGENT_ROOM_ID`、`DIREXIO_AGENT_NODE_ID` 读取配置。MCP payload 只写 credentials 文件路径会导致服务不可读。
+- 如果 `npx` 通过包名直跑没有 JSON-RPC 输出，改用包内 bin 名或本地安装后的 `node node_modules/.../dist/index.js` 验证，先确认 MCP `initialize` 和 `tools/list` 能返回。
+- Windows Codex gateway 如果因为 WindowsApps alias 或权限问题无法 spawn `codex`，用 `$env:LOCALAPPDATA\OpenAI\Codex\bin` 动态发现真实 `codex.exe`，并设置 `DIREXIO_CODEX_COMMAND`。发布文档只能使用 `%USERPROFILE%`、`$env:USERPROFILE`、`$HOME`、`CODEX_HOME` 等变量，不要写入某台机器的绝对用户路径。
+
 ## 上机看现场
 
 ```bash

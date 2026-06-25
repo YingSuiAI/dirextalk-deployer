@@ -302,6 +302,164 @@ _write_agent_env_file() {
   echo "$envfile"
 }
 
+_shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+_write_hermes_gateway_files() {
+  local service_dir=$1 envfile=$2 node_id=$3 workspace=$4
+  local gateway_dir handler start state_file handler_args envfile_q state_file_q workspace_q
+  gateway_dir="$service_dir/hermes-gateway"
+  handler="$gateway_dir/p2p_handler.cjs"
+  start="$gateway_dir/start_gateway.sh"
+  state_file="$gateway_dir/state.json"
+  mkdir -p "$gateway_dir"
+
+  cat > "$handler" <<'EOF'
+#!/usr/bin/env node
+const { spawn } = require("node:child_process");
+
+const chunks = [];
+
+process.stdin.on("data", (chunk) => {
+  chunks.push(chunk);
+});
+
+process.stdin.on("end", () => {
+  const prompt = Buffer.concat(chunks).toString("utf8").trim();
+  if (!prompt) {
+    return;
+  }
+
+  let settled = false;
+  const child = spawn("hermes", ["-z", prompt], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: process.env,
+    windowsHide: true
+  });
+
+  let stdout = "";
+  let stderr = "";
+
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+
+  child.on("error", (error) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    process.stdout.write(
+      `Direxio gateway is connected, but Hermes could not be started: ${error.message}\n`
+    );
+  });
+
+  child.on("exit", (code) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+
+    const reply = stdout.trim();
+    if (code === 0 && reply) {
+      process.stdout.write(reply);
+      if (!reply.endsWith("\n")) {
+        process.stdout.write("\n");
+      }
+      return;
+    }
+
+    const detail = stderr.trim() || `hermes exited with code ${code}`;
+    const missingModelKey = /no API key was found|Set the [A-Z0-9_]+_API_KEY environment variable|Provider .* no API key/i.test(detail);
+    if (missingModelKey) {
+      process.stdout.write(
+        "Direxio gateway is connected, but Hermes cannot answer yet because its current model provider has no API key. Run `hermes model` to choose a working provider/model, or set the provider API key in the Hermes environment file before starting this gateway.\n"
+      );
+      return;
+    }
+
+    process.stdout.write(`Hermes failed while generating a reply: ${detail}\n`);
+  });
+});
+EOF
+  chmod 700 "$handler"
+
+  handler_args=$(jq -cn --arg handler "$handler" '[$handler]')
+  envfile_q=$(_shell_quote "$envfile")
+  state_file_q=$(_shell_quote "$state_file")
+  workspace_q=$(_shell_quote "$workspace")
+
+  cat > "$start" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+_load_env_file() {
+  local file=\${1:-} line key value
+  [ -n "\$file" ] && [ -f "\$file" ] || return 0
+  while IFS= read -r line || [ -n "\$line" ]; do
+    case "\$line" in
+      ''|'#'*) continue ;;
+    esac
+    case "\$line" in
+      export\\ *) line=\${line#export } ;;
+    esac
+    case "\$line" in
+      *=*) ;;
+      *) continue ;;
+    esac
+    key=\${line%%=*}
+    value=\${line#*=}
+    key=\$(printf '%s' "\$key" | sed -E 's/^[[:space:]]+|[[:space:]]+\$//g')
+    value=\$(printf '%s' "\$value" | sed -E 's/^[[:space:]]+|[[:space:]]+\$//g')
+    case "\$key" in
+      ''|*[!A-Za-z0-9_]*) continue ;;
+    esac
+    case "\$key" in
+      [0-9]*) continue ;;
+    esac
+    case "\$value" in
+      \\"*\\") value=\${value#\\"}; value=\${value%\\"} ;;
+      \\'*\\') value=\${value#\\'}; value=\${value%\\'} ;;
+    esac
+    export "\$key=\$value"
+  done < "\$file"
+}
+
+_load_env_file "\${HERMES_ENV_FILE:-}"
+_load_env_file "\${HERMES_HOME:-}/.env"
+_load_env_file "\$HOME/AppData/Local/hermes/.env"
+_load_env_file "\$HOME/.hermes/.env"
+_load_env_file $envfile_q
+
+export DIREXIO_AGENT_PLATFORM=hermes
+export DIREXIO_GATEWAY_ADAPTER=generic-cli
+export DIREXIO_GATEWAY_COMMAND=node
+export DIREXIO_GATEWAY_ARGS='$handler_args'
+if [ -z "\${DIREXIO_GATEWAY_STATE_FILE:-}" ]; then
+  export DIREXIO_GATEWAY_STATE_FILE=$state_file_q
+fi
+if [ -z "\${DIREXIO_AGENT_WORKSPACE:-}" ]; then
+  export DIREXIO_AGENT_WORKSPACE=$workspace_q
+fi
+
+if ! command -v hermes >/dev/null 2>&1; then
+  echo "warning: hermes is not on PATH; App agent replies will fail until Hermes CLI is available." >&2
+fi
+
+exec npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway start
+EOF
+  chmod 700 "$start"
+  printf '%s\n' "$start"
+}
+
 _agent_node_id() {
   local runtime=$1 domain=$2 room=$3 explicit host digest raw
   explicit=${DIREXIO_AGENT_NODE_ID:-}
@@ -343,7 +501,7 @@ _persist_agent_env() {
 
 _print_mcp_plugin_guidance() {
   local runtime=$1 asurl=$2 cred=$3 envfile=$4 policy=$5 mode=$6 install_command=$7 node_id=$8
-  local skill_path global_skill_path mcp_config_path install_target_summary
+  local skill_path global_skill_path mcp_config_path install_target_summary service_dir
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
   mcp_config_path=$(_agent_mcp_config_path "$runtime" "$node_id")
@@ -374,13 +532,27 @@ Use this stdio MCP server in the current agent config:
 Gateway native send is also available without MCP:
   npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "\$DIREXIO_AGENT_ROOM_ID" --message "hello"
 EOF
+  if [ "$runtime:$mode" = "hermes:native" ]; then
+    service_dir=$(dirname "$envfile")
+    cat >&2 <<EOF
+
+Hermes passive App-agent gateway helper:
+  handler:      $service_dir/hermes-gateway/p2p_handler.cjs
+  start script: $service_dir/hermes-gateway/start_gateway.sh
+  model check:  hermes -z "Reply with only: ok"
+  start:        bash "$service_dir/hermes-gateway/start_gateway.sh"
+
+Do not set DIREXIO_GATEWAY_COMMAND=node by itself. The handler above is required
+because it converts incoming room prompts into Hermes CLI calls.
+EOF
+  fi
   _print_runtime_install_summary "$runtime" "$mode" "$mcp_config_path"
 }
 
 run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and Direxio MCP/plugin env"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
-  local node_id service_dir node_cred workspace service_id
+  local node_id service_dir node_cred workspace service_id hermes_gateway_start
   local skill_path global_skill_path mcp_config_path install_target_summary
   domain=$(state_get domain)
   asurl=$(state_get as_url)
@@ -418,6 +590,13 @@ run_phase() {
   state_set agent_service_dir "$service_dir" 2>/dev/null || true
   state_set agent_credentials_file "$node_cred" 2>/dev/null || true
   state_set agent_workspace "$workspace" 2>/dev/null || true
+  if [ "$runtime" = "hermes" ]; then
+    hermes_gateway_start=$(_write_hermes_gateway_files "$service_dir" "$envfile" "$node_id" "$workspace")
+    ok "Wrote Hermes gateway helper files under $service_dir/hermes-gateway."
+    state_set hermes_gateway_dir "$service_dir/hermes-gateway" 2>/dev/null || true
+    state_set hermes_gateway_handler "$service_dir/hermes-gateway/p2p_handler.cjs" 2>/dev/null || true
+    state_set hermes_gateway_start_script "$hermes_gateway_start" 2>/dev/null || true
+  fi
 
   # 3) Installation is runtime-specific and may mutate agent config, so the skill
   # asks the user for confirmation after deployment instead of doing it blindly.

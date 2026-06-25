@@ -99,6 +99,28 @@ npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "$DIRE
 
 MCP is for active tools mounted into an agent. Gateway passive replies and manual `send` do not depend on `@direxio/local-mcp`.
 
+## Hermes Passive App-Agent Gateway
+
+When S6 detects `DIREXIO_AGENT_PLATFORM=hermes`, it writes a per-node helper under:
+
+```text
+~/.direxio/nodes/<service_id>/hermes-gateway/
+```
+
+The helper contains:
+
+- `p2p_handler.cjs`: reads an incoming room prompt from stdin and calls `hermes -z <prompt>`.
+- `start_gateway.sh`: loads Hermes model-provider environment variables, loads the node's Direxio env file, sets `DIREXIO_GATEWAY_ADAPTER=generic-cli`, and starts `direxio-agent-gateway`.
+
+Use:
+
+```bash
+hermes -z "Reply with only: ok"
+bash ~/.direxio/nodes/<service_id>/hermes-gateway/start_gateway.sh
+```
+
+Do not set `DIREXIO_GATEWAY_COMMAND=node` without `DIREXIO_GATEWAY_ARGS` pointing at the generated handler. A bare `node` process treats the natural-language prompt as JavaScript and fails with errors such as `SyntaxError: Unexpected identifier 'are'`.
+
 ## Install Parameters
 
 ```bash

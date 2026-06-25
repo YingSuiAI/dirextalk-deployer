@@ -258,6 +258,7 @@ DIREXIO_AGENT_NODE_ID=<agent_node_id>
 
 The current integration targets are `@direxio/local-mcp` for stdio MCP and `@direxio/agent-plugins` for runtime-specific plugins and gateway binaries.
 The gateway in `direxio-agent-plugins` has native send support: it calls `/_p2p/command` action `mcp.messages.send` directly and does not require MCP to send room replies.
+For Hermes, S6 also writes a node-scoped passive App-agent gateway helper under `~/.direxio/nodes/<service_id>/hermes-gateway/`. Use its `start_gateway.sh`; do not point `DIREXIO_GATEWAY_COMMAND` at bare `node`, because incoming prompts would be interpreted as JavaScript instead of being passed to Hermes.
 
 Post-deploy agent wiring is controlled by:
 
@@ -318,6 +319,7 @@ IP-derived, localhost, wildcard, or disposable domains.
 4. Present one complete deployment configuration and request one consolidated confirmation covering the final domain and irreversible binding, DNS mode, AWS region and billing, credentials source, instance type, message-server image, required installs, and existing-state action.
 5. Apply the approved existing-state action for `${P2P_WORKDIR:-$HOME/.direxio/deploy}/state.json`: continue, destroy, or use a new workdir.
 6. Run `scripts/orchestrate.sh` with the confirmed environment. Let the state machine own AWS calls, state, polling, cloud-init, token/password handling, verification, and destroy behavior.
+   **Hermes passive agent pitfall:** Hermes needs both a working model provider and the generated gateway handler. Before expecting App Agent replies, run `hermes -z "Reply with only: ok"` locally. If Hermes reports a missing model API key, configure the provider through `hermes model` or the Hermes environment file, then start `~/.direxio/nodes/<service_id>/hermes-gateway/start_gateway.sh`.
    **⚠️ Runtime detection pitfall:** S6 detects the agent runtime by checking directories in a fixed order — `~/.codex` is checked before `~/.hermes`. If `~/.codex` exists from past tool use, the script may mis-detect `codex` even when Hermes is running. **Fix:** pass `DIREXIO_AGENT_PLATFORM=hermes` explicitly when deploying from a Hermes session. Also see `references/windows-deployment-notes.md`.
    **⚠️ Route53 pre-requisite for domains at other registrars:** The script's `_find_route53_zone()` looks up existing hosted zones only — it does NOT create one. If the domain is registered at Alibaba, GoDaddy, Cloudflare, etc. and the user chose Route53 management, the agent must pre-create the hosted zone (see Step 4 DNS control) BEFORE running orchestrate.sh. Do not rely on the script to create the zone.
    **⚠️ Let's Encrypt certificate rate limit:** A single domain can get at most
@@ -418,6 +420,7 @@ mcp config    : <agent_mcp_config_path>
 skill clone   : <agent_skill_install_path>
 target summary: <agent_install_target_summary>
 gateway send  : npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "$DIREXIO_AGENT_ROOM_ID" --message "hello"
+Hermes gateway: ~/.direxio/nodes/<service_id>/hermes-gateway/start_gateway.sh (Hermes only)
 AWS region   : <region>
 EC2          : <instance-id> (<public-ip>)
 SSH          : ssh -i <key-file> ubuntu@<public-ip>
@@ -441,7 +444,7 @@ args: ["-y", "@direxio/local-mcp@latest"]
 env: DIREXIO_CREDENTIALS_FILE, DIREXIO_AGENT_NODE_ID
 ```
 
-For OpenClaw and Hermes, prefer native long-process integration. For Claude Code, Cursor, Gemini, and Copilot, use MCP-only unless the user supplies a local command for an external `generic-cli` gateway.
+For OpenClaw and Hermes, prefer native long-process integration. For Hermes passive App-agent replies, use the generated `hermes-gateway/start_gateway.sh` so prompts are routed through `p2p_handler.cjs` into `hermes -z`. For Claude Code, Cursor, Gemini, and Copilot, use MCP-only unless the user supplies a local command for an external `generic-cli` gateway.
 
 ## References
 

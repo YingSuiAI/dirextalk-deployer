@@ -93,4 +93,18 @@ case "$install_command" in
     ;;
 esac
 
+hermes_start=$(_write_hermes_gateway_files "$tmp/service" "$envfile" "hermes-test-node" "$tmp/workspace")
+[ "$hermes_start" = "$tmp/service/hermes-gateway/start_gateway.sh" ]
+[ -x "$tmp/service/hermes-gateway/start_gateway.sh" ]
+[ -x "$tmp/service/hermes-gateway/p2p_handler.cjs" ]
+bash -n "$tmp/service/hermes-gateway/start_gateway.sh"
+grep -Fq 'DIREXIO_GATEWAY_COMMAND=node' "$tmp/service/hermes-gateway/start_gateway.sh"
+grep -Fq 'DIREXIO_GATEWAY_ARGS=' "$tmp/service/hermes-gateway/start_gateway.sh"
+grep -Fq 'p2p_handler.cjs' "$tmp/service/hermes-gateway/start_gateway.sh"
+grep -Fq 'spawn("hermes", ["-z", prompt]' "$tmp/service/hermes-gateway/p2p_handler.cjs"
+grep -Fq 'no API key was found' "$tmp/service/hermes-gateway/p2p_handler.cjs"
+if command -v node >/dev/null 2>&1; then
+  node --check "$tmp/service/hermes-gateway/p2p_handler.cjs" >/dev/null
+fi
+
 echo "s6 wire local ok"

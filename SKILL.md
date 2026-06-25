@@ -68,6 +68,10 @@ Default tone for new users:
 Step-by-step onboarding flow:
 
 1. **AWS account.**
+   - **Shortcut:** If the user already provided valid AWS credentials (a
+     configured profile or a CSV that passed `aws sts get-caller-identity`),
+     skip the browser sign-in and email questions entirely. The agent already
+     has AWS access.
    - Ask: "Do you already have an AWS account you can log into?"
    - If yes, continue to the access key step.
    - If no, ask the user to open
@@ -76,14 +80,42 @@ Step-by-step onboarding flow:
    - Do not explain AWS resource details at this stage unless asked.
    - Never ask for, collect, paste, log, or store payment card details, root
      password, MFA code, email verification code, or phone verification code.
+   - **After credentials are configured and verified** (`aws sts
+     get-caller-identity` succeeds), do NOT ask "what is your AWS email" or
+     attempt browser sign-in. Use the CLI for all AWS operations — DNS checks,
+     Route53 zone inspection, EC2 provisioning.
 
 2. **Access key file.**
    - Ask: "Do you already have an AWS access key CSV file for deployment?"
    - If yes, ask only for the local file path.
-   - If no, guide them through creating one in the AWS console one screen at a
-     time. Prefer a dedicated deployment user or role over root access keys.
+   - If no, guide them through creating one with specific step-by-step
+     instructions. Do NOT say "go create one" — tell them exactly what to
+     click. Example for a root access key:
+     1. Open `https://console.aws.amazon.com/iam/` and sign in as root user.
+     2. Click the account name (top-right) → **Security credentials**.
+     3. Scroll to **Access keys (access key ID and secret access key)**.
+     4. Click **Create access key**.
+     5. In the dialog, select **Root user access key** → acknowledge the
+        warning → **Create access key**.
+     6. Click **Download .csv file** to save the credentials file.
+     7. Return the local file path to the agent.
+   - For a dedicated IAM deployment user (recommended over root):
+     1. User opens `https://console.aws.amazon.com/iam/` → **Users** →
+        **Create user** with name like `p2p-matrix`.
+     2. Attach the policy from `references/iam-policy.json` (or `AdministratorAccess` for simplicity).
+     3. **Create user** → select the user → **Security credentials** →
+        **Create access key** → **Command Line Interface (CLI)** →
+        download the CSV.
+   - Prefer a dedicated deployment user or role over root access keys. If the
+     user insists on root keys, warn: "Root keys have unrestricted access to
+     your entire AWS account. Use them only if you understand the risk."
    - If they need a permission policy, point to `references/iam-policy.json`.
      Do not explain the policy line by line unless asked.
+   - **Reading the CSV file:** On some platforms, terminal output-level
+     redaction may truncate credential values (e.g. `AKIAQ6...W47B` instead of
+     the full key). In that case, use Python to read the raw CSV bytes and
+     configure AWS CLI — see `references/windows-deployment-notes.md` for the
+     exact code snippet.
    - The agent may read the local CSV path, but must never print the Access Key
      ID together with the Secret Access Key, and must never write secrets into
      the repository, skill files, logs, or chat output.
@@ -92,7 +124,16 @@ Step-by-step onboarding flow:
    - Ask: "Do you already own a domain or subdomain you want to use for this
      Direxio node?"
    - If yes, ask for the domain.
-   - If no, ask them to buy or prepare one first, then stop until they have it.
+   - If no, **before asking them to buy one**, first check whether they already
+     own domains registered in the same AWS account:
+     ```bash
+     aws route53domains list-domains --profile <profile>
+     ```
+     If the account has domains, present the list and ask if they want to use
+     one of them. This avoids unnecessary purchases when the user forgot what
+     they own.
+   - If no domains exist in the account either, ask them to buy or prepare one
+     first, then stop until they have it.
    - When guiding domain purchase, keep it concrete and short:
      1. Open one official registrar URL in the browser.
      2. Search for a domain name.
@@ -116,20 +157,72 @@ Step-by-step onboarding flow:
      Cloudflare, GoDaddy, or Alibaba Cloud?"
    - If AWS Route53, use `DOMAIN_MODE=route53` only after the user confirms AWS
      may create or update the domain's A record.
-   - If another provider, use `DOMAIN_MODE=user`. Later, when the script emits
-     the fixed IP, ask the user to create exactly:
+   - If another provider, use `DOMAIN_MODE=user` by default. Later, when the
+     script emits the fixed IP, ask the user to create exactly:
 
      ```text
      <DOMAIN>  A  <PUBLIC_IP>
      ```
 
+   - **Route53 delegation from another provider** — If the user prefers Route53
+     even though the domain is registered elsewhere (Alibaba, GoDaddy,
+     Cloudflare, etc.), there is a pre-deployment step before orchestrate.sh:
+
+     1. Create the Route53 hosted zone:
+        ```bash
+        aws route53 create-hosted-zone --name <DOMAIN> --caller-reference "deploy-$(date -u +%Y%m%d%H%M%S)"
+        ```
+     2. Extract the 4 NS nameservers from the created zone.
+     3. Give them to the user with clear instructions to update the domain's
+        NS records at their current DNS provider (e.g. Alibaba Cloud DNS
+        console → "修改DNS").
+     4. Wait for the user to confirm they made the change.
+     5. **Then** proceed to run orchestrate.sh with `DOMAIN_MODE=route53`,
+        which will find the now-existing hosted zone and upsert the A record.
+        The script's `_find_route53_zone()` function looks up existing zones
+        only — it does NOT create one.
+
+   - **Important:** Route53 A record upsert happens during S3_PROVISION, before
+     DNS propagation checks. The user must delegate NS FIRST so the hosted zone
+     exists before the script runs. Do not run orchestrate.sh before the NS
+     delegation is submitted and routed.
+
 5. **Billing confirmation.**
    - Give a short billing warning before the first mutating AWS command:
      "This will create paid AWS resources for the server. They keep billing
      until destroyed."
-   - Do not list every AWS resource by default. If the user asks what is billed,
-     mention EC2/server, fixed IP, storage, DNS, network traffic, and call relay
-     traffic.
+   - **Provide an upfront monthly cost estimate** based on the selected
+     region and instance type, so the user can decide whether to proceed.
+     Default estimate (t3.small, us-east-1, ~730 hours/month):
+
+     | Resource | Monthly Cost |
+     |---|---:|
+     | EC2 t3.small (Linux) | ~$15 |
+     | EBS gp3 (8 GB) | ~$0.60 |
+     | Elastic IP (when attached) | free |
+     | Route53 hosted zone | ~$0.50 |
+     | Outbound data (first 100 GB) | free |
+     | **Total** | **~$16-17/month** |
+
+     If the user chose a **non-us-east-1 region**, adjust the EC2 rate
+      or add a note that prices may vary by region. For t3.small in other
+      regions, add roughly +10-30%. To get exact on-demand rates, use:
+
+     ```bash
+     aws pricing get-products --service-code AmazonEC2 \
+       --filters "Type=TERM_MATCH,Field=instanceType,Value=t3.small" \
+                "Type=TERM_MATCH,Field=location,Value=<Region Name>" \
+                "Type=TERM_MATCH,Field=operatingSystem,Value=Linux" \
+                "Type=TERM_MATCH,Field=tenancy,Value=Shared" \
+                "Type=TERM_MATCH,Field=preInstalledSw,Value=NA" \
+       --max-results 1
+     ```
+
+     Replace `<Region Name>` with the AWS Pricing API region name
+     (e.g. `Asia Pacific (Tokyo)`, `Europe (Frankfurt)`). The on-demand
+     hourly rate times 730 gives the approximate monthly CPU cost.
+   - If the user asks what is billed, mention EC2/server, fixed IP, storage,
+     DNS, network traffic, and call relay traffic.
 
 Required first-time deployment confirmation:
 
@@ -186,21 +279,61 @@ DOMAIN_MODE=user
 CONFIRM_DOMAIN_BINDING=1
 ```
 
-Use `DOMAIN_MODE=route53` only when the domain is in Route53 and the user confirms AWS may manage the A record. Never use temporary `sslip.io`, IP-derived, localhost, wildcard, or disposable domains.
+Use `DOMAIN_MODE=route53` when the user confirms AWS may manage the domain's
+A record through Route53. The domain must have a Route53 hosted zone already
+existing (either pre-created by the agent or inherited from prior setup). If
+the domain is registered at another provider, the agent must pre-create the
+hosted zone, extract NS records, and guide the user to delegate DNS *before*
+running orchestrate.sh (see Step 4). Never use temporary `sslip.io`,
+IP-derived, localhost, wildcard, or disposable domains.
 
 ## Deployment Flow
 
 1. Complete the Cloud Account And Domain Onboarding gate above for first-time users or whenever AWS credentials, domain ownership, or DNS authority are unclear.
 2. Read `references/tooling.md`; inspect the user OS and install or prepare missing `bash`, `aws`, `jq`, `ssh`, `scp`, and `curl` only after approval.
 3. Inspect DNS, AWS credentials, region defaults, local tooling, and existing deployment state before asking the user anything that can be discovered automatically.
+   **Multi-domain state check:** Before finalising the domain, scan for existing
+   nodes across all domains to avoid deploying the same domain twice or
+   colliding with an active node:
+
+   ```bash
+   # Check local deploy state for any active/in-progress deployment
+   ls ~/.direxio/nodes/ 2>/dev/null && cat ~/.direxio/deploy/state.json 2>/dev/null | jq '{phase, phases}'
+
+   # Check Route53 A records to see which domains already have a server
+   for zid in $(aws route53 list-hosted-zones --query "HostedZones[].Id" --output text); do
+     zone_name=$(aws route53 list-hosted-zones --query "HostedZones[?Id=='$zid'].Name" --output text)
+     a_rec=$(aws route53 list-resource-record-sets --hosted-zone-id "$zid" --query "ResourceRecordSets[?Type=='A'].{Name:Name,Value:ResourceRecords[0].Value}" --output json)
+     echo "$zone_name -> A=$a_rec"
+   done
+   ```
+
+   If the chosen domain already has an A record pointing to a different IP,
+   or has a local node directory under `~/.direxio/nodes/`, warn the user
+   and suggest using a different domain or destroying the existing deployment
+   first. If the domain was deployed multiple times recently, warn about
+   Let's Encrypt rate limits (max 5 certificates per domain per 7 days).
 4. Present one complete deployment configuration and request one consolidated confirmation covering the final domain and irreversible binding, DNS mode, AWS region and billing, credentials source, instance type, message-server image, required installs, and existing-state action.
 5. Apply the approved existing-state action for `${P2P_WORKDIR:-$HOME/.direxio/deploy}/state.json`: continue, destroy, or use a new workdir.
 6. Run `scripts/orchestrate.sh` with the confirmed environment. Let the state machine own AWS calls, state, polling, cloud-init, token/password handling, verification, and destroy behavior.
+   **⚠️ Runtime detection pitfall:** S6 detects the agent runtime by checking directories in a fixed order — `~/.codex` is checked before `~/.hermes`. If `~/.codex` exists from past tool use, the script may mis-detect `codex` even when Hermes is running. **Fix:** pass `DIREXIO_AGENT_PLATFORM=hermes` explicitly when deploying from a Hermes session. Also see `references/windows-deployment-notes.md`.
+   **⚠️ Route53 pre-requisite for domains at other registrars:** The script's `_find_route53_zone()` looks up existing hosted zones only — it does NOT create one. If the domain is registered at Alibaba, GoDaddy, Cloudflare, etc. and the user chose Route53 management, the agent must pre-create the hosted zone (see Step 4 DNS control) BEFORE running orchestrate.sh. Do not rely on the script to create the zone.
+   **⚠️ Let's Encrypt certificate rate limit:** A single domain can get at most
+   5 certificates per 7 days (504 hours). If the chosen domain has been
+   deployed and destroyed repeatedly within the past week, S4 will fail with
+   `healthz did not return 200 before timeout` because Caddy cannot issue a new
+   cert. Before running, check the domain's recent cert history by inspecting
+   Caddy data on an existing EC2 instance, or simply choose a domain that has
+   not been deployed recently. See `references/deployment-workflow.md` → "S4
+   Bootstrap Timeout / Certificate Rate Limit Recovery" for recovery steps.
 7. For `DOMAIN_MODE=user`, pause when the script emits an Elastic IP and ask the user to set:
-
-```text
-<DOMAIN>  A  <PUBLIC_IP>
-```
+   ```text
+   <DOMAIN>  A  <PUBLIC_IP>
+   ```
+   For `DOMAIN_MODE=route53` where NS delegation was just changed (third-party
+   registrar → Route53), DNS propagation of the new nameservers is required
+   before the script can verify the A record. The Route53 hosted zone must be
+   pre-created and delegated before step 6.
 
 8. After authoritative DNS resolves, rerun the same command with `DNS_READY=1`.
 9. After S7 passes, read `references/runtime-wiring.md` and `references/agent-targets.md`, then report the URL, `password`, agent token status, `agent_room_id`, persistent Direxio MCP/plugin env status, runtime-specific target paths, resources, SSH command, state path, and destroy command.
@@ -211,6 +344,19 @@ Use `DOMAIN_MODE=route53` only when the domain is in Route53 and the user confir
 Use `scripts/destroy.sh` for teardown. After AWS resources are terminated and released, destroy removes the corresponding local deploy workdir under `~/.direxio` so stale state cannot block or mislead the next deployment. It leaves unrelated node credential directories intact.
 
 If an operator needs to preserve local state files for debugging, run destroy with `P2P_KEEP_WORKDIR=1` and explicitly report that the stale workdir remains.
+
+### Full reset / "treat me as a brand new user"
+
+When the user asks for a complete fresh start — "destroy everything", "start over from zero", "treat me as a brand new user" — running `scripts/destroy.sh` alone is **not sufficient**. The destroy script only handles infrastructure and local workdir cleanup. The agent must also clear its own persistent memory about the old deployment. Specifically:
+
+1. **Run `scripts/destroy.sh` first** (infra teardown).
+2. **Clear agent memory entries** for this deployment:
+   - `memory(action='remove', target='memory')` — remove all entries referencing the old domain, deployment URLs, credentials, passwords, tokens, node IDs, room IDs, service IDs, AWS account info, MCP config paths, and the skill install/update history.
+   - `memory(action='remove', target='user')` — remove any user profile entries that describe the user's cloud/DNS setup from the prior deployment (the new deployment starts fresh with new onboarding).
+3. **Verify** that `~/AppData/Local/hermes/memory.json` (Hermes desktop) or `~/.hermes/memory.json` (CLI) no longer carries stale deployment facts.
+4. **Then start from Step 1** of the Cloud Account And Domain Onboarding section — ask about AWS account first, don't assume anything carried over.
+
+> ⚠️ Do not skip step 2. Stale credentials (URLs, passwords, tokens) in agent memory can leak into the new deployment's Delivery report or cause the agent to skip onboarding steps by referencing facts that no longer apply. A true fresh start requires both infra cleanup **and** agent memory cleanup.
 
 ## Image Refresh And Data Reset
 
@@ -304,3 +450,4 @@ For OpenClaw and Hermes, prefer native long-process integration. For Claude Code
 - Verification and recovery: `references/verification-recovery.md`
 - State machine details: `references/state-machine.md`
 - Architecture and troubleshooting: `references/architecture.md`, `references/troubleshooting.md`
+- Windows deployment notes: `references/windows-deployment-notes.md` — bash prerequisites, credential setup, MCP arg format, known background-buffer gotcha, and Route53 DNS tips for Git Bash / Windows 10+.

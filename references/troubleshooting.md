@@ -23,6 +23,7 @@ docker compose logs coturn --tail=50
 - `postgres` 不 healthy: 看 `docker compose logs postgres --tail=80`。
 - `message-server` 不 healthy: 看 `docker compose logs message-server --tail=100`，并确认 `/etc/direxio-message-server/message-server.yaml` 已生成。
 - 证书签不下来: 确认 80/443 安全组放行，且 `dig +short <domain>` 已解析到当前 EIP。
+- Let's Encrypt 429 限流（too many certificates already issued）: 同一域名 7 天内申请超过 5 次会触发。SSH 上机器用 `docker logs p2p-caddy-1 | grep 429` 确认。**临时解决**：在 Caddyfile 的 `{$DOMAIN} {` 后加一行 `tls internal`，重启 Caddy（`docker compose -f /opt/p2p/docker-compose.yml restart caddy`），然后用 `curl -sk --resolve <domain>:443:<EIP> https://<domain>/healthz` 验证。部署完成后恢复原始 Caddyfile 去掉 `tls internal` 并重启 Caddy，Caddy 会在限流解除后自动申请正式证书。详见 `deployment-lessons.md` 的 Let's Encrypt 章节。
 
 ## owner.json / Portal 未部署
 

@@ -53,7 +53,57 @@ Exit codes:
 - `1`: phase failed; inspect logs and rerun or destroy.
 - `2`: waiting for user/external action, usually DNS or credentials.
 
+## S4 Bootstrap Timeout / Certificate Rate Limit Recovery
+
+When S4 fails with `healthz did not return 200 before timeout`, the most
+common cause is **Let's Encrypt certificate rate limiting** (max 5 certs per
+domain per 7 days). Caddy retries automatically with backoff, but the
+orchestration script may time out first.
+
+**How to check:**
+
+```bash
+ssh -i <keyfile> ubuntu@<public-ip> \
+  'sudo docker logs p2p-caddy-1 --tail 20 2>&1 | grep -i "rateLimit\|retry after\|429"'
+```
+
+If rate-limited, the log shows `retry after <timestamp> UTC`.
+
+**Recovery options:**
+
+1. **Wait for rate limit to expire** — Caddy retries in the background.
+   Check progress periodically:
+   ```bash
+   curl -skI https://<DOMAIN>/healthz  # returns 200 when cert is ready
+   ```
+   Once the endpoint returns 200, re-run orchestrate.sh to complete:
+   ```bash
+   P2P_EXISTING_STATE_ACTION=continue \
+   DNS_READY=1 \
+   AWS_PROFILE=p2p-matrix \
+   AWS_DEFAULT_REGION=us-east-1 \
+   DOMAIN=<DOMAIN> \
+   DOMAIN_MODE=route53 \
+   CONFIRM_DOMAIN_BINDING=1 \
+   INSTANCE_TYPE=t3.small \
+   bash scripts/orchestrate.sh
+   ```
+
+2. **Use a different domain** — If you have multiple domains, destroy the
+   current deployment and deploy on a domain without recent cert history:
+   ```bash
+   bash scripts/destroy.sh
+   ```
+   Then start again with a fresh domain.
+
+3. **Force Caddy staging CA** (development only) — Set the environment
+   variable `CADDY_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory`
+   in the compose file to get a staging certificate. Staging certs are **not
+   trusted by browsers** — use only for testing.
+
 ## Manual DNS Mode
+
+|...
 
 When S3 emits an Elastic IP, ask the user to set:
 

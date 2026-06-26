@@ -18,6 +18,7 @@
 - AWS resources cost money; the user must explicitly confirm before deployment.
 - User-managed DNS mode pauses after Elastic IP creation until the user updates the A record.
 - The backend image is `direxio/message-server`; Matrix and P2P APIs share port 8008.
+- Cloud init generates `P2P_PORTAL_PASSWORD`; `init-tokens.sh` calls `portal.bootstrap` and creates a real Matrix agent room if the backend credentials file does not already include one.
 - S6 rejects legacy pseudo agent rooms such as `!agent:<domain>` and requires the real Matrix `agent_room_id` created by message-server.
 - S6 creates an `@agent:<server>` Matrix session through `agent.matrix_session.create`, writes a Matrix-only `cc-connect/config.toml`, and restricts the bridge to the current `agent_room_id`.
 - `DIREXIO_CC_CONNECT_AGENT` selects the local `direxio-connect` agent type. Supported values match connent/connect: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.

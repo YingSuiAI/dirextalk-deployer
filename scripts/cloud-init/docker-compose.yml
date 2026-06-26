@@ -66,6 +66,7 @@ services:
         condition: service_completed_successfully
     environment:
       P2P_PORTAL_CREDENTIALS_FILE: /var/direxio-message-server/p2p/bootstrap.json
+      P2P_PORTAL_PASSWORD: ${P2P_PORTAL_PASSWORD}
     command:
       - --config
       - /etc/direxio-message-server/message-server.yaml

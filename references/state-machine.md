@@ -9,7 +9,7 @@
 - **S2_DOMAIN**: 确认正式长期域名和 Matrix `server_name` 不可逆绑定。
 - **S3_PROVISION**: 创建 EC2、密钥对、安全组、Elastic IP，渲染 cloud-init。默认镜像 `MESSAGE_SERVER_IMAGE=direxio/message-server:latest`。
 - **S4_BOOTSTRAP_STACK**: 等 cloud-init 安装 Docker 并启动 `postgres:18 + message-server + caddy + coturn`，轮询 `https://<domain>/healthz`。
-- **S5_INIT_TOKENS**: SSH 读取 `/opt/p2p/bootstrap.json`，归一化 `password`、`access_token`、`agent_token`、真实 `agent_room_id`。
+- **S5_INIT_TOKENS**: SSH 读取云端 `init-tokens.sh` 生成的 `/opt/p2p/bootstrap.json`，归一化 `password`、`access_token`、`agent_token`、真实 `agent_room_id`。云端脚本会先调用 `portal.bootstrap`，并在服务端未返回房间时用 Matrix Client API 创建和回写真实 agent room。
 - **S6_WIRE_LOCAL**: 写本地凭据、创建 `@agent:<server>` Matrix session、写 `cc-connect/config.toml`，并按策略安装或推荐 `direxio-connect`。
 - **S7_VERIFY_E2E**: 验证 `/_p2p`、Matrix versions、well-known、owner.json+CORS、TURN。
 
@@ -38,6 +38,6 @@
 
 - DNS 未指向 EIP: S3 返回 waiting，用户设置 A 记录后用 `DNS_READY=1` 续跑。
 - `/healthz` 不通: 看 `/var/log/cloud-init-output.log` 和 `docker compose logs message-server`。
-- bootstrap 缺字段: 重跑 `DOMAIN=<domain> bash /opt/p2p/init-tokens.sh`，再看容器内 `/var/direxio-message-server/p2p/bootstrap.json`。
-- `agent_room_id` 是旧伪 ID: 使用当前 message-server build 重新启动或重部署，让后端创建真实 Matrix room。
+- bootstrap 缺字段: 在实例上重跑 `sudo sh -lc 'cd /opt/p2p && DOMAIN=<domain> bash /opt/p2p/init-tokens.sh'`，再看宿主 `/opt/p2p/bootstrap.json` 和容器内 `/var/direxio-message-server/p2p/bootstrap.json`。
+- `agent_room_id` 缺失或是旧伪 ID: 确认 `.env` 有 `P2P_PORTAL_PASSWORD`，然后重跑 `/opt/p2p/init-tokens.sh`；脚本应创建真实 Matrix room 并回写。
 - TURN 为空: 检查 `TURN_SECRET`、coturn、安全组 3478 和 49160-49200/udp。

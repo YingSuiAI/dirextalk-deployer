@@ -376,7 +376,7 @@ When the user asks for a complete fresh start — "destroy everything", "start o
 
 ## Image Refresh And Data Reset
 
-When the user only asks to pull a newer image or reset application data on an existing EC2 instance, do not destroy cloud resources and do not delete TLS storage. Pull the compose images, stop the stack, remove only the application data volumes, restart, rerun `/opt/p2p/init-tokens.sh`, then reset local S5-S7 state so credentials and verification are refreshed.
+When the user only asks to pull a newer image or reset application data on an existing EC2 instance, do not destroy cloud resources and do not delete TLS storage. Pull the compose images, stop the stack, remove only the application data volumes, restart, rerun `/opt/p2p/init-tokens.sh`, then reset local S5-S7 state so credentials and verification are refreshed. Current message-server images require `P2P_PORTAL_PASSWORD` and an explicit `portal.bootstrap`; `init-tokens.sh` owns that cloud-side bootstrap and creates a real Matrix `agent_room_id` when the backend credentials file does not already include one.
 
 Do not delete caddy-data or caddy-config during an image-only refresh. Removing Caddy's ACME storage loses the existing production certificate and can trigger CA duplicate-certificate rate limits. Preserve `caddy-data` and `caddy-config`; clear only `postgres-data message-config message-data` when the requested reset needs a clean homeserver/database.
 

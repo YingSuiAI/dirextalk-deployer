@@ -16,6 +16,7 @@
 - AWS 资源会产生费用，部署前必须让用户明确确认。
 - 用户侧 DNS 模式会在 Elastic IP 创建后暂停，等待用户更新 A 记录。
 - 当前后端是 `direxio/message-server` 单体服务，Matrix 与 P2P API 共用 8008。
+- cloud-init 会生成 `P2P_PORTAL_PASSWORD`；`init-tokens.sh` 会调用 `portal.bootstrap`，并在后端凭据文件没有真实房间时创建 Matrix agent room。
 - S6 会拒绝 `!agent:<domain>` 这类旧伪房间，只接受 message-server 创建的真实 Matrix `agent_room_id`。
 - S6 会通过 `agent.matrix_session.create` 创建 `@agent:<server>` Matrix session，写入 Matrix-only `cc-connect/config.toml`，并把 bridge 限制在当前 `agent_room_id`。
 - `DIREXIO_CC_CONNECT_AGENT` 用来选择本地 `direxio-connect` agent 类型。支持值与 connent/connect 一致：`acp`、`antigravity`、`claudecode`、`codex`、`copilot`、`cursor`、`devin`、`gemini`、`iflow`、`kimi`、`opencode`、`pi`、`qoder`、`reasonix`、`tmux`。

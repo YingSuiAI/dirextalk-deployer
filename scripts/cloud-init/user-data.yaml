@@ -25,6 +25,8 @@ runcmd:
     grep -q '^PUBLIC_IP=' /opt/p2p/.env || echo "PUBLIC_IP=$IP" >> /opt/p2p/.env
     grep -q '^TURN_SECRET=' /opt/p2p/.env || \
       echo "TURN_SECRET=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)" >> /opt/p2p/.env
+    grep -q '^P2P_PORTAL_PASSWORD=' /opt/p2p/.env || \
+      echo "P2P_PORTAL_PASSWORD=$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", $1 % 100000000}')" >> /opt/p2p/.env
   - export DOMAIN=$(grep '^DOMAIN=' /opt/p2p/.env | cut -d= -f2)
   - curl -fsSL https://get.docker.com | sh
   - systemctl enable --now docker

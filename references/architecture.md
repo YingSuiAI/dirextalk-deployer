@@ -25,9 +25,10 @@ coturn         -> TURN 3478 + 49160-49200/udp
 
 1. `postgres` healthy。
 2. `message-init` 生成 `/etc/direxio-message-server/message-server.yaml` 和 signing key，并写入 TURN 配置。
-3. `message-server` 启动，加载 Matrix + P2P 业务，写 `/var/direxio-message-server/p2p/bootstrap.json`。
-4. `init-tokens.sh` 从容器复制完整凭据到宿主 `/opt/p2p/bootstrap.json`，并生成 `/opt/p2p/wellknown/owner.json`。
-5. `caddy` 对外服务 Matrix、P2P API 和 well-known。
+3. `message-server` 启动，加载 Matrix + P2P 业务，读取 `P2P_PORTAL_PASSWORD` 和 `P2P_PORTAL_CREDENTIALS_FILE`。
+4. `init-tokens.sh` 调用 `portal.bootstrap`，从容器复制凭据到宿主 `/opt/p2p/bootstrap.json`。如果最新服务端没有写入 `agent_room_id`，脚本会通过 Matrix Client API 创建真实 agent room、邀请并加入 `@agent:<server>`，再把 `agent_room_id` 回写到宿主和容器凭据文件。
+5. `init-tokens.sh` 生成 `/opt/p2p/wellknown/owner.json`。
+6. `caddy` 对外服务 Matrix、P2P API 和 well-known。
 
 ## 凭据模型
 
@@ -36,6 +37,7 @@ coturn         -> TURN 3478 + 49160-49200/udp
 - `password`: 前端 IM 登录密码。
 - `access_token`: 当前用户的统一 bearer token，可用于 Matrix `/_matrix/client/*` 和需要用户身份的 P2P 调用。
 - `agent_token`: 本地服务凭据中的 agent bearer token；`direxio-connect` 对话桥接使用 S6 创建的 `@agent:<server>` Matrix session。
+- `agent_room_id`: 真实 Matrix 房间 ID。部署脚本拒绝旧式 `!agent:<domain>` 伪房间。
 
 ## 域名模型
 

@@ -329,6 +329,12 @@ IP-derived, localhost, wildcard, or disposable domains.
 4. Present one complete deployment configuration and request one consolidated confirmation covering the final domain and irreversible binding, DNS mode, AWS region and billing, credentials source, instance type, message-server image, required installs, and existing-state action.
 5. Apply the approved existing-state action for `${DIREXIO_HOME:-$HOME/.direxio}/nodes/<service_id>/state.json`: continue, destroy, or use a different domain/service directory.
 6. Run `scripts/orchestrate.sh` with the confirmed environment. Let the state machine own AWS calls, state, polling, cloud-init, token/password handling, verification, and destroy behavior.
+   **Credential freshness:** The synced `password` and owner `access_token`
+   are one-time/volatile values. User login or token exchange can reset them
+   on the server. Before reporting a login password or using an owner
+   `access_token` for API calls, rerun the credential sync path or pull the
+   latest `/opt/p2p/bootstrap.json` from the server; do not reuse values from
+   old chat output, old `state.json`, or stale local `credentials.json`.
    **Runtime detection note:** S6 checks active-process signals before stale
    config directories, so current-session markers, environment variables, and
    process names win over historical runtime directories. If a session still

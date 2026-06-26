@@ -28,6 +28,8 @@ After deployment, S6 writes service-scoped files under:
 }
 ```
 
+Treat the synced `password` and owner `access_token` as one-time/volatile values. A successful user login or token exchange can reset them on the server. Before showing a login password or using an owner `access_token` for `/_p2p/command` or Matrix Client API calls, pull the current `/opt/p2p/bootstrap.json` from the server and refresh local credentials instead of using older local output.
+
 `env` contains the same service-scoped environment values for shell usage:
 
 ```bash

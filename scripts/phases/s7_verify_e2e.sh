@@ -28,8 +28,9 @@ run_phase() {
   if [ "$fails" -eq 0 ]; then
     phase_set S7_VERIFY_E2E done "all green"
 
-    # Auto-start Hermes passive gateway if agent runtime is Hermes
+    # Auto-start passive gateway if the detected agent runtime owns one.
     _start_hermes_gateway "$domain"
+    _start_openclaw_gateway "$domain"
 
     return 0
   fi
@@ -145,6 +146,41 @@ _start_hermes_gateway() {
     ok "Hermes passive gateway started (pid=$pid). Agent room messages will auto-reply."
   else
     warn "Hermes gateway exited immediately. Start manually:"
+    warn "  bash \"$gateway_script\""
+  fi
+}
+
+# Auto-start OpenClaw passive gateway after deployment completes.
+# Uses the openclaw-gateway helper that S6 generated.
+_start_openclaw_gateway() {
+  local domain=$1 runtime service_dir gateway_script
+  runtime=$(state_get agent_runtime 2>/dev/null || echo "")
+  [ "$runtime" != "openclaw" ] && [ "${DIREXIO_AGENT_PLATFORM:-}" != "openclaw" ] && return 0
+
+  service_dir=$(state_get agent_service_dir 2>/dev/null || echo "")
+  if [ -z "$service_dir" ]; then
+    # Fallback: derive from domain
+    local sid
+    sid=$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')
+    service_dir="$HOME/.direxio/nodes/$sid"
+  fi
+
+  gateway_script="$service_dir/openclaw-gateway/start_gateway.sh"
+  if [ ! -f "$gateway_script" ]; then
+    warn "OpenClaw gateway script not found at $gateway_script; skipping auto-start."
+    warn "  Start manually: bash \"$gateway_script\""
+    return 0
+  fi
+
+  log "Starting OpenClaw passive gateway (background)..."
+  nohup bash "$gateway_script" >/dev/null 2>&1 &
+  local pid=$!
+  sleep 2
+  if kill -0 "$pid" 2>/dev/null; then
+    state_set openclaw_gateway_pid "$pid" 2>/dev/null || true
+    ok "OpenClaw passive gateway started (pid=$pid). Agent room messages will auto-reply."
+  else
+    warn "OpenClaw gateway exited immediately. Start manually:"
     warn "  bash \"$gateway_script\""
   fi
 }

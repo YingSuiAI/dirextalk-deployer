@@ -135,6 +135,28 @@ bash ~/.direxio/nodes/<service_id>/hermes-gateway/start_gateway.sh
 
 Do not set `DIREXIO_GATEWAY_COMMAND=node` without `DIREXIO_GATEWAY_ARGS` pointing at the generated handler. A bare `node` process treats the natural-language prompt as JavaScript and fails with errors such as `SyntaxError: Unexpected identifier 'are'`.
 
+## OpenClaw Passive App-Agent Gateway
+
+When S6 detects `DIREXIO_AGENT_PLATFORM=openclaw`, it writes a per-node helper under:
+
+```text
+~/.direxio/nodes/<service_id>/openclaw-gateway/
+```
+
+The helper contains:
+
+- `p2p_handler.cjs`: reads an incoming room prompt from stdin and calls `openclaw agent --agent main --session-key agent:main:main --message <prompt>`.
+- `start_gateway.sh`: loads OpenClaw and Direxio environment files, adds common OpenClaw CLI locations to `PATH`, sets `DIREXIO_GATEWAY_ADAPTER=generic-cli`, and starts `direxio-agent-gateway`.
+
+Use:
+
+```bash
+openclaw agent --message "Reply with only: ok"
+bash ~/.direxio/nodes/<service_id>/openclaw-gateway/start_gateway.sh
+```
+
+Set `OPENCLAW_AGENT_ID`, `OPENCLAW_SESSION_KEY`, `OPENCLAW_AGENT_MODEL`, or `OPENCLAW_COMMAND` before starting the helper when the default `main` agent/session should not be used. The default session key is `agent:main:main`, matching the local App-agent session used by OpenClaw's main agent.
+
 ## Windows-Native Codex Gateway
 
 Windows-native Codex should start gateway from Windows PowerShell, not WSL, when
@@ -180,7 +202,8 @@ Defaults:
 
 Platform guidance:
 
-- OpenClaw and Hermes: prefer native long-process integration using `/_p2p/events` and `mcp.messages.send`.
+- OpenClaw: use the generated `openclaw-gateway/start_gateway.sh` helper for native passive replies, and mount MCP only for active Direxio tools.
+- Hermes: use the generated `hermes-gateway/start_gateway.sh` helper for native passive replies, and mount MCP only for active Direxio tools.
 - Codex: prefer gateway with `codex-app-server`; when Codex runs from Windows and the deployer is invoked through WSL, infer the Windows Codex home from active `.codex/tmp` paths or set `CODEX_HOME=/mnt/c/Users/<user>/.codex` explicitly. Do not treat a project-local `PROJECT_ROOT/.codex/skills` clone as the Codex user config home.
 - Claude Code, Cursor, Gemini, and Copilot: use MCP-only unless the user supplies a local prompt command for `generic-cli`.
 - Cursor repository target: copy or merge the generated MCP payload into `PROJECT_ROOT/.cursor/mcp.json`.
@@ -195,4 +218,4 @@ After S7 succeeds, ask the user whether to configure the detected runtime automa
 Detected <runtime>. Do you want me to automatically install/configure the Direxio plugin and MCP service for this agent using the persisted DIREXIO_* environment and the recorded runtime target paths?
 ```
 
-Only proceed after the user agrees or after `DIREXIO_AGENT_INSTALL=auto` was set before deployment. Use the runtime-specific plugin under `@direxio/agent-plugins`, the MCP server configuration above, and the native gateway-send contract when passive replies are needed.
+Only proceed after the user agrees or after `DIREXIO_AGENT_INSTALL=auto` was set before deployment. Use the runtime-specific plugin under `@direxio/agent-plugins` when it exists, the MCP server configuration above, and the generated OpenClaw/Hermes gateway helpers when passive replies are needed.

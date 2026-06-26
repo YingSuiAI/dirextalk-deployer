@@ -104,10 +104,11 @@ When all phases complete, report:
 - detected agent runtime plus `@direxio/local-mcp` and `@direxio/agent-plugins` installation targets
 - agent install policy/mode/status from `DIREXIO_AGENT_INSTALL` and `DIREXIO_AGENT_INSTALL_MODE`
 - native gateway send command: `npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "$DIREXIO_AGENT_ROOM_ID" --message "hello"`
+- OpenClaw/Hermes generated passive gateway helper paths when those runtimes are detected
 - region, instance ID, public IP, and `state.json` path
 - SSH command
 - destroy command
 
-After reporting delivery, ask whether to automatically install/configure the Direxio plugin and MCP service for the detected runtime unless `DIREXIO_AGENT_INSTALL=auto` was already set. Only mutate the user's agent config after they agree or explicitly set auto install. OpenClaw and Hermes should use native long-process integration; platforms without local long-process support use MCP-only or an external gateway.
+After reporting delivery, ask whether to automatically install/configure the Direxio plugin and MCP service for the detected runtime unless `DIREXIO_AGENT_INSTALL=auto` was already set. Only mutate the user's agent config after they agree or explicitly set auto install. OpenClaw and Hermes should use their generated native gateway helpers for passive replies; platforms without local long-process support use MCP-only or an external gateway.
 
 Destroying AWS resources does not remove DNS records or registered domains.

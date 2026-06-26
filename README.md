@@ -31,6 +31,7 @@ See `references/agent-targets.md` for the full runtime matrix, global fallbacks,
 - After deployment, S6 persists `DIREXIO_DOMAIN`, `DIREXIO_AGENT_TOKEN`, `DIREXIO_AGENT_ROOM_ID`, and `DIREXIO_AGENT_NODE_ID` under the domain-derived `~/.direxio/nodes/<service_id>/`, then records `@direxio/local-mcp`, `@direxio/agent-plugins`, runtime-specific skill clone paths, and node-scoped MCP/config payload targets.
 - Post-deploy agent installation is controlled by `DIREXIO_AGENT_INSTALL=skip|recommend|auto`; the default is `recommend`. Only `auto` attempts to run `npx -y -p @direxio/agent-plugins@latest direxio-agent-install --node-id <agent_node_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --write`. Gateway mode restarts only the matching node gateway.
 - The gateway has native `mcp.messages.send` support through `/_p2p/command`; it does not require `@direxio/local-mcp` for room replies.
+- OpenClaw deployments also get a node-scoped `~/.direxio/nodes/<service_id>/openclaw-gateway/start_gateway.sh` helper so passive App-agent replies use `openclaw agent` through a handler instead of a missing packaged OpenClaw plugin.
 - Hermes deployments also get a node-scoped `~/.direxio/nodes/<service_id>/hermes-gateway/start_gateway.sh` helper so passive App-agent replies use `hermes -z` through a handler instead of a bare `node` process.
 
 ## Minimal Command
@@ -84,7 +85,7 @@ Agents should read `SKILL.md` first. Use this skill when the user asks to deploy
 
 After deployment, S6 detects the current runtime, such as Codex, Claude Code, Gemini, Cursor, GitHub Copilot, OpenClaw, or Hermes. After S7 passes, the executing agent must ask before automatically installing/configuring Direxio plugin and MCP access for the detected runtime. Non-interactive deployment can opt in with `DIREXIO_AGENT_INSTALL=auto`.
 
-OpenClaw and Hermes should prefer native long-process integration. For Hermes passive App-agent replies, run the generated `hermes-gateway/start_gateway.sh` after `hermes -z "Reply with only: ok"` succeeds. Claude Code, Cursor, Gemini, and GitHub Copilot use MCP-only unless the user provides a local command for an external gateway. S6 records `agent_skill_install_path`, `agent_global_skill_install_path`, `agent_mcp_config_path`, and `agent_install_target_summary`; agents must follow those fields and `references/agent-targets.md` instead of defaulting to Codex paths.
+OpenClaw and Hermes should prefer native long-process integration. For OpenClaw passive App-agent replies, run the generated `openclaw-gateway/start_gateway.sh` after `openclaw agent --message "Reply with only: ok"` succeeds. For Hermes passive App-agent replies, run the generated `hermes-gateway/start_gateway.sh` after `hermes -z "Reply with only: ok"` succeeds. Claude Code, Cursor, Gemini, and GitHub Copilot use MCP-only unless the user provides a local command for an external gateway. S6 records `agent_skill_install_path`, `agent_global_skill_install_path`, `agent_mcp_config_path`, and `agent_install_target_summary`; agents must follow those fields and `references/agent-targets.md` instead of defaulting to Codex paths.
 
 Gateway native send test:
 

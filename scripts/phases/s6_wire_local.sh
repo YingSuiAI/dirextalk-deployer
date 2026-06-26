@@ -337,9 +337,11 @@ _print_runtime_install_summary() {
     openclaw:native)
       cat >&2 <<EOF
 Recommended OpenClaw install:
-  openclaw plugins install ./platforms/openclaw
+  use the generated OpenClaw passive gateway helper after OpenClaw can answer:
+    openclaw agent --message "Reply with only: ok"
   mount $mcp_path or platforms/openclaw/mcp.json in OpenClaw's MCP registry
-Native passive listening should use /_p2p/events and /_p2p/command action mcp.messages.send.
+Native passive listening uses direxio-agent-gateway plus an OpenClaw handler that calls:
+  openclaw agent --agent main --session-key agent:main:main --message <incoming prompt>
 EOF
       ;;
     hermes:native)
@@ -613,6 +615,196 @@ EOF
   printf '%s\n' "$start"
 }
 
+_write_openclaw_gateway_files() {
+  local service_dir=$1 envfile=$2 node_id=$3 workspace=$4
+  local gateway_dir handler start state_file handler_args envfile_q state_file_q workspace_q
+  gateway_dir="$service_dir/openclaw-gateway"
+  handler="$gateway_dir/p2p_handler.cjs"
+  start="$gateway_dir/start_gateway.sh"
+  state_file="$gateway_dir/state.json"
+  mkdir -p "$gateway_dir"
+
+  cat > "$handler" <<'EOF'
+#!/usr/bin/env node
+const { spawn } = require("node:child_process");
+
+const chunks = [];
+
+process.stdin.on("data", (chunk) => {
+  chunks.push(chunk);
+});
+
+process.stdin.on("end", () => {
+  const prompt = Buffer.concat(chunks).toString("utf8").trim();
+  if (!prompt) {
+    return;
+  }
+
+  const openclawCommand = process.env.OPENCLAW_COMMAND || "openclaw";
+  const agentId = process.env.OPENCLAW_AGENT_ID || "main";
+  const sessionKey = process.env.OPENCLAW_SESSION_KEY || `agent:${agentId}:main`;
+  const timeoutSeconds = process.env.OPENCLAW_AGENT_TIMEOUT || "600";
+  const args = [
+    "agent",
+    "--agent",
+    agentId,
+    "--session-key",
+    sessionKey,
+    "--message",
+    prompt,
+    "--timeout",
+    timeoutSeconds
+  ];
+
+  if (process.env.OPENCLAW_AGENT_MODEL) {
+    args.push("--model", process.env.OPENCLAW_AGENT_MODEL);
+  }
+
+  let settled = false;
+  const child = spawn(openclawCommand, args, {
+    cwd: process.env.DIREXIO_AGENT_WORKSPACE || process.cwd(),
+    stdio: ["ignore", "pipe", "pipe"],
+    env: process.env,
+    windowsHide: true
+  });
+
+  let stdout = "";
+  let stderr = "";
+
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+
+  child.on("error", (error) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    process.stdout.write(
+      `Direxio gateway is connected, but OpenClaw could not be started: ${error.message}\n`
+    );
+  });
+
+  child.on("exit", (code) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+
+    const reply = stdout.trim();
+    if (code === 0 && reply) {
+      process.stdout.write(reply);
+      if (!reply.endsWith("\n")) {
+        process.stdout.write("\n");
+      }
+      return;
+    }
+
+    const detail = (stderr.trim() || stdout.trim() || `openclaw exited with code ${code}`).replace(/\s+/g, " ").trim();
+    const authOrModel = /No API key found|missing auth|Unknown model|model_not_found|provider has no API key/i.test(detail);
+    if (authOrModel) {
+      process.stdout.write(
+        "Direxio gateway is connected, but OpenClaw cannot answer yet because its current model/auth configuration is not usable. Run `openclaw models status`, configure a working provider/model, then restart this gateway.\n"
+      );
+      return;
+    }
+
+    process.stdout.write(`OpenClaw failed while generating a reply: ${detail}\n`);
+  });
+});
+EOF
+  chmod 700 "$handler"
+
+  handler_args=$(jq -cn --arg handler "$handler" '[$handler]')
+  envfile_q=$(_shell_quote "$envfile")
+  state_file_q=$(_shell_quote "$state_file")
+  workspace_q=$(_shell_quote "$workspace")
+
+  cat > "$start" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+_load_env_file() {
+  local file=\${1:-} line key value
+  [ -n "\$file" ] && [ -f "\$file" ] || return 0
+  while IFS= read -r line || [ -n "\$line" ]; do
+    case "\$line" in
+      ''|'#'*) continue ;;
+    esac
+    case "\$line" in
+      export\\ *) line=\${line#export } ;;
+    esac
+    case "\$line" in
+      *=*) ;;
+      *) continue ;;
+    esac
+    key=\${line%%=*}
+    value=\${line#*=}
+    key=\$(printf '%s' "\$key" | sed -E 's/^[[:space:]]+|[[:space:]]+\$//g')
+    value=\$(printf '%s' "\$value" | sed -E 's/^[[:space:]]+|[[:space:]]+\$//g')
+    case "\$key" in
+      ''|*[!A-Za-z0-9_]*) continue ;;
+    esac
+    case "\$key" in
+      [0-9]*) continue ;;
+    esac
+    case "\$value" in
+      \\"*\\") value=\${value#\\"}; value=\${value%\\"} ;;
+      \\'*\\') value=\${value#\\'}; value=\${value%\\'} ;;
+    esac
+    export "\$key=\$value"
+  done < "\$file"
+}
+
+_prepend_existing_path() {
+  local dir=\${1:-}
+  [ -n "\$dir" ] && [ -d "\$dir" ] || return 0
+  PATH="\$dir:\$PATH"
+}
+
+_load_env_file "\${OPENCLAW_ENV_FILE:-}"
+_load_env_file "\$HOME/.openclaw/.env"
+_load_env_file "\$HOME/.config/openclaw/.env"
+_load_env_file $envfile_q
+
+_prepend_existing_path "\$HOME/.openclaw/bin"
+for _openclaw_node_bin in "\$HOME"/.openclaw/tools/node-*/bin; do
+  _prepend_existing_path "\$_openclaw_node_bin"
+done
+_prepend_existing_path "/opt/openclaw/bin"
+export PATH
+
+export DIREXIO_AGENT_PLATFORM=openclaw
+export DIREXIO_GATEWAY_ADAPTER=generic-cli
+export DIREXIO_GATEWAY_COMMAND=node
+export DIREXIO_GATEWAY_ARGS='$handler_args'
+if [ -z "\${DIREXIO_GATEWAY_STATE_FILE:-}" ]; then
+  export DIREXIO_GATEWAY_STATE_FILE=$state_file_q
+fi
+if [ -z "\${DIREXIO_AGENT_WORKSPACE:-}" ]; then
+  export DIREXIO_AGENT_WORKSPACE=$workspace_q
+fi
+export OPENCLAW_AGENT_ID="\${OPENCLAW_AGENT_ID:-main}"
+export OPENCLAW_SESSION_KEY="\${OPENCLAW_SESSION_KEY:-agent:\${OPENCLAW_AGENT_ID}:main}"
+export OPENCLAW_AGENT_TIMEOUT="\${OPENCLAW_AGENT_TIMEOUT:-600}"
+
+if ! command -v openclaw >/dev/null 2>&1; then
+  echo "warning: openclaw is not on PATH; App agent replies will fail until OpenClaw CLI is available." >&2
+fi
+
+exec npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway start
+EOF
+  chmod 700 "$start"
+  printf '%s\n' "$start"
+}
+
 _agent_node_id() {
   local runtime=$1 domain=$2 room=$3 explicit host digest raw
   explicit=${DIREXIO_AGENT_NODE_ID:-}
@@ -708,13 +900,27 @@ Do not set DIREXIO_GATEWAY_COMMAND=node by itself. The handler above is required
 because it converts incoming room prompts into Hermes CLI calls.
 EOF
   fi
+  if [ "$runtime:$mode" = "openclaw:native" ]; then
+    service_dir=$(dirname "$envfile")
+    cat >&2 <<EOF
+
+OpenClaw passive App-agent gateway helper:
+  handler:      $service_dir/openclaw-gateway/p2p_handler.cjs
+  start script: $service_dir/openclaw-gateway/start_gateway.sh
+  model check:  openclaw agent --message "Reply with only: ok"
+  start:        bash "$service_dir/openclaw-gateway/start_gateway.sh"
+
+The helper keeps Direxio passive listening outside MCP, then routes incoming
+room prompts through OpenClaw's native agent CLI.
+EOF
+  fi
   _print_runtime_install_summary "$runtime" "$mode" "$mcp_config_path"
 }
 
 run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and Direxio MCP/plugin env"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
-  local node_id service_dir node_cred workspace service_id hermes_gateway_start
+  local node_id service_dir node_cred workspace service_id hermes_gateway_start openclaw_gateway_start
   local skill_path global_skill_path mcp_config_path install_target_summary
   domain=$(state_get domain)
   asurl=$(state_get as_url)
@@ -758,6 +964,13 @@ run_phase() {
     state_set hermes_gateway_dir "$service_dir/hermes-gateway" 2>/dev/null || true
     state_set hermes_gateway_handler "$service_dir/hermes-gateway/p2p_handler.cjs" 2>/dev/null || true
     state_set hermes_gateway_start_script "$hermes_gateway_start" 2>/dev/null || true
+  fi
+  if [ "$runtime" = "openclaw" ]; then
+    openclaw_gateway_start=$(_write_openclaw_gateway_files "$service_dir" "$envfile" "$node_id" "$workspace")
+    ok "Wrote OpenClaw gateway helper files under $service_dir/openclaw-gateway."
+    state_set openclaw_gateway_dir "$service_dir/openclaw-gateway" 2>/dev/null || true
+    state_set openclaw_gateway_handler "$service_dir/openclaw-gateway/p2p_handler.cjs" 2>/dev/null || true
+    state_set openclaw_gateway_start_script "$openclaw_gateway_start" 2>/dev/null || true
   fi
 
   # 3) Installation is runtime-specific and may mutate agent config, so the skill

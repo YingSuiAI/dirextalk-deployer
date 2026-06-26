@@ -30,7 +30,7 @@ S6 writes service-specific credentials to `~/.direxio/nodes/<service_id>/credent
 | Gemini | `mcp` | `$HOME/.gemini/direxio/nodes/<agent_node_id>/settings.json` | Merge `platforms/gemini/settings.json` into Gemini settings. |
 | Cursor | `mcp` | `${XDG_CONFIG_HOME:-$HOME/.config}/direxio-agent/nodes/<agent_node_id>/cursor.mcp.json` | Copy or merge into `PROJECT_ROOT/.cursor/mcp.json`. |
 | GitHub Copilot | `mcp` | `${XDG_CONFIG_HOME:-$HOME/.config}/direxio-agent/nodes/<agent_node_id>/copilot.mcp.json` | Use read-only MCP by default at `PROJECT_ROOT/.github/copilot/mcp.json`; use full-chat only with repository owner approval. |
-| OpenClaw | `native` | `$HOME/.openclaw/direxio/nodes/<agent_node_id>/mcp.json` | Run `openclaw plugins install ./platforms/openclaw`; mount MCP payload in OpenClaw's MCP registry. |
+| OpenClaw | `native` | `$HOME/.openclaw/direxio/nodes/<agent_node_id>/mcp.json` | Use the generated `~/.direxio/nodes/<service_id>/openclaw-gateway/start_gateway.sh` helper for passive replies; mount MCP payload in OpenClaw's MCP registry for active tools. |
 | Hermes | `native` | `$HOME/.hermes/direxio/nodes/<agent_node_id>/mcp.json` | Merge into `~/.hermes/config.yaml` and use a Hermes-native long process for passive listening. |
 | Generic or unknown | `mcp` | `${XDG_CONFIG_HOME:-$HOME/.config}/direxio-agent/nodes/<agent_node_id>/mcp.json` | Mount MCP manually; use `DIREXIO_GATEWAY_COMMAND` only when an agent CLI reads stdin and writes stdout. |
 

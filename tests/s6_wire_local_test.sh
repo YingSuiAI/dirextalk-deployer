@@ -176,6 +176,25 @@ if command -v node >/dev/null 2>&1; then
   node --check "$tmp/service/hermes-gateway/p2p_handler.cjs" >/dev/null
 fi
 
+openclaw_start=$(_write_openclaw_gateway_files "$tmp/service" "$envfile" "openclaw-test-node" "$tmp/workspace")
+[ "$openclaw_start" = "$tmp/service/openclaw-gateway/start_gateway.sh" ]
+[ -x "$tmp/service/openclaw-gateway/start_gateway.sh" ]
+[ -x "$tmp/service/openclaw-gateway/p2p_handler.cjs" ]
+bash -n "$tmp/service/openclaw-gateway/start_gateway.sh"
+grep -Fq 'DIREXIO_AGENT_PLATFORM=openclaw' "$tmp/service/openclaw-gateway/start_gateway.sh"
+grep -Fq 'DIREXIO_GATEWAY_COMMAND=node' "$tmp/service/openclaw-gateway/start_gateway.sh"
+grep -Fq 'DIREXIO_GATEWAY_ARGS=' "$tmp/service/openclaw-gateway/start_gateway.sh"
+grep -Fq 'openclaw-gateway/p2p_handler.cjs' "$tmp/service/openclaw-gateway/start_gateway.sh"
+grep -Fq 'OPENCLAW_SESSION_KEY="${OPENCLAW_SESSION_KEY:-agent:${OPENCLAW_AGENT_ID}:main}"' "$tmp/service/openclaw-gateway/start_gateway.sh"
+grep -Fq 'const openclawCommand = process.env.OPENCLAW_COMMAND || "openclaw";' "$tmp/service/openclaw-gateway/p2p_handler.cjs"
+grep -Fq '"agent",' "$tmp/service/openclaw-gateway/p2p_handler.cjs"
+grep -Fq '"--message",' "$tmp/service/openclaw-gateway/p2p_handler.cjs"
+grep -Fq 'spawn(openclawCommand, args' "$tmp/service/openclaw-gateway/p2p_handler.cjs"
+grep -Fq 'Unknown model' "$tmp/service/openclaw-gateway/p2p_handler.cjs"
+if command -v node >/dev/null 2>&1; then
+  node --check "$tmp/service/openclaw-gateway/p2p_handler.cjs" >/dev/null
+fi
+
 stale_node_id=$(DIREXIO_AGENT_NODE_ID=codex-old.example.test _agent_node_id codex new.example.test '!agent:new.example.test')
 [[ "$stale_node_id" == codex-new.example.test-* ]]
 
@@ -195,5 +214,12 @@ if [[ "$guidance" == *"$bad_mcp_env_name"* ]]; then
   echo "MCP guidance must not use $bad_mcp_env_name; @direxio/local-mcp expects direct DIREXIO_* env" >&2
   exit 1
 fi
+
+openclaw_guidance=$(
+  _print_mcp_plugin_guidance openclaw https://im.example.test "$HOME/.direxio/nodes/im.example.test/credentials.json" "$HOME/.direxio/nodes/im.example.test/env" recommend native "install command" openclaw-im 2>&1 >/dev/null
+)
+[[ "$openclaw_guidance" == *"OpenClaw passive App-agent gateway helper"* ]]
+[[ "$openclaw_guidance" == *"openclaw-gateway/start_gateway.sh"* ]]
+[[ "$openclaw_guidance" == *"openclaw agent --message"* ]]
 
 echo "s6 wire local ok"

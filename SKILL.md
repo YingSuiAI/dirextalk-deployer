@@ -258,6 +258,7 @@ DIREXIO_AGENT_NODE_ID=<agent_node_id>
 
 The current integration targets are `@direxio/local-mcp` for stdio MCP and `@direxio/agent-plugins` for runtime-specific plugins and gateway binaries.
 The gateway in `direxio-agent-plugins` has native send support: it calls `/_p2p/command` action `mcp.messages.send` directly and does not require MCP to send room replies.
+For OpenClaw, S6 also writes a node-scoped passive App-agent gateway helper under `~/.direxio/nodes/<service_id>/openclaw-gateway/`. Use its `start_gateway.sh`; it routes incoming prompts through `openclaw agent` because the published `@direxio/agent-plugins` OpenClaw platform payload may only contain MCP templates.
 For Hermes, S6 also writes a node-scoped passive App-agent gateway helper under `~/.direxio/nodes/<service_id>/hermes-gateway/`. Use its `start_gateway.sh`; do not point `DIREXIO_GATEWAY_COMMAND` at bare `node`, because incoming prompts would be interpreted as JavaScript instead of being passed to Hermes.
 
 Post-deploy agent wiring is controlled by:
@@ -327,6 +328,7 @@ IP-derived, localhost, wildcard, or disposable domains.
 4. Present one complete deployment configuration and request one consolidated confirmation covering the final domain and irreversible binding, DNS mode, AWS region and billing, credentials source, instance type, message-server image, required installs, and existing-state action.
 5. Apply the approved existing-state action for `${P2P_WORKDIR:-$HOME/.direxio/deploy}/state.json`: continue, destroy, or use a new workdir.
 6. Run `scripts/orchestrate.sh` with the confirmed environment. Let the state machine own AWS calls, state, polling, cloud-init, token/password handling, verification, and destroy behavior.
+   **OpenClaw passive agent pitfall:** OpenClaw needs both a running Gateway and a working model provider. Before expecting App Agent replies, run `openclaw agent --message "Reply with only: ok"` locally. If OpenClaw reports a missing API key or unknown model, fix it with `openclaw models status` / `openclaw configure`, then start `~/.direxio/nodes/<service_id>/openclaw-gateway/start_gateway.sh`.
    **Hermes passive agent pitfall:** Hermes needs both a working model provider and the generated gateway handler. Before expecting App Agent replies, run `hermes -z "Reply with only: ok"` locally. If Hermes reports a missing model API key, configure the provider through `hermes model` or the Hermes environment file, then start `~/.direxio/nodes/<service_id>/hermes-gateway/start_gateway.sh`.
    **Runtime detection note:** S6 checks active-process signals before stale
    config directories, so current-session markers such as Codex `.codex/tmp`
@@ -431,6 +433,7 @@ mcp config    : <agent_mcp_config_path>
 skill clone   : <agent_skill_install_path>
 target summary: <agent_install_target_summary>
 gateway send  : npx -y -p @direxio/agent-plugins@latest direxio-agent-gateway send --room "$DIREXIO_AGENT_ROOM_ID" --message "hello"
+OpenClaw gateway: ~/.direxio/nodes/<service_id>/openclaw-gateway/start_gateway.sh (OpenClaw only; auto-started by S7 when agent_runtime=openclaw)
 Hermes gateway: ~/.direxio/nodes/<service_id>/hermes-gateway/start_gateway.sh (Hermes only; auto-started by S7 when agent_runtime=hermes)
 AWS region   : <region>
 EC2          : <instance-id> (<public-ip>)
@@ -455,7 +458,7 @@ args: ["-y", "-p", "@direxio/local-mcp@latest", "direxio-mcp"]
 env: DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID, DIREXIO_AGENT_NODE_ID
 ```
 
-Do not configure `@direxio/local-mcp` through credential-file indirection unless the package version being installed documents that support. Current published local MCP wiring reads the direct `DIREXIO_*` environment. For OpenClaw and Hermes, prefer native long-process integration. For Hermes passive App-agent replies, use the generated `hermes-gateway/start_gateway.sh` so prompts are routed through `p2p_handler.cjs` into `hermes -z`. For Claude Code, Cursor, Gemini, and Copilot, use MCP-only unless the user supplies a local command for an external `generic-cli` gateway. For Windows-native Codex, launch gateway from Windows PowerShell and use `%USERPROFILE%`, `$env:CODEX_HOME`, `$env:XDG_CONFIG_HOME`, and a discovered `DIREXIO_CODEX_COMMAND`; never publish or template a machine-specific user path.
+Do not configure `@direxio/local-mcp` through credential-file indirection unless the package version being installed documents that support. Current published local MCP wiring reads the direct `DIREXIO_*` environment. For OpenClaw and Hermes, prefer native long-process integration. For OpenClaw passive App-agent replies, use the generated `openclaw-gateway/start_gateway.sh` so prompts are routed through `p2p_handler.cjs` into `openclaw agent`. For Hermes passive App-agent replies, use the generated `hermes-gateway/start_gateway.sh` so prompts are routed through `p2p_handler.cjs` into `hermes -z`. For Claude Code, Cursor, Gemini, and Copilot, use MCP-only unless the user supplies a local command for an external `generic-cli` gateway. For Windows-native Codex, launch gateway from Windows PowerShell and use `%USERPROFILE%`, `$env:CODEX_HOME`, `$env:XDG_CONFIG_HOME`, and a discovered `DIREXIO_CODEX_COMMAND`; never publish or template a machine-specific user path.
 
 ## References
 

@@ -1,11 +1,13 @@
 # Tooling By OS
 
-Prepare `bash`, `aws`, `jq`, `ssh`, `scp`, and `curl`. Always inspect first, then ask before installing or downloading.
+Prepare `bash`, `aws`, `jq`, `ssh`, `scp`, `curl`, and at least one DNS lookup
+tool. Always inspect first, then ask before installing or downloading.
 
 ## Detect
 
 ```bash
 command -v bash aws jq ssh scp curl
+command -v dig nslookup getent
 aws --version
 jq --version
 ```
@@ -13,12 +15,15 @@ jq --version
 On Windows PowerShell:
 
 ```powershell
-Get-Command "C:\Program Files\Git\bin\bash.exe","C:\Program Files\Git\usr\bin\bash.exe",aws,jq,ssh,scp,curl -ErrorAction SilentlyContinue
+Get-Command "C:\Program Files\Git\bin\bash.exe","C:\Program Files\Git\usr\bin\bash.exe",aws,jq,ssh,scp,curl,nslookup,Resolve-DnsName -ErrorAction SilentlyContinue
 ```
 
 ## Windows
 
 Preferred shell: Git Bash, MSYS2, Cygwin, or a working WSL distro. Do not use `C:\Windows\System32\bash.exe` unless `bash -lc 'echo ok'` succeeds.
+
+Standard Git Bash usually does not include `dig`. Use Windows `Resolve-DnsName`
+or `nslookup` for DNS checks instead of blocking deployment on `dig`.
 
 Common system installs:
 
@@ -59,18 +64,19 @@ Preferred installs:
 brew install awscli jq
 ```
 
-If Homebrew is unavailable, ask before using the official AWS CLI pkg installer. macOS already includes `ssh`, `scp`, and `curl`.
+If Homebrew is unavailable, ask before using the official AWS CLI pkg installer.
+macOS already includes `ssh`, `scp`, `curl`, and `dig`.
 
 ## Linux
 
 Choose the detected package manager:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y awscli jq openssh-client curl
-sudo dnf install -y awscli jq openssh-clients curl
-sudo yum install -y awscli jq openssh-clients curl
-sudo pacman -Sy --needed aws-cli jq openssh curl
-sudo zypper install -y aws-cli jq openssh-clients curl
+sudo apt-get update && sudo apt-get install -y awscli jq openssh-client curl dnsutils
+sudo dnf install -y awscli jq openssh-clients curl bind-utils
+sudo yum install -y awscli jq openssh-clients curl bind-utils
+sudo pacman -Sy --needed aws-cli jq openssh curl bind-tools
+sudo zypper install -y aws-cli jq openssh-clients curl bind-utils
 ```
 
 If distro packages are too old or missing, ask before using the official AWS CLI zip installer.

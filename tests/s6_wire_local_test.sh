@@ -39,7 +39,11 @@ envfile=$(_write_agent_env_file "https://im.example.test" "agent-token" "access-
 [ "$envfile" = "$HOME/.direxio/env" ]
 grep -q 'DIREXIO_DOMAIN=https://im.example.test' "$envfile"
 grep -q 'DIREXIO_AGENT_TOKEN=agent-token' "$envfile"
-grep -q 'DIREXIO_AGENT_ROOM_ID=\\!agent:im.example.test' "$envfile"
+grep -q 'DIREXIO_AGENT_ROOM_ID=!agent:im.example.test' "$envfile"
+unset DIREXIO_AGENT_ROOM_ID
+# shellcheck disable=SC1090
+source "$envfile"
+[ "$DIREXIO_AGENT_ROOM_ID" = "!agent:im.example.test" ]
 ! grep -q '^export P2P_' "$envfile"
 ! grep -q 'P2P_ADMIN_ACCESS_TOKEN' "$envfile"
 ! grep -q 'P2P_MATRIX_ACCESS_TOKEN' "$envfile"

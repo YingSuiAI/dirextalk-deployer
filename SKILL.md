@@ -293,8 +293,16 @@ IP-derived, localhost, wildcard, or disposable domains.
 ## Deployment Flow
 
 1. Complete the Cloud Account And Domain Onboarding gate above for first-time users or whenever AWS credentials, domain ownership, or DNS authority are unclear.
-2. Read `references/tooling.md`; inspect the user OS and install or prepare missing `bash`, `aws`, `jq`, `ssh`, `scp`, and `curl` only after approval.
+2. Read `references/tooling.md`; inspect the user OS and install or prepare missing `bash`, `aws`, `jq`, `ssh`, `scp`, `curl`, and DNS lookup capability only after approval.
 3. Inspect DNS, AWS credentials, region defaults, local tooling, and existing deployment state before asking the user anything that can be discovered automatically.
+   **DNS tool preflight:** Before any DNS propagation or Route53 delegation
+   check, confirm the environment has at least one working DNS lookup path:
+   `dig`, `nslookup`, Windows PowerShell `Resolve-DnsName`, or `getent`.
+   Prefer an existing tool. If no DNS lookup tool is available, ask before
+   installing the OS package from `references/tooling.md` (`dnsutils`,
+   `bind-utils`, or `bind-tools`), or use the platform fallback. Do not treat
+   "dig is missing" as DNS failure; fix the missing tool or use a fallback,
+   then rerun the same deployment step.
    **Multi-domain state check:** Before finalising the domain, scan for existing
    nodes across all domains to avoid deploying the same domain twice or
    colliding with an active node:

@@ -470,8 +470,12 @@ _write_hermes_gateway_files() {
   state_file="$gateway_dir/state.json"
   mkdir -p "$gateway_dir"
 
-  cat > "$handler" <<'EOF'
+  cat > "$handler" <<'P2P_EOF'
 #!/usr/bin/env node
+// p2p_handler.cjs -- Direxio P2P room message handler for Hermes
+// Extracts user message body from SSE event JSON, pipes to Hermes.
+// System events and non-message payloads are silently dropped.
+
 const { spawn } = require("node:child_process");
 
 const chunks = [];
@@ -481,16 +485,20 @@ process.stdin.on("data", (chunk) => {
 });
 
 process.stdin.on("end", () => {
-  const prompt = Buffer.concat(chunks).toString("utf8").trim();
-  if (!prompt) {
-    return;
-  }
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+  if (!raw) return;
+
+  let event;
+  try { event = JSON.parse(raw); } catch { return; }
+
+  const body = event.body || event.msg || event.text || "";
+  if (!body.trim()) return;
 
   let settled = false;
-  const child = spawn("hermes", ["chat", "-c", "-q", prompt], {
+  const child = spawn("hermes", ["chat", "-c", "-q", body], {
     stdio: ["ignore", "pipe", "pipe"],
     env: process.env,
-    windowsHide: true
+    windowsHide: true,
   });
 
   let stdout = "";
@@ -499,52 +507,37 @@ process.stdin.on("end", () => {
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
 
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-  });
-
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
+  child.stdout.on("data", (c) => { stdout += c; });
+  child.stderr.on("data", (c) => { stderr += c; });
 
   child.on("error", (error) => {
-    if (settled) {
-      return;
-    }
+    if (settled) return;
     settled = true;
-    process.stdout.write(
-      `Direxio gateway is connected, but Hermes could not be started: ${error.message}\n`
-    );
+    console.error("[p2p_handler] spawn error:", error.message);
   });
 
   child.on("exit", (code) => {
-    if (settled) {
-      return;
-    }
+    if (settled) return;
     settled = true;
 
     const reply = stdout.trim();
     if (code === 0 && reply) {
       process.stdout.write(reply);
-      if (!reply.endsWith("\n")) {
-        process.stdout.write("\n");
-      }
+      if (!reply.endsWith("\n")) process.stdout.write("\n");
       return;
     }
 
-    const detail = stderr.trim() || `hermes exited with code ${code}`;
+    const detail = stderr.trim() || `exit code ${code}`;
     const missingModelKey = /no API key was found|Set the [A-Z0-9_]+_API_KEY environment variable|Provider .* no API key/i.test(detail);
     if (missingModelKey) {
-      process.stdout.write(
-        "Direxio gateway is connected, but Hermes cannot answer yet because its current model provider has no API key. Run `hermes model` to choose a working provider/model, or set the provider API key in the Hermes environment file before starting this gateway.\n"
-      );
+      console.error("[p2p_handler] model provider has no API key");
       return;
     }
 
-    process.stdout.write(`Hermes failed while generating a reply: ${detail}\n`);
+    console.error("[p2p_handler] hermes failed:", detail);
   });
 });
-EOF
+P2P_EOF
   chmod 700 "$handler"
 
   handler_args=$(jq -cn --arg handler "$handler" '[$handler]')

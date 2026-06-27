@@ -206,6 +206,9 @@ grep -q 'type = "matrix"' "$config_path"
 grep -q 'type = "codex"' "$config_path"
 grep -q 'admin_from = "@owner:im.example.test"' "$config_path"
 awk '/^\[projects.agent.options\]/{in_options=1} /^admin_from = / && in_options{exit 1}' "$config_path"
+grep -q 'backend = "app_server"' "$config_path"
+grep -q 'app_server_url = "stdio"' "$config_path"
+grep -q 'mode = "yolo"' "$config_path"
 grep -q 'room_id = "!agents-real:im.example.test"' "$config_path"
 grep -q 'user_id = "@agent:im.example.test"' "$config_path"
 grep -q 'share_session_in_channel = true' "$config_path"
@@ -255,6 +258,15 @@ options_config_path="$tmp/cc-connect/config-with-extra-options.toml"
 _write_cc_connect_config "$options_config_path" "$tmp/cc-connect/data-options" "reasonix-node" "reasonix" "$tmp/workspace" "https://im.example.test" "matrix-token" "@agent:im.example.test" "!agents-real:im.example.test" "@owner:im.example.test" "" 'serve_url = "http://127.0.0.1:8080"'
 grep -q 'type = "reasonix"' "$options_config_path"
 grep -q 'serve_url = "http://127.0.0.1:8080"' "$options_config_path"
+! grep -q 'backend = "app_server"' "$options_config_path"
+
+codex_options_config_path="$tmp/cc-connect/config-with-codex-extra-options.toml"
+_write_cc_connect_config "$codex_options_config_path" "$tmp/cc-connect/data-codex-options" "codex-node" "codex" "$tmp/workspace" "https://im.example.test" "matrix-token" "@agent:im.example.test" "!agents-real:im.example.test" "@owner:im.example.test" "" $'mode = "full-auto"\nmodel = "gpt-5.5"'
+grep -q 'backend = "app_server"' "$codex_options_config_path"
+grep -q 'app_server_url = "stdio"' "$codex_options_config_path"
+grep -q 'mode = "full-auto"' "$codex_options_config_path"
+[ "$(grep -c '^[[:space:]]*mode[[:space:]]*=' "$codex_options_config_path")" = "1" ]
+grep -q 'model = "gpt-5.5"' "$codex_options_config_path"
 
 fakebin="$tmp/fakebin"
 mkdir -p "$fakebin"

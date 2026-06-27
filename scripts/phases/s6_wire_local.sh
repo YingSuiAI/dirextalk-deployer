@@ -513,6 +513,22 @@ _cc_connect_agent_options_toml() {
   printf '%s\n' "${DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML:-}"
 }
 
+_toml_has_key() {
+  local toml=$1 key=$2
+  printf '%s\n' "$toml" | grep -Eq "^[[:space:]]*${key}[[:space:]]*="
+}
+
+_cc_connect_default_agent_options_toml() {
+  local agent=$1 custom_toml=${2:-}
+  case "$agent" in
+    codex)
+      _toml_has_key "$custom_toml" backend || printf 'backend = "app_server"\n'
+      _toml_has_key "$custom_toml" app_server_url || printf 'app_server_url = "stdio"\n'
+      _toml_has_key "$custom_toml" mode || printf 'mode = "yolo"\n'
+      ;;
+  esac
+}
+
 _toml_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
@@ -747,7 +763,7 @@ _create_cc_connect_matrix_session() {
 
 _write_cc_connect_config() {
   local config_path=$1 data_dir=$2 project=$3 agent=$4 workspace=$5 homeserver=$6 matrix_token=$7 matrix_user=$8 room_id=$9 admin_from=${10:-} agent_cmd=${11:-} agent_options_toml=${12:-}
-  local q_data q_project q_agent q_workspace q_homeserver q_token q_user q_room q_admin_from q_agent_cmd speech_toml
+  local q_data q_project q_agent q_workspace q_homeserver q_token q_user q_room q_admin_from q_agent_cmd speech_toml default_agent_options_toml
   mkdir -p "$(dirname "$config_path")" "$data_dir"
   q_data=$(_toml_escape "$data_dir")
   q_project=$(_toml_escape "$project")
@@ -760,6 +776,7 @@ _write_cc_connect_config() {
   q_admin_from=$(_toml_escape "$admin_from")
   q_agent_cmd=$(_toml_escape "$agent_cmd")
   speech_toml=$(_cc_connect_speech_config_toml)
+  default_agent_options_toml=$(_cc_connect_default_agent_options_toml "$agent" "$agent_options_toml")
   umask 077
   cat > "$config_path" <<EOF
 language = "zh"
@@ -784,6 +801,9 @@ EOF
     cat >> "$config_path" <<EOF
 cmd = "$q_agent_cmd"
 EOF
+  fi
+  if [ -n "$default_agent_options_toml" ]; then
+    printf '%s\n' "$default_agent_options_toml" >> "$config_path"
   fi
   if [ -n "$agent_options_toml" ]; then
     printf '%s\n' "$agent_options_toml" >> "$config_path"

@@ -243,7 +243,7 @@ If a project target exists, install or update this skill as a Git clone at the r
 
 ## Agent Recognition
 
-Use this skill when the user asks to deploy, resume, verify, destroy, repair, or wire a P2P-IM Matrix server. The instructions are runtime-neutral and can be followed by any agent that can run shell commands and read files. The local bridge target must be one of the connent/connect agents unless the user explicitly supplies compatible custom TOML.
+Use this skill when the user asks to deploy, resume, verify, destroy, repair, or wire a P2P-IM Matrix server. The instructions are runtime-neutral and can be followed by any agent that can run shell commands and read files. The local bridge target must be one of the connent/connect agents unless the user explicitly supplies compatible custom TOML. OpenClaw and Hermes are host runtimes that S6 wires through the generic connent/connect `acp` agent.
 
 For local agent integration after deployment, S6 writes service-specific credentials and environment files under `~/.direxio/nodes/<service_id>/`, where `service_id` is derived from the deployed domain. It also writes MCP client snippets under `~/.direxio/nodes/<service_id>/mcp/` for MCP-capable hosts such as Codex, OpenClaw, and Hermes. It does not write root-level compatibility credentials, shell profiles, Windows user environment variables, or mutate each host's global MCP config.
 
@@ -259,6 +259,7 @@ Post-deploy agent wiring is controlled by:
 ```bash
 DIREXIO_AGENT_PLATFORM=auto
 DIREXIO_CC_CONNECT_AGENT=<optional connect agent>
+DIREXIO_OPENCLAW_ACP_URL=<optional OpenClaw gateway URL>
 DIREXIO_AGENT_INSTALL=recommend
 DIREXIO_AGENT_INSTALL_MODE=recommended
 ```
@@ -267,7 +268,7 @@ The only supported local conversation bridge is `direxio-connect`, installed fro
 
 The local MCP tool surface is `direxio-mcp`, installed from `@direxio/local-mcp@0.1.2` by default. S6 writes `mcp/codex.toml`, `mcp/openclaw.mcp.json`, `mcp/hermes.mcp.json`, `mcp/mcp-servers.json`, and `mcp/env`; these snippets point to `credentials.json` by `DIREXIO_CREDENTIALS_FILE`. Keep this separate from cc-connect: cc-connect must use its direct Matrix config and must not use `DIREXIO_CREDENTIALS_FILE`.
 
-`DIREXIO_CC_CONNECT_AGENT` is the preferred explicit selector. Supported values match connent/connect: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`. Use `DIREXIO_CC_CONNECT_AGENT_CMD`, `DIREXIO_<AGENT>_COMMAND`, and when needed `DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML` for agent-specific launch details.
+`DIREXIO_CC_CONNECT_AGENT` is the preferred explicit selector. Supported values match connent/connect: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`. Detected OpenClaw and Hermes runtimes map to `cc_connect_agent=acp` with `cmd = "openclaw"` or `cmd = "hermes"` and default `args = ["acp"]`; they are not native connect agent types. Use `DIREXIO_CC_CONNECT_AGENT_CMD`, `DIREXIO_<AGENT>_COMMAND`, and when needed `DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML` for agent-specific launch details. OpenClaw and Hermes also accept `DIREXIO_OPENCLAW_COMMAND`, `DIREXIO_HERMES_COMMAND`, `DIREXIO_OPENCLAW_ACP_URL`, `DIREXIO_OPENCLAW_ACP_TOKEN_FILE`, `DIREXIO_OPENCLAW_ACP_ARGS_TOML`, and `DIREXIO_HERMES_ACP_ARGS_TOML`.
 
 `DIREXIO_AGENT_PLATFORM` describes the host runtime following the skill, while `DIREXIO_CC_CONNECT_AGENT` describes the local agent backend that `direxio-connect` should launch. Host runtimes such as Hermes or OpenClaw are not cc-connect backends; when they are detected, set `DIREXIO_CC_CONNECT_AGENT` explicitly, for example `DIREXIO_AGENT_PLATFORM=hermes DIREXIO_CC_CONNECT_AGENT=codex`.
 
@@ -366,7 +367,7 @@ IP-derived, localhost, wildcard, or disposable domains.
 
 8. After authoritative DNS resolves, rerun the same command with `DNS_READY=1`.
 9. After S7 passes, read `references/runtime-wiring.md` and `references/agent-targets.md`, then report the URL, `password`, agent token status, real `agent_room_id`, persistent Direxio env status, cc-connect config path, MCP config paths, Matrix bridge user/device, resources, SSH command, state path, and destroy command.
-10. Read the selected connect agent from S6 state (`cc_connect_agent`) and report the recorded `agent_install_command` and `agent_install_status`. If `DIREXIO_AGENT_INSTALL=auto` was explicitly set, treat the daemon as installed only when S6 recorded `agent_install_status=installed`; `install_failed` means the daemon command returned but `direxio-connect daemon status --service-name <service_id>` was not `Status: Running`. Otherwise leave installation as an explicit operator action.
+10. Read the selected connect agent from S6 state (`cc_connect_agent`) and report the recorded `agent_install_command` and `agent_install_status`. For OpenClaw or Hermes, also report that the detected host runtime is ACP-backed and `cc_connect_agent` is expected to be `acp`. If `DIREXIO_AGENT_INSTALL=auto` was explicitly set, treat the daemon as installed only when S6 recorded `agent_install_status=installed`; `install_failed` means the daemon command returned but `direxio-connect daemon status --service-name <service_id>` was not `Status: Running`. Otherwise leave installation as an explicit operator action.
 
 ## Destroy Flow
 

@@ -101,6 +101,8 @@ Set-AgentCommandIfMissing @('DIREXIO_IFLOW_COMMAND') @('iflow.exe', 'iflow.cmd',
 Set-AgentCommandIfMissing @('DIREXIO_QODER_COMMAND', 'DIREXIO_QODERCLI_COMMAND') @('qodercli.exe', 'qodercli.cmd', 'qodercli', 'qoder.exe', 'qoder.cmd', 'qoder')
 Set-AgentCommandIfMissing @('DIREXIO_PI_COMMAND') @('pi.exe', 'pi.cmd', 'pi')
 Set-AgentCommandIfMissing @('DIREXIO_ANTIGRAVITY_COMMAND', 'DIREXIO_AGY_COMMAND') @('agy.exe', 'agy.cmd', 'agy')
+Set-AgentCommandIfMissing @('DIREXIO_OPENCLAW_COMMAND') @('openclaw.exe', 'openclaw.cmd', 'openclaw')
+Set-AgentCommandIfMissing @('DIREXIO_HERMES_COMMAND') @('hermes.exe', 'hermes.cmd', 'hermes')
 
 $repoRootForBash = ConvertTo-GitBashPath $RepoRoot
 $quotedArgs = ($OrchestrateArgs | ForEach-Object { Quote-BashArg $_ }) -join ' '

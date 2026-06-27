@@ -396,21 +396,21 @@ _cc_connect_agent_type() {
     _validate_cc_connect_agent "$explicit"
     return 0
   fi
-  if ! _cc_connect_agent_alias "$runtime" >/dev/null 2>&1; then
-    fail "detected runtime '$runtime' is not a direxio-connect agent. Set DIREXIO_CC_CONNECT_AGENT to one of: $(_cc_connect_supported_agents_csv)."
-    return 1
-  fi
+  case "$runtime" in
+    openclaw|hermes) printf 'acp\n'; return 0 ;;
+  esac
   _validate_cc_connect_agent "$runtime"
 }
 
 _cc_connect_agent_command() {
-  local agent raw_key var value
+  local agent runtime raw_key var value
+  runtime=${2:-$1}
   agent=$(_cc_connect_agent_alias "$1" 2>/dev/null || printf '%s\n' "$1")
   if [ -n "${DIREXIO_CC_CONNECT_AGENT_CMD:-}" ]; then
     printf '%s\n' "$DIREXIO_CC_CONNECT_AGENT_CMD"
     return 0
   fi
-  for raw_key in "$agent" $(_cc_connect_agent_command_aliases "$agent"); do
+  for raw_key in $(_cc_connect_runtime_command_aliases "$runtime") "$agent" $(_cc_connect_agent_command_aliases "$agent"); do
     var="DIREXIO_$(printf '%s' "$raw_key" | tr '[:lower:]-' '[:upper:]_')_COMMAND"
     value=$(printenv "$var" 2>/dev/null || true)
     if [ -n "$value" ]; then
@@ -418,6 +418,16 @@ _cc_connect_agent_command() {
       return 0
     fi
   done
+  case "$runtime" in
+    openclaw|hermes) printf '%s\n' "$runtime" ;;
+  esac
+}
+
+_cc_connect_runtime_command_aliases() {
+  case "$1" in
+    openclaw) printf '%s\n' openclaw ;;
+    hermes) printf '%s\n' hermes ;;
+  esac
 }
 
 _cc_connect_agent_command_aliases() {
@@ -457,7 +467,7 @@ _cc_connect_config_path() {
 }
 
 _mcp_npm_package() {
-  printf '%s\n' "${DIREXIO_MCP_NPM_PACKAGE:-@direxio/local-mcp@0.1.4}"
+  printf '%s\n' "${DIREXIO_MCP_NPM_PACKAGE:-@direxio/local-mcp@0.1.5}"
 }
 
 _mcp_command() {
@@ -510,7 +520,69 @@ _cc_connect_binary_path() {
 }
 
 _cc_connect_agent_options_toml() {
-  printf '%s\n' "${DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML:-}"
+  local runtime=${1:-} agent=${2:-} args_toml q_display
+  if [ -n "${DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML:-}" ]; then
+    printf '%s\n' "$DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML"
+    return 0
+  fi
+  case "$runtime:$agent" in
+    openclaw:acp)
+      args_toml=$(_openclaw_acp_args_toml)
+      q_display=$(_toml_escape "OpenClaw ACP")
+      printf 'args = %s\n' "$args_toml"
+      printf 'display_name = "%s"\n' "$q_display"
+      ;;
+    hermes:acp)
+      args_toml=$(_hermes_acp_args_toml)
+      q_display=$(_toml_escape "Hermes ACP")
+      printf 'args = %s\n' "$args_toml"
+      printf 'display_name = "%s"\n' "$q_display"
+      ;;
+  esac
+}
+
+_openclaw_acp_args_toml() {
+  local url token_file
+  if [ -n "${DIREXIO_OPENCLAW_ACP_ARGS_TOML:-}" ]; then
+    printf '%s\n' "$DIREXIO_OPENCLAW_ACP_ARGS_TOML"
+    return 0
+  fi
+  url=${DIREXIO_OPENCLAW_ACP_URL:-}
+  token_file=${DIREXIO_OPENCLAW_ACP_TOKEN_FILE:-}
+  if [ -n "$token_file" ]; then
+    token_file=$(_local_connect_path "$token_file")
+  fi
+  if [ -n "$url" ] && [ -n "$token_file" ]; then
+    _toml_array acp --url "$url" --token-file "$token_file"
+  elif [ -n "$url" ]; then
+    _toml_array acp --url "$url"
+  elif [ -n "$token_file" ]; then
+    _toml_array acp --token-file "$token_file"
+  else
+    _toml_array acp
+  fi
+}
+
+_hermes_acp_args_toml() {
+  if [ -n "${DIREXIO_HERMES_ACP_ARGS_TOML:-}" ]; then
+    printf '%s\n' "$DIREXIO_HERMES_ACP_ARGS_TOML"
+    return 0
+  fi
+  _toml_array acp
+}
+
+_toml_array() {
+  local first=1 value q_value
+  printf '['
+  for value in "$@"; do
+    q_value=$(_toml_escape "$value")
+    if [ "$first" -eq 0 ]; then
+      printf ', '
+    fi
+    printf '"%s"' "$q_value"
+    first=0
+  done
+  printf ']\n'
 }
 
 _toml_has_key() {
@@ -1124,8 +1196,8 @@ run_phase() {
 
   runtime=$(_detect_agent_runtime)
   cc_agent=$(_cc_connect_agent_type "$runtime")
-  cc_agent_cmd=$(_cc_connect_agent_command "$cc_agent")
-  cc_agent_options_toml=$(_cc_connect_agent_options_toml)
+  cc_agent_cmd=$(_cc_connect_agent_command "$cc_agent" "$runtime")
+  cc_agent_options_toml=$(_cc_connect_agent_options_toml "$runtime" "$cc_agent")
   node_id=$(_agent_node_id "$runtime" "$domain" "$agent_room_id")
   service_id=$(_direxio_service_id "${asurl:-$domain}")
   service_dir=$(_direxio_service_dir "${asurl:-$domain}")

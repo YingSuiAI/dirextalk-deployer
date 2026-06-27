@@ -67,7 +67,7 @@ This is intentionally separate from the `direxio-connect` bridge. MCP uses the d
 Install and check the MCP package:
 
 ```bash
-npm install -g @direxio/local-mcp@0.1.4
+npm install -g @direxio/local-mcp@0.1.5
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
 ```
 
@@ -109,9 +109,15 @@ DIREXIO_LOCAL_PATH_STYLE=posix|windows
 DIREXIO_CC_CONNECT_AGENT_CMD=<optional agent executable path>
 DIREXIO_<AGENT>_COMMAND=<optional agent-specific executable path>
 DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML=<optional extra TOML under projects.agent.options>
+DIREXIO_OPENCLAW_COMMAND=<optional OpenClaw executable path>
+DIREXIO_HERMES_COMMAND=<optional Hermes executable path>
+DIREXIO_OPENCLAW_ACP_URL=<optional OpenClaw gateway URL>
+DIREXIO_OPENCLAW_ACP_TOKEN_FILE=<optional OpenClaw ACP token file>
+DIREXIO_OPENCLAW_ACP_ARGS_TOML=<optional OpenClaw ACP TOML array>
+DIREXIO_HERMES_ACP_ARGS_TOML=<optional Hermes ACP TOML array>
 DIREXIO_CC_CONNECT_NPM_PACKAGE=@direxio/connent@1.3.7
 DIREXIO_CC_CONNECT_REPO=https://github.com/YingSuiAI/connect.git
-DIREXIO_MCP_NPM_PACKAGE=@direxio/local-mcp@0.1.4
+DIREXIO_MCP_NPM_PACKAGE=@direxio/local-mcp@0.1.5
 DIREXIO_MCP_COMMAND=direxio-mcp
 DIREXIO_SPEECH_PROVIDER=openai|groq|qwen|gemini
 DIREXIO_SPEECH_API_KEY=<optional generic STT key>
@@ -123,10 +129,12 @@ DIREXIO_SPEECH_LANGUAGE=zh
 Defaults:
 
 - `DIREXIO_CC_CONNECT_AGENT` is the preferred explicit selector. It accepts every connent/connect agent: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
-- `DIREXIO_AGENT_PLATFORM=auto` detects the local agent runtime and maps it to a `direxio-connect` agent type only when it can identify one unambiguously. `DIREXIO_AGENT_PLATFORM` is the host runtime; `DIREXIO_CC_CONNECT_AGENT` is the bridge backend. If the host runtime is Hermes/OpenClaw or another runtime that is not a connect agent, set `DIREXIO_CC_CONNECT_AGENT` explicitly.
-- `DIREXIO_LOCAL_PATH_STYLE=windows` writes Windows-compatible `data_dir`, `work_dir`, config paths, and install commands. `scripts/orchestrate.ps1` sets this automatically.
-- `DIREXIO_CC_CONNECT_AGENT_CMD` writes `cmd = "<path>"` into `[projects.agent.options]`. Agent-specific forms such as `DIREXIO_CODEX_COMMAND`, `DIREXIO_CLAUDE_CODE_COMMAND`, `DIREXIO_GEMINI_COMMAND`, `DIREXIO_OPENCODE_COMMAND`, and `DIREXIO_QODERCLI_COMMAND` are also accepted.
+- `DIREXIO_AGENT_PLATFORM=auto` detects the local agent runtime and maps it to a `direxio-connect` agent type only when it can identify one unambiguously. OpenClaw and Hermes map to the generic `acp` connect agent with default `args = ["acp"]`.
+- `DIREXIO_LOCAL_PATH_STYLE=windows` writes Windows-compatible `data_dir`, `work_dir`, config paths, and install commands. `scripts/orchestrate.ps1` sets this automatically. Linux, macOS, and WSL Bash runs should leave the default `posix` style. Windows Git Bash/MSYS2 users who run `scripts/orchestrate.sh` directly must set `DIREXIO_LOCAL_PATH_STYLE=windows` when the local bridge is a Windows process.
+- `DIREXIO_CC_CONNECT_AGENT_CMD` writes `cmd = "<path>"` into `[projects.agent.options]`. Agent-specific forms such as `DIREXIO_CODEX_COMMAND`, `DIREXIO_CLAUDE_CODE_COMMAND`, `DIREXIO_GEMINI_COMMAND`, `DIREXIO_OPENCODE_COMMAND`, `DIREXIO_QODERCLI_COMMAND`, `DIREXIO_OPENCLAW_COMMAND`, and `DIREXIO_HERMES_COMMAND` are also accepted.
 - `DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML` appends agent-specific options under `[projects.agent.options]`; use it for agents with required non-command options such as `reasonix` (`serve_url`) or `tmux` (`session`).
+- OpenClaw Gateway ACP uses `DIREXIO_OPENCLAW_ACP_URL` to append `--url <url>` and `DIREXIO_OPENCLAW_ACP_TOKEN_FILE` to append `--token-file <local path>`. Complete OpenClaw pairing before installing or starting the daemon.
+- `DIREXIO_OPENCLAW_ACP_ARGS_TOML` and `DIREXIO_HERMES_ACP_ARGS_TOML` replace the generated ACP args array, for example `["acp", "--url", "wss://gateway.example.test:18789"]`.
 - `DIREXIO_AGENT_INSTALL=recommend` prints and records the command only.
 - `DIREXIO_AGENT_INSTALL=auto` runs `npm install -g @direxio/connent@1.3.7` and then installs the `direxio-connect` daemon with the generated config and `--service-name <service_id>`. It is recorded as installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running`; otherwise S6 records `agent_install_status=install_failed`.
 - `DIREXIO_AGENT_INSTALL_MODE=recommended` maps every supported local runtime to `cc-connect`.

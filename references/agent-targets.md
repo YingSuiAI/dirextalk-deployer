@@ -35,12 +35,7 @@ The bridge agent type is selected independently from the host operating system. 
 acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode pi qoder reasonix tmux
 ```
 
-`DIREXIO_AGENT_PLATFORM=auto` is a convenience detector only. If detection is ambiguous or the detected host runtime is not a cc-connect agent, set `DIREXIO_CC_CONNECT_AGENT` explicitly. For example, a Hermes-hosted deploy should use a supported bridge backend such as:
-
-```bash
-DIREXIO_AGENT_PLATFORM=hermes
-DIREXIO_CC_CONNECT_AGENT=codex
-```
+`DIREXIO_AGENT_PLATFORM=auto` is a convenience detector. If it detects OpenClaw or Hermes, S6 wires `direxio-connect` through the generic `acp` agent and writes `cmd = "openclaw"` or `cmd = "hermes"` with `args = ["acp"]`. OpenClaw and Hermes are not native connent/connect agent types. If detection is ambiguous or the detected host runtime should use a different connect backend, set `DIREXIO_CC_CONNECT_AGENT` explicitly.
 
 S6 writes service-specific files to `~/.direxio/nodes/<service_id>/`, where `service_id` is derived from the deployed domain:
 
@@ -94,10 +89,10 @@ The `[speech]` block is present only when S6 finds a speech-to-text API key from
 
 ## MCP Targets
 
-S6 writes MCP snippets for Codex, OpenClaw, and Hermes under `~/.direxio/nodes/<service_id>/mcp/`. These snippets use `direxio-mcp` from `@direxio/local-mcp@0.1.4` by default and point to the service credential file through `DIREXIO_CREDENTIALS_FILE`.
+S6 writes MCP snippets for Codex, OpenClaw, and Hermes under `~/.direxio/nodes/<service_id>/mcp/`. These snippets use `direxio-mcp` from `@direxio/local-mcp@0.1.5` by default and point to the service credential file through `DIREXIO_CREDENTIALS_FILE`.
 
 ```bash
-npm install -g @direxio/local-mcp@0.1.4
+npm install -g @direxio/local-mcp@0.1.5
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
 ```
 
@@ -111,3 +106,4 @@ Use `mcp/codex.toml` for Codex. Use `mcp/openclaw.mcp.json` and `mcp/hermes.mcp.
 
 Prefer `DIREXIO_CC_CONNECT_AGENT=<agent>` to choose the local agent that `direxio-connect` should run. Keep `DIREXIO_AGENT_PLATFORM=<runtime>` for auto-detection overrides and legacy host-runtime naming. Use `DIREXIO_AGENT_INSTALL_MODE=cc-connect` only when overriding the default `recommended` mapping explicitly.
 Use `DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXIO_CC_CONNECT_AGENT_CMD` is not enough.
+For OpenClaw Gateway ACP, set `DIREXIO_OPENCLAW_ACP_URL` and complete OpenClaw pairing before starting the daemon. `DIREXIO_OPENCLAW_ACP_TOKEN_FILE` adds `--token-file` with a local-path-style conversion. `DIREXIO_OPENCLAW_ACP_ARGS_TOML` and `DIREXIO_HERMES_ACP_ARGS_TOML` replace the default ACP args array when the runtime needs custom flags.

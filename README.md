@@ -24,8 +24,8 @@
 - S6 creates an `@agent:<server>` Matrix session through `agent.matrix_session.create`, writes a Matrix-only `cc-connect/config.toml`, and restricts the bridge to the current `agent_room_id`.
 - S6 writes MCP client snippets under `~/.direxio/nodes/<service_id>/mcp/`. They point `direxio-mcp` at the same service-scoped `credentials.json` by `DIREXIO_CREDENTIALS_FILE`; cc-connect still uses its direct Matrix config.
 - `DIREXIO_CC_CONNECT_AGENT` selects the local `direxio-connect` agent type. Supported values match connent/connect: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
-- `DIREXIO_AGENT_PLATFORM` is the host runtime following this deployer skill; `DIREXIO_CC_CONNECT_AGENT` is the backend that `direxio-connect` launches. If the host runtime is Hermes/OpenClaw or anything else that is not a supported connect agent, set `DIREXIO_CC_CONNECT_AGENT` explicitly.
-- Set `DIREXIO_CC_CONNECT_AGENT_CMD` or `DIREXIO_<AGENT>_COMMAND` when a local agent executable is not discoverable from PATH. Codex also supports `DIREXIO_CODEX_COMMAND` for Windows Desktop installs.
+- `DIREXIO_AGENT_PLATFORM` is the host runtime following this deployer skill; `DIREXIO_CC_CONNECT_AGENT` is the backend that `direxio-connect` launches. Detected OpenClaw and Hermes runtimes are wired through the generic `acp` agent, not native `type = "openclaw"` or `type = "hermes"` connect agents. S6 writes `cmd = "openclaw"` or `cmd = "hermes"` with default `args = ["acp"]`.
+- Set `DIREXIO_CC_CONNECT_AGENT_CMD` or `DIREXIO_<AGENT>_COMMAND` when a local agent executable is not discoverable from PATH. Codex also supports `DIREXIO_CODEX_COMMAND` for Windows Desktop installs; OpenClaw and Hermes support `DIREXIO_OPENCLAW_COMMAND` and `DIREXIO_HERMES_COMMAND`.
 - `DIREXIO_AGENT_INSTALL=auto` installs `@direxio/connent@1.3.7` and runs `direxio-connect daemon install --config <config> --service-name <service_id> --force`. The default `recommend` mode only records and prints the command. Auto install is marked installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running`; otherwise S6 records `agent_install_status=install_failed`.
 
 ## Minimal Command
@@ -71,7 +71,7 @@ bash scripts/orchestrate.sh
 ```
 
 Supported install modes: `recommended` and `cc-connect`.
-If `DIREXIO_AGENT_PLATFORM=auto` cannot identify a single supported runtime, or if the detected host runtime is not a supported connect agent, set `DIREXIO_CC_CONNECT_AGENT` explicitly.
+If `DIREXIO_AGENT_PLATFORM=auto` cannot identify a single supported runtime, set `DIREXIO_CC_CONNECT_AGENT` explicitly. For OpenClaw or Hermes defaults, force the host runtime with `DIREXIO_AGENT_PLATFORM=openclaw` or `DIREXIO_AGENT_PLATFORM=hermes`; setting only `DIREXIO_CC_CONNECT_AGENT=acp` selects generic ACP and requires manual options. For OpenClaw Gateway ACP, set `DIREXIO_OPENCLAW_ACP_URL` and complete OpenClaw pairing before starting the daemon. Use `DIREXIO_OPENCLAW_ACP_ARGS_TOML` or `DIREXIO_HERMES_ACP_ARGS_TOML` for custom ACP argument arrays.
 
 Check status:
 
@@ -117,7 +117,7 @@ direxio-connect daemon status --service-name <service_id>
 MCP install and check:
 
 ```bash
-npm install -g @direxio/local-mcp@0.1.4
+npm install -g @direxio/local-mcp@0.1.5
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
 ```
 

@@ -32,7 +32,7 @@
 - cc-connect 配置: `~/.direxio/nodes/<service_id>/cc-connect/config.toml`
 - MCP 配置目录: `~/.direxio/nodes/<service_id>/mcp/`
 - Matrix bridge 用户: `@agent:<server>`
-- 安装命令: `npm install -g @direxio/connent@1.3.9 && direxio-connect daemon install --config <config> --service-name <service_id> --force`
+- 安装命令: `npm install -g @direxio/connent@1.3.10 && direxio-connect daemon install --config <config> --service-name <service_id> --force`
 - MCP 检查命令: `DIREXIO_CREDENTIALS_FILE=<credentials.json> direxio-mcp doctor --json`
 - AWS 信息: region、instance id、Elastic IP、SSH 命令、state.json、destroy 命令
 

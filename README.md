@@ -2,7 +2,7 @@
 
 [简体中文](README_zh.md)
 
-`direxio-deployer` deploys a production Direxio message server and wires the local agent room through Direxio's Matrix bridge. The supported local bridge is `direxio-connect`, installed from the npm package `@direxio/connent@1.3.9` by default or built from `YingSuiAI/connect`. S6 also writes service-scoped MCP snippets for MCP-capable hosts such as Codex, OpenClaw, and Hermes.
+`direxio-deployer` deploys a production Direxio message server and wires the local agent room through Direxio's Matrix bridge. The supported local bridge is `direxio-connect`, installed from the npm package `@direxio/connent@1.3.10` by default or built from `YingSuiAI/connect`. S6 also writes service-scoped MCP snippets for MCP-capable hosts such as Codex, OpenClaw, and Hermes.
 
 ## Contents
 
@@ -26,7 +26,7 @@
 - `DIREXIO_CC_CONNECT_AGENT` selects the local `direxio-connect` agent type. Supported values match connent/connect: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
 - `DIREXIO_AGENT_PLATFORM` is the host runtime following this deployer skill; `DIREXIO_CC_CONNECT_AGENT` is the backend that `direxio-connect` launches. Detected OpenClaw and Hermes runtimes are wired through the generic `acp` agent, not native `type = "openclaw"` or `type = "hermes"` connect agents. S6 writes OpenClaw as `cmd = "openclaw"` with `args = ["acp"]`; Hermes is wrapped as `cmd = "direxio-connect"` with `args = ["hermes-acp-adapter", "--", "hermes", "acp"]` so Hermes reasoning text cannot be exposed as user-visible chat.
 - Set `DIREXIO_CC_CONNECT_AGENT_CMD` or `DIREXIO_<AGENT>_COMMAND` when a local agent executable is not discoverable from PATH. Codex also supports `DIREXIO_CODEX_COMMAND` for Windows Desktop installs; OpenClaw supports `DIREXIO_OPENCLAW_COMMAND`; Hermes supports `DIREXIO_HERMES_COMMAND` for the child process behind the adapter and `DIREXIO_HERMES_ACP_ADAPTER_COMMAND` only when the adapter command itself is not `direxio-connect`.
-- `DIREXIO_AGENT_INSTALL=auto` installs `@direxio/connent@1.3.9` and runs `direxio-connect daemon install --config <config> --service-name <service_id> --force`. The default `recommend` mode only records and prints the command. Auto install is marked installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running`; otherwise S6 records `agent_install_status=install_failed`.
+- `DIREXIO_AGENT_INSTALL=auto` installs `@direxio/connent@1.3.10` and runs `direxio-connect daemon install --config <config> --service-name <service_id> --force`. The default `recommend` mode only records and prints the command. Auto install is marked installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running`; otherwise S6 records `agent_install_status=install_failed`.
 
 ## Minimal Command
 
@@ -109,7 +109,7 @@ mcp/mcp-servers.json
 Manual install:
 
 ```bash
-npm install -g @direxio/connent@1.3.9
+npm install -g @direxio/connent@1.3.10
 direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/cc-connect/config.toml --service-name <service_id> --force
 direxio-connect daemon status --service-name <service_id>
 ```

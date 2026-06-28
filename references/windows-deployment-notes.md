@@ -68,7 +68,7 @@ or another supported connent/connect agent before running `scripts/orchestrate.s
 The npm path is the default local install:
 
 ```bash
-npm install -g @direxio/connent@1.3.9
+npm install -g @direxio/connent@1.3.10
 direxio-connect daemon install --config "$HOME/.direxio/nodes/<service_id>/cc-connect/config.toml" --service-name <service_id> --force
 direxio-connect daemon status --service-name <service_id>
 ```

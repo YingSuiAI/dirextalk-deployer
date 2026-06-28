@@ -61,7 +61,7 @@ When all phases complete, report:
 - persisted `DIREXIO_DOMAIN`, `DIREXIO_AGENT_TOKEN`, `DIREXIO_AGENT_ROOM_ID`, `DIREXIO_AGENT_NODE_ID`
 - `cc_connect_config`, `cc_connect_matrix_user`, `cc_connect_matrix_device`, and `cc_connect_matrix_homeserver`
 - install policy/mode/status from `DIREXIO_AGENT_INSTALL` and `DIREXIO_AGENT_INSTALL_MODE`
-- manual command: `npm install -g @direxio/connent@1.3.9 && direxio-connect daemon install --config <cc_connect_config> --service-name <service_id> --force`
+- manual command: `npm install -g @direxio/connent@1.3.10 && direxio-connect daemon install --config <cc_connect_config> --service-name <service_id> --force`
 - region, instance ID, public IP, and `state.json` path
 - SSH command
 - destroy command

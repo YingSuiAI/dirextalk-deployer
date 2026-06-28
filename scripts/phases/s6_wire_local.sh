@@ -448,7 +448,7 @@ _cc_connect_repo() {
 }
 
 _cc_connect_npm_package() {
-  printf '%s\n' "${DIREXIO_CC_CONNECT_NPM_PACKAGE:-@direxio/connent@1.3.9}"
+  printf '%s\n' "${DIREXIO_CC_CONNECT_NPM_PACKAGE:-@direxio/connent@1.3.10}"
 }
 
 _cc_connect_ref() {

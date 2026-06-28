@@ -102,7 +102,7 @@ Use `mcp/codex.toml` for Codex. Use `mcp/openclaw.mcp.json` and `mcp/hermes.mcp.
 
 - `DIREXIO_AGENT_INSTALL=skip`: write credentials/env and cc-connect config only.
 - `DIREXIO_AGENT_INSTALL=recommend`: write files, record state, and print the install command.
-- `DIREXIO_AGENT_INSTALL=auto`: run `npm install -g @direxio/connent@1.3.9` and then `direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/cc-connect/config.toml --service-name <service_id> --force`. S6 records this as installed only after `direxio-connect daemon status --service-name <service_id>` reports `Status: Running`; otherwise it records `agent_install_status=install_failed`.
+- `DIREXIO_AGENT_INSTALL=auto`: run `npm install -g @direxio/connent@1.3.10` and then `direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/cc-connect/config.toml --service-name <service_id> --force`. S6 records this as installed only after `direxio-connect daemon status --service-name <service_id>` reports `Status: Running`; otherwise it records `agent_install_status=install_failed`.
 
 Prefer `DIREXIO_CC_CONNECT_AGENT=<agent>` to choose the local agent that `direxio-connect` should run. Keep `DIREXIO_AGENT_PLATFORM=<runtime>` for auto-detection overrides and legacy host-runtime naming. Use `DIREXIO_AGENT_INSTALL_MODE=cc-connect` only when overriding the default `recommended` mapping explicitly.
 Use `DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXIO_CC_CONNECT_AGENT_CMD` is not enough.

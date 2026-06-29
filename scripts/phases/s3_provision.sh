@@ -43,6 +43,9 @@ run_phase() {
     fi
     state_set instance_type "$instance_type"
   fi
+  if declare -F ensure_cost_estimate >/dev/null 2>&1; then
+    ensure_cost_estimate
+  fi
   ami=$(res_get ami_id)
   vpc=$(res_get vpc_id)
   local message_server_image
@@ -130,6 +133,7 @@ run_phase() {
       return 1
     }
   fi
+  _record_root_volume_id "$iid"
 
   # 5) Public address. Production-domain deployments require EIP for stable DNS.
   local pubip
@@ -168,7 +172,9 @@ run_phase() {
   log "Public IP = $pubip; domain = $(state_get domain)"
 
   if [ "$domain_mode" = "route53" ]; then
-    _upsert_route53_record "$domain" "$pubip" || return 1
+    local route53_rc=0
+    _upsert_route53_record "$domain" "$pubip" || route53_rc=$?
+    [ "$route53_rc" -eq 0 ] || return "$route53_rc"
   fi
 
   if [ "$domain_mode" = "user" ] || [ "$domain_mode" = "route53" ]; then
@@ -179,9 +185,23 @@ run_phase() {
   return 0
 }
 
+_record_root_volume_id() {
+  local iid=$1 volume_id
+  [ -n "$iid" ] || return 0
+  volume_id=$(aws ec2 describe-instances --instance-ids "$iid" \
+    --query 'Reservations[0].Instances[0].BlockDeviceMappings[?Ebs.VolumeId!=`null`].Ebs.VolumeId | [0]' \
+    --output text 2>/dev/null) || return 0
+  [ -n "$volume_id" ] && [ "$volume_id" != "None" ] || return 0
+  res_set root_volume_id "$volume_id"
+}
+
 _upsert_route53_record() {
   local domain=$1 pubip=$2 zone zone_id zone_name change_file change_id
-  zone=$(_find_route53_zone "$domain")
+  zone=$(_find_or_create_route53_zone "$domain") || {
+    phase_set S3_PROVISION failed "Route53 hosted zone unavailable"
+    warn "DOMAIN_MODE=route53 requires Route53 permission to list or create the hosted zone for $domain."
+    return 1
+  }
   zone_id=$(printf '%s' "$zone" | cut -f1)
   zone_name=$(printf '%s' "$zone" | cut -f2)
   if [ -z "$zone_id" ]; then
@@ -189,6 +209,7 @@ _upsert_route53_record() {
     warn "DOMAIN_MODE=route53 requires the parent domain of $domain to exist in a Route53 hosted zone."
     return 1
   fi
+  _guard_route53_a_overwrite "$zone_id" "$domain" "$pubip" || return $?
 
   log "Route53 upsert: $domain A $pubip (zone=$zone_name)"
   change_file=$(mktemp)
@@ -228,8 +249,85 @@ EOF
   return 0
 }
 
+_route53_existing_a_value() {
+  local zone_id=$1 domain=$2 records name
+  name="${domain}."
+  records=$(aws route53 list-resource-record-sets --hosted-zone-id "$zone_id" --output json 2>/dev/null) || return 0
+  printf '%s\n' "$records" | jq -r --arg name "$name" '
+    .ResourceRecordSets[]?
+    | select(.Name == $name and .Type == "A")
+    | [.ResourceRecords[]?.Value]
+    | join(",")
+  ' | sed -n '1p'
+}
+
+_guard_route53_a_overwrite() {
+  local zone_id=$1 domain=$2 pubip=$3 existing confirmed
+  existing=$(_route53_existing_a_value "$zone_id" "$domain")
+  [ -n "$existing" ] || return 0
+  [ "$existing" = "$pubip" ] && return 0
+
+  res_set route53_existing_a_value "$existing"
+  res_set route53_pending_a_value "$pubip"
+  confirmed=${DIREXIO_CONFIRM_DNS_OVERWRITE:-${CONFIRM_DNS_OVERWRITE:-0}}
+  if [ "$confirmed" = "1" ]; then
+    res_set route53_overwrite_confirmed "true"
+    warn "Route53 A record overwrite confirmed: $domain $existing -> $pubip."
+    return 0
+  fi
+
+  phase_set S3_PROVISION waiting_user "Route53 A record overwrite requires confirmation"
+  warn "Route53 A record overwrite requires confirmation for $domain."
+  warn "Current A record: $existing"
+  warn "New deployment IP: $pubip"
+  warn "If this is intentional, rerun with DIREXIO_CONFIRM_DNS_OVERWRITE=1."
+  return 2
+}
+
+_route53_zone_from_state() {
+  local zone_id zone_name
+  zone_id=$(res_get route53_zone_id)
+  zone_name=$(res_get route53_zone_name)
+  [ -n "$zone_id" ] && [ -n "$zone_name" ] || return 1
+  printf '%s\t%s\n' "$zone_id" "$zone_name"
+}
+
+_record_route53_zone() {
+  local zone_id=$1 zone_name=$2 created=${3:-false} name_servers=${4:-}
+  res_set route53_zone_id "$zone_id"
+  res_set route53_zone_name "${zone_name%.}"
+  if [ -z "$(res_get route53_zone_created_by_deployer)" ] || [ "$created" = "true" ]; then
+    res_set route53_zone_created_by_deployer "$created"
+  fi
+  [ -n "$name_servers" ] && res_set route53_name_servers "$name_servers"
+}
+
+_find_or_create_route53_zone() {
+  local domain=$1 zone zone_id zone_name find_rc
+  if zone=$(_route53_zone_from_state); then
+    printf '%s\n' "$zone"
+    return 0
+  fi
+
+  if zone=$(_find_route53_zone "$domain"); then
+    zone_id=$(printf '%s' "$zone" | cut -f1)
+    zone_name=$(printf '%s' "$zone" | cut -f2)
+    _record_route53_zone "$zone_id" "$zone_name" false
+    printf '%s\n' "$zone"
+    return 0
+  else
+    find_rc=$?
+  fi
+
+  case "$find_rc" in
+    1) _create_route53_zone "$domain" ;;
+    *) return 1 ;;
+  esac
+}
+
 _find_route53_zone() {
-  local domain=$1 best_id="" best_name="" best_len=0 id name clean len
+  local domain=$1 best_id="" best_name="" best_len=0 id name clean len zones_json
+  zones_json=$(aws route53 list-hosted-zones --output json) || return 2
   while IFS=$'\t' read -r id name; do
     id=${id%$'\r'}
     name=${name%$'\r'}
@@ -244,8 +342,31 @@ _find_route53_zone() {
         fi
         ;;
     esac
-  done < <(aws route53 list-hosted-zones --output json | jq -r '.HostedZones[] | [.Id, .Name] | @tsv')
-  [ -n "$best_id" ] && printf '%s\t%s\n' "$best_id" "$best_name"
+  done < <(printf '%s\n' "$zones_json" | jq -r '.HostedZones[] | [.Id, .Name] | @tsv')
+  [ -n "$best_id" ] || return 1
+  printf '%s\t%s\n' "$best_id" "$best_name"
+}
+
+_create_route53_zone() {
+  local domain=$1 zone_name caller created zone_id returned_name name_servers
+  zone_name=${DIREXIO_ROUTE53_ZONE_NAME:-$domain}
+  caller="direxio-$(state_get run_id)-$(date -u +%Y%m%d%H%M%S)"
+  created=$(aws route53 create-hosted-zone \
+    --name "$zone_name" \
+    --caller-reference "$caller" \
+    --output json) || return 1
+  zone_id=$(printf '%s\n' "$created" | jq -r '.HostedZone.Id // empty' | sed 's#^/hostedzone/##')
+  returned_name=$(printf '%s\n' "$created" | jq -r '.HostedZone.Name // empty')
+  name_servers=$(printf '%s\n' "$created" | jq -r '(.DelegationSet.NameServers // []) | join(",")')
+  [ -n "$zone_id" ] && [ -n "$returned_name" ] || return 1
+
+  _record_route53_zone "$zone_id" "${returned_name%.}" true "$name_servers"
+  warn "Created Route53 hosted zone ${returned_name%.} (id=$zone_id). This hosted zone is billable until deleted."
+  if [ -n "$name_servers" ]; then
+    warn "Route53 nameservers: $name_servers"
+    warn "If the domain is registered outside Route53, delegate NS at the registrar before DNS can resolve."
+  fi
+  printf '%s\t%s\n' "$zone_id" "${returned_name%.}"
 }
 
 _require_user_dns_ready() {

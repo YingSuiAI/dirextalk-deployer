@@ -27,6 +27,25 @@ aws_configured_region() {
   fi
 }
 
+aws_identity_arn() {
+  aws sts get-caller-identity --query Arn --output text 2>/dev/null || true
+}
+
+aws_identity_account() {
+  aws sts get-caller-identity --query Account --output text 2>/dev/null || true
+}
+
+aws_arn_is_root() {
+  case "$1" in
+    arn:aws*:iam::*:root) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+aws_redact_arn() {
+  printf '%s\n' "$1" | sed -E 's/::[0-9]{12}:/::<account>:/'
+}
+
 # EC2 vCPU quota code: Running On-Demand Standard instances.
 EC2_STD_QUOTA_CODE="L-1216C47A"
 

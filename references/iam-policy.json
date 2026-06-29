@@ -41,6 +41,8 @@
       "Effect": "Allow",
       "Action": [
         "route53:ListHostedZones",
+        "route53:CreateHostedZone",
+        "route53:DeleteHostedZone",
         "route53:ChangeResourceRecordSets",
         "route53:GetChange"
       ],

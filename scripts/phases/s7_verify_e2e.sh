@@ -118,7 +118,7 @@ _check() {
   else warn "  ✗ $name (got $code, want $want)"; return 1; fi
 }
 
-# TURN acceptance: exchange the IM login password for Matrix access_token, then verify
+# TURN acceptance: exchange the backend password/init-code field for Matrix access_token, then verify
 # /voip/turnServer returns non-empty valid TURN credentials.
 _check_turn() {
   local domain=$1 password=$2 at turn

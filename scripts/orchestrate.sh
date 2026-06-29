@@ -38,6 +38,7 @@ DIREXIO_WORKDIR_WAS_SET=${DIREXIO_WORKDIR+x}
 source "$HERE/lib/state.sh"
 source "$HERE/lib/aws.sh"
 source "$HERE/lib/domain.sh"
+source "$HERE/lib/operation_report.sh"
 
 # Phase -> script mapping. Use case instead of declare -A for macOS bash 3.2.
 phase_file() {
@@ -125,6 +126,138 @@ cmd_status_inventory() {
   fi
 }
 
+phase_user_meaning() {
+  case "$1" in
+    S0_PREREQ_AWS)      echo "AWS credentials, CLI tooling, or account identity are not ready." ;;
+    S1_PREFLIGHT)       echo "AWS region, default VPC, quota, or Ubuntu AMI checks are not ready." ;;
+    S2_DOMAIN)          echo "The long-lived domain, DNS authority, or irreversible Matrix server_name binding is not confirmed." ;;
+    S3_PROVISION)       echo "AWS infrastructure provisioning, fixed public IP, security group, or DNS record setup is not complete." ;;
+    S4_BOOTSTRAP_STACK) echo "The EC2 instance exists, but cloud-init, Docker, Caddy/TLS, or message-server has not reached healthy state." ;;
+    S5_INIT_TOKENS)     echo "The server is not yet returning fresh bootstrap credentials from /opt/p2p/bootstrap.json." ;;
+    S6_WIRE_LOCAL)      echo "The cloud service is likely up, but local direxio-connect, service credentials, or MCP snippets are not wired." ;;
+    S7_VERIFY_E2E)      echo "The deployed service failed one or more final automated health, Matrix, CORS, TURN, or API checks." ;;
+    DONE)               echo "Automated S0-S7 checks are complete." ;;
+    *)                  echo "The deployment state is incomplete or unknown." ;;
+  esac
+}
+
+phase_at_or_after_s3() {
+  case "$1" in
+    S3_PROVISION|S4_BOOTSTRAP_STACK|S5_INIT_TOKENS|S6_WIRE_LOCAL|S7_VERIFY_E2E|DONE) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+recorded_billable_resources() {
+  local iid volume pubip eip zone out=""
+  iid=$(res_get instance_id)
+  volume=$(res_get root_volume_id)
+  pubip=$(res_get public_ip)
+  eip=$(res_get eip_id)
+  zone=$(res_get route53_zone_id)
+  [ -n "$iid" ] && out="EC2 $iid"
+  if [ -n "$volume" ]; then
+    [ -n "$out" ] && out="$out, "
+    out="${out}EBS root volume $volume"
+  fi
+  if [ -n "$pubip" ]; then
+    [ -n "$out" ] && out="$out, "
+    out="${out}public IPv4 $pubip"
+  fi
+  if [ -n "$eip" ]; then
+    [ -n "$out" ] && out="$out, "
+    out="${out}Elastic IP $eip"
+  fi
+  if [ -n "$zone" ]; then
+    [ -n "$out" ] && out="$out, "
+    out="${out}Route53 hosted zone $zone"
+  fi
+  printf '%s\n' "$out"
+}
+
+status_billing_impact() {
+  local current=$1 billable
+  billable=$(recorded_billable_resources)
+  if [ -n "$billable" ]; then
+    echo "recorded AWS resources may keep billing: $billable"
+  elif phase_at_or_after_s3 "$current"; then
+    echo "S3 or later may have created billable AWS resources; inspect AWS if state is incomplete"
+  else
+    echo "no EC2, public IPv4, or EBS resource is recorded yet"
+  fi
+}
+
+status_resume_safety() {
+  local current=$1 billable
+  billable=$(recorded_billable_resources)
+  if [ -n "$billable" ] || phase_at_or_after_s3 "$current"; then
+    echo "do not reset state; fix the issue and rerun with P2P_EXISTING_STATE_ACTION=continue"
+  else
+    echo "safe to rerun the same command after the next action is complete"
+  fi
+}
+
+local_refresh_pending() {
+  [ "$(state_get agent_install_status)" = "refresh_pending" ]
+}
+
+status_local_refresh() {
+  if local_refresh_pending; then
+    echo "update/reset cleared old credentials, user confirmations, runtime checks, and bridge install proof"
+  fi
+}
+
+status_next_action() {
+  if local_refresh_pending; then
+    case "$1" in
+      S4_BOOTSTRAP_STACK|S5_INIT_TOKENS|S6_WIRE_LOCAL|S7_VERIFY_E2E|DONE)
+        echo "rerun the deployment workflow to refresh S4-S7, local credentials, MCP snippets, and runtime checks"
+        return 0
+        ;;
+    esac
+  fi
+
+  case "$1" in
+    S0_PREREQ_AWS)      echo "configure AWS CLI credentials for a non-root temporary DirexioDeployer IAM user and rerun status" ;;
+    S1_PREFLIGHT)       echo "fix AWS region, default VPC, EC2 quota, or AMI availability before creating resources" ;;
+    S2_DOMAIN)          echo "confirm the long-lived domain, DNS authority, and irreversible Matrix server_name binding" ;;
+    S3_PROVISION)       echo "inspect EC2 provisioning, Elastic IP allocation, security group creation, and DNS record setup" ;;
+    S4_BOOTSTRAP_STACK) echo "inspect cloud-init, Docker, Caddy/TLS, and message-server logs over SSH" ;;
+    S5_INIT_TOKENS)     echo "inspect /opt/p2p/bootstrap.json, init-tokens.sh, and message-server bootstrap logs" ;;
+    S6_WIRE_LOCAL)      echo "refresh local credentials, direxio-connect config, MCP snippets, and agent runtime settings without destroying cloud resources" ;;
+    S7_VERIFY_E2E)      echo "inspect the failed health, Matrix, well-known, owner.json/CORS, TURN, MCP, or runtime gate before declaring delivery" ;;
+    DONE)               echo "give the user the App domain and eight-digit initialization code, then record App initialization and agent/MCP confirmation separately" ;;
+    *)                  echo "inspect state.json and the current phase evidence before taking action" ;;
+  esac
+}
+
+status_stop_loss() {
+  local domain billable
+  domain=$(state_get domain)
+  billable=$(recorded_billable_resources)
+  if [ -z "$billable" ]; then
+    echo "no recorded cloud resources need destroy from this state"
+  else
+    echo "ask the agent to run destroy, or run:"
+    echo "  DOMAIN=${domain:-__DOMAIN__} bash $HERE/destroy.sh"
+    echo "  Purchased domains, third-party DNS records, and retained hosted zones are not automatically removed."
+  fi
+}
+
+print_recovery_summary() {
+  local current=$1 status refresh
+  status=$(phase_status "$current")
+  refresh=$(status_local_refresh)
+  echo "-- Recovery summary --"
+  echo "Where it is blocked: $current (${status:-unknown}) - $(phase_user_meaning "$current")"
+  echo "Billing impact: $(status_billing_impact "$current")"
+  echo "Resume safety: $(status_resume_safety "$current")"
+  [ -z "$refresh" ] || echo "Local refresh: $refresh"
+  echo "Next action: $(status_next_action "$current")"
+  printf "Stop-loss: "
+  status_stop_loss
+}
+
 cmd_status() {
   if [ ! -f "$STATE_JSON" ]; then
     if [ -z "${DOMAIN:-}" ] && [ -z "$P2P_WORKDIR_WAS_SET" ] && [ -z "$DIREXIO_WORKDIR_WAS_SET" ]; then
@@ -142,6 +275,8 @@ cmd_status() {
 	  echo "instance   : $(state_get instance_type)"
 	  echo "dns_ready  : $(state_get dns_ready)"
   echo "current    : $(first_unfinished_phase)"
+  local current
+  current=$(first_unfinished_phase)
   echo "-- phases --"
   local p
   for p in "${PHASES[@]}"; do
@@ -149,18 +284,21 @@ cmd_status() {
   done
   echo "-- resources --"
   jq -r '.resources | to_entries[]? | "  \(.key)=\(.value)"' "$STATE_JSON"
+  print_recovery_summary "$current"
 }
 
 # Delivery summary.
 print_delivery() {
-  local domain asurl password keyfile pubip iid region statejson envfile agent_room_id runtime install_policy install_mode install_status install_command
-  local agent_node_id agent_service_dir agent_cred cc_config cc_binary cc_agent cc_user cc_pkg
-  domain=$(state_get domain); asurl=$(state_get as_url)
+  local domain password keyfile pubip iid region statejson envfile agent_room_id runtime install_policy install_mode install_status install_command
+  local agent_node_id agent_service_id agent_service_dir agent_cred cc_config cc_binary cc_agent cc_user cc_pkg
+  local report_path runtime_summary app_gate real_chat_gate agent_runtime_gate
+  domain=$(state_get domain)
   password=$(state_get password)
   keyfile=$(res_get key_file); pubip=$(res_get public_ip)
   iid=$(res_get instance_id); region=$(state_get region); statejson="$STATE_JSON"
   envfile=$(state_get agent_env_file)
   agent_node_id=$(state_get agent_node_id)
+  agent_service_id=$(state_get agent_service_id)
   agent_service_dir=$(state_get agent_service_dir)
   agent_cred=$(state_get agent_credentials_file)
   agent_room_id=$(state_get agent_room_id)
@@ -174,27 +312,42 @@ print_delivery() {
   install_mode=$(state_get agent_install_mode)
   install_status=$(state_get agent_install_status)
   install_command=$(state_get agent_install_command)
+  runtime_summary=$(jq -r '.runtime_checks.summary.status // "not_run"' "$STATE_JSON")
+  app_gate=$(jq -r '.user_confirmations.app_initialization.status // "pending_user_confirmation"' "$STATE_JSON")
+  real_chat_gate=$(jq -r '.user_confirmations.real_chat.status // "pending_user_confirmation"' "$STATE_JSON")
+  agent_runtime_gate=$(jq -r '.user_confirmations.agent_mcp_runtime.status // "pending_runtime_confirmation"' "$STATE_JSON")
   echo
-  echo -e "\033[32m========== Deployment Complete ==========\033[0m"
-  echo "  IM URL       : ${asurl:-https://$domain}"
-  echo "  password     : $password   <- paste into the IM login form"
+  echo -e "\033[32m========== Automated Deployment Gates Passed ==========\033[0m"
+  echo "  App domain   : $domain"
+  echo "  init code    : $password   <- enter in the App initialization flow"
+  echo "  status       : server automation is green; product completion waits for user/runtime confirmation"
+  echo "  user gates   : app_initialization=$app_gate real_chat=$real_chat_gate agent_mcp_runtime=$agent_runtime_gate"
+  echo "  runtime check: ${runtime_summary:-not_run}"
   echo "  agent node   : ${agent_node_id:-default}"
+  echo "  service id   : ${agent_service_id:-not recorded}"
   echo "  service dir  : ${agent_service_dir:-not recorded}"
-  echo "  tokens       : password, access_token, and agent_token written to ${agent_cred:-~/.direxio/nodes/<service_id>/credentials.json}"
+  echo "  credentials  : init code/password field, access_token, and agent_token written to ${agent_cred:-~/.direxio/nodes/<service_id>/credentials.json}"
   echo "  agent room   : ${agent_room_id:-written to credentials.json}"
-  echo "  cc-connect   : package=${cc_pkg:-@direxio/connent} config=${cc_config:-not recorded} command=${cc_binary:-direxio-connect}"
+  echo "  cc-connect   : package=${cc_pkg:-@direxio/connent@1.3.10} config=${cc_config:-not recorded} command=${cc_binary:-direxio-connect}"
   echo "  matrix user  : ${cc_user:-created during S6}"
   echo "  agent runtime: ${runtime:-unknown}"
   echo "  install mode : policy=${install_policy:-recommend} mode=${install_mode:-cc-connect} agent=${cc_agent:-codex} status=${install_status:-recommend}"
   [ -n "$install_command" ] && echo "  install cmd  : $install_command"
-  echo "  daemon       : ${cc_binary:-direxio-connect} daemon status"
+  echo "  daemon       : ${cc_binary:-direxio-connect} daemon status --service-name ${agent_service_id:-cc-connect}"
   echo "  env vars     : DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID persisted${envfile:+ via $envfile}"
   echo "  AWS region   : $region"
   echo "  EC2          : $iid ($pubip)"
   echo "  SSH          : ssh -i $keyfile ubuntu@$pubip"
   echo "  state.json   : $statejson"
-  echo "  Destroy      : bash $HERE/destroy.sh"
-  echo "  Note         : run destroy when finished, otherwise EC2/EIP resources keep billing."
+  echo "  stop billing : ask the agent to destroy this node when finished"
+  echo "  Note         : EC2/public IPv4/EBS resources keep billing until destroy is run."
+  echo "  security     : delete or disable the temporary IAM key after deployment."
+  echo "  Product gate : S7 is green; final product completion still needs App initialization and agent/MCP runtime confirmation."
+  if report_path=$(operation_report_write new_deploy automated_gates_complete_user_confirmation_pending "$STATE_JSON" 2>/dev/null); then
+    echo "  report       : $report_path"
+  else
+    echo "  report       : not written; run bash $0 report new_deploy"
+  fi
 }
 
 ensure_region_selected() {
@@ -220,6 +373,27 @@ ensure_region_selected() {
   fi
   export AWS_DEFAULT_REGION="$region"
   return 0
+}
+
+ensure_cost_estimate() {
+  local output status total region instance_type args
+  args=(--state "$STATE_JSON" --write-state)
+  if [ -n "${INSTANCE_TYPE:-}" ]; then
+    args+=(--instance-type "$INSTANCE_TYPE")
+  fi
+
+  if output=$(bash "$HERE/pricing-estimate.sh" "${args[@]}" 2>/dev/null); then
+    status=$(printf '%s\n' "$output" | jq -r '.pricing_status // "unknown"' 2>/dev/null)
+    total=$(printf '%s\n' "$output" | jq -r '.total_monthly_usd // "unknown"' 2>/dev/null)
+    region=$(printf '%s\n' "$output" | jq -r '.region // "unknown"' 2>/dev/null)
+    instance_type=$(printf '%s\n' "$output" | jq -r '.components.ec2_instance.instance_type // "unknown"' 2>/dev/null)
+    log "Cost estimate recorded (status=${status:-unknown}, region=${region:-unknown}, instance=${instance_type:-unknown}, monthly_usd≈${total:-unknown})."
+    if [ "$status" = "fallback" ]; then
+      warn "AWS Pricing API was unavailable or incomplete; cost_estimate uses conservative fallback values."
+    fi
+  else
+    warn "Could not write AWS cost estimate. Continue only after giving the user a manual billing estimate."
+  fi
 }
 
 precheck_new_deploy_domain_env() {
@@ -353,6 +527,7 @@ cmd_run() {
   state_ensure
   ensure_production_domain_selected || return $?
   ensure_region_selected || return $?
+  ensure_cost_estimate
   log "State machine started. state.json = $STATE_JSON"
 
   while true; do
@@ -375,12 +550,537 @@ cmd_run() {
   done
 }
 
+cmd_report() {
+  local operation=${1:-new_deploy} status report_path
+  [ -f "$STATE_JSON" ] || {
+    warn "state.json not found: $STATE_JSON"
+    return 1
+  }
+  case "$operation" in
+    new_deploy) status=automated_gates_complete_user_confirmation_pending ;;
+    repair_or_verify) status=verification_report ;;
+    update) status=update_report ;;
+    reset_app_data) status=reset_app_data_report ;;
+    destroy) status=destroy_processed ;;
+    *)
+      echo "Usage: $0 report [new_deploy|repair_or_verify|update|reset_app_data|destroy]" >&2
+      return 1
+      ;;
+  esac
+  report_path=$(operation_report_write "$operation" "$status" "$STATE_JSON")
+  echo "operation report: $report_path"
+}
+
+cmd_confirm() {
+  local gate=${1:-} evidence=${DIREXIO_CONFIRM_EVIDENCE:-}
+  local runtime_summary_status runtime_probe_confirmed
+  [ -f "$STATE_JSON" ] || {
+    warn "state.json not found: $STATE_JSON"
+    return 1
+  }
+  case "$gate" in
+    app_initialization|real_chat|agent_mcp_runtime) ;;
+    *)
+      echo "Usage: $0 confirm [app_initialization|real_chat|agent_mcp_runtime]" >&2
+      return 1
+      ;;
+  esac
+  if [ -z "$evidence" ]; then
+    warn "confirm $gate requires DIREXIO_CONFIRM_EVIDENCE with a concrete user/runtime evidence note."
+    return 1
+  fi
+  if [ "${#evidence}" -lt 12 ]; then
+    warn "DIREXIO_CONFIRM_EVIDENCE is too short; provide a concrete user/runtime evidence note."
+    return 1
+  fi
+  runtime_summary_status=$(jq -r '.runtime_checks.summary.status // "not_run"' "$STATE_JSON")
+  runtime_probe_confirmed=false
+  if [ "$gate" = "agent_mcp_runtime" ]; then
+    if [ "$runtime_summary_status" != "passed" ]; then
+      warn "agent_mcp_runtime confirmation requires runtime_checks.summary.status=passed. Run: DOMAIN=<DOMAIN> bash $0 verify runtime"
+      return 1
+    fi
+    if [ "${DIREXIO_CONFIRM_RUNTIME_PROBE:-0}" != "1" ]; then
+      warn "agent_mcp_runtime confirmation requires DIREXIO_CONFIRM_RUNTIME_PROBE=1 after the selected runtime/channel probe is actually confirmed."
+      return 1
+    fi
+    runtime_probe_confirmed=true
+  fi
+  _state_write '
+    .user_confirmations[$gate] = {
+      status: "confirmed",
+      ts: $ts,
+      evidence: $evidence
+    }
+    + (if $gate == "agent_mcp_runtime" then {
+      runtime_summary_status: $runtime_summary_status,
+      runtime_probe_confirmed: ($runtime_probe_confirmed == "true")
+    } else {} end)
+  ' --arg gate "$gate" \
+    --arg ts "$(_now)" \
+    --arg evidence "$evidence" \
+    --arg runtime_summary_status "$runtime_summary_status" \
+    --arg runtime_probe_confirmed "$runtime_probe_confirmed"
+  echo "confirmed gate: $gate"
+}
+
+cmd_verify_mcp_doctor() {
+  [ -f "$STATE_JSON" ] || {
+    warn "state.json not found: $STATE_JSON"
+    return 1
+  }
+
+  local credentials mcp_cmd node_id out err report token_status
+  credentials=$(jq -r '.agent_credentials_file // .mcp_credentials_file // empty' "$STATE_JSON")
+  mcp_cmd=$(jq -r '.mcp_command // "direxio-mcp"' "$STATE_JSON")
+  node_id=$(jq -r '.agent_node_id // empty' "$STATE_JSON")
+  [ -n "$credentials" ] || {
+    warn "mcp doctor check requires agent_credentials_file or mcp_credentials_file in state.json"
+    return 1
+  }
+  [ -n "$mcp_cmd" ] || mcp_cmd=direxio-mcp
+
+  out=$(mktemp)
+  err=$(mktemp)
+  if ! DIREXIO_CREDENTIALS_FILE="$credentials" DIREXIO_AGENT_NODE_ID="$node_id" bash -lc "$mcp_cmd doctor --json" > "$out" 2> "$err"; then
+    _state_write '
+      .runtime_checks.mcp_doctor = {
+        status: "failed",
+        ts: $ts,
+        evidence: "direxio-mcp doctor failed"
+      }
+    ' --arg ts "$(_now)"
+    cat "$err" >&2
+    rm -f "$out" "$err"
+    return 1
+  fi
+  if ! jq empty "$out" >/dev/null 2>&1; then
+    _state_write '
+      .runtime_checks.mcp_doctor = {
+        status: "failed",
+        ts: $ts,
+        evidence: "direxio-mcp doctor returned non-json output"
+      }
+    ' --arg ts "$(_now)"
+    rm -f "$out" "$err"
+    return 1
+  fi
+  report=$(cat "$out")
+  token_status=$(printf '%s\n' "$report" | jq -r '
+    if (.token // "") == "redacted" then "redacted"
+    elif ((.token // "") | tostring | length) > 0 then "present_redacted"
+    else "missing"
+    end
+  ')
+  _state_write '
+    .runtime_checks.mcp_doctor = {
+      status: "passed",
+      ts: $ts,
+      evidence: "direxio-mcp doctor --json succeeded",
+      domain: ($report.domain // ""),
+      agent_room_id: ($report.agent_room_id // ""),
+      token: $token_status
+    }
+  ' --arg ts "$(_now)" --argjson report "$report" --arg token_status "$token_status"
+  rm -f "$out" "$err"
+  echo "verified runtime check: mcp_doctor"
+}
+
+cmd_verify_mcp_smoke() {
+  [ -f "$STATE_JSON" ] || {
+    warn "state.json not found: $STATE_JSON"
+    return 1
+  }
+
+  local service_url token room_id body code payload tmp url
+  service_url=$(jq -r '.as_url // empty' "$STATE_JSON")
+  if [ -z "$service_url" ]; then
+    local domain
+    domain=$(jq -r '.domain // empty' "$STATE_JSON")
+    [ -n "$domain" ] && service_url="https://$domain"
+  fi
+  token=$(jq -r '.agent_token // empty' "$STATE_JSON")
+  room_id=$(jq -r '.agent_room_id // empty' "$STATE_JSON")
+  if [ -z "$service_url" ] || [ -z "$token" ] || [ -z "$room_id" ]; then
+    warn "mcp smoke check requires as_url/domain, agent_token, and agent_room_id in state.json"
+    return 1
+  fi
+
+  body=$(mktemp)
+  payload=$(jq -cn --arg room_id "$room_id" '{action:"mcp.messages.list", params:{room_id:$room_id, limit:1}}')
+  url="${service_url%/}/_p2p/query"
+  code=$(curl -sk -o "$body" -w '%{http_code}' \
+    -X POST "$url" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" \
+    -d "$payload" 2>/dev/null)
+  if [ "$code" != "200" ] || ! jq -e '(.messages | type == "array") and (.room_id | type == "string")' "$body" >/dev/null 2>&1; then
+    _state_write '
+      .runtime_checks.mcp_smoke = {
+        status: "failed",
+        ts: $ts,
+        action: "mcp.messages.list",
+        evidence: $evidence
+      }
+    ' --arg ts "$(_now)" --arg evidence "mcp.messages.list returned HTTP $code or invalid response"
+    rm -f "$body"
+    return 1
+  fi
+
+  tmp=$(mktemp)
+  jq -n --slurpfile response "$body" \
+    --arg ts "$(_now)" \
+    --arg room_id "$room_id" \
+    '{
+      status: "passed",
+      ts: $ts,
+      action: "mcp.messages.list",
+      room_id: $room_id,
+      response_room_id: ($response[0].room_id // ""),
+      response_messages_type: (($response[0].messages // null) | type),
+      evidence: "read-only backend smoke check succeeded"
+    }' > "$tmp"
+  _state_write '.runtime_checks.mcp_smoke = $check[0]' --slurpfile check "$tmp"
+  rm -f "$body" "$tmp"
+  echo "verified runtime check: mcp_smoke"
+}
+
+cmd_verify_mcp_tools() {
+  [ -f "$STATE_JSON" ] || {
+    warn "state.json not found: $STATE_JSON"
+    return 1
+  }
+
+  local credentials mcp_cmd node_id node_cmd node_script out err report
+  credentials=$(jq -r '.agent_credentials_file // .mcp_credentials_file // empty' "$STATE_JSON")
+  mcp_cmd=$(jq -r '.mcp_command // "direxio-mcp"' "$STATE_JSON")
+  node_id=$(jq -r '.agent_node_id // empty' "$STATE_JSON")
+  [ -n "$credentials" ] || {
+    warn "mcp tools check requires agent_credentials_file or mcp_credentials_file in state.json"
+    return 1
+  }
+  [ -n "$mcp_cmd" ] || mcp_cmd=direxio-mcp
+  node_cmd=$(_node_command)
+  [ -n "$node_cmd" ] || {
+    warn "mcp tools check requires node or node.exe to run scripts/mcp-tools-list.mjs"
+    return 1
+  }
+  node_script=$(_node_script_path "$node_cmd" "$HERE/mcp-tools-list.mjs")
+
+  out=$(mktemp)
+  err=$(mktemp)
+  if ! DIREXIO_CREDENTIALS_FILE="$credentials" DIREXIO_AGENT_NODE_ID="$node_id" "$node_cmd" "$node_script" "$mcp_cmd" > "$out" 2> "$err"; then
+    _state_write '
+      .runtime_checks.mcp_tools = {
+        status: "failed",
+        ts: $ts,
+        evidence: "MCP tools/list failed"
+      }
+    ' --arg ts "$(_now)"
+    cat "$err" >&2
+    rm -f "$out" "$err"
+    return 1
+  fi
+  if ! jq -e '(.tools | type == "array") and (.tool_count | type == "number")' "$out" >/dev/null 2>&1; then
+    _state_write '
+      .runtime_checks.mcp_tools = {
+        status: "failed",
+        ts: $ts,
+        evidence: "MCP tools/list returned invalid output"
+      }
+    ' --arg ts "$(_now)"
+    rm -f "$out" "$err"
+    return 1
+  fi
+  report=$(cat "$out")
+  _state_write '
+    .runtime_checks.mcp_tools = {
+      status: "passed",
+      ts: $ts,
+      evidence: "MCP tools/list succeeded",
+      tool_count: ($report.tool_count // 0),
+      tools: ($report.tools // [])
+    }
+  ' --arg ts "$(_now)" --argjson report "$report"
+  rm -f "$out" "$err"
+  echo "verified runtime check: mcp_tools"
+}
+
+_node_command() {
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return 0
+  fi
+  if command -v node.exe >/dev/null 2>&1; then
+    command -v node.exe
+    return 0
+  fi
+  return 1
+}
+
+_node_script_path() {
+  local node_cmd=$1 script=$2
+  case "$node_cmd" in
+    *.exe|*.EXE)
+      if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$script"
+        return 0
+      fi
+      case "$script" in
+        /mnt/[A-Za-z]/*)
+          local drive rest
+          drive=${script#/mnt/}
+          drive=${drive%%/*}
+          rest=${script#/mnt/$drive/}
+          printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
+          return 0
+          ;;
+        /[A-Za-z]/*)
+          local drive rest
+          drive=${script#/}
+          drive=${drive%%/*}
+          rest=${script#/$drive/}
+          printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
+          return 0
+          ;;
+      esac
+      ;;
+  esac
+  printf '%s\n' "$script"
+}
+
+path_dirname() {
+  local path=$1
+  path=${path%/}
+  case "$path" in
+    */*) printf '%s\n' "${path%/*}" ;;
+    *) printf '.\n' ;;
+  esac
+}
+
+normalize_check_path() {
+  local path=$1
+  path=$(printf '%s' "$path" | sed 's#\\#/#g')
+  while [ "${#path}" -gt 1 ] && [ "${path%/}" != "$path" ]; do
+    case "$path" in [A-Za-z]:/) break ;; esac
+    path=${path%/}
+  done
+  printf '%s\n' "$path"
+}
+
+paths_match_for_check() {
+  local left right
+  left=$(normalize_check_path "$1")
+  right=$(normalize_check_path "$2")
+  case "$left:$right" in
+    [A-Za-z]:/*:[A-Za-z]:/*)
+      [ "$(printf '%s' "$left" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$right" | tr '[:upper:]' '[:lower:]')" ]
+      ;;
+    *)
+      [ "$left" = "$right" ]
+      ;;
+  esac
+}
+
+cmd_verify_connect_daemon() {
+  [ -f "$STATE_JSON" ] || {
+    warn "state.json not found: $STATE_JSON"
+    return 1
+  }
+
+  local service_name service_dir config runtime_dir binary target_work_dir status_out daemon_status work_dir evidence
+  service_name=$(jq -r '.agent_service_id // .domain // empty' "$STATE_JSON")
+  service_dir=$(jq -r '.agent_service_dir // empty' "$STATE_JSON")
+  config=$(jq -r '.cc_connect_config // empty' "$STATE_JSON")
+  runtime_dir=$(jq -r '.cc_connect_runtime_dir // empty' "$STATE_JSON")
+  binary=$(jq -r '.cc_connect_binary // "direxio-connect"' "$STATE_JSON")
+  [ -n "$service_name" ] || service_name=cc-connect
+  [ -n "$binary" ] || binary=direxio-connect
+
+  if [ -n "$config" ]; then
+    target_work_dir=$(path_dirname "$config")
+  elif [ -n "$runtime_dir" ]; then
+    target_work_dir="$runtime_dir"
+  elif [ -n "$service_dir" ]; then
+    target_work_dir="$service_dir/cc-connect"
+  else
+    warn "connect daemon check requires cc_connect_config, cc_connect_runtime_dir, or agent_service_dir in state.json"
+    return 1
+  fi
+
+  case "$binary" in
+    */*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
+    *)
+      command -v "$binary" >/dev/null 2>&1 || {
+        _state_write '
+          .runtime_checks.connect_daemon = {
+            status: "failed",
+            ts: $ts,
+            evidence: "direxio-connect binary not found"
+          }
+        ' --arg ts "$(_now)"
+        warn "connect daemon check could not find binary: $binary"
+        return 1
+      }
+      ;;
+  esac
+
+  status_out=$("$binary" daemon status --service-name "$service_name" 2>/dev/null) || {
+    _state_write '
+      .runtime_checks.connect_daemon = {
+        status: "failed",
+        ts: $ts,
+        service_name: $service_name,
+        evidence: "direxio-connect daemon status failed"
+      }
+    ' --arg ts "$(_now)" --arg service_name "$service_name"
+    return 1
+  }
+  daemon_status=$(printf '%s\n' "$status_out" | sed -nE 's/^[[:space:]]*Status:[[:space:]]*//p' | head -n 1)
+  work_dir=$(printf '%s\n' "$status_out" | sed -nE 's/^[[:space:]]*WorkDir:[[:space:]]*//p' | head -n 1)
+
+  if [ "$daemon_status" != "Running" ]; then
+    evidence="direxio-connect daemon is not Running"
+  elif [ -z "$work_dir" ]; then
+    evidence="direxio-connect daemon status has no WorkDir"
+  elif ! paths_match_for_check "$target_work_dir" "$work_dir"; then
+    evidence="direxio-connect daemon belongs to a different service"
+  else
+    _state_write '
+      .runtime_checks.connect_daemon = {
+        status: "passed",
+        ts: $ts,
+        evidence: "direxio-connect daemon is running for this service",
+        service_name: $service_name,
+        daemon_status: $daemon_status,
+        work_dir: $work_dir,
+        expected_work_dir: $target_work_dir
+      }
+    ' --arg ts "$(_now)" \
+      --arg service_name "$service_name" \
+      --arg daemon_status "$daemon_status" \
+      --arg work_dir "$(normalize_check_path "$work_dir")" \
+      --arg target_work_dir "$(normalize_check_path "$target_work_dir")"
+    echo "verified runtime check: connect_daemon"
+    return 0
+  fi
+
+  _state_write '
+    .runtime_checks.connect_daemon = {
+      status: "failed",
+      ts: $ts,
+      evidence: $evidence,
+      service_name: $service_name,
+      daemon_status: $daemon_status,
+      work_dir: $work_dir,
+      expected_work_dir: $target_work_dir
+    }
+  ' --arg ts "$(_now)" \
+    --arg evidence "$evidence" \
+    --arg service_name "$service_name" \
+    --arg daemon_status "$daemon_status" \
+    --arg work_dir "$(normalize_check_path "$work_dir")" \
+    --arg target_work_dir "$(normalize_check_path "$target_work_dir")"
+  warn "$evidence"
+  return 1
+}
+
+runtime_check_status() {
+  local check=$1
+  jq -r --arg check "$check" '.runtime_checks[$check].status // "not_run"' "$STATE_JSON"
+}
+
+cmd_verify_runtime() {
+  [ -f "$STATE_JSON" ] || {
+    warn "state.json not found: $STATE_JSON"
+    return 1
+  }
+
+  local rc=0 failed_count=0 connect_status doctor_status tools_status smoke_status status
+
+  cmd_verify_connect_daemon >/dev/null || rc=1
+  cmd_verify_mcp_doctor >/dev/null || rc=1
+  cmd_verify_mcp_tools >/dev/null || rc=1
+  cmd_verify_mcp_smoke >/dev/null || rc=1
+
+  connect_status=$(runtime_check_status connect_daemon)
+  doctor_status=$(runtime_check_status mcp_doctor)
+  tools_status=$(runtime_check_status mcp_tools)
+  smoke_status=$(runtime_check_status mcp_smoke)
+
+  for status in "$connect_status" "$doctor_status" "$tools_status" "$smoke_status"; do
+    [ "$status" = "passed" ] || failed_count=$((failed_count + 1))
+  done
+
+  if [ "$failed_count" -eq 0 ]; then
+    _state_write '
+      .runtime_checks.summary = {
+        status: "passed",
+        ts: $ts,
+        failed_count: 0,
+        evidence: "all runtime checks passed",
+        checks: {
+          connect_daemon: $connect_status,
+          mcp_doctor: $doctor_status,
+          mcp_tools: $tools_status,
+          mcp_smoke: $smoke_status
+        }
+      }
+    ' --arg ts "$(_now)" \
+      --arg connect_status "$connect_status" \
+      --arg doctor_status "$doctor_status" \
+      --arg tools_status "$tools_status" \
+      --arg smoke_status "$smoke_status"
+    echo "verified runtime checks: passed"
+    return 0
+  fi
+
+  _state_write '
+    .runtime_checks.summary = {
+      status: "failed",
+      ts: $ts,
+      failed_count: ($failed_count | tonumber),
+      evidence: "one or more runtime checks failed",
+      checks: {
+        connect_daemon: $connect_status,
+        mcp_doctor: $doctor_status,
+        mcp_tools: $tools_status,
+        mcp_smoke: $smoke_status
+      }
+    }
+  ' --arg ts "$(_now)" \
+    --arg failed_count "$failed_count" \
+    --arg connect_status "$connect_status" \
+    --arg doctor_status "$doctor_status" \
+    --arg tools_status "$tools_status" \
+    --arg smoke_status "$smoke_status"
+  warn "runtime checks failed: $failed_count"
+  return "${rc:-1}"
+}
+
+cmd_verify() {
+  case "${1:-}" in
+    connect_daemon) cmd_verify_connect_daemon ;;
+    mcp_doctor) cmd_verify_mcp_doctor ;;
+    mcp_smoke) cmd_verify_mcp_smoke ;;
+    mcp_tools) cmd_verify_mcp_tools ;;
+    runtime) cmd_verify_runtime ;;
+    *)
+      echo "Usage: $0 verify [connect_daemon|mcp_doctor|mcp_smoke|mcp_tools|runtime]" >&2
+      return 1
+      ;;
+  esac
+}
+
 # Entry point.
 case "${1:-run}" in
   run)    cmd_run ;;
   status) cmd_status ;;
+  report) shift; cmd_report "${1:-new_deploy}" ;;
+  confirm) shift; cmd_confirm "${1:-}" ;;
+  verify) shift; cmd_verify "${1:-}" ;;
   reset)
     [ -f "$STATE_JSON" ] && { mv "$STATE_JSON" "$STATE_JSON.reset-$(date -u +%Y%m%d%H%M%S)"; warn "Archived old state.json."; }
     warn "Warning: after reset, destroy no longer has state data. Any remaining AWS resources must be removed manually." ;;
-  *) echo "Usage: $0 [run|status|reset]"; exit 1 ;;
+  *) echo "Usage: $0 [run|status|report|confirm|verify|reset]"; exit 1 ;;
 esac

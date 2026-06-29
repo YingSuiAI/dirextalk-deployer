@@ -1,7 +1,7 @@
 # VoIP / TURN relay 部署方案(已落地)
 
 > 来源:飞书《20260603 - VoIP 通话连接缺口》。**已按决策实现**:方案 A 自建 coturn、第一版仅明文 `turn:3478`(udp+tcp,不上 TLS)、UDP relay 收窄 `49160-49200`。代码见 PR `feat/voip-turn-coturn`。
-> ⚠️ 验收唯一硬标准:真机互拨一通,WebRTC internals 看到 **relay** ICE candidate(S7 的 turnServer 非空只是必要条件)。
+> ⚠️ VoIP 专项验收的硬标准:真机互拨一通,WebRTC internals 看到 **relay** ICE candidate(S7 的 turnServer 非空只是必要条件)。基础部署验收只要求 S7 `turnServer` 自动检测通过,不要求用户每次真实打电话。
 >
 > 缺口结论:Matrix 通话信令(`m.call.*`)已互通,但 `/_matrix/client/v3/voip/turnServer` 返回 `{}`,
 > ICE 只有 host/srflx 没有 relay → 跨 NAT/防火墙通话必失败。**纯后端缺口,非前端。**
@@ -149,6 +149,6 @@ echo "$turn" | jq -e '.uris and (.uris|length>0) and (.uris[]|test("^turns?:")) 
 
 1. 方案 A 已落地到部署 skill,第一版只跑明文 `turn:3478`(udp+tcp),不上 `turns:5349`。
 2. 自动验收已进入 S7:能防止重部署后 `turnServer` 再次变成 `{}`。
-3. 真正的媒体链路仍需 Alice/Bob 真机互拨,并在 WebRTC internals 看到 `relay` ICE candidate;S7 非空只是必要条件。
+3. 基础部署验收只阻塞在 S7 `turnServer` 非空/有效;真正的媒体链路属于 VoIP 专项验收,仍需 Alice/Bob 真机互拨,并在 WebRTC internals 看到 `relay` ICE candidate。
 
 > agent 项目:**这件事无需改动**(已核实它与 TURN/通话无关)。

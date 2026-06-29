@@ -30,8 +30,8 @@ bash -lc 'echo ok; command -v aws; command -v jq; command -v ssh; command -v scp
 
 | Mode | Meaning | DNS behavior |
 |---|---|---|
-| `user` | User owns DNS outside ops automation | S3 emits the EIP and waits until the domain A record resolves to it |
-| `route53` | Domain is hosted in Route53 | S3 upserts the A record and waits for DNS to resolve |
+| `route53` | User authorizes AWS Route53 automation | S3 reuses or creates the hosted zone, records NS, upserts the A record, and waits for DNS to resolve |
+| `user` | Fallback when no DNS provider automation is available | S3 emits the EIP and waits until the domain A record resolves to it |
 
 ## Minimal Command
 
@@ -48,24 +48,28 @@ bash scripts/orchestrate.sh
 
 ## Token Initialization
 
-S5 reads `/opt/p2p/bootstrap.json` from the instance. Current message-server builds initialize on startup and write password plus owner, Matrix, and agent tokens.
+S5 reads `/opt/p2p/bootstrap.json` from the instance. Current message-server builds initialize on startup and write the backend `password` field plus owner, Matrix, and agent tokens. User-facing delivery should call `password` the eight-digit app initialization code.
 
 ## Delivery
 
 When all phases complete, report:
 
-- IM URL
-- `password`
+- App domain
+- eight-digit app initialization code, sourced from the backend `password` field
 - `access_token`, `agent_token`, and real `agent_room_id` in local credentials
 - local node credential file status
 - persisted `DIREXIO_DOMAIN`, `DIREXIO_AGENT_TOKEN`, `DIREXIO_AGENT_ROOM_ID`, `DIREXIO_AGENT_NODE_ID`
 - `cc_connect_config`, `cc_connect_matrix_user`, `cc_connect_matrix_device`, and `cc_connect_matrix_homeserver`
 - install policy/mode/status from `DIREXIO_AGENT_INSTALL` and `DIREXIO_AGENT_INSTALL_MODE`
-- manual command: `npm install -g @direxio/connent && direxio-connect daemon install --config <cc_connect_config> --force`
+- manual command: `npm install -g @direxio/connent@1.3.10 && direxio-connect daemon install --config <cc_connect_config> --service-name <service_id> --force`
 - region, instance ID, public IP, and `state.json` path
 - SSH command
-- destroy command
+- stop-billing guidance: ask the agent to destroy this node when finished
+- which gates are automated and which still need user confirmation, because S7 green is not the final product-complete state
 
-After delivery, verify the local bridge by checking `direxio-connect daemon status` when installed, or by running the recorded `agent_install_command` if the policy was `recommend`.
+After delivery, verify the local bridge by checking `direxio-connect daemon status --service-name <service_id>` when installed, or by running the recorded `agent_install_command` if the policy was `recommend`.
 
-Destroying AWS resources does not remove DNS records or registered domains.
+Destroying AWS resources removes deployer-created Route53 A records and
+attempts to delete hosted zones that state marks as deployer-created. It does
+not remove registered domains, third-party DNS records, or user-owned hosted
+zones.

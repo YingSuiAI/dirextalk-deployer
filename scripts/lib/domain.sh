@@ -78,6 +78,15 @@ domain_authoritative_servers() {
     " 2>/dev/null && return 0
   fi
 
+  if command -v dig >/dev/null 2>&1; then
+    IFS=. read -r -a labels <<< "$domain"
+    for ((i=0; i<${#labels[@]}-1; i++)); do
+      zone=$(IFS=.; echo "${labels[*]:$i}")
+      servers=$(dig +short NS "$zone" 2>/dev/null | sed 's/\.$//' | sed '/^$/d')
+      [ -n "$servers" ] && { printf '%s\n' "$servers"; return 0; }
+    done
+  fi
+
   if command -v nslookup >/dev/null 2>&1; then
     IFS=. read -r -a labels <<< "$domain"
     for ((i=0; i<${#labels[@]}-1; i++)); do
@@ -90,9 +99,51 @@ domain_authoritative_servers() {
   return 1
 }
 
+domain_authoritative_resolves_to_ip() {
+  local domain=$1 ip=$2 server found=0
+  [ -n "$domain" ] && [ -n "$ip" ] || return 2
+
+  while IFS= read -r server; do
+    server=${server%$'\r'}
+    server=${server%.}
+    [ -n "$server" ] || continue
+    found=1
+
+    if command -v dig >/dev/null 2>&1; then
+      dig +short "@$server" A "$domain" 2>/dev/null | grep -qFx "$ip" && return 0
+    fi
+
+    if command -v nslookup >/dev/null 2>&1; then
+      nslookup "$domain" "$server" 2>/dev/null | awk -v want="$ip" '
+        /^Name:/ { in_answer = 1; next }
+        in_answer && /^Address:[[:space:]]*/ {
+          addr = $2
+          sub(/#.*$/, "", addr)
+          if (addr == want) found = 1
+        }
+        END { exit(found ? 0 : 1) }
+      ' && return 0
+    fi
+
+    if command -v powershell.exe >/dev/null 2>&1; then
+      powershell.exe -NoProfile -Command "\$r = Resolve-DnsName -Name '$domain' -Type A -Server '$server' -ErrorAction SilentlyContinue | Where-Object { \$_.IPAddress -eq '$ip' }; if (\$r) { exit 0 } else { exit 1 }" >/dev/null 2>&1 && return 0
+    fi
+  done < <(domain_authoritative_servers "$domain")
+
+  [ "$found" -eq 1 ] && return 1
+  return 2
+}
+
 domain_resolves_to_ip() {
-  local domain=$1 ip=$2
+  local domain=$1 ip=$2 auth_rc
   [ -n "$domain" ] && [ -n "$ip" ] || return 1
+
+  domain_authoritative_resolves_to_ip "$domain" "$ip"
+  auth_rc=$?
+  case "$auth_rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+  esac
 
   if command -v dig >/dev/null 2>&1; then
     dig +short A "$domain" 2>/dev/null | grep -qFx "$ip" && return 0

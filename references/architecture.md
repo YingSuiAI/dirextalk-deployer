@@ -34,7 +34,7 @@ coturn         -> TURN 3478 + 49160-49200/udp
 
 `/opt/p2p/bootstrap.json` 会包含:
 
-- `password`: 前端 IM 登录密码。
+- `password`: 后端字段名；对用户展示时是八位 App 初始化码。
 - `access_token`: 当前用户的统一 bearer token，可用于 Matrix `/_matrix/client/*` 和需要用户身份的 P2P 调用。
 - `agent_token`: 本地服务凭据中的 agent bearer token；`direxio-connect` 对话桥接使用 S6 创建的 `@agent:<server>` Matrix session。
 - `agent_room_id`: 真实 Matrix 房间 ID。部署脚本拒绝旧式 `!agent:<domain>` 伪房间。

@@ -83,7 +83,17 @@ If distro packages are too old or missing, ask before using the official AWS CLI
 
 ## Credentials
 
-Prefer a dedicated IAM user or role:
+Prefer a temporary non-root `DirexioDeployer` IAM user or role. If the user
+provides an AWS access-key CSV, import it through the repository helper so root
+identities are blocked and command output stays redacted:
+
+```bash
+bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv direxio-deployer <region>
+export AWS_PROFILE=direxio-deployer
+bash scripts/aws-credentials.sh verify direxio-deployer
+```
+
+Existing profiles can still be used when they are non-root:
 
 ```bash
 aws configure --profile p2p-matrix
@@ -92,4 +102,4 @@ export AWS_DEFAULT_REGION=us-east-1
 aws sts get-caller-identity
 ```
 
-If the user provides a CSV access key, read it only into process environment variables. Never print secrets or commit them.
+Never print secrets or commit them.

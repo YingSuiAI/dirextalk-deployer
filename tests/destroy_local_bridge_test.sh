@@ -19,7 +19,13 @@ printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 
 case "${1:-} ${2:-}" in
-  "sts get-caller-identity") exit 0 ;;
+  "sts get-caller-identity")
+    case "$*" in
+      *"--query Arn"*) printf 'arn:aws:iam::123456789012:user/DirexioDeployer-Test\n' ;;
+      *"--query Account"*) printf '123456789012\n' ;;
+      *) printf '{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/DirexioDeployer-Test"}\n' ;;
+    esac
+    ;;
   "ec2 terminate-instances") exit 0 ;;
   "ec2 wait") exit 0 ;;
   "ec2 release-address") exit 0 ;;
@@ -37,6 +43,8 @@ printf 'direxio-connect' >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "status" ]; then
+  [ "${3:-}" = "--service-name" ]
+  [ -n "${4:-}" ]
   cat <<STATUS
 cc-connect daemon status
 
@@ -62,6 +70,7 @@ write_state() {
       domain: $domain,
       as_url: ("https://" + $domain),
       agent_service_dir: $service_dir,
+      agent_service_id: $domain,
       resources: {
         instance_id: "i-test",
         eip_id: "eipalloc-test",
@@ -83,7 +92,13 @@ current_calls="$tmp/current.calls"
 write_state "$current_state" "a5.direxio.ai" "$current_service"
 run_destroy "$current_state" "$current_calls" "$current_service/cc-connect"
 
-grep -q '^direxio-connect daemon stop$' "$current_calls" || {
+grep -q '^direxio-connect daemon status --service-name a5.direxio.ai$' "$current_calls" || {
+  echo "destroy should query the current named daemon status" >&2
+  cat "$current_calls" >&2
+  exit 1
+}
+
+grep -q '^direxio-connect daemon stop --service-name a5.direxio.ai$' "$current_calls" || {
   echo "destroy should stop the daemon when daemon status WorkDir matches the current service cc-connect dir" >&2
   cat "$current_calls" >&2
   exit 1
@@ -102,7 +117,13 @@ mkdir -p "$active_other_service/cc-connect"
 write_state "$other_state" "b5.direxio.ai" "$other_service"
 run_destroy "$other_state" "$other_calls" "$active_other_service/cc-connect"
 
-if grep -q '^direxio-connect daemon stop$' "$other_calls"; then
+grep -q '^direxio-connect daemon status --service-name b5.direxio.ai$' "$other_calls" || {
+  echo "destroy should query the named daemon for the service being destroyed" >&2
+  cat "$other_calls" >&2
+  exit 1
+}
+
+if grep -q '^direxio-connect daemon stop' "$other_calls"; then
   echo "destroy must not stop a daemon whose status WorkDir belongs to a different service" >&2
   cat "$other_calls" >&2
   exit 1

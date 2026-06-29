@@ -75,9 +75,9 @@ reuse of an old deployment state.
 
 ## Credential Safety
 
-Never prefer root access keys for deployment. If a root key was used to unblock a
-deployment, delete or disable it after the deployment succeeds and replace it
-with a dedicated IAM user/role based on `references/iam-policy.json`.
+Never use root access keys for deployment. If the active AWS CLI identity is
+root, stop before mutating AWS resources and replace it with a temporary
+`DirexioDeployer` IAM user or a dedicated IAM role.
 
 Do not store AWS AK/SK in skill files, docs, or committed repo files. Treat
 `state.json`, `outputs.json`, and `~/.direxio/nodes/<service_id>/credentials.json` as local
@@ -88,31 +88,26 @@ secrets because they contain the portal/agent token after S5.
 Symptom:
 
 - User chose `DOMAIN_MODE=route53` but the domain is registered at Alibaba Cloud / GoDaddy / Cloudflare (not AWS Route53 registrar).
-- `_find_route53_zone()` returns empty → S3 fails with "Route53 hosted zone not found".
-- The script does NOT create the hosted zone — it only looks up existing ones.
+- S3 creates or reuses a Route53 hosted zone and upserts the A record, but public
+  DNS still does not resolve to the new IP.
 
 Cause:
 
-The `_find_route53_zone()` function in `scripts/phases/s3_provision.sh` calls
-`aws route53 list-hosted-zones` and searches for a matching name. It never
-calls `create-hosted-zone`. When the domain administrator is a third party, no
-zone exists yet.
+S3 can create the Route53 hosted zone, but Route53 does not become
+authoritative until the current registrar delegates the zone's NS records. When
+the domain administrator is a third party, the user or a provider-specific DNS
+connector must update NS delegation outside AWS.
 
-Fix procedure (must happen BEFORE `scripts/orchestrate.sh`):
+Fix procedure:
 
-1. Create the Route53 hosted zone:
+1. Read the created or reused zone details from `state.json`:
    ```bash
-   aws route53 create-hosted-zone --name <DOMAIN> \
-     --caller-reference "direxio-deploy-$(date -u +%Y%m%d%H%M%S)"
+   jq '.resources | {route53_zone_id, route53_zone_name, route53_name_servers}' ~/.direxio/nodes/<service_id>/state.json
    ```
-2. Extract the 4 NS servers from the response.
-3. Ask the user to update their domain's NS records at their current registrar
-   (e.g. Alibaba Cloud DNS console → "修改DNS" → paste the 4 NS nameservers).
-4. Wait for the user to confirm they made the change.
-5. **Only then** run `scripts/orchestrate.sh` with `DOMAIN_MODE=route53`.
-
-Do NOT run orchestrate.sh before the NS records are submitted. The Route53
-hosted zone must exist before S3_PROVISION, or S3 fails immediately.
+2. Delegate those NS servers at the current registrar, or use the provider API
+   if credentials are available.
+3. Wait for authoritative NS and A-record propagation.
+4. Re-run `scripts/orchestrate.sh` with `P2P_EXISTING_STATE_ACTION=continue`.
 
 DNS propagation of new NS records can take minutes to hours. After the user
 confirms the change, verify with `nslookup -type=NS <DOMAIN>` or
@@ -121,11 +116,11 @@ handle the A-record wait loop.
 
 Always report:
 
-- IM URL.
+- App domain and eight-digit app initialization code, with the code sourced from the backend `password` field.
 - Portal token or where it was written.
 - `~/.direxio/nodes/<service_id>/credentials.json` status and profile shape.
 - AWS region, EC2 instance ID, public IP, security group, state path, SSH command.
-- Destroy command and billing reminder.
+- Stop-billing guidance: ask the agent to destroy this node when finished; AWS resources keep billing until teardown completes.
 - Any manual DNS record the user owns outside Route53.
 
 ## Let's Encrypt Certificate Rate Limits
@@ -185,5 +180,9 @@ Fix:
 
 Prevention:
 
-- Before deployment, check for existing zones. If one exists and its NS records match current DNS delegation, no new zone is needed — `_find_route53_zone()` in S3 will find it.
-- Only create a new hosted zone when deploying to a domain with no existing Route53 zone or when migrating DNS delegation for the first time.
+- Before deployment, check for existing zones. If one exists and its NS records
+  match current DNS delegation, no new zone is needed; S3 will reuse it.
+- Let S3 create a new hosted zone only when deploying a domain with no matching
+  Route53 zone or when migrating DNS delegation for the first time.
+- Destroy attempts to delete hosted zones recorded as created by the deployer;
+  user-owned or pre-existing zones are retained.

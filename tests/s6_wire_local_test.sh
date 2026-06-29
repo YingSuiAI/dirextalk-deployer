@@ -152,6 +152,8 @@ fi
 [ "$(_agent_global_skill_install_path claude-code)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/direxio-deployer' ]
 [ "$(_agent_global_skill_install_path claudecode)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/direxio-deployer' ]
 [ "$(_agent_global_skill_install_path generic)" = '$HOME/.agent/skills/direxio-deployer' ]
+[ "$(_agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
+[ "$(DIREXIO_AGENT_WORKSPACE="$tmp/custom-workspace" _agent_workspace "$tmp/service")" = "$tmp/custom-workspace" ]
 
 install_command=$(_agent_install_command "direxio-connect" "$HOME/.direxio/nodes/im.example.test/cc-connect/config.toml" "im.example.test")
 case "$install_command" in

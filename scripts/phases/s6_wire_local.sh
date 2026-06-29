@@ -465,6 +465,19 @@ _cc_connect_runtime_dir() {
   printf '%s/cc-connect\n' "$service_dir"
 }
 
+_agent_workspace() {
+  local service_dir=$1
+  if [ -n "${DIREXIO_AGENT_WORKSPACE:-}" ]; then
+    printf '%s\n' "$DIREXIO_AGENT_WORKSPACE"
+    return 0
+  fi
+  if [ -n "${DIREXIO_AGENT_WORKSPACE_WINDOWS:-}" ]; then
+    printf '%s\n' "$DIREXIO_AGENT_WORKSPACE_WINDOWS"
+    return 0
+  fi
+  printf '%s/workspace\n' "$service_dir"
+}
+
 _cc_connect_config_path() {
   local service_dir=$1
   printf '%s/config.toml\n' "$(_cc_connect_runtime_dir "$service_dir")"
@@ -1222,7 +1235,7 @@ run_phase() {
   service_dir=$(_direxio_service_dir "${asurl:-$domain}")
   node_cred="$service_dir/credentials.json"
   envfile="$service_dir/env"
-  workspace=${DIREXIO_AGENT_WORKSPACE:-${DIREXIO_AGENT_WORKSPACE_WINDOWS:-${PWD:-$HOME}}}
+  workspace=$(_agent_workspace "$service_dir")
   admin_from="@owner:$domain"
   cc_runtime_dir=$(_cc_connect_runtime_dir "$service_dir")
   cc_config=$(_cc_connect_config_path "$service_dir")
@@ -1262,6 +1275,7 @@ run_phase() {
     fail "failed to persist Direxio cc-connect env vars."
   fi
 
+  mkdir -p "$workspace"
   mkdir -p "$cc_runtime_dir"
   if ! _create_cc_connect_matrix_session "$asurl" "$access_token" "DIREXIO_CC_CONNECT_${node_id}" "$cc_session"; then
     phase_set S6_WIRE_LOCAL failed "agent Matrix session creation failed"

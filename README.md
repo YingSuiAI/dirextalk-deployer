@@ -141,7 +141,8 @@ cc-connect/config.toml
 cc-connect/data/
 cc-connect/matrix-session.json
 mcp/codex.toml
-mcp/openclaw.mcp.json
+mcp/openclaw.md
+mcp/openclaw-server.json
 mcp/hermes.mcp.json
 mcp/mcp-servers.json
 ```
@@ -161,7 +162,7 @@ npm install -g direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
 ```
 
-Use `mcp/codex.toml` for Codex. Use `mcp/openclaw.mcp.json` or `mcp/hermes.mcp.json` as JSON snippets for OpenClaw and Hermes.
+Use `mcp/codex.toml` for Codex and `mcp/hermes.mcp.json` for Hermes. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
 
 Voice input is supported when an STT provider key is available. Set `DIREXIO_SPEECH_API_KEY` or provider-specific variables such as `DIREXIO_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `cc-connect/config.toml`.
 

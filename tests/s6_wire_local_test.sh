@@ -179,13 +179,17 @@ mcp_service_dir="$tmp/mcp-service"
 mcp_credentials="$mcp_service_dir/credentials.json"
 mkdir -p "$mcp_service_dir"
 : > "$mcp_credentials"
+mkdir -p "$mcp_service_dir/mcp"
+: > "$mcp_service_dir/mcp/openclaw.mcp.json"
 expected_mcp_credentials="$mcp_credentials"
 if command -v cygpath >/dev/null 2>&1; then
   expected_mcp_credentials=$(cygpath -m "$expected_mcp_credentials")
 fi
 _write_mcp_config_artifacts "im.example.test" "$mcp_service_dir" "$mcp_credentials" "codex-im-example"
 [ -s "$mcp_service_dir/mcp/codex.toml" ]
-[ -s "$mcp_service_dir/mcp/openclaw.mcp.json" ]
+[ -s "$mcp_service_dir/mcp/openclaw.md" ]
+[ -s "$mcp_service_dir/mcp/openclaw-server.json" ]
+[ ! -e "$mcp_service_dir/mcp/openclaw.mcp.json" ]
 [ -s "$mcp_service_dir/mcp/hermes.mcp.json" ]
 [ -s "$mcp_service_dir/mcp/mcp-servers.json" ]
 [ -s "$mcp_service_dir/mcp/env" ]
@@ -193,7 +197,15 @@ grep -q '\[mcp_servers."direxio-im_example_test"\]' "$mcp_service_dir/mcp/codex.
 grep -q 'command = "direxio-mcp"' "$mcp_service_dir/mcp/codex.toml"
 grep -q 'DIREXIO_CREDENTIALS_FILE' "$mcp_service_dir/mcp/codex.toml"
 grep -q "$mcp_credentials" "$mcp_service_dir/mcp/codex.toml"
-jq -e '.mcpServers["direxio-im_example_test"].command == "direxio-mcp"' "$mcp_service_dir/mcp/openclaw.mcp.json" >/dev/null
+jq -e '.command == "direxio-mcp"' "$mcp_service_dir/mcp/openclaw-server.json" >/dev/null
+jq -e '.env.DIREXIO_CREDENTIALS_FILE == "'"$expected_mcp_credentials"'"' "$mcp_service_dir/mcp/openclaw-server.json" >/dev/null
+if jq -e 'has("mcp") or has("mcpServers")' "$mcp_service_dir/mcp/openclaw-server.json" >/dev/null; then
+  echo "OpenClaw server object must not be a root openclaw.json or mcpServers snippet" >&2
+  exit 1
+fi
+grep -q 'openclaw mcp set direxio-im_example_test' "$mcp_service_dir/mcp/openclaw.md"
+grep -q 'Do not paste' "$mcp_service_dir/mcp/openclaw.md"
+grep -q 'openclaw.json' "$mcp_service_dir/mcp/openclaw.md"
 jq -e '.mcpServers["direxio-im_example_test"].env.DIREXIO_CREDENTIALS_FILE == "'"$expected_mcp_credentials"'"' "$mcp_service_dir/mcp/hermes.mcp.json" >/dev/null
 grep -q 'DIREXIO_AGENT_NODE_ID=codex-im-example' "$mcp_service_dir/mcp/env"
 mcp_install_command=$(_mcp_install_command)

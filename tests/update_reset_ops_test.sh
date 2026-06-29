@@ -62,7 +62,7 @@ write_state() {
       cc_connect_agent: "codex",
       mcp_config_dir: ($service_dir + "/mcp"),
       mcp_codex_config: ($service_dir + "/mcp/codex.toml"),
-      mcp_openclaw_config: ($service_dir + "/mcp/openclaw.mcp.json"),
+      mcp_openclaw_config: ($service_dir + "/mcp/openclaw.md"),
       mcp_hermes_config: ($service_dir + "/mcp/hermes.mcp.json"),
       mcp_doctor_command: ("DIREXIO_CREDENTIALS_FILE=" + $service_dir + "/credentials.json direxio-mcp doctor --json"),
       resources: {

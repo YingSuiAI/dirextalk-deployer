@@ -51,7 +51,7 @@ jq -n \
     mcp_server_name: "direxio-report-example-test",
     mcp_config_dir: ($service_dir + "/mcp"),
     mcp_codex_config: ($service_dir + "/mcp/codex.toml"),
-    mcp_openclaw_config: ($service_dir + "/mcp/openclaw.mcp.json"),
+    mcp_openclaw_config: ($service_dir + "/mcp/openclaw.md"),
     mcp_hermes_config: ($service_dir + "/mcp/hermes.mcp.json"),
     mcp_doctor_command: "DIREXIO_CREDENTIALS_FILE=<redacted> direxio-mcp doctor --json",
     phase: "S7_VERIFY_E2E",

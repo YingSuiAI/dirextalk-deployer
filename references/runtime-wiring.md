@@ -50,12 +50,13 @@ S6 writes MCP snippets under the same service directory:
 Generated files:
 
 - `codex.toml`: Codex TOML snippet using `[mcp_servers."<server-name>"]`.
-- `openclaw.mcp.json`: OpenClaw JSON snippet using `mcpServers`.
+- `openclaw.md`: OpenClaw CLI setup note. It must use `openclaw mcp set`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
+- `openclaw-server.json`: one OpenClaw MCP server object consumed by `openclaw mcp set`.
 - `hermes.mcp.json`: Hermes JSON snippet using `mcpServers`.
 - `mcp-servers.json`: generic JSON snippet for other MCP clients.
 - `env`: shell exports for checking `direxio-mcp` manually.
 
-All snippets run `direxio-mcp` over stdio and set:
+All snippets and setup artifacts run `direxio-mcp` over stdio and set:
 
 ```bash
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json

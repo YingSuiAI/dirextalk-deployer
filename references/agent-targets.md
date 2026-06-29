@@ -46,7 +46,8 @@ cc-connect/config.toml
 cc-connect/data/
 cc-connect/matrix-session.json
 mcp/codex.toml
-mcp/openclaw.mcp.json
+mcp/openclaw.md
+mcp/openclaw-server.json
 mcp/hermes.mcp.json
 mcp/mcp-servers.json
 ```
@@ -89,14 +90,14 @@ The `[speech]` block is present only when S6 finds a speech-to-text API key from
 
 ## MCP Targets
 
-S6 writes MCP snippets for Codex, OpenClaw, and Hermes under `~/.direxio/nodes/<service_id>/mcp/`. These snippets use `direxio-mcp` from `direxio-mcp@latest` by default and point to the service credential file through `DIREXIO_CREDENTIALS_FILE`.
+S6 writes MCP artifacts for Codex, OpenClaw, and Hermes under `~/.direxio/nodes/<service_id>/mcp/`. These artifacts use `direxio-mcp` from `direxio-mcp@latest` by default and point to the service credential file through `DIREXIO_CREDENTIALS_FILE`.
 
 ```bash
 npm install -g direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
 ```
 
-Use `mcp/codex.toml` for Codex. Use `mcp/openclaw.mcp.json` and `mcp/hermes.mcp.json` as JSON snippets for OpenClaw and Hermes. The deployer writes snippets only; it does not mutate each host application's global MCP config.
+Use `mcp/codex.toml` for Codex and `mcp/hermes.mcp.json` for Hermes. For OpenClaw, use `mcp/openclaw.md`; it runs `openclaw mcp set` with `mcp/openclaw-server.json` so OpenClaw validates and writes its own `mcp.servers` config. Do not paste MCP JSON into `~/.openclaw/openclaw.json`. The deployer writes local artifacts only; it does not mutate each host application's global MCP config.
 
 ## Installation Policy
 

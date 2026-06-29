@@ -138,7 +138,8 @@ cc-connect/config.toml
 cc-connect/data/
 cc-connect/matrix-session.json
 mcp/codex.toml
-mcp/openclaw.mcp.json
+mcp/openclaw.md
+mcp/openclaw-server.json
 mcp/hermes.mcp.json
 mcp/mcp-servers.json
 ```
@@ -158,7 +159,7 @@ npm install -g direxio-mcp
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
 ```
 
-Codex 使用 `mcp/codex.toml`。OpenClaw 和 Hermes 使用 `mcp/openclaw.mcp.json` 或 `mcp/hermes.mcp.json` 作为 JSON 配置片段。
+Codex 使用 `mcp/codex.toml`，Hermes 使用 `mcp/hermes.mcp.json`。OpenClaw 使用 `mcp/openclaw.md` 中生成的 `openclaw mcp set` 命令读取 `mcp/openclaw-server.json`；不要把 MCP JSON 直接粘贴到 `~/.openclaw/openclaw.json`。
 
 语音输入在配置 STT provider key 后可用。设置 `DIREXIO_SPEECH_API_KEY` 或 `DIREXIO_SPEECH_QWEN_API_KEY` 等 provider 专用变量后，S6 会在 `cc-connect/config.toml` 写入 `[speech] enabled = true`。
 

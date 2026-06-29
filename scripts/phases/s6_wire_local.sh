@@ -508,7 +508,12 @@ _mcp_json_config_path() {
 
 _mcp_openclaw_config_path() {
   local service_dir=$1
-  printf '%s/openclaw.mcp.json\n' "$(_mcp_runtime_dir "$service_dir")"
+  printf '%s/openclaw.md\n' "$(_mcp_runtime_dir "$service_dir")"
+}
+
+_mcp_openclaw_server_config_path() {
+  local service_dir=$1
+  printf '%s/openclaw-server.json\n' "$(_mcp_runtime_dir "$service_dir")"
 }
 
 _mcp_hermes_config_path() {
@@ -633,6 +638,10 @@ _cc_connect_default_agent_options_toml() {
 
 _toml_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+_powershell_single_quote() {
+  printf '%s' "$1" | sed "s/'/''/g"
 }
 
 _env_first() {
@@ -778,10 +787,29 @@ _write_mcp_json_config() {
   chmod 600 "$path" 2>/dev/null || true
 }
 
+_write_mcp_openclaw_server_config() {
+  local path=$1 command=$2 credentials_file=$3 node_id=${4:-}
+  mkdir -p "$(dirname "$path")"
+  umask 077
+  jq -n \
+    --arg command "$command" \
+    --arg credentials_file "$credentials_file" \
+    --arg node_id "$node_id" \
+    '{
+      command: $command,
+      env: {
+        DIREXIO_CREDENTIALS_FILE: $credentials_file,
+        DIREXIO_AGENT_NODE_ID: $node_id
+      }
+    }' > "$path"
+  chmod 600 "$path" 2>/dev/null || true
+}
+
 _write_mcp_config_artifacts() {
   local service_id=$1 service_dir=$2 credentials_file=$3 node_id=${4:-}
   local mcp_dir server_name command credentials_local q_server q_command q_credentials q_node
-  local codex_config json_config openclaw_config hermes_config env_file readme
+  local codex_config json_config openclaw_config openclaw_server_config hermes_config env_file readme
+  local openclaw_server_config_local openclaw_server_config_bash openclaw_server_config_ps
   mcp_dir=$(_mcp_runtime_dir "$service_dir")
   server_name=$(_mcp_server_name "$service_id")
   command=$(_mcp_command)
@@ -793,6 +821,7 @@ _write_mcp_config_artifacts() {
   codex_config=$(_mcp_codex_config_path "$service_dir")
   json_config=$(_mcp_json_config_path "$service_dir")
   openclaw_config=$(_mcp_openclaw_config_path "$service_dir")
+  openclaw_server_config=$(_mcp_openclaw_server_config_path "$service_dir")
   hermes_config=$(_mcp_hermes_config_path "$service_dir")
   env_file=$(_mcp_env_file_path "$service_dir")
   readme=$(_mcp_readme_path "$service_dir")
@@ -806,9 +835,42 @@ env = { DIREXIO_CREDENTIALS_FILE = "$q_credentials", DIREXIO_AGENT_NODE_ID = "$q
 EOF
   chmod 600 "$codex_config" 2>/dev/null || true
 
+  rm -f "$mcp_dir/openclaw.mcp.json"
   _write_mcp_json_config "$json_config" "$server_name" "$command" "$credentials_local" "$node_id"
-  _write_mcp_json_config "$openclaw_config" "$server_name" "$command" "$credentials_local" "$node_id"
+  _write_mcp_openclaw_server_config "$openclaw_server_config" "$command" "$credentials_local" "$node_id"
   _write_mcp_json_config "$hermes_config" "$server_name" "$command" "$credentials_local" "$node_id"
+
+  openclaw_server_config_local=$(_local_connect_path "$openclaw_server_config")
+  openclaw_server_config_bash=$(printf '%q' "$openclaw_server_config_local")
+  openclaw_server_config_ps=$(_powershell_single_quote "$openclaw_server_config_local")
+  cat > "$openclaw_config" <<EOF
+# OpenClaw MCP Setup
+
+OpenClaw must manage MCP servers through its own CLI/schema. Do not paste Codex/Hermes mcpServers snippets, or any raw top-level mcp block from this directory, into openclaw.json.
+
+Server object for openclaw mcp set:
+
+$openclaw_server_config_local
+
+POSIX/Git Bash:
+
+\`\`\`bash
+openclaw mcp set $server_name "\$(cat $openclaw_server_config_bash)"
+openclaw mcp doctor
+openclaw mcp reload
+\`\`\`
+
+PowerShell:
+
+\`\`\`powershell
+openclaw mcp set $server_name (Get-Content -Raw -LiteralPath '$openclaw_server_config_ps')
+openclaw mcp doctor
+openclaw mcp reload
+\`\`\`
+
+This writes the server under OpenClaw's mcp.servers schema after OpenClaw validates it.
+EOF
+  chmod 644 "$openclaw_config" 2>/dev/null || true
 
   {
     printf 'export DIREXIO_CREDENTIALS_FILE=%q\n' "$credentials_local"
@@ -834,7 +896,7 @@ $(_mcp_doctor_command "$credentials_file" "$node_id")
 Config snippets:
 
 - Codex TOML: $(_local_connect_path "$codex_config")
-- OpenClaw JSON: $(_local_connect_path "$openclaw_config")
+- OpenClaw CLI setup: $(_local_connect_path "$openclaw_config")
 - Hermes JSON: $(_local_connect_path "$hermes_config")
 - Generic JSON: $(_local_connect_path "$json_config")
 EOF
@@ -1207,7 +1269,7 @@ EOF
 
 _print_mcp_guidance() {
   local runtime=$1 service_name=$2 server_name=$3 credentials_file=$4 config_dir=$5 codex_config=$6 openclaw_config=$7 hermes_config=$8 install_command=$9 doctor_command=${10}
-  warn "Direxio MCP snippets written for runtime=$runtime service=$service_name."
+  warn "Direxio MCP artifacts written for runtime=$runtime service=$service_name."
   cat >&2 <<EOF
 MCP server name:        $server_name
 MCP config directory:   $config_dir
@@ -1215,11 +1277,11 @@ MCP credential file:    $credentials_file
 MCP install command:    $install_command
 MCP doctor command:     $doctor_command
 Codex TOML snippet:     $codex_config
-OpenClaw JSON snippet: $openclaw_config
+OpenClaw CLI setup:    $openclaw_config
 Hermes JSON snippet:   $hermes_config
 
-These snippets use direxio-mcp over stdio and point to the service-scoped DIREXIO_CREDENTIALS_FILE.
-Add the matching snippet to each agent's MCP client config when enabling its local MCP tools.
+These artifacts use direxio-mcp over stdio and point to the service-scoped DIREXIO_CREDENTIALS_FILE.
+For OpenClaw, use the CLI setup note so OpenClaw validates and writes mcp.servers itself; do not paste MCP JSON into openclaw.json.
 EOF
 }
 

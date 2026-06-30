@@ -38,8 +38,13 @@ if [ "${DIREXIO_CREDENTIALS_FILE:-}" != "${EXPECTED_CREDENTIALS_FILE:-}" ]; then
   exit 1
 fi
 
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"fake-direxio-mcp","version":"0.0.0"}}}'
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"search_rooms","description":"Search rooms"},{"name":"send_message","description":"Send message"},{"name":"list_messages","description":"List messages"}]}}'
+frame() {
+  local body=$1
+  printf 'Content-Length: %s\r\n\r\n%s' "${#body}" "$body"
+}
+
+frame '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"fake-direxio-mcp","version":"0.0.0"}}}'
+frame '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"search_rooms","description":"Search rooms"},{"name":"send_message","description":"Send message"},{"name":"list_messages","description":"List messages"}]}}'
 EOF
 chmod 700 "$fakebin/direxio-mcp"
 
@@ -49,8 +54,12 @@ if ($env:DIREXIO_CREDENTIALS_FILE -ne $env:EXPECTED_CREDENTIALS_FILE) {
   exit 1
 }
 
-[Console]::Out.WriteLine('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"fake-direxio-mcp","version":"0.0.0"}}}')
-[Console]::Out.WriteLine('{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"search_rooms","description":"Search rooms"},{"name":"send_message","description":"Send message"},{"name":"list_messages","description":"List messages"}]}}')
+function Frame($body) {
+  [Console]::Out.Write("Content-Length: $($body.Length)`r`n`r`n$body")
+}
+
+Frame '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"fake-direxio-mcp","version":"0.0.0"}}}'
+Frame '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"search_rooms","description":"Search rooms"},{"name":"send_message","description":"Send message"},{"name":"list_messages","description":"List messages"}]}}'
 EOF
 
 mcp_command=direxio-mcp

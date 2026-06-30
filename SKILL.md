@@ -637,6 +637,33 @@ do next.
 
 Use `scripts/destroy.sh` for teardown on POSIX shells and `.\scripts\destroy.ps1` from PowerShell on Windows. The Windows wrapper selects Git for Windows Bash for the Bash state machine, sets Windows-compatible local path mode, and converts explicit Windows state paths before invoking `scripts/destroy.sh`. Destroy first checks `direxio-connect daemon status --service-name <service_id>` and stops plus uninstalls only that named daemon when the reported `WorkDir` matches the current service directory, `~/.direxio/nodes/<service_id>/cc-connect`. After AWS resources are terminated and released, destroy reads AWS back and records `destroy.evidence` before removing the corresponding local service directory under `~/.direxio/nodes/<service_id>`. This prevents stale state, credentials, bridge files, and stale local service registrations from blocking or misleading the next deployment while still preserving a reportable AWS cleanup audit trail. It leaves unrelated node credential directories intact.
 
+Before running destroy, warn the user that this is not merely "turning off the
+server." Destroy removes the recorded cloud node and its application data. The
+current app account, friends, channels, messages, Agent room/session, and login
+state will no longer be usable. If the user later deploys again, even with the
+same domain, treat it as a new Direxio node that needs a fresh app
+initialization code, new account setup, new friends, and new channels.
+
+For ordinary users, distinguish the available destructive levels before asking
+for confirmation:
+
+- Update deployment: keep accounts, friends, channels, messages, DNS, TLS, and
+  cloud resources; only refresh the service image and local credentials.
+- Reset app data: keep EC2, public IP, DNS, and TLS storage, but delete app
+  accounts, friends, channels, messages, and Agent room state.
+- Destroy resources: delete the recorded EC2/EBS/EIP/security group/key pair,
+  remove the deployer-managed DNS A record, stop the local bridge, and make the
+  current app data unavailable.
+
+Require an explicit destructive confirmation before destroy when the user has
+not already clearly confirmed this data loss. A suitable confirmation is:
+
+```text
+I confirm destroying this Direxio node and understand the current account,
+friends, channels, messages, and Agent conversation will be lost; redeploying
+later will create a new node/account.
+```
+
 Destroy uses the same AWS identity boundary as deployment: root AWS access-key
 identity is allowed when the operator explicitly chose root credentials. Prefer
 using the same temporary `DirexioDeployer` IAM user/profile for teardown when

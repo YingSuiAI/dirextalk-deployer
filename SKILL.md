@@ -1,6 +1,6 @@
 ---
 name: direxio-deployer
-description: Deploy, resume, verify, destroy, and locally wire a production P2P-IM Matrix server on AWS for any connent/connect-supported local agent runtime. Use when installing or updating this skill itself; if a current project or workspace exists, prefer the runtime-specific project-local Git clone path from references/agent-targets.md and use global skill directories only when no project target exists or the user explicitly asks for global installation.
+description: Deploy, resume, verify, destroy, and locally wire a production P2P-IM Matrix server on AWS for any connent/connect-supported local agent runtime. Use when installing or updating this skill itself; install the versioned npm package `direxio-deployer` and use its CLI to place the skill in the runtime-specific project-local path from references/agent-targets.md unless the user explicitly asks for a global installation.
 ---
 
 # Direxio Deployer
@@ -19,26 +19,33 @@ scripts/destroy.ps1
 ## Skill Freshness Gate
 
 Before following this local Skill for deployment, repair, verification,
-teardown, or runtime wiring, make one freshness attempt against the canonical
-source:
+teardown, runtime wiring, or skill installation, make one freshness attempt
+against the versioned npm package:
 
-```text
-https://github.com/YingSuiAI/direxio-deployer/blob/main/SKILL.md
+```bash
+npm install -g direxio-deployer@latest
+direxio-deployer skill refresh --agent <runtime> --scope project --project <project-root>
 ```
 
+Use the current runtime name for `<runtime>` when known, such as `codex`,
+`claudecode`, `gemini`, `cursor`, `openclaw`, or `hermes`. Prefer project scope
+when a project or workspace root exists. Use `--scope global` only when the
+user explicitly asks for a global installation or no project target exists.
+
+`direxio-deployer skill refresh` checks the latest npm version, updates the
+global CLI when npm reports a newer package, and refreshes the managed skill
+copy in the selected runtime directory. If npm is unavailable, offline, or not
+authenticated, report that freshness could not be checked and continue with
+this local copy.
+
 If this Skill is running from a Git clone whose origin is
-`YingSuiAI/direxio-deployer`, fetch `origin main` and compare the local HEAD
-with `origin/main`. Fast-forward only when it is safe and does not overwrite
-local edits. If the clone has local changes, do not discard them; report the
-divergence and continue from the local copy unless the user approves a specific
-update action.
+`YingSuiAI/direxio-deployer`, Git may be used as a developer fallback: fetch
+`origin main` and compare the local HEAD with `origin/main`. Fast-forward only
+when it is safe and does not overwrite local edits. If the clone has local
+changes, do not discard them; report the divergence and continue from the local
+copy unless the user approves a specific update action.
 
-If this Skill is not running from that Git clone, read the canonical `SKILL.md`
-URL once and use it as the latest deployment guidance when reachable. If GitHub
-or the private repository is unreachable, say so briefly and continue with this
-local copy.
-
-Do not fall back to older P2P-IM skill repositories or copied skill bundles unless the user explicitly asks for one of those repositories. Never print or commit AWS credentials, initialization codes, agent tokens, or local credential files while refreshing the Skill.
+Do not fall back to older P2P-IM skill repositories or unmanaged copied skill bundles unless the user explicitly asks for one of those repositories. Never print or commit AWS credentials, initialization codes, agent tokens, or local credential files while refreshing the Skill.
 
 ## Cloud Account And Domain Onboarding
 
@@ -275,7 +282,21 @@ When the user asks to install or update this skill itself, or asks to wire Direx
 
 For this skill repository itself, first determine whether the current working directory belongs to a project or workspace. Treat an explicit workspace root, project files, or an existing agent-specific directory such as `.codex/`, `.claude/`, `.gemini/`, `.cursor/`, `.github/copilot/`, `.devin/`, `.opencode/`, `.qoder/`, `.pi/`, `.openclaw/`, or `.hermes/` as a project target.
 
-If a project target exists, install or update this skill as a Git clone at the runtime-specific project-local path from `references/agent-targets.md`. Create the parent directory if needed. Do not use copy-based skill installation for a project-local install because it drops `.git` and prevents normal tracking, `git pull`, and commit inspection. Use global runtime skill directories only when the user explicitly asks for a global install or no project target exists. If a global copy was created by mistake, remove it and replace it with the project-local clone.
+If a project target exists, install or update this skill with the versioned npm CLI at the runtime-specific project-local path from `references/agent-targets.md`:
+
+```bash
+npm install -g direxio-deployer@latest
+direxio-deployer skill install --agent <runtime> --scope project --project <project-root>
+direxio-deployer skill update --agent <runtime> --scope project --project <project-root>
+```
+
+The installer writes `.direxio-skill-install.json` into the target directory and refuses to overwrite unmanaged existing content unless the operator explicitly uses `--force`. Use global runtime skill directories only when the user explicitly asks for a global install or no project target exists:
+
+```bash
+direxio-deployer skill install --agent <runtime> --scope global
+```
+
+Use a Git clone only for development or local patching of this deployer, not as the normal end-user installation path.
 
 ## Agent Recognition
 

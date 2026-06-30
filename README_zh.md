@@ -27,6 +27,46 @@
 - 当本地 agent 可执行文件不能从 PATH 找到时，设置 `DIREXIO_CC_CONNECT_AGENT_CMD` 或 `DIREXIO_<AGENT>_COMMAND`。Codex Desktop 在 Windows 下也可以继续使用 `DIREXIO_CODEX_COMMAND`；OpenClaw 支持 `DIREXIO_OPENCLAW_COMMAND`；Hermes 使用 `DIREXIO_HERMES_COMMAND` 指定 adapter 后面的子进程命令，只有 adapter 命令本身不是 `direxio-connect` 时才需要 `DIREXIO_HERMES_ACP_ADAPTER_COMMAND`。
 - `DIREXIO_AGENT_INSTALL=auto` 会安装 `direxio-connent` 并执行 `direxio-connect daemon install --config <config> --service-name <service_id> --force`。默认 `recommend` 只记录并打印命令。自动安装只有在 `direxio-connect daemon status --service-name <service_id>` 返回 `Status: Running` 且近期 daemon 日志没有 ACP session 初始化失败时才记为 installed，否则 S6 会记录 `agent_install_status=install_failed`。
 
+## Skill 安装和更新
+
+通过 npm 安装 deployer skill，再把它写入当前智能体运行时的 skill 目录。默认推荐 project-local 安装，让部署 skill 跟随当前 workspace。
+
+POSIX shell：
+
+```bash
+npm install -g direxio-deployer@latest
+direxio-deployer skill install --agent codex --scope project --project .
+```
+
+Windows PowerShell：
+
+```powershell
+npm install -g direxio-deployer@latest
+direxio-deployer skill install --agent codex --scope project --project .
+```
+
+在同一个宿主运行时中更新已安装 skill：
+
+```bash
+npm install -g direxio-deployer@latest
+direxio-deployer skill update --agent codex --scope project --project .
+```
+
+根据当前运行时替换 agent 名称：`codex`、`claudecode`、`gemini`、`cursor`、`copilot`、`openclaw`、`hermes`、`opencode`、`qoder`、`reasonix`，或使用 `references/agent-targets.md` 中列出的其他目标。只有明确想安装到宿主级目录时才使用 `--scope global`：
+
+```bash
+direxio-deployer skill install --agent codex --scope global
+```
+
+安装器会在目标目录写入 `.direxio-skill-install.json`，并拒绝覆盖没有该 manifest 的既有目录，除非显式传入 `--force`。如需固定版本，先安装指定 npm 版本：
+
+```bash
+npm install -g direxio-deployer@0.1.0
+direxio-deployer skill update --agent codex --scope project --project .
+```
+
+这个 CLI 由 Node 实现，并使用当前宿主的原生路径。Windows 下写入 Windows 路径；Linux、macOS、Git Bash 或 WSL 下写入对应运行时能读取的路径。
+
 ## 最小命令
 
 从 AWS CSV 导入并验证一个部署 profile。推荐使用临时 `DirexioDeployer` IAM

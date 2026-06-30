@@ -6,9 +6,11 @@ cd "$ROOT"
 
 required=(
   AGENTS.md
+  package.json
   SKILL.md
   README.md
   README_zh.md
+  bin/direxio-deployer.mjs
   scripts/orchestrate.sh
   scripts/orchestrate.ps1
   scripts/aws-credentials.sh
@@ -22,6 +24,7 @@ required=(
   scripts/lib/operation_report.sh
   scripts/phases/s6_wire_local.sh
   tests/operation_report_test.sh
+  tests/npm_skill_distribution_test.sh
   tests/orchestrate_status_recovery_test.sh
   tests/update_reset_ops_test.sh
   tests/aws_credentials_test.sh
@@ -51,6 +54,14 @@ for path in "${required[@]}"; do
 done
 
 grep -q 'direxio/message-server:latest' SKILL.md
+grep -q 'direxio-deployer' package.json
+grep -q 'bin/direxio-deployer.mjs' package.json
+grep -q 'skill install --agent' README.md
+grep -q 'skill update --agent' README_zh.md
+grep -q 'skill refresh --agent' SKILL.md
+grep -q 'Windows PowerShell' README.md
+grep -q 'Windows PowerShell' README_zh.md
+grep -q '.direxio-skill-install.json' references/agent-targets.md
 grep -q 'DIREXIO_DOMAIN' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_AGENT_TOKEN' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_AGENT_ROOM_ID' scripts/phases/s6_wire_local.sh

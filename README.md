@@ -29,6 +29,46 @@
 - Set `DIREXIO_CC_CONNECT_AGENT_CMD` or `DIREXIO_<AGENT>_COMMAND` when a local agent executable is not discoverable from PATH. Codex also supports `DIREXIO_CODEX_COMMAND` for Windows Desktop installs; OpenClaw supports `DIREXIO_OPENCLAW_COMMAND`; Hermes supports `DIREXIO_HERMES_COMMAND` for the child process behind the adapter and `DIREXIO_HERMES_ACP_ADAPTER_COMMAND` only when the adapter command itself is not `direxio-connect`.
 - `DIREXIO_AGENT_INSTALL=auto` installs `direxio-connent@latest` and runs `direxio-connect daemon install --config <config> --service-name <service_id> --force`. The default `recommend` mode only records and prints the command. Auto install is marked installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs do not show ACP session initialization failure; otherwise S6 records `agent_install_status=install_failed`.
 
+## Skill Installation And Updates
+
+Install the deployer skill from npm, then place it into the current agent runtime's skill directory. Project-local installs are preferred because they keep the deployment skill scoped to the workspace that uses it.
+
+POSIX shells:
+
+```bash
+npm install -g direxio-deployer@latest
+direxio-deployer skill install --agent codex --scope project --project .
+```
+
+Windows PowerShell:
+
+```powershell
+npm install -g direxio-deployer@latest
+direxio-deployer skill install --agent codex --scope project --project .
+```
+
+Update the installed skill with the same host runtime:
+
+```bash
+npm install -g direxio-deployer@latest
+direxio-deployer skill update --agent codex --scope project --project .
+```
+
+Use the matching agent name for your runtime: `codex`, `claudecode`, `gemini`, `cursor`, `copilot`, `openclaw`, `hermes`, `opencode`, `qoder`, `reasonix`, or another target listed in `references/agent-targets.md`. Use `--scope global` only when you intentionally want a host-level skill install:
+
+```bash
+direxio-deployer skill install --agent codex --scope global
+```
+
+The installer writes `.direxio-skill-install.json` into the target directory and refuses to overwrite unmanaged existing content unless `--force` is provided. To pin a version, install that package version first:
+
+```bash
+npm install -g direxio-deployer@0.1.0
+direxio-deployer skill update --agent codex --scope project --project .
+```
+
+The CLI is implemented in Node and uses native paths for the host it runs on. On Windows it writes Windows-compatible paths; on Linux, macOS, Git Bash, or WSL it writes paths for that runtime.
+
 ## Minimal Command
 
 Import and verify an AWS deployment profile from an AWS CSV. A temporary

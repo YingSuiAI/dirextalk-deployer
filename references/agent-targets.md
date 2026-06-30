@@ -2,11 +2,29 @@
 
 Use this file when installing or updating this skill and when reviewing S6 local bridge output. Direxio no longer ships extra chat-platform adapters from this deployer; the only post-deploy local conversation bridge is `direxio-connect`. MCP-capable hosts can also use the generated `direxio-mcp` snippets.
 
-## Project-Local Skill Clones
+## Npm Skill Installation
 
-Prefer a project-local Git clone when a project or workspace exists. Create the parent directory if needed and run `git clone`, not a copy-based installer, so `.git` remains available for `git pull`, commit inspection, and local patches.
+Prefer a project-local npm-managed install when a project or workspace exists. Install the versioned package, then let the CLI copy the skill bundle into the runtime-specific target:
 
-| Runtime | Project-local skill clone | Global fallback only when explicitly requested or no project exists |
+POSIX shells:
+
+```bash
+npm install -g direxio-deployer@latest
+direxio-deployer skill install --agent codex --scope project --project PROJECT_ROOT
+direxio-deployer skill update --agent codex --scope project --project PROJECT_ROOT
+```
+
+Windows PowerShell:
+
+```powershell
+npm install -g direxio-deployer@latest
+direxio-deployer skill install --agent codex --scope project --project PROJECT_ROOT
+direxio-deployer skill update --agent codex --scope project --project PROJECT_ROOT
+```
+
+Use `--scope global` only when the user explicitly asks for a global install or no project target exists. Use a Git clone only for deployer development or local patching, not as the normal end-user installation path. The npm installer writes `.direxio-skill-install.json` and refuses to overwrite unmanaged existing target directories unless `--force` is passed.
+
+| Runtime | Project-local skill target | Global fallback only when explicitly requested or no project exists |
 | --- | --- | --- |
 | Codex | `PROJECT_ROOT/.codex/skills/direxio-deployer` | `${CODEX_HOME:-$HOME/.codex}/skills/direxio-deployer` |
 | Claude Code | `PROJECT_ROOT/.claude/skills/direxio-deployer` | `${CLAUDE_HOME:-$HOME/.claude}/skills/direxio-deployer` |

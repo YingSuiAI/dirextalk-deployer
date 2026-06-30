@@ -325,13 +325,10 @@ STATE_CALLS="$tmp/state.calls"
 PATH="$fakebin:$PATH" _maybe_auto_install_cc_connect auto codex codex "$tmp/service" "$tmp/service/cc-connect/config.toml" direxio-connect im.example.test
 grep -q '^agent_install_status=install_failed$' "$STATE_CALLS"
 
-if _cc_connect_agent_options_toml openclaw acp > "$tmp/openclaw-missing.out" 2> "$tmp/openclaw-missing.err"; then
-  echo "OpenClaw ACP options must require real gateway URL, token file, and session" >&2
-  exit 1
-fi
-grep -q 'DIREXIO_OPENCLAW_ACP_URL' "$tmp/openclaw-missing.err"
-grep -q 'DIREXIO_OPENCLAW_ACP_TOKEN_FILE' "$tmp/openclaw-missing.err"
-grep -q 'DIREXIO_OPENCLAW_ACP_SESSION' "$tmp/openclaw-missing.err"
+# When DIREXIO_OPENCLAW_ACP_* are not set, should fall back to minimal defaults
+# (openclaw acp auto-discovers Gateway from ~/.openclaw/openclaw.json)
+openclaw_fallback_options=$(_cc_connect_agent_options_toml openclaw acp 2> "$tmp/openclaw-fallback.err")
+[[ "$openclaw_fallback_options" == *'args = ["acp", "--session", "agent:main:main"]'* ]]
 
 openclaw_options=$(
   DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 \

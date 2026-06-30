@@ -572,15 +572,14 @@ _openclaw_acp_args_toml() {
   url=${DIREXIO_OPENCLAW_ACP_URL:-}
   token_file=${DIREXIO_OPENCLAW_ACP_TOKEN_FILE:-}
   session=${DIREXIO_OPENCLAW_ACP_SESSION:-}
-  [ -n "$url" ] || missing="${missing} DIREXIO_OPENCLAW_ACP_URL"
-  [ -n "$token_file" ] || missing="${missing} DIREXIO_OPENCLAW_ACP_TOKEN_FILE"
-  [ -n "$session" ] || missing="${missing} DIREXIO_OPENCLAW_ACP_SESSION"
-  if [ -n "$missing" ]; then
-    fail "OpenClaw ACP requires real Gateway settings:${missing}. Set them from the current OpenClaw runtime, or provide DIREXIO_OPENCLAW_ACP_ARGS_TOML with the complete args array."
-    return 1
+  if [ -n "$url" ] && [ -n "$token_file" ] && [ -n "$session" ]; then
+    token_file=$(_local_connect_path "$token_file")
+    _toml_array acp --url "$url" --token-file "$token_file" --session "$session"
+    return 0
   fi
-  token_file=$(_local_connect_path "$token_file")
-  _toml_array acp --url "$url" --token-file "$token_file" --session "$session"
+  # Fallback: OpenClaw acp auto-discovers gateway from ~/.openclaw/openclaw.json
+  warn "OpenClaw ACP: DIREXIO_OPENCLAW_ACP_URL / TOKEN_FILE / SESSION not all set; using default session 'agent:main:main' and letting openclaw acp auto-detect the Gateway from its config."
+  _toml_array acp --session "${session:-agent:main:main}"
 }
 
 _hermes_acp_args_toml() {

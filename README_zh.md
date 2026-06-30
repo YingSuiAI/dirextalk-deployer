@@ -9,23 +9,11 @@
 - `references/`: 工具准备、部署续跑、cc-connect wiring、状态机、架构、排障和恢复说明。
 - `agents/`: 面向不同智能体运行时的展示元数据和识别说明。
 
-## 部署原则
+## 部署前准备
 
-- 只部署到真实、长期域名。
-- Matrix `server_name` 一旦绑定，后续换域名等同新 homeserver。
-- AWS 资源会产生费用，部署前必须让用户明确确认。
-- Route53 模式会复用或创建 hosted zone，记录 NS nameservers，自动 upsert A 记录，并等待 DNS 生效。
-- 用户侧 DNS 模式只是没有 DNS provider 自动化时的 fallback；它会在 Elastic IP 创建后暂停，等待 A 记录指向新 IP。
-- 当前后端是 `direxio/message-server` 单体服务，Matrix 与 P2P API 共用 8008。
-- cloud-init 会生成 `P2P_PORTAL_PASSWORD`；`init-tokens.sh` 会调用 `portal.bootstrap`，并在后端凭据文件没有真实房间时创建 Matrix agent room。
-- 从服务端同步的 `password` 和 owner `access_token` 按一次性/易失凭据处理；后端字段 `password` 对用户来说是八位 App 初始化码。展示初始化码或调接口前先重新拉取服务器 `/opt/p2p/bootstrap.json`，不要复用旧输出。
-- S6 会拒绝 `!agent:<domain>` 这类旧伪房间，只接受 message-server 创建的真实 Matrix `agent_room_id`。
-- S6 会通过 `agent.matrix_session.create` 创建 `@agent:<server>` Matrix session，写入 Matrix-only `cc-connect/config.toml`，并把 bridge 限制在当前 `agent_room_id`。
-- S6 会在 `~/.direxio/nodes/<service_id>/mcp/` 下写入 MCP client 配置片段。MCP 通过 `DIREXIO_CREDENTIALS_FILE` 指向同一个服务级 `credentials.json`；cc-connect 仍然只使用直接 Matrix 配置。
-- `DIREXIO_CC_CONNECT_AGENT` 用来选择本地 `direxio-connect` agent 类型。支持值与 connent/connect 一致：`acp`、`antigravity`、`claudecode`、`codex`、`copilot`、`cursor`、`devin`、`gemini`、`iflow`、`kimi`、`opencode`、`pi`、`qoder`、`reasonix`、`tmux`。
-- `DIREXIO_AGENT_PLATFORM` 表示正在执行部署 skill 的宿主运行时；`DIREXIO_CC_CONNECT_AGENT` 表示 `direxio-connect` 要启动的本地 agent 后端。检测到 OpenClaw 或 Hermes 运行时时，S6 会通过通用 `acp` agent 写入桥接配置，不会写成 connect 原生 `type = "openclaw"` 或 `type = "hermes"`。OpenClaw 会写入 `cmd = "openclaw"`，但必须由当前 agent/operator 提供真实 Gateway URL、token-file 和 ACP session；Hermes 默认写入 `cmd = "direxio-connect"`、`args = ["hermes-acp-adapter", "--", "hermes", "acp"]`，通过兼容层避免 Hermes 推理文本被当成用户可见回复。
-- 当本地 agent 可执行文件不能从 PATH 找到时，设置 `DIREXIO_CC_CONNECT_AGENT_CMD` 或 `DIREXIO_<AGENT>_COMMAND`。Codex Desktop 在 Windows 下也可以继续使用 `DIREXIO_CODEX_COMMAND`；OpenClaw 支持 `DIREXIO_OPENCLAW_COMMAND`；Hermes 使用 `DIREXIO_HERMES_COMMAND` 指定 adapter 后面的子进程命令，只有 adapter 命令本身不是 `direxio-connect` 时才需要 `DIREXIO_HERMES_ACP_ADAPTER_COMMAND`。
-- `DIREXIO_AGENT_INSTALL=auto` 会安装 `direxio-connent` 并执行 `direxio-connect daemon install --config <config> --service-name <service_id> --force`。默认 `recommend` 只记录并打印命令。自动安装只有在 `direxio-connect daemon status --service-name <service_id>` 返回 `Status: Running` 且近期 daemon 日志没有 ACP session 初始化失败时才记为 installed，否则 S6 会记录 `agent_install_status=install_failed`。
+- 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。
+- deployer 创建的 AWS 资源在销毁前可能持续计费。
+- `SKILL.md` 是给智能体看的运行手册，详细部署规则、确认门禁、运行时 wiring 和恢复流程都放在那里。
 
 ## Skill 安装和更新
 

@@ -11,23 +11,11 @@
 - `references/`: Tooling, deployment resume flow, cc-connect wiring, state machine, architecture, troubleshooting, and recovery notes.
 - `agents/`: Runtime metadata and recognition notes for agent hosts.
 
-## Deployment Rules
+## Before Deployment
 
-- Deploy only to a real, long-lived domain.
-- Matrix `server_name` is identity; changing it later is effectively a new homeserver.
-- AWS resources cost money; the user must explicitly confirm before deployment.
-- Route53 mode reuses or creates the hosted zone, records NS nameservers, upserts the A record, and waits for DNS to resolve.
-- User-managed DNS mode is a fallback when no DNS provider automation is available; it pauses after Elastic IP creation until the A record points to the new IP.
-- The backend image is `direxio/message-server`; Matrix and P2P APIs share port 8008.
-- Cloud init generates `P2P_PORTAL_PASSWORD`; `init-tokens.sh` calls `portal.bootstrap` and creates a real Matrix agent room if the backend credentials file does not already include one.
-- Treat synced `password` and owner `access_token` values as one-time/volatile credentials. The backend field `password` is the user-facing eight-digit app initialization code. Pull the current server `/opt/p2p/bootstrap.json` before showing that code or using an owner token for API calls.
-- S6 rejects legacy pseudo agent rooms such as `!agent:<domain>` and requires the real Matrix `agent_room_id` created by message-server.
-- S6 creates an `@agent:<server>` Matrix session through `agent.matrix_session.create`, writes a Matrix-only `cc-connect/config.toml`, and restricts the bridge to the current `agent_room_id`.
-- S6 writes MCP client snippets under `~/.direxio/nodes/<service_id>/mcp/`. They point `direxio-mcp` at the same service-scoped `credentials.json` by `DIREXIO_CREDENTIALS_FILE`; cc-connect still uses its direct Matrix config.
-- `DIREXIO_CC_CONNECT_AGENT` selects the local `direxio-connect` agent type. Supported values match connent/connect: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
-- `DIREXIO_AGENT_PLATFORM` is the host runtime following this deployer skill; `DIREXIO_CC_CONNECT_AGENT` is the backend that `direxio-connect` launches. Detected OpenClaw and Hermes runtimes are wired through the generic `acp` agent, not native `type = "openclaw"` or `type = "hermes"` connect agents. S6 writes OpenClaw as `cmd = "openclaw"` and requires the current agent/operator to provide the real Gateway URL, token-file, and ACP session; Hermes is wrapped as `cmd = "direxio-connect"` with `args = ["hermes-acp-adapter", "--", "hermes", "acp"]` so Hermes reasoning text cannot be exposed as user-visible chat.
-- Set `DIREXIO_CC_CONNECT_AGENT_CMD` or `DIREXIO_<AGENT>_COMMAND` when a local agent executable is not discoverable from PATH. Codex also supports `DIREXIO_CODEX_COMMAND` for Windows Desktop installs; OpenClaw supports `DIREXIO_OPENCLAW_COMMAND`; Hermes supports `DIREXIO_HERMES_COMMAND` for the child process behind the adapter and `DIREXIO_HERMES_ACP_ADAPTER_COMMAND` only when the adapter command itself is not `direxio-connect`.
-- `DIREXIO_AGENT_INSTALL=auto` installs `direxio-connent@latest` and runs `direxio-connect daemon install --config <config> --service-name <service_id> --force`. The default `recommend` mode only records and prints the command. Auto install is marked installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs do not show ACP session initialization failure; otherwise S6 records `agent_install_status=install_failed`.
+- Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain.
+- AWS resources created by this deployer can bill until they are destroyed.
+- Use `SKILL.md` as the agent-facing runbook. It contains the detailed deployment rules, confirmation gates, runtime wiring behavior, and recovery procedures.
 
 ## Skill Installation And Updates
 

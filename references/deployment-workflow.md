@@ -96,7 +96,7 @@ $env:DOMAIN = "__DOMAIN__"
 .\scripts\destroy.ps1
 ```
 
-Destroy stops and uninstalls the local `direxio-connect` daemon only when `direxio-connect daemon status --service-name <service_id>` reports a `WorkDir` matching the current service directory, `~/.direxio/nodes/<service_id>/cc-connect`. It then terminates the recorded EC2 instance, verifies the recorded EBS root volume, releases the Elastic IP, deletes the security group and key pair, removes Route53 records/zones created by the deployer, records AWS read-back results under `destroy.evidence`, and removes the corresponding local service directory under `~/.direxio/nodes/<service_id>`. This prevents stale credentials, `state.json` files, and local service registrations from being treated as active deployments later while preserving an audit report for cleanup.
+Destroy stops and uninstalls the local `direxio-connect` daemon only when `direxio-connect daemon status --service-name <service_id>` reports a `WorkDir` matching the current service directory, `~/.direxio/nodes/<service_id>/direxio-connect`. It then terminates the recorded EC2 instance, verifies the recorded EBS root volume, releases the Elastic IP, deletes the security group and key pair, removes Route53 records/zones created by the deployer, records AWS read-back results under `destroy.evidence`, and removes the corresponding local service directory under `~/.direxio/nodes/<service_id>`. This prevents stale credentials, `state.json` files, and local service registrations from being treated as active deployments later while preserving an audit report for cleanup.
 
 Destroy allows root AWS access-key identity when the operator explicitly chose
 root credentials. Use the same deployment profile for teardown that was used
@@ -147,7 +147,7 @@ service directory is removed:
 ```
 
 Reports include operation type, S0-S7 gate status, user-confirmation gates,
-credential/config paths, cc-connect/MCP metadata, AWS resource IDs, billing
+credential/config paths, direxio-connect/MCP metadata, AWS resource IDs, billing
 reminders, `billing.cost_estimate`, destroy read-back evidence under
 `destroy.evidence` when applicable, and redaction evidence. They must not
 contain the initialization code, AWS secrets, access tokens, agent tokens, or
@@ -157,7 +157,7 @@ codes into confirmation notes. After reset/redeploy, the report must show
 `credentials.status=refresh_pending`, `connect.install_status=refresh_pending`,
 and `mcp.status=refresh_pending` until S5/S6/S7 and runtime checks refresh
 local evidence. Image-only update does not clear local credentials,
-confirmations, runtime checks, cc-connect state, or MCP artifacts.
+confirmations, runtime checks, direxio-connect state, or MCP artifacts.
 
 When the user or runtime evidence confirms a manual product gate, write it back
 to state before regenerating the report. Connect daemon status is a
@@ -166,7 +166,7 @@ MCP tools is stdio `tools/list` discovery, and MCP smoke is a read-only backend
 call. In the `DIREXIO_AGENT_INSTALL=recommend` path, `verify runtime` records
 `connect_daemon=manual_pending` instead of failing the aggregate, because
 daemon installation is an explicit operator action. The default
-`DIREXIO_AGENT_INSTALL=auto` path expects cc-connect and direxio-mcp to be
+`DIREXIO_AGENT_INSTALL=auto` path expects direxio-connect and direxio-mcp to be
 installed automatically during S6. These checks are not the full runtime
 product gate:
 

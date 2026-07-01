@@ -10,6 +10,8 @@ required=(
   SKILL.md
   README.md
   README_zh.md
+  agents/README.md
+  agents/openai.yaml
   bin/direxio-deployer.mjs
   scripts/orchestrate.sh
   scripts/orchestrate.ps1
@@ -71,15 +73,27 @@ fi
 
 legacy_json_cli_name=$(printf '\152\161')
 legacy_json_cli_pattern="(^|[^[:alnum:]_])${legacy_json_cli_name}([^[:alnum:]_]|$)|${legacy_json_cli_name}\\.exe"
-if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md README_zh.md SKILL.md references AGENTS.md package.json docs >/dev/null; then
+if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md README_zh.md SKILL.md references AGENTS.md agents package.json docs >/dev/null; then
   echo "current docs/scripts/tests must use scripts/json.mjs instead of the legacy external JSON CLI" >&2
-  grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md README_zh.md SKILL.md references AGENTS.md package.json docs >&2
+  grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md README_zh.md SKILL.md references AGENTS.md agents package.json docs >&2
   exit 1
 fi
 
 grep -q 'direxio/message-server:latest' SKILL.md
 grep -q 'direxio-deployer' package.json
 grep -q 'bin/direxio-deployer.mjs' package.json
+grep -q 'compact agent-facing entrypoint' AGENTS.md
+grep -q 'scripts/lib/local-paths.sh' AGENTS.md
+grep -q 'scripts/lib/windows-paths.ps1' AGENTS.md
+grep -q 'scripts/json.mjs' AGENTS.md
+grep -q 'direxio-connent@latest' AGENTS.md
+grep -q 'direxio-mcp@latest' AGENTS.md
+grep -q 'bash tests/local_paths_test.sh' AGENTS.md
+grep -q 'npm test' AGENTS.md
+grep -q 'scripts/json.mjs' agents/README.md
+grep -q 'direxio-connect' agents/README.md
+grep -q 'direxio-connect' agents/openai.yaml
+grep -q 'direxio-mcp' agents/openai.yaml
 grep -q 'skill install --agent' README.md
 grep -q 'skill update --agent' README_zh.md
 grep -q 'skill refresh --agent' SKILL.md
@@ -89,24 +103,31 @@ grep -q '.direxio-skill-install.json' references/agent-targets.md
 grep -q 'DIREXIO_DOMAIN' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_AGENT_TOKEN' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_AGENT_ROOM_ID' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXIO_CC_CONNECT_REPO' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXIO_CONNECT_REPO' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_LOCAL_PATH_STYLE' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_CREDENTIALS_FILE' scripts/phases/s6_wire_local.sh
 grep -q 'direxio-mcp' scripts/phases/s6_wire_local.sh
 grep -q 'PLATFORMS_INCLUDE=matrix' scripts/phases/s6_wire_local.sh
 grep -q 'YingSuiAI/direxio-connect.git' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXIO_CC_CONNECT_AGENT' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXIO_CONNECT_AGENT' scripts/phases/s6_wire_local.sh
 grep -q 'orchestrate.ps1' README.md
 grep -q 'destroy.ps1' README.md
 grep -q 'destroy.ps1' README_zh.md
 grep -q 'destroy.ps1' SKILL.md
 grep -q 'destroy.ps1' references/deployment-workflow.md
 grep -q 'destroy.ps1' references/windows-deployment-notes.md
-grep -q 'cc-connect' SKILL.md
+grep -q 'direxio-connect' SKILL.md
 grep -q 'mcp_config_dir' SKILL.md
 grep -q 'mcp_codex_config' references/runtime-wiring.md
 if grep -R '@direxio/agent-plugins' SKILL.md scripts README.md README_zh.md references >/dev/null; then
   echo "current docs/scripts must not reference legacy agent plugin packages" >&2
+  exit 1
+fi
+legacy_plugin_word=plugin
+legacy_mcp_plugin_pattern="MCP/${legacy_plugin_word}|agent ${legacy_plugin_word}s|${legacy_plugin_word} access|${legacy_plugin_word} configuration|wire Direxio MCP/${legacy_plugin_word}|runtime-specific ${legacy_plugin_word}"
+if grep -R -n -E "$legacy_mcp_plugin_pattern" AGENTS.md agents SKILL.md README.md README_zh.md references >/dev/null; then
+  echo "current docs and agent metadata must not use stale combined MCP and extension wording" >&2
+  grep -R -n -E "$legacy_mcp_plugin_pattern" AGENTS.md agents SKILL.md README.md README_zh.md references >&2
   exit 1
 fi
 grep -q '简体中文](README_zh.md)' README.md
@@ -116,8 +137,10 @@ grep -q 'direxio-connent' references/agent-targets.md
 grep -q 'direxio-connect daemon install' references/agent-targets.md
 grep -q 'acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode pi qoder reasonix tmux' references/agent-targets.md
 
-if grep -R 'YingSuiAI/cc-connect\|github.com/YingSuiAI/cc-connect' SKILL.md scripts README.md README_zh.md references AGENTS.md >/dev/null; then
-  echo "current docs/scripts must use YingSuiAI/direxio-connect, not the old YingSuiAI/cc-connect repository" >&2
+legacy_cc_repo=$(printf 'cc-%s' 'connect')
+wrong_connect_repo=$(printf 'direxio-%s' 'connext')
+if grep -R "YingSuiAI/${legacy_cc_repo}\\|github.com/YingSuiAI/${legacy_cc_repo}\\|YingSuiAI/${wrong_connect_repo}\\|github.com/YingSuiAI/${wrong_connect_repo}" SKILL.md scripts README.md README_zh.md references AGENTS.md >/dev/null; then
+  echo "current docs/scripts must use YingSuiAI/direxio-connect, not stale bridge repository names" >&2
   exit 1
 fi
 
@@ -136,13 +159,13 @@ if grep -RE 'agentp2p\.im|54\.161\.73\.211' SKILL.md references scripts README.m
   exit 1
 fi
 
-if awk '/_write_cc_connect_config\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep -q 'DIREXIO_CREDENTIALS_FILE'; then
-  echo "cc-connect config must not use DIREXIO_CREDENTIALS_FILE; it must use direct Matrix config" >&2
+if awk '/_write_connect_config\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep -q 'DIREXIO_CREDENTIALS_FILE'; then
+  echo "direxio-connect config must not use DIREXIO_CREDENTIALS_FILE; it must use direct Matrix config" >&2
   exit 1
 fi
 
-if awk '/_print_cc_connect_guidance\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep -q 'DIREXIO_CREDENTIALS_FILE'; then
-  echo "cc-connect guidance must not use DIREXIO_CREDENTIALS_FILE; MCP guidance owns that env var" >&2
+if awk '/_print_connect_guidance\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep -q 'DIREXIO_CREDENTIALS_FILE'; then
+  echo "direxio-connect guidance must not use DIREXIO_CREDENTIALS_FILE; MCP guidance owns that env var" >&2
   exit 1
 fi
 
@@ -166,7 +189,7 @@ if grep -RE 'Elastic IP.*attached.*free|attached.*Elastic IP.*free' SKILL.md ref
   exit 1
 fi
 
-if grep -F 'Host runtimes such as Hermes or OpenClaw are not cc-connect backends; when they are detected, set `DIREXIO_CC_CONNECT_AGENT` explicitly' SKILL.md >/dev/null; then
+if grep -F 'Host runtimes such as Hermes or OpenClaw are not direxio-connect backends; when they are detected, set `DIREXIO_CONNECT_AGENT` explicitly' SKILL.md >/dev/null; then
   echo "SKILL.md must not override ACP-backed OpenClaw/Hermes defaults with stale explicit-agent guidance" >&2
   exit 1
 fi
@@ -249,7 +272,7 @@ grep -q 'refresh_pending' references/token-refresh.md
 grep -q 'user_confirmations.*runtime_checks' references/token-refresh.md
 grep -q 'stops only the matching service-scoped direxio-connect daemon' references/token-refresh.md
 grep -q '重新生成本地 credentials/MCP snippets' references/token-refresh.md
-grep -q '默认自动重新安装/重启 cc-connect 和 direxio-mcp' references/token-refresh.md
+grep -q '默认自动重新安装/重启 direxio-connect 和 direxio-mcp' references/token-refresh.md
 grep -q 'DIREXIO_RESET_APP_DATA_CONFIRM=1' SKILL.md
 grep -q 'scripts/aws-credentials.sh import-csv' SKILL.md
 grep -q 'scripts/aws-credentials.sh verify' SKILL.md

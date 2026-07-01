@@ -304,11 +304,11 @@ print_delivery() {
   agent_cred=$(state_get agent_credentials_file)
   agent_room_id=$(state_get agent_room_id)
   runtime=$(state_get agent_runtime)
-  cc_config=$(state_get cc_connect_config)
-  cc_binary=$(state_get cc_connect_binary)
-  cc_agent=$(state_get cc_connect_agent)
-  cc_user=$(state_get cc_connect_matrix_user)
-  cc_pkg=$(state_get cc_connect_npm_package)
+  cc_config=$(state_get connect_config)
+  cc_binary=$(state_get connect_binary)
+  cc_agent=$(state_get connect_agent)
+  cc_user=$(state_get connect_matrix_user)
+  cc_pkg=$(state_get connect_npm_package)
   install_policy=$(state_get agent_install_policy)
   install_mode=$(state_get agent_install_mode)
   install_status=$(state_get agent_install_status)
@@ -329,12 +329,12 @@ print_delivery() {
   echo "  service dir  : ${agent_service_dir:-not recorded}"
   echo "  credentials  : init code/password field, access_token, and agent_token written to ${agent_cred:-~/.direxio/nodes/<service_id>/credentials.json}"
   echo "  agent room   : ${agent_room_id:-written to credentials.json}"
-  echo "  cc-connect   : package=${cc_pkg:-direxio-connent@latest} config=${cc_config:-not recorded} command=${cc_binary:-direxio-connect}"
+  echo "  direxio-connect   : package=${cc_pkg:-direxio-connent@latest} config=${cc_config:-not recorded} command=${cc_binary:-direxio-connect}"
   echo "  matrix user  : ${cc_user:-created during S6}"
   echo "  agent runtime: ${runtime:-unknown}"
-  echo "  install mode : policy=${install_policy:-recommend} mode=${install_mode:-cc-connect} agent=${cc_agent:-codex} status=${install_status:-recommend}"
+  echo "  install mode : policy=${install_policy:-recommend} mode=${install_mode:-direxio-connect} agent=${cc_agent:-codex} status=${install_status:-recommend}"
   [ -n "$install_command" ] && echo "  install cmd  : $install_command"
-  echo "  daemon       : ${cc_binary:-direxio-connect} daemon status --service-name ${agent_service_id:-cc-connect}"
+  echo "  daemon       : ${cc_binary:-direxio-connect} daemon status --service-name ${agent_service_id:-direxio-connect}"
   echo "  env vars     : DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID persisted${envfile:+ via $envfile}"
   echo "  AWS region   : $region"
   echo "  EC2          : $iid ($pubip)"
@@ -862,10 +862,10 @@ cmd_verify_connect_daemon() {
   service_name=$(json_get "$STATE_JSON" agent_service_id)
   [ -n "$service_name" ] || service_name=$(json_get "$STATE_JSON" domain)
   service_dir=$(json_get "$STATE_JSON" agent_service_dir)
-  config=$(json_get "$STATE_JSON" cc_connect_config)
-  runtime_dir=$(json_get "$STATE_JSON" cc_connect_runtime_dir)
-  binary=$(json_get "$STATE_JSON" cc_connect_binary "direxio-connect")
-  [ -n "$service_name" ] || service_name=cc-connect
+  config=$(json_get "$STATE_JSON" connect_config)
+  runtime_dir=$(json_get "$STATE_JSON" connect_runtime_dir)
+  binary=$(json_get "$STATE_JSON" connect_binary "direxio-connect")
+  [ -n "$service_name" ] || service_name=direxio-connect
   [ -n "$binary" ] || binary=direxio-connect
 
   if [ -n "$config" ]; then
@@ -873,9 +873,9 @@ cmd_verify_connect_daemon() {
   elif [ -n "$runtime_dir" ]; then
     target_work_dir="$runtime_dir"
   elif [ -n "$service_dir" ]; then
-    target_work_dir="$service_dir/cc-connect"
+    target_work_dir="$service_dir/direxio-connect"
   else
-    warn "connect daemon check requires cc_connect_config, cc_connect_runtime_dir, or agent_service_dir in state.json"
+    warn "connect daemon check requires connect_config, connect_runtime_dir, or agent_service_dir in state.json"
     return 1
   fi
 
@@ -972,7 +972,7 @@ cmd_verify_runtime() {
       status=manual_pending \
       "ts=$(_now)" \
       "evidence=direxio-connect daemon install is an explicit operator action for policy=$install_status" \
-      "service_name=${service_name:-cc-connect}"
+      "service_name=${service_name:-direxio-connect}"
   else
     cmd_verify_connect_daemon >/dev/null || rc=1
   fi

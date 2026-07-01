@@ -58,7 +58,7 @@ Destroy recorded AWS resources while state exists:
 DOMAIN=__DOMAIN__ bash scripts/destroy.sh
 ```
 
-Destroy stops and uninstalls the local `direxio-connect` daemon only when its reported `WorkDir` matches the current service's `~/.direxio/nodes/<service_id>/cc-connect` directory. It then cleans recorded EC2, EBS root volume, EIP, key pair, security group, Route53 records/zones created by the deployer, and current service directory best-effort. Before removing local state, it records AWS read-back cleanup evidence under `destroy.evidence`. User-managed DNS records and purchased domains remain the user's responsibility.
+Destroy stops and uninstalls the local `direxio-connect` daemon only when its reported `WorkDir` matches the current service's `~/.direxio/nodes/<service_id>/direxio-connect` directory. It then cleans recorded EC2, EBS root volume, EIP, key pair, security group, Route53 records/zones created by the deployer, and current service directory best-effort. Before removing local state, it records AWS read-back cleanup evidence under `destroy.evidence`. User-managed DNS records and purchased domains remain the user's responsibility.
 
 After destroy, read the redacted audit report at:
 
@@ -85,6 +85,6 @@ must rewrite service-scoped local credentials/MCP snippets and reinstall local
 packages by default.
 
 After `scripts/update.sh`, do not rerun S4-S7 just because the service was
-restarted. Image-only update preserves local credentials, cc-connect daemon
+restarted. Image-only update preserves local credentials, direxio-connect daemon
 state, MCP artifacts, confirmations, and runtime checks unless a separate
 verification shows the server regenerated bootstrap credentials.

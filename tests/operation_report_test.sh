@@ -44,9 +44,9 @@ json_build object \
   agent_service_id=report.example.test \
   "agent_service_dir=$service_dir" \
   "agent_credentials_file=$service_dir/credentials.json" \
-  "cc_connect_config=$service_dir/cc-connect/config.toml" \
-  cc_connect_agent=acp \
-  cc_connect_npm_package=direxio-connent@latest \
+  "connect_config=$service_dir/direxio-connect/config.toml" \
+  connect_agent=acp \
+  connect_npm_package=direxio-connent@latest \
   mcp_npm_package=direxio-mcp@latest \
   mcp_server_name=direxio-report-example-test \
   "mcp_config_dir=$service_dir/mcp" \
@@ -104,7 +104,7 @@ cat > "$fakebin/direxio-connect" <<'EOF'
 set -euo pipefail
 if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "status" ]; then
   cat <<STATUS
-cc-connect daemon status
+direxio-connect daemon status
 
   Status:    Running
   WorkDir:   ${STATUS_WORK_DIR:-}
@@ -113,8 +113,8 @@ fi
 EOF
 chmod 700 "$fakebin/direxio-connect"
 
-mkdir -p "$service_dir/cc-connect"
-PATH="$fakebin:$PATH" STATUS_WORK_DIR="$service_dir/cc-connect" bash "$ROOT/scripts/destroy.sh" "$state" >/dev/null
+mkdir -p "$service_dir/direxio-connect"
+PATH="$fakebin:$PATH" STATUS_WORK_DIR="$service_dir/direxio-connect" bash "$ROOT/scripts/destroy.sh" "$state" >/dev/null
 destroy_report="$HOME/.direxio/reports/report.example.test/operation-report.json"
 assert_file_exists "$destroy_report"
 assert_not_contains_secret "$destroy_report"

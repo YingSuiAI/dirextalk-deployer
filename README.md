@@ -8,7 +8,7 @@
 
 - `SKILL.md`: Agent entrypoint, confirmation rules, deployment/destroy flow, and delivery format.
 - `scripts/`: State machine, AWS/EC2/DNS/cloud-init/verification/destroy scripts.
-- `references/`: Tooling, deployment resume flow, cc-connect wiring, state machine, architecture, troubleshooting, and recovery notes.
+- `references/`: Tooling, deployment resume flow, direxio-connect wiring, state machine, architecture, troubleshooting, and recovery notes.
 - `agents/`: Runtime metadata and recognition notes for agent hosts.
 
 ## Before Deployment
@@ -122,13 +122,13 @@ Automatic local bridge and MCP install is the default. Set runtime selectors onl
 
 ```bash
 DIREXIO_AGENT_PLATFORM=auto \
-DIREXIO_CC_CONNECT_AGENT=claudecode \
+DIREXIO_CONNECT_AGENT=claudecode \
 DIREXIO_AGENT_INSTALL_MODE=recommended \
 bash scripts/orchestrate.sh
 ```
 
-Supported install modes: `recommended` and `cc-connect`.
-If `DIREXIO_AGENT_PLATFORM=auto` cannot identify a single supported runtime, set `DIREXIO_CC_CONNECT_AGENT` explicitly. For OpenClaw or Hermes defaults, force the host runtime with `DIREXIO_AGENT_PLATFORM=openclaw` or `DIREXIO_AGENT_PLATFORM=hermes`; setting only `DIREXIO_CC_CONNECT_AGENT=acp` selects generic ACP and requires manual options. OpenClaw Gateway ACP defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-detect the Gateway from `~/.openclaw/openclaw.json`. To force explicit Gateway settings, set all of `DIREXIO_OPENCLAW_ACP_URL`, `DIREXIO_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXIO_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime after pairing. Use `DIREXIO_OPENCLAW_ACP_ARGS_TOML` only when you need to provide the complete OpenClaw ACP args array yourself. Use `DIREXIO_HERMES_ACP_ARGS_TOML` for the child Hermes args; S6 prefixes the `hermes-acp-adapter -- <hermes-command>` wrapper automatically.
+Supported install modes: `recommended` and `direxio-connect`.
+If `DIREXIO_AGENT_PLATFORM=auto` cannot identify a single supported runtime, set `DIREXIO_CONNECT_AGENT` explicitly. For OpenClaw or Hermes defaults, force the host runtime with `DIREXIO_AGENT_PLATFORM=openclaw` or `DIREXIO_AGENT_PLATFORM=hermes`; setting only `DIREXIO_CONNECT_AGENT=acp` selects generic ACP and requires manual options. OpenClaw Gateway ACP defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-detect the Gateway from `~/.openclaw/openclaw.json`. To force explicit Gateway settings, set all of `DIREXIO_OPENCLAW_ACP_URL`, `DIREXIO_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXIO_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime after pairing. Use `DIREXIO_OPENCLAW_ACP_ARGS_TOML` only when you need to provide the complete OpenClaw ACP args array yourself. Use `DIREXIO_HERMES_ACP_ARGS_TOML` for the child Hermes args; S6 prefixes the `hermes-acp-adapter -- <hermes-command>` wrapper automatically.
 
 Check status:
 
@@ -151,7 +151,7 @@ $env:DOMAIN = "<domain>"
 ```
 
 Destroy stops and uninstalls the local `direxio-connect` daemon only when its reported `WorkDir`
-matches the current service's `~/.direxio/nodes/<service_id>/cc-connect`
+matches the current service's `~/.direxio/nodes/<service_id>/direxio-connect`
 directory, then removes that service directory.
 
 Update an existing node without deleting data:
@@ -182,9 +182,9 @@ S6 writes these service-scoped files under `~/.direxio/nodes/<service_id>/`:
 ```text
 credentials.json
 env
-cc-connect/config.toml
-cc-connect/data/
-cc-connect/matrix-session.json
+direxio-connect/config.toml
+direxio-connect/data/
+direxio-connect/matrix-session.json
 mcp/codex.toml
 mcp/openclaw.md
 mcp/openclaw-server.json
@@ -196,7 +196,7 @@ Manual install:
 
 ```bash
 npm install -g direxio-connent@latest
-direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/cc-connect/config.toml --service-name <service_id> --force
+direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force
 direxio-connect daemon status --service-name <service_id>
 ```
 
@@ -210,7 +210,7 @@ DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-
 
 Use `mcp/codex.toml` for Codex and `mcp/hermes.mcp.json` for Hermes. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
 
-Voice input is supported when an STT provider key is available. Set `DIREXIO_SPEECH_API_KEY` or provider-specific variables such as `DIREXIO_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `cc-connect/config.toml`.
+Voice input is supported when an STT provider key is available. Set `DIREXIO_SPEECH_API_KEY` or provider-specific variables such as `DIREXIO_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `direxio-connect/config.toml`.
 
 Homebrew documentation should use:
 
@@ -223,7 +223,7 @@ Source builds use:
 ```bash
 git clone https://github.com/YingSuiAI/direxio-connect.git
 cd connect
-make build AGENTS=<cc-connect-agent> PLATFORMS_INCLUDE=matrix
+make build AGENTS=<direxio-connect-agent> PLATFORMS_INCLUDE=matrix
 ```
 
 ## Validation

@@ -68,7 +68,7 @@ ops_ssh() {
   ssh -i "$keyfile" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 ubuntu@"$pubip" "$command"
 }
 
-ops_cc_connect_service_name() {
+ops_connect_service_name() {
   local state=$1 service_name service_dir
   service_name=$(ops_state_get "$state" '.agent_service_id')
   [ -n "$service_name" ] || service_name=$(ops_state_get "$state" '.domain')
@@ -76,29 +76,29 @@ ops_cc_connect_service_name() {
     service_dir=$(ops_state_get "$state" '.agent_service_dir')
     [ -n "$service_dir" ] && service_name=$(basename "$service_dir")
   fi
-  printf '%s\n' "${service_name:-cc-connect}"
+  printf '%s\n' "${service_name:-direxio-connect}"
 }
 
-ops_cc_connect_target_work_dir() {
+ops_connect_target_work_dir() {
   local state=$1 config runtime_dir service_dir
-  config=$(ops_state_get "$state" '.cc_connect_config')
-  runtime_dir=$(ops_state_get "$state" '.cc_connect_runtime_dir')
+  config=$(ops_state_get "$state" '.connect_config')
+  runtime_dir=$(ops_state_get "$state" '.connect_runtime_dir')
   service_dir=$(ops_state_get "$state" '.agent_service_dir')
   if [ -n "$config" ]; then
     ops_path_dirname "$config"
   elif [ -n "$runtime_dir" ]; then
     printf '%s\n' "$runtime_dir"
   elif [ -n "$service_dir" ]; then
-    printf '%s/cc-connect\n' "${service_dir%/}"
+    printf '%s/direxio-connect\n' "${service_dir%/}"
   fi
 }
 
 ops_stop_scoped_daemon() {
   local state=$1 binary service_name target_work_dir status_out daemon_status work_dir
-  binary=$(ops_state_get "$state" '.cc_connect_binary')
+  binary=$(ops_state_get "$state" '.connect_binary')
   [ -n "$binary" ] || binary=direxio-connect
-  service_name=$(ops_cc_connect_service_name "$state")
-  target_work_dir=$(ops_cc_connect_target_work_dir "$state")
+  service_name=$(ops_connect_service_name "$state")
+  target_work_dir=$(ops_connect_target_work_dir "$state")
   [ -n "$target_work_dir" ] || return 1
 
   case "$binary" in

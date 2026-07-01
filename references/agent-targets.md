@@ -53,22 +53,22 @@ Use `--scope project --project PROJECT_ROOT` only when the user explicitly asks 
 
 ## Direxio Connect Target
 
-The bridge agent type is selected independently from the host operating system. `DIREXIO_CC_CONNECT_AGENT` may be any agent supported by connent/connect:
+The bridge agent type is selected independently from the host operating system. `DIREXIO_CONNECT_AGENT` may be any agent supported by direxio-connect:
 
 ```text
 acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode pi qoder reasonix tmux
 ```
 
-`DIREXIO_AGENT_PLATFORM=auto` is a convenience detector. If it detects OpenClaw or Hermes, S6 wires `direxio-connect` through the generic `acp` agent. OpenClaw writes `cmd = "openclaw"` and requires the current agent/operator to provide the real Gateway URL, token-file, and ACP session. Hermes writes `cmd = "direxio-connect"` with `args = ["hermes-acp-adapter", "--", "hermes", "acp"]` so the Direxio ACP compatibility layer can buffer and clean Hermes output before it reaches the Matrix room. OpenClaw and Hermes are not native connent/connect agent types. If detection is ambiguous or the detected host runtime should use a different connect backend, set `DIREXIO_CC_CONNECT_AGENT` explicitly.
+`DIREXIO_AGENT_PLATFORM=auto` is a convenience detector. If it detects OpenClaw or Hermes, S6 wires `direxio-connect` through the generic `acp` agent. OpenClaw writes `cmd = "openclaw"` and requires the current agent/operator to provide the real Gateway URL, token-file, and ACP session. Hermes writes `cmd = "direxio-connect"` with `args = ["hermes-acp-adapter", "--", "hermes", "acp"]` so the Direxio ACP compatibility layer can buffer and clean Hermes output before it reaches the Matrix room. OpenClaw and Hermes are not native direxio-connect agent types. If detection is ambiguous or the detected host runtime should use a different connect backend, set `DIREXIO_CONNECT_AGENT` explicitly.
 
 S6 writes service-specific files to `~/.direxio/nodes/<service_id>/`, where `service_id` is derived from the deployed domain:
 
 ```text
 credentials.json
 env
-cc-connect/config.toml
-cc-connect/data/
-cc-connect/matrix-session.json
+direxio-connect/config.toml
+direxio-connect/data/
+direxio-connect/matrix-session.json
 mcp/codex.toml
 mcp/openclaw.md
 mcp/openclaw-server.json
@@ -76,7 +76,7 @@ mcp/hermes.mcp.json
 mcp/mcp-servers.json
 ```
 
-The generated `cc-connect/config.toml` contains exactly one Matrix platform and includes:
+The generated `direxio-connect/config.toml` contains exactly one Matrix platform and includes:
 
 ```toml
 [speech]
@@ -110,7 +110,7 @@ auto_verify = false
 
 The `[speech]` block is present only when S6 finds a speech-to-text API key from `DIREXIO_SPEECH_*` or supported provider environment variables. Voice input is not available without STT credentials.
 
-`admin_from` must stay at the `[[projects]]` level. `direxio-connect` uses the full Matrix sender ID, so S6 writes `@owner:<server>`; privileged commands such as `/dir`, `/shell`, `/show`, `/restart`, and `/upgrade` are blocked for other room members. `/dir reset` returns to the generated `work_dir` and clears the runtime override stored under `cc-connect/data/projects/<project>.state.json`.
+`admin_from` must stay at the `[[projects]]` level. `direxio-connect` uses the full Matrix sender ID, so S6 writes `@owner:<server>`; privileged commands such as `/dir`, `/shell`, `/show`, `/restart`, and `/upgrade` are blocked for other room members. `/dir reset` returns to the generated `work_dir` and clears the runtime override stored under `direxio-connect/data/projects/<project>.state.json`.
 
 ## MCP Targets
 
@@ -125,10 +125,10 @@ Use `mcp/codex.toml` for Codex and `mcp/hermes.mcp.json` for Hermes. For OpenCla
 
 ## Installation Policy
 
-- `DIREXIO_AGENT_INSTALL=skip`: write credentials/env and cc-connect config only.
+- `DIREXIO_AGENT_INSTALL=skip`: write credentials/env and direxio-connect config only.
 - `DIREXIO_AGENT_INSTALL=recommend`: write files, record state, and print the install command.
-- `DIREXIO_AGENT_INSTALL=auto` (default): run `npm install -g direxio-connent@latest`, `direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/cc-connect/config.toml --service-name <service_id> --force`, and `npm install -g direxio-mcp@latest`. S6 records cc-connect as installed only after `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs do not show ACP session initialization failure; otherwise it records `agent_install_status=install_failed`. MCP records `mcp_install_status=installed` only when npm succeeds.
+- `DIREXIO_AGENT_INSTALL=auto` (default): run `npm install -g direxio-connent@latest`, `direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force`, and `npm install -g direxio-mcp@latest`. S6 records direxio-connect as installed only after `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs do not show ACP session initialization failure; otherwise it records `agent_install_status=install_failed`. MCP records `mcp_install_status=installed` only when npm succeeds.
 
-Prefer `DIREXIO_CC_CONNECT_AGENT=<agent>` to choose the local agent that `direxio-connect` should run. Keep `DIREXIO_AGENT_PLATFORM=<runtime>` for auto-detection overrides and legacy host-runtime naming. Use `DIREXIO_AGENT_INSTALL_MODE=cc-connect` only when overriding the default `recommended` mapping explicitly.
-Use `DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXIO_CC_CONNECT_AGENT_CMD` is not enough.
+Prefer `DIREXIO_CONNECT_AGENT=<agent>` to choose the local agent that `direxio-connect` should run. Keep `DIREXIO_AGENT_PLATFORM=<runtime>` for auto-detection overrides and legacy host-runtime naming. Use `DIREXIO_AGENT_INSTALL_MODE=direxio-connect` only when overriding the default `recommended` mapping explicitly.
+Use `DIREXIO_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXIO_CONNECT_AGENT_CMD` is not enough.
 For OpenClaw Gateway ACP, S6 defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-discover the Gateway from `~/.openclaw/openclaw.json`. To force an explicit Gateway, complete OpenClaw pairing first, then set all of `DIREXIO_OPENCLAW_ACP_URL`, `DIREXIO_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXIO_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime. S6 writes `["acp", "--url", <url>, "--token-file", <local path>, "--session", <session>]` and converts the token-file with `DIREXIO_LOCAL_PATH_STYLE`. `DIREXIO_OPENCLAW_ACP_ARGS_TOML` replaces the OpenClaw ACP args array only when the runtime needs a fully custom argument list. `DIREXIO_HERMES_ACP_ARGS_TOML` supplies the child Hermes args and keeps the Direxio adapter prefix.

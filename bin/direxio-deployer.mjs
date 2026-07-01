@@ -275,7 +275,7 @@ function copyRecursive(source, destination) {
 
 function shouldSkip(entry) {
   return new Set([
-    ".cc-connect",
+    ".direxio-connect",
     ".codegraph",
     ".direxio-skill-install.json",
     ".git",

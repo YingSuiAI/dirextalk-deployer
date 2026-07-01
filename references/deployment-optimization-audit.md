@@ -228,7 +228,7 @@ Status: Deployer-side implemented.
 
 Current evidence:
 - S5 refreshes bootstrap credentials from the server.
-- S6 rewrites service-scoped `credentials.json`, `env`, cc-connect config, and
+- S6 rewrites service-scoped `credentials.json`, `env`, direxio-connect config, and
   MCP snippets.
 - Reset/redeploy mark S4-S7 pending and report refresh-pending status.
 - Reset/redeploy stops only the matching service-scoped direxio-connect daemon

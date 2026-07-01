@@ -59,9 +59,9 @@ When all phases complete, report:
 - `access_token`, `agent_token`, and real `agent_room_id` in local credentials
 - local node credential file status
 - persisted `DIREXIO_DOMAIN`, `DIREXIO_AGENT_TOKEN`, `DIREXIO_AGENT_ROOM_ID`, `DIREXIO_AGENT_NODE_ID`
-- `cc_connect_config`, `cc_connect_matrix_user`, `cc_connect_matrix_device`, and `cc_connect_matrix_homeserver`
+- `connect_config`, `connect_matrix_user`, `connect_matrix_device`, and `connect_matrix_homeserver`
 - install policy/mode/status from `DIREXIO_AGENT_INSTALL` and `DIREXIO_AGENT_INSTALL_MODE`
-- manual command: `npm install -g direxio-connent@latest && direxio-connect daemon install --config <cc_connect_config> --service-name <service_id> --force`
+- manual command: `npm install -g direxio-connent@latest && direxio-connect daemon install --config <connect_config> --service-name <service_id> --force`
 - region, instance ID, public IP, and `state.json` path
 - SSH command
 - stop-billing guidance: ask the agent to destroy this node when finished

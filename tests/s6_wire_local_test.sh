@@ -30,7 +30,7 @@ clear_runtime_env() {
   done < <(env)
   unset ACP_HOME ANTIGRAVITY_HOME AGY_HOME HERMES_HOME CODEX_HOME CLAUDE_HOME CLAUDECODE_HOME GEMINI_HOME CURSOR_HOME COPILOT_HOME DEVIN_HOME IFLOW_HOME KIMI_HOME OPENCODE_HOME OPEN_CODE_HOME PI_CODING_AGENT_DIR PI_HOME QODER_HOME REASONIX_HOME TMUX_HOME OPENCLAW_HOME
   unset HERMES_SESSION CODEX_SANDBOX CLAUDECODE GEMINI_CLI CURSOR_TRACE_ID GITHUB_COPILOT_TOKEN DEVIN_SESSION IFLOW_SESSION KIMI_SESSION OPENCODE_SESSION QODER_SESSION PI_AGENT_SESSION ANTIGRAVITY_SESSION OPENCLAW_SESSION
-  unset DIREXIO_CC_CONNECT_AGENT DIREXIO_CC_CONNECT_AGENT_CMD
+  unset DIREXIO_CONNECT_AGENT DIREXIO_CONNECT_AGENT_CMD
 }
 
 clear_speech_env() {
@@ -78,8 +78,8 @@ fi
 [ "$(DIREXIO_AGENT_PLATFORM=openclaw _detect_agent_runtime)" = "openclaw" ]
 [ "$(DIREXIO_AGENT_PLATFORM=claude-code _detect_agent_runtime)" = "claude-code" ]
 [ "$(DIREXIO_AGENT_PLATFORM=opencode _detect_agent_runtime)" = "opencode" ]
-[ "$(DIREXIO_CC_CONNECT_AGENT=qodercli _detect_agent_runtime)" = "qoder" ]
-[ "$(DIREXIO_AGENT_PLATFORM=hermes DIREXIO_CC_CONNECT_AGENT=codex _detect_agent_runtime)" = "hermes" ]
+[ "$(DIREXIO_CONNECT_AGENT=qodercli _detect_agent_runtime)" = "qoder" ]
+[ "$(DIREXIO_AGENT_PLATFORM=hermes DIREXIO_CONNECT_AGENT=codex _detect_agent_runtime)" = "hermes" ]
 assert_active_runtime() {
   local expected=$1 signal=$2
   shift 2
@@ -127,12 +127,12 @@ assert_active_runtime codex .codex/tmp PATH="/tmp/.codex/tmp/codex-arg123:/usr/b
 [ "$(DIREXIO_AGENT_INSTALL=recommend _agent_install_policy)" = "recommend" ]
 [ "$(DIREXIO_AGENT_INSTALL=auto _agent_install_policy)" = "auto" ]
 [ "$(_agent_install_policy)" = "auto" ]
-[ "$(_agent_install_mode hermes)" = "cc-connect" ]
-[ "$(_agent_install_mode openclaw)" = "cc-connect" ]
-[ "$(_agent_install_mode codex)" = "cc-connect" ]
-[ "$(_agent_install_mode cursor)" = "cc-connect" ]
-[ "$(_agent_install_mode opencode)" = "cc-connect" ]
-[ "$(DIREXIO_AGENT_INSTALL_MODE=cc-connect _agent_install_mode hermes)" = "cc-connect" ]
+[ "$(_agent_install_mode hermes)" = "direxio-connect" ]
+[ "$(_agent_install_mode openclaw)" = "direxio-connect" ]
+[ "$(_agent_install_mode codex)" = "direxio-connect" ]
+[ "$(_agent_install_mode cursor)" = "direxio-connect" ]
+[ "$(_agent_install_mode opencode)" = "direxio-connect" ]
+[ "$(DIREXIO_AGENT_INSTALL_MODE=direxio-connect _agent_install_mode hermes)" = "direxio-connect" ]
 if DIREXIO_AGENT_INSTALL_MODE=gateway _agent_install_mode hermes >/dev/null 2>&1; then
   echo "legacy install mode should be rejected" >&2
   exit 1
@@ -176,7 +176,7 @@ MATRIX_RETRY_COUNT="$matrix_retry_dir/count" \
 DIREXIO_MATRIX_SESSION_CREATE_MAX=2 \
 DIREXIO_MATRIX_SESSION_RETRY_INTERVAL=0 \
 PATH="$matrix_retry_dir/bin:$PATH" \
-  _create_cc_connect_matrix_session "https://service.example.test" "agent-token" "DEVICE" "$matrix_retry_dir/session.json"
+  _create_connect_matrix_session "https://service.example.test" "agent-token" "DEVICE" "$matrix_retry_dir/session.json"
 [ "$(cat "$matrix_retry_dir/count")" = "2" ]
 json_test_check "$matrix_retry_dir/session.json" "data.user_id === '@agent:service.example.test' && data.access_token === 'matrix-token'"
 
@@ -185,7 +185,7 @@ MATRIX_RETRY_COUNT="$matrix_retry_dir/count" \
 MATRIX_SUCCESS_AFTER=6 \
 DIREXIO_MATRIX_SESSION_RETRY_INTERVAL=0 \
 PATH="$matrix_retry_dir/bin:$PATH" \
-  _create_cc_connect_matrix_session "https://service.example.test" "agent-token" "DEVICE" "$matrix_retry_dir/session.json"
+  _create_connect_matrix_session "https://service.example.test" "agent-token" "DEVICE" "$matrix_retry_dir/session.json"
 [ "$(cat "$matrix_retry_dir/count")" = "6" ]
 json_test_check "$matrix_retry_dir/session.json" "data.user_id === '@agent:service.example.test' && data.access_token === 'matrix-token'"
 
@@ -210,21 +210,21 @@ json_test_check "$matrix_retry_dir/session.json" "data.user_id === '@agent:servi
 [ "$(_agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
 [ "$(DIREXIO_AGENT_WORKSPACE="$tmp/custom-workspace" _agent_workspace "$tmp/service")" = "$tmp/custom-workspace" ]
 
-install_command=$(_agent_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/cc-connect/config.toml" "service.example.test")
+install_command=$(_agent_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/direxio-connect/config.toml" "service.example.test")
 case "$install_command" in
-  *"npm install -g"*"direxio-connent@latest"*"direxio-connect"*"daemon install"*"--config"*"service.example.test/cc-connect/config.toml"*"--service-name"*"service.example.test"*"--force"*) ;;
+  *"npm install -g"*"direxio-connent@latest"*"direxio-connect"*"daemon install"*"--config"*"service.example.test/direxio-connect/config.toml"*"--service-name"*"service.example.test"*"--force"*) ;;
   *)
-    echo "install command did not include expected cc-connect daemon flags: $install_command" >&2
+    echo "install command did not include expected direxio-connect daemon flags: $install_command" >&2
     exit 1
     ;;
 esac
-custom_install_command=$(DIREXIO_CC_CONNECT_NPM_PACKAGE='direxio-connent@override-test' _agent_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/cc-connect/config.toml" "service.example.test")
+custom_install_command=$(DIREXIO_CONNECT_NPM_PACKAGE='direxio-connent@override-test' _agent_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/direxio-connect/config.toml" "service.example.test")
 [[ "$custom_install_command" == *"direxio-connent@override-test"* ]]
 
-[ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/mnt/c/Users/alice/.direxio/nodes/im/cc-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/cc-connect/config.toml" ]
-[ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.direxio/nodes/im/cc-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/cc-connect/config.toml" ]
-windows_install_command=$(DIREXIO_LOCAL_PATH_STYLE=windows _agent_install_command "direxio-connect" "/mnt/c/Users/alice/.direxio/nodes/im/cc-connect/config.toml" "im")
-[[ "$windows_install_command" == *"C:/Users/alice/.direxio/nodes/im/cc-connect/config.toml"* ]]
+[ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" ]
+[ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" ]
+windows_install_command=$(DIREXIO_LOCAL_PATH_STYLE=windows _agent_install_command "direxio-connect" "/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" "im")
+[[ "$windows_install_command" == *"C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml"* ]]
 [[ "$windows_install_command" == *"--service-name im"* ]]
 
 [ "$(_mcp_server_name "service.example.test")" = "direxio-service_example_test" ]
@@ -277,8 +277,8 @@ stale_node_id=$(DIREXIO_AGENT_NODE_ID=codex-old.example.test _agent_node_id code
 matching_node_id=$(DIREXIO_AGENT_NODE_ID=codex-new.example.test-123 _agent_node_id codex new.example.test '!agents-real:new.example.test')
 [ "$matching_node_id" = "codex-new.example.test-123" ]
 
-config_path="$tmp/cc-connect/config.toml"
-_write_cc_connect_config "$config_path" "$tmp/cc-connect/data" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
+config_path="$tmp/direxio-connect/config.toml"
+_write_connect_config "$config_path" "$tmp/direxio-connect/data" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
 grep -q 'type = "matrix"' "$config_path"
 grep -q 'type = "codex"' "$config_path"
 grep -q 'admin_from = "@owner:service.example.test"' "$config_path"
@@ -294,11 +294,11 @@ grep -q 'auto_join = false' "$config_path"
 ! grep -q '^\[speech\]' "$config_path"
 ! grep -q 'DIREXIO_CREDENTIALS_FILE' "$config_path"
 
-speech_config_path="$tmp/cc-connect/config-with-speech.toml"
+speech_config_path="$tmp/direxio-connect/config-with-speech.toml"
 DIREXIO_SPEECH_API_KEY=speech-key \
 DIREXIO_SPEECH_BASE_URL=https://stt.example.test/v1 \
 DIREXIO_SPEECH_MODEL=whisper-test \
-  _write_cc_connect_config "$speech_config_path" "$tmp/cc-connect/data-speech" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
+  _write_connect_config "$speech_config_path" "$tmp/direxio-connect/data-speech" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
 grep -q '^\[speech\]$' "$speech_config_path"
 grep -q 'enabled = true' "$speech_config_path"
 grep -q 'provider = "openai"' "$speech_config_path"
@@ -308,38 +308,38 @@ grep -q 'api_key = "speech-key"' "$speech_config_path"
 grep -q 'base_url = "https://stt.example.test/v1"' "$speech_config_path"
 grep -q 'model = "whisper-test"' "$speech_config_path"
 
-[ "$(_cc_connect_agent_type codex)" = "codex" ]
-[ "$(_cc_connect_agent_type claude-code)" = "claudecode" ]
-[ "$(_cc_connect_agent_type claudecode)" = "claudecode" ]
-[ "$(_cc_connect_agent_type opencode)" = "opencode" ]
-[ "$(_cc_connect_agent_type qodercli)" = "qoder" ]
-[ "$(_cc_connect_agent_type antigravity)" = "antigravity" ]
-[ "$(_cc_connect_agent_type openclaw)" = "acp" ]
-[ "$(_cc_connect_agent_type hermes)" = "acp" ]
-[ "$(DIREXIO_CC_CONNECT_AGENT=gemini _cc_connect_agent_type unknown)" = "gemini" ]
-[ "$(DIREXIO_CC_CONNECT_AGENT=codex _cc_connect_agent_type hermes)" = "codex" ]
-[ "$(DIREXIO_CODEX_COMMAND=/opt/codex/bin/codex _cc_connect_agent_command codex)" = "/opt/codex/bin/codex" ]
-[ "$(DIREXIO_GEMINI_COMMAND=/opt/gemini/bin/gemini _cc_connect_agent_command gemini)" = "/opt/gemini/bin/gemini" ]
-[ "$(DIREXIO_CLAUDE_CODE_COMMAND=/opt/claude/bin/claude _cc_connect_agent_command claudecode)" = "/opt/claude/bin/claude" ]
-[ "$(DIREXIO_QODERCLI_COMMAND=/opt/qoder/qodercli _cc_connect_agent_command qoder)" = "/opt/qoder/qodercli" ]
-[ "$(DIREXIO_CC_CONNECT_AGENT_CMD=/custom/agent _cc_connect_agent_command codex)" = "/custom/agent" ]
-[ "$(_cc_connect_agent_command acp openclaw)" = "openclaw" ]
-[ "$(_cc_connect_agent_command acp hermes)" = "direxio-connect" ]
-[ "$(DIREXIO_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _cc_connect_agent_command acp openclaw)" = "/opt/openclaw/bin/openclaw" ]
-[ "$(DIREXIO_HERMES_COMMAND=/opt/hermes/bin/hermes _cc_connect_agent_command acp hermes)" = "direxio-connect" ]
+[ "$(_connect_agent_type codex)" = "codex" ]
+[ "$(_connect_agent_type claude-code)" = "claudecode" ]
+[ "$(_connect_agent_type claudecode)" = "claudecode" ]
+[ "$(_connect_agent_type opencode)" = "opencode" ]
+[ "$(_connect_agent_type qodercli)" = "qoder" ]
+[ "$(_connect_agent_type antigravity)" = "antigravity" ]
+[ "$(_connect_agent_type openclaw)" = "acp" ]
+[ "$(_connect_agent_type hermes)" = "acp" ]
+[ "$(DIREXIO_CONNECT_AGENT=gemini _connect_agent_type unknown)" = "gemini" ]
+[ "$(DIREXIO_CONNECT_AGENT=codex _connect_agent_type hermes)" = "codex" ]
+[ "$(DIREXIO_CODEX_COMMAND=/opt/codex/bin/codex _connect_agent_command codex)" = "/opt/codex/bin/codex" ]
+[ "$(DIREXIO_GEMINI_COMMAND=/opt/gemini/bin/gemini _connect_agent_command gemini)" = "/opt/gemini/bin/gemini" ]
+[ "$(DIREXIO_CLAUDE_CODE_COMMAND=/opt/claude/bin/claude _connect_agent_command claudecode)" = "/opt/claude/bin/claude" ]
+[ "$(DIREXIO_QODERCLI_COMMAND=/opt/qoder/qodercli _connect_agent_command qoder)" = "/opt/qoder/qodercli" ]
+[ "$(DIREXIO_CONNECT_AGENT_CMD=/custom/agent _connect_agent_command codex)" = "/custom/agent" ]
+[ "$(_connect_agent_command acp openclaw)" = "openclaw" ]
+[ "$(_connect_agent_command acp hermes)" = "direxio-connect" ]
+[ "$(DIREXIO_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _connect_agent_command acp openclaw)" = "/opt/openclaw/bin/openclaw" ]
+[ "$(DIREXIO_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_command acp hermes)" = "direxio-connect" ]
 
-cmd_config_path="$tmp/cc-connect/config-with-cmd.toml"
-_write_cc_connect_config "$cmd_config_path" "$tmp/cc-connect/data-cmd" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "/opt/codex/bin/codex"
+cmd_config_path="$tmp/direxio-connect/config-with-cmd.toml"
+_write_connect_config "$cmd_config_path" "$tmp/direxio-connect/data-cmd" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "/opt/codex/bin/codex"
 grep -q 'cmd = "/opt/codex/bin/codex"' "$cmd_config_path"
 
-options_config_path="$tmp/cc-connect/config-with-extra-options.toml"
-_write_cc_connect_config "$options_config_path" "$tmp/cc-connect/data-options" "reasonix-node" "reasonix" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" 'serve_url = "http://127.0.0.1:8080"'
+options_config_path="$tmp/direxio-connect/config-with-extra-options.toml"
+_write_connect_config "$options_config_path" "$tmp/direxio-connect/data-options" "reasonix-node" "reasonix" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" 'serve_url = "http://127.0.0.1:8080"'
 grep -q 'type = "reasonix"' "$options_config_path"
 grep -q 'serve_url = "http://127.0.0.1:8080"' "$options_config_path"
 ! grep -q 'backend = "app_server"' "$options_config_path"
 
-codex_options_config_path="$tmp/cc-connect/config-with-codex-extra-options.toml"
-_write_cc_connect_config "$codex_options_config_path" "$tmp/cc-connect/data-codex-options" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" $'mode = "full-auto"\nmodel = "gpt-5.5"'
+codex_options_config_path="$tmp/direxio-connect/config-with-codex-extra-options.toml"
+_write_connect_config "$codex_options_config_path" "$tmp/direxio-connect/data-codex-options" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" $'mode = "full-auto"\nmodel = "gpt-5.5"'
 grep -q 'backend = "app_server"' "$codex_options_config_path"
 grep -q 'app_server_url = "stdio"' "$codex_options_config_path"
 grep -q 'mode = "full-auto"' "$codex_options_config_path"
@@ -368,7 +368,7 @@ direxio-connect daemon status
 
   Status:    Stopped
   Platform:  launchd
-  WorkDir:   /tmp/direxio-test/cc-connect
+  WorkDir:   /tmp/direxio-test/direxio-connect
 STATUS
   exit 0
 fi
@@ -377,7 +377,7 @@ EOF
 chmod 700 "$fakebin/npm" "$fakebin/direxio-connect"
 STATE_CALLS="$tmp/state.calls"
 : > "$STATE_CALLS"
-PATH="$fakebin:$PATH" _maybe_auto_install_cc_connect auto codex codex "$tmp/service" "$tmp/service/cc-connect/config.toml" direxio-connect service.example.test
+PATH="$fakebin:$PATH" _maybe_auto_install_connect auto codex codex "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
 grep -q '^agent_install_status=install_failed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/mcp-state.calls"
@@ -392,14 +392,14 @@ grep -q '^mcp_install_status=recommend$' "$STATE_CALLS"
 
 # When explicit Gateway settings are not set, OpenClaw ACP should auto-discover
 # the Gateway from ~/.openclaw/openclaw.json.
-openclaw_fallback_options=$(_cc_connect_agent_options_toml openclaw acp 2> "$tmp/openclaw-fallback.err")
+openclaw_fallback_options=$(_connect_agent_options_toml openclaw acp 2> "$tmp/openclaw-fallback.err")
 [[ "$openclaw_fallback_options" == *'args = ["acp", "--session", "agent:main:main"]'* ]]
 grep -q 'auto-detect the Gateway' "$tmp/openclaw-fallback.err"
 
-openclaw_session_fallback_options=$(DIREXIO_OPENCLAW_ACP_SESSION=agent:direxio:main _cc_connect_agent_options_toml openclaw acp 2> "$tmp/openclaw-session-fallback.err")
+openclaw_session_fallback_options=$(DIREXIO_OPENCLAW_ACP_SESSION=agent:direxio:main _connect_agent_options_toml openclaw acp 2> "$tmp/openclaw-session-fallback.err")
 [[ "$openclaw_session_fallback_options" == *'args = ["acp", "--session", "agent:direxio:main"]'* ]]
 
-if DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 _cc_connect_agent_options_toml openclaw acp > "$tmp/openclaw-partial.out" 2> "$tmp/openclaw-partial.err"; then
+if DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 _connect_agent_options_toml openclaw acp > "$tmp/openclaw-partial.out" 2> "$tmp/openclaw-partial.err"; then
   echo "OpenClaw ACP explicit Gateway options must require URL, token file, and session together" >&2
   exit 1
 fi
@@ -410,7 +410,7 @@ openclaw_options=$(
   DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 \
   DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/gateway.token \
   DIREXIO_OPENCLAW_ACP_SESSION=agent:main:main \
-  _cc_connect_agent_options_toml openclaw acp
+  _connect_agent_options_toml openclaw acp
 )
 [[ "$openclaw_options" == *'args = ["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "/mnt/c/Users/alice/.openclaw/gateway.token", "--session", "agent:main:main"]'* ]]
 [[ "$openclaw_options" == *'display_name = "OpenClaw ACP"'* ]]
@@ -419,59 +419,59 @@ openclaw_session_options=$(
   DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 \
   DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/gateway.token \
   DIREXIO_OPENCLAW_ACP_SESSION=agent:direxio:main \
-  _cc_connect_agent_options_toml openclaw acp
+  _connect_agent_options_toml openclaw acp
 )
 [[ "$openclaw_session_options" == *'--session", "agent:direxio:main"'* ]]
 
-openclaw_url_options=$(DIREXIO_OPENCLAW_ACP_ARGS_TOML='["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]' _cc_connect_agent_options_toml openclaw acp)
+openclaw_url_options=$(DIREXIO_OPENCLAW_ACP_ARGS_TOML='["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]' _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_url_options" == *'args = ["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]'* ]]
 
-openclaw_posix_token_options=$(DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXIO_LOCAL_PATH_STYLE=posix DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXIO_OPENCLAW_ACP_SESSION=agent:main:main _cc_connect_agent_options_toml openclaw acp)
+openclaw_posix_token_options=$(DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXIO_LOCAL_PATH_STYLE=posix DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXIO_OPENCLAW_ACP_SESSION=agent:main:main _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_posix_token_options" == *'args = ["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "/mnt/c/Users/alice/.openclaw/token.json", "--session", "agent:main:main"]'* ]]
 
-openclaw_token_options=$(DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXIO_LOCAL_PATH_STYLE=windows DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXIO_OPENCLAW_ACP_SESSION=agent:main:main _cc_connect_agent_options_toml openclaw acp)
+openclaw_token_options=$(DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXIO_LOCAL_PATH_STYLE=windows DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXIO_OPENCLAW_ACP_SESSION=agent:main:main _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_token_options" == *'args = ["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "C:/Users/alice/.openclaw/token.json", "--session", "agent:main:main"]'* ]]
 
-hermes_options=$(_cc_connect_agent_options_toml hermes acp)
+hermes_options=$(_connect_agent_options_toml hermes acp)
 [[ "$hermes_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "acp"]'* ]]
 [[ "$hermes_options" == *'display_name = "Hermes ACP"'* ]]
 
-hermes_custom_command_options=$(DIREXIO_HERMES_COMMAND=/opt/hermes/bin/hermes _cc_connect_agent_options_toml hermes acp)
+hermes_custom_command_options=$(DIREXIO_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_options_toml hermes acp)
 [[ "$hermes_custom_command_options" == *'args = ["hermes-acp-adapter", "--", "/opt/hermes/bin/hermes", "acp"]'* ]]
 
-hermes_custom_args_options=$(DIREXIO_HERMES_ACP_ARGS_TOML='["acp", "--profile", "direxio"]' _cc_connect_agent_options_toml hermes acp)
+hermes_custom_args_options=$(DIREXIO_HERMES_ACP_ARGS_TOML='["acp", "--profile", "direxio"]' _connect_agent_options_toml hermes acp)
 [[ "$hermes_custom_args_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "acp", "--profile", "direxio"]'* ]]
 
-openclaw_config_path="$tmp/cc-connect/config-openclaw.toml"
-_write_cc_connect_config "$openclaw_config_path" "$tmp/cc-connect/data-openclaw" "openclaw-node" "$(_cc_connect_agent_type openclaw)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_cc_connect_agent_command acp openclaw)" "$openclaw_options"
+openclaw_config_path="$tmp/direxio-connect/config-openclaw.toml"
+_write_connect_config "$openclaw_config_path" "$tmp/direxio-connect/data-openclaw" "openclaw-node" "$(_connect_agent_type openclaw)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp openclaw)" "$openclaw_options"
 grep -q 'type = "acp"' "$openclaw_config_path"
 grep -q 'cmd = "openclaw"' "$openclaw_config_path"
 grep -q 'args = \["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "/mnt/c/Users/alice/.openclaw/gateway.token", "--session", "agent:main:main"\]' "$openclaw_config_path"
 grep -q 'display_name = "OpenClaw ACP"' "$openclaw_config_path"
 
-hermes_config_path="$tmp/cc-connect/config-hermes.toml"
-_write_cc_connect_config "$hermes_config_path" "$tmp/cc-connect/data-hermes" "hermes-node" "$(_cc_connect_agent_type hermes)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_cc_connect_agent_command acp hermes)" "$(_cc_connect_agent_options_toml hermes acp)"
+hermes_config_path="$tmp/direxio-connect/config-hermes.toml"
+_write_connect_config "$hermes_config_path" "$tmp/direxio-connect/data-hermes" "hermes-node" "$(_connect_agent_type hermes)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp hermes)" "$(_connect_agent_options_toml hermes acp)"
 grep -q 'type = "acp"' "$hermes_config_path"
 grep -q 'cmd = "direxio-connect"' "$hermes_config_path"
 grep -q 'args = \["hermes-acp-adapter", "--", "hermes", "acp"\]' "$hermes_config_path"
 grep -q 'display_name = "Hermes ACP"' "$hermes_config_path"
 
 guidance=$(
-  _print_cc_connect_guidance codex https://service.example.test "$HOME/.direxio/nodes/service.example.test/credentials.json" "$HOME/.direxio/nodes/service.example.test/env" recommend cc-connect "install command" codex-service "$config_path" "$HOME/.direxio/nodes/service.example.test/cc-connect/bin/direxio-connect" codex "/opt/codex/bin/codex" service.example.test 2>&1 >/dev/null
+  _print_connect_guidance codex https://service.example.test "$HOME/.direxio/nodes/service.example.test/credentials.json" "$HOME/.direxio/nodes/service.example.test/env" recommend direxio-connect "install command" codex-service "$config_path" "$HOME/.direxio/nodes/service.example.test/direxio-connect/bin/direxio-connect" codex "/opt/codex/bin/codex" service.example.test 2>&1 >/dev/null
 )
 [[ "$guidance" == *"DIREXIO_DOMAIN"* ]]
 [[ "$guidance" == *"DIREXIO_AGENT_TOKEN"* ]]
-[[ "$guidance" == *"cc-connect service"* ]]
+[[ "$guidance" == *"direxio-connect service"* ]]
 [[ "$guidance" == *"DIREXIO_AGENT_ROOM_ID"* ]]
 [[ "$guidance" == *"DIREXIO_AGENT_NODE_ID"* ]]
-[[ "$guidance" == *"cc-connect config"* ]]
+[[ "$guidance" == *"direxio-connect config"* ]]
 [[ "$guidance" == *"/opt/codex/bin/codex"* ]]
 [[ "$guidance" == *"daemon install"* ]]
 [[ "$guidance" == *"direxio-connent@latest"* || "$install_command" == *"direxio-connent@latest"* ]]
-[[ "$guidance" == *"type = \"matrix\""* || "$guidance" == *"cc-connect will use Matrix"* ]]
+[[ "$guidance" == *"type = \"matrix\""* || "$guidance" == *"direxio-connect will use Matrix"* ]]
 bad_credentials_env_name="DIREXIO_CREDENTIALS""_FILE"
 if [[ "$guidance" == *"$bad_credentials_env_name"* ]]; then
-  echo "cc-connect guidance must not use $bad_credentials_env_name; it writes direct Matrix config" >&2
+  echo "direxio-connect guidance must not use $bad_credentials_env_name; it writes direct Matrix config" >&2
   exit 1
 fi
 

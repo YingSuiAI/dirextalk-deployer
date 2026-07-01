@@ -40,7 +40,7 @@ set -euo pipefail
 [ "${3:-}" = "--service-name" ]
 [ "${4:-}" = "runtime-summary.example.test" ]
 cat <<STATUS
-cc-connect daemon status
+direxio-connect daemon status
 
   Status:    Running
   Platform:  test
@@ -138,9 +138,9 @@ EOF
 chmod 700 "$fakebin/curl"
 
 service_dir="$HOME/.direxio/nodes/runtime-summary.example.test"
-mkdir -p "$service_dir/cc-connect"
+mkdir -p "$service_dir/direxio-connect"
 credentials="$service_dir/credentials.json"
-config="$service_dir/cc-connect/config.toml"
+config="$service_dir/direxio-connect/config.toml"
 : > "$credentials"
 : > "$config"
 expected_credentials="$credentials"
@@ -161,13 +161,13 @@ json_build object \
   "mcp_command=$mcp_command" \
   agent_token=AGENT_TOKEN_RUNTIME \
   'agent_room_id=!agent:runtime-summary.example.test' \
-  "cc_connect_config=$config" \
-  cc_connect_binary=direxio-connect \
+  "connect_config=$config" \
+  connect_binary=direxio-connect \
   phase=S7_VERIFY_E2E \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
   'resources={}' > "$state"
 
-verify_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$service_dir/cc-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
+verify_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$service_dir/direxio-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
 printf '%s\n' "$verify_output" | grep -q 'verified runtime checks: passed'
 
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'passed' && data.runtime_checks.summary.checks.mcp_doctor === 'passed' && data.runtime_checks.summary.checks.mcp_tools === 'passed' && data.runtime_checks.summary.checks.mcp_smoke === 'passed' && !data.user_confirmations?.agent_mcp_runtime"
@@ -177,7 +177,7 @@ report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p
 json_test_check "$report_path" "data.runtime_checks.summary.status === 'passed'"
 
 set +e
-DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.direxio/nodes/other.example.test/cc-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime > "$tmp/runtime-fail.out" 2>&1
+DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.direxio/nodes/other.example.test/direxio-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime > "$tmp/runtime-fail.out" 2>&1
 fail_rc=$?
 set -e
 [ "$fail_rc" -ne 0 ] || {
@@ -188,7 +188,7 @@ json_test_check "$state" "data.runtime_checks.summary.status === 'failed' && dat
 
 json_mutate "$state" set-string agent_install_policy recommend
 json_mutate "$state" set-string agent_install_status recommend
-verify_recommend_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.direxio/nodes/other.example.test/cc-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
+verify_recommend_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.direxio/nodes/other.example.test/direxio-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
 printf '%s\n' "$verify_recommend_output" | grep -q 'verified runtime checks: passed'
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'manual_pending' && data.runtime_checks.connect_daemon.status === 'manual_pending' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"
 

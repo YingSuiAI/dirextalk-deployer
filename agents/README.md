@@ -6,7 +6,7 @@ This skill is runtime-neutral. Claude, Codex/OpenAI, Gemini, Cursor, Copilot, Op
 SKILL.md
 ```
 
-When an agent runtime supports skill metadata, point it at `SKILL.md` and use `scripts/orchestrate.sh` as the deployment command. Read `references/agent-targets.md` before installing this skill or wiring MCP/plugin access for a runtime. S6 writes current Direxio MCP/plugin variables and records the detected runtime plus target paths. After deployment, ask the user before installing or configuring the runtime-specific plugin and MCP service.
+When an agent runtime supports skill metadata, point it at `SKILL.md` and use `scripts/orchestrate.sh` as the deployment command. Read `references/agent-targets.md` before installing this skill or wiring the local `direxio-connect` bridge and `direxio-mcp` snippets for a runtime. S6 writes current Direxio bridge/MCP variables and records the detected runtime plus target paths. After deployment, ask the user before mutating the runtime-specific local bridge or MCP configuration.
 
 Recognition keywords:
 
@@ -14,12 +14,13 @@ Recognition keywords:
 - resume Direxio deployment
 - verify Direxio message server
 - destroy Direxio AWS resources
-- wire Direxio MCP/plugin
+- wire Direxio connect bridge
+- refresh Direxio MCP snippets
 - refresh Direxio agent token
 
 Required capabilities:
 
 - Read local files.
 - Run POSIX shell commands.
-- Use `aws`, `jq`, `ssh`, `scp`, and `curl` after the user approves any missing installs.
+- Use `aws`, `ssh`, `scp`, `curl`, and Node.js for `scripts/json.mjs` after the user approves any missing installs.
 - Preserve secrets outside the repository.

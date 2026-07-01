@@ -1,6 +1,6 @@
 ---
 name: direxio-deployer
-description: Deploy, resume, verify, destroy, and locally wire a production Direxio message server on AWS for any connent/connect-supported local agent runtime. Use when installing or updating this skill itself; install the versioned npm package `direxio-deployer` and use its CLI to place the skill in the runtime-specific global path from references/agent-targets.md unless the user explicitly asks for a project-local installation.
+description: Deploy, resume, verify, destroy, and locally wire a production Direxio message server on AWS for any local agent runtime supported by direxio-connect. Use when installing or updating this skill itself; install the versioned npm package `direxio-deployer` and use its CLI to place the skill in the runtime-specific global path from references/agent-targets.md unless the user explicitly asks for a project-local installation.
 ---
 
 # Direxio Deployer
@@ -45,7 +45,7 @@ install rule. Use a Git clone only for deployer development or local patching.
 ## Platform Law
 
 Classify every path by consumer before writing it to `state.json`,
-`credentials.json`, `env`, `cc-connect/config.toml`, docs, or printed commands:
+`credentials.json`, `env`, `direxio-connect/config.toml`, docs, or printed commands:
 
 - Remote server paths are Linux paths consumed on EC2, such as `/opt/p2p`.
 - Deployer execution paths may be POSIX paths inside Bash phases.
@@ -129,11 +129,11 @@ S6 writes service-scoped files under `~/.direxio/nodes/<service_id>/`:
 ```text
 credentials.json
 env
-cc-connect/config.toml
+direxio-connect/config.toml
 mcp/
 ```
 
-The cc-connect config must use a direct Matrix config, create the Matrix session
+The direxio-connect config must use a direct Matrix config, create the Matrix session
 through `agent.matrix_session.create` with `agent_token`, require `@agent:<server>`,
 and restrict sync/replies to the real `agent_room_id`. It must not use
 `DIREXIO_CREDENTIALS_FILE`; MCP owns that variable.
@@ -142,7 +142,7 @@ Key selectors:
 
 ```bash
 DIREXIO_AGENT_PLATFORM=auto
-DIREXIO_CC_CONNECT_AGENT=<optional connect agent>
+DIREXIO_CONNECT_AGENT=<optional connect agent>
 DIREXIO_AGENT_INSTALL=auto
 DIREXIO_AGENT_INSTALL_MODE=recommended
 ```
@@ -162,7 +162,7 @@ only after:
 
 1. The user receives the App domain and eight-digit app initialization code.
 2. The user confirms App initialization.
-3. cc-connect is wired to the real `agent_room_id`.
+3. direxio-connect is wired to the real `agent_room_id`.
 4. MCP snippets exist and `direxio-mcp doctor --json` succeeds.
 5. Agent/MCP validation is non-polluting; prefer read-only checks and do not
    auto-send a normal chat message.
@@ -214,7 +214,7 @@ AWS resource IDs, EBS root volume evidence, billing reminders, and
 `cost_estimate`.
 
 Delivery must include App domain, eight-digit app initialization code, product
-gate status, `agent_room_id`, service directory, cc-connect config, MCP config
+gate status, `agent_room_id`, service directory, direxio-connect config, MCP config
 paths, Matrix bridge user/device, AWS region, EC2 instance/public IP, SSH path,
 state path, report path, stop-billing reminder, and security reminder to delete
 or disable temporary credentials and rotate/remove root access keys if used.
@@ -222,7 +222,7 @@ or disable temporary credentials and rotate/remove root access keys if used.
 ## Update, Reset, And Destroy
 
 Use `scripts/update.sh` for image-only refresh. It preserves infrastructure,
-TLS storage, local credentials, confirmations, runtime checks, cc-connect daemon
+TLS storage, local credentials, confirmations, runtime checks, direxio-connect daemon
 state, and MCP artifacts unless verification proves credentials were regenerated.
 
 Use `scripts/reset-app-data.sh` only with `DIREXIO_RESET_APP_DATA_CONFIRM=1`.
@@ -235,7 +235,7 @@ Destroy uses `scripts/destroy.sh` on POSIX and `.\scripts\destroy.ps1` on
 Windows PowerShell. Destroy uses the same AWS identity boundary as deployment.
 Root AWS access-key identity is allowed when the operator explicitly chose it.
 Destroy stops and uninstalls only the service-scoped daemon whose WorkDir
-matches `~/.direxio/nodes/<service_id>/cc-connect`, then removes recorded AWS
+matches `~/.direxio/nodes/<service_id>/direxio-connect`, then removes recorded AWS
 resources and writes `destroy.evidence`. If `possible_remaining_billable_resources`
 is present, AWS Console/Billing is the source of truth and cleanup must continue.
 

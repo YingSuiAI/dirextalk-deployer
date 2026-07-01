@@ -69,10 +69,10 @@ Windows terminal output may redact AWS keys. If a CSV appears truncated in outpu
 S6 checks active runtime signals before historical config directories. If detection is ambiguous on Windows, set:
 
 ```bash
-DIREXIO_CC_CONNECT_AGENT=claudecode
+DIREXIO_CONNECT_AGENT=claudecode
 ```
 
-or another supported connent/connect agent before running `scripts/orchestrate.sh`. Supported bridge agents are `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
+or another supported direxio-connect agent before running `scripts/orchestrate.sh`. Supported bridge agents are `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
 
 ## direxio-connect
 
@@ -80,7 +80,7 @@ The npm path is the default local install:
 
 ```bash
 npm install -g direxio-connent@latest
-direxio-connect daemon install --config "$HOME/.direxio/nodes/<service_id>/cc-connect/config.toml" --service-name <service_id> --force
+direxio-connect daemon install --config "$HOME/.direxio/nodes/<service_id>/direxio-connect/config.toml" --service-name <service_id> --force
 direxio-connect daemon status --service-name <service_id>
 ```
 
@@ -93,7 +93,7 @@ npm bin -g
 If an agent executable cannot be spawned from PATH, set a generic or agent-specific command before running S6:
 
 ```powershell
-$env:DIREXIO_CC_CONNECT_AGENT = "gemini"
+$env:DIREXIO_CONNECT_AGENT = "gemini"
 $env:DIREXIO_GEMINI_COMMAND = "C:\Tools\gemini.cmd"
 ```
 

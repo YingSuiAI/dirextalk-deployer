@@ -57,9 +57,9 @@ write_state() {
     "agent_service_dir=$service_dir" \
     "agent_credentials_file=$service_dir/credentials.json" \
     agent_install_status=installed \
-    "cc_connect_config=$service_dir/cc-connect/config.toml" \
-    cc_connect_binary=direxio-connect \
-    cc_connect_agent=codex \
+    "connect_config=$service_dir/direxio-connect/config.toml" \
+    connect_binary=direxio-connect \
+    connect_agent=codex \
     "mcp_config_dir=$service_dir/mcp" \
     "mcp_codex_config=$service_dir/mcp/codex.toml" \
     "mcp_openclaw_config=$service_dir/mcp/openclaw.md" \
@@ -102,7 +102,7 @@ write_state "$state" "$service_dir"
 
 update_calls="$tmp/update.calls"
 : > "$update_calls"
-CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/cc-connect" MESSAGE_SERVER_IMAGE="direxio/message-server:test" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
+CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/direxio-connect" MESSAGE_SERVER_IMAGE="direxio/message-server:test" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
 assert_not_contains "$tmp/update.out" 'Old user confirmations and runtime checks were cleared'
 assert_not_contains "$tmp/update.out" 'Scoped local bridge daemon was stopped'
 assert_not_contains "$tmp/update.out" 'rerun orchestrate with DIREXIO_EXISTING_STATE_ACTION=continue'
@@ -119,7 +119,7 @@ assert_not_contains "$update_calls" 'volume rm|down -v|postgres-data|message-con
 write_state "$state" "$service_dir"
 update_default_calls="$tmp/update-default.calls"
 : > "$update_default_calls"
-env -u MESSAGE_SERVER_IMAGE CALLS="$update_default_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/cc-connect" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-default.out"
+env -u MESSAGE_SERVER_IMAGE CALLS="$update_default_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/direxio-connect" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-default.out"
 assert_contains "$update_default_calls" 'sudo sh -lc'
 assert_not_contains "$update_default_calls" 'sudo MESSAGE_SERVER_IMAGE='
 assert_contains "$update_default_calls" 'docker compose --env-file \.env pull'
@@ -139,7 +139,7 @@ fi
 
 reset_calls="$tmp/reset.calls"
 : > "$reset_calls"
-CALLS="$reset_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/cc-connect" DIREXIO_RESET_APP_DATA_CONFIRM=1 bash "$ROOT/scripts/reset-app-data.sh" "$state" > "$tmp/reset.out"
+CALLS="$reset_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/direxio-connect" DIREXIO_RESET_APP_DATA_CONFIRM=1 bash "$ROOT/scripts/reset-app-data.sh" "$state" > "$tmp/reset.out"
 assert_contains "$tmp/reset.out" 'Old user confirmations and runtime checks were cleared'
 assert_contains "$tmp/reset.out" 'Scoped local bridge daemon was stopped'
 assert_contains "$tmp/reset.out" 'rerun orchestrate with DIREXIO_EXISTING_STATE_ACTION=continue'

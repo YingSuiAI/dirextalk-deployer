@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# S6 WIRE_LOCAL_CLIENT - write service-scoped credentials and cc-connect env.
+# S6 WIRE_LOCAL_CLIENT - write service-scoped credentials and direxio-connect env.
 #
 #   ① ~/.direxio/nodes/<service_id>/credentials.json
 #   ② ~/.direxio/nodes/<service_id>/env
-#   ③ cc-connect Matrix config and install guidance for the detected agent runtime
+#   ③ direxio-connect Matrix config and install guidance for the detected agent runtime
 #   ④ MCP client snippets for Codex/OpenClaw/Hermes under the service directory
 #
-# Tokens change on every rebuild, so local credentials and cc-connect env must be refreshed.
+# Tokens change on every rebuild, so local credentials and direxio-connect env must be refreshed.
 
 S6_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
@@ -27,15 +27,15 @@ _direxio_service_dir() {
   direxio_service_dir "$1"
 }
 
-_cc_connect_supported_agents() {
+_connect_supported_agents() {
   printf '%s\n' acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode pi qoder reasonix tmux
 }
 
-_cc_connect_supported_agents_csv() {
-  _cc_connect_supported_agents | paste -sd ',' - | sed 's/,/, /g'
+_connect_supported_agents_csv() {
+  _connect_supported_agents | paste -sd ',' - | sed 's/,/, /g'
 }
 
-_cc_connect_agent_alias() {
+_connect_agent_alias() {
   case "$1" in
     claude|claude-code|claudecode) printf 'claudecode\n' ;;
     open-code|opencode) printf 'opencode\n' ;;
@@ -46,10 +46,10 @@ _cc_connect_agent_alias() {
   esac
 }
 
-_validate_cc_connect_agent() {
+_validate_connect_agent() {
   local agent
-  agent=$(_cc_connect_agent_alias "$1" 2>/dev/null) || {
-    fail "cc-connect agent must be one of: $(_cc_connect_supported_agents_csv)."
+  agent=$(_connect_agent_alias "$1" 2>/dev/null) || {
+    fail "direxio-connect agent must be one of: $(_connect_supported_agents_csv)."
     return 1
   }
   printf '%s\n' "$agent"
@@ -62,8 +62,8 @@ _detect_agent_runtime() {
     printf '%s\n' "$DIREXIO_AGENT_PLATFORM"
     return 0
   fi
-  if [ -n "${DIREXIO_CC_CONNECT_AGENT:-}" ]; then
-    explicit_agent=$(_validate_cc_connect_agent "$DIREXIO_CC_CONNECT_AGENT")
+  if [ -n "${DIREXIO_CONNECT_AGENT:-}" ]; then
+    explicit_agent=$(_validate_connect_agent "$DIREXIO_CONNECT_AGENT")
     printf '%s\n' "$explicit_agent"
     return 0
   fi
@@ -358,8 +358,8 @@ _validate_agent_platform() {
   case "$1" in
     auto|generic|unknown|openclaw|hermes) return 0 ;;
     *)
-      _cc_connect_agent_alias "$1" >/dev/null 2>&1 && return 0
-      fail "DIREXIO_AGENT_PLATFORM must be auto, a cc-connect agent ($(_cc_connect_supported_agents_csv)), openclaw, hermes, generic, or unknown."
+      _connect_agent_alias "$1" >/dev/null 2>&1 && return 0
+      fail "DIREXIO_AGENT_PLATFORM must be auto, a direxio-connect agent ($(_connect_supported_agents_csv)), openclaw, hermes, generic, or unknown."
       ;;
   esac
 }
@@ -376,10 +376,10 @@ _agent_install_mode() {
   local runtime=$1 mode=${DIREXIO_AGENT_INSTALL_MODE:-recommended}
   case "$mode" in
     recommended)
-      printf 'cc-connect\n'
+      printf 'direxio-connect\n'
       ;;
-    cc-connect) printf '%s\n' "$mode" ;;
-    *) fail "DIREXIO_AGENT_INSTALL_MODE must be recommended or cc-connect." ;;
+    direxio-connect) printf '%s\n' "$mode" ;;
+    *) fail "DIREXIO_AGENT_INSTALL_MODE must be recommended or direxio-connect." ;;
   esac
 }
 
@@ -393,31 +393,31 @@ _validate_real_agent_room_id() {
   esac
 }
 
-_cc_connect_agent_type() {
-  local runtime=$1 explicit=${DIREXIO_CC_CONNECT_AGENT:-}
+_connect_agent_type() {
+  local runtime=$1 explicit=${DIREXIO_CONNECT_AGENT:-}
   if [ -n "$explicit" ]; then
-    _validate_cc_connect_agent "$explicit"
+    _validate_connect_agent "$explicit"
     return 0
   fi
   case "$runtime" in
     openclaw|hermes) printf 'acp\n'; return 0 ;;
   esac
-  _validate_cc_connect_agent "$runtime"
+  _validate_connect_agent "$runtime"
 }
 
-_cc_connect_agent_command() {
+_connect_agent_command() {
   local agent runtime raw_key var value
   runtime=${2:-$1}
-  agent=$(_cc_connect_agent_alias "$1" 2>/dev/null || printf '%s\n' "$1")
-  if [ -n "${DIREXIO_CC_CONNECT_AGENT_CMD:-}" ]; then
-    printf '%s\n' "$DIREXIO_CC_CONNECT_AGENT_CMD"
+  agent=$(_connect_agent_alias "$1" 2>/dev/null || printf '%s\n' "$1")
+  if [ -n "${DIREXIO_CONNECT_AGENT_CMD:-}" ]; then
+    printf '%s\n' "$DIREXIO_CONNECT_AGENT_CMD"
     return 0
   fi
   if [ "$runtime" = "hermes" ] && [ "$agent" = "acp" ]; then
-    _local_connect_path "${DIREXIO_HERMES_ACP_ADAPTER_COMMAND:-${DIREXIO_CC_CONNECT_BIN:-direxio-connect}}"
+    _local_connect_path "${DIREXIO_HERMES_ACP_ADAPTER_COMMAND:-${DIREXIO_CONNECT_BIN:-direxio-connect}}"
     return 0
   fi
-  for raw_key in $(_cc_connect_runtime_command_aliases "$runtime") "$agent" $(_cc_connect_agent_command_aliases "$agent"); do
+  for raw_key in $(_connect_runtime_command_aliases "$runtime") "$agent" $(_connect_agent_command_aliases "$agent"); do
     var="DIREXIO_$(printf '%s' "$raw_key" | tr '[:lower:]-' '[:upper:]_')_COMMAND"
     value=$(printenv "$var" 2>/dev/null || true)
     if [ -n "$value" ]; then
@@ -430,14 +430,14 @@ _cc_connect_agent_command() {
   esac
 }
 
-_cc_connect_runtime_command_aliases() {
+_connect_runtime_command_aliases() {
   case "$1" in
     openclaw) printf '%s\n' openclaw ;;
     hermes) printf '%s\n' hermes ;;
   esac
 }
 
-_cc_connect_agent_command_aliases() {
+_connect_agent_command_aliases() {
   case "$1" in
     claudecode) printf '%s\n' claude-code claude ;;
     opencode) printf '%s\n' open-code ;;
@@ -446,26 +446,26 @@ _cc_connect_agent_command_aliases() {
   esac
 }
 
-_cc_connect_repo() {
-  printf '%s\n' "${DIREXIO_CC_CONNECT_REPO:-https://github.com/YingSuiAI/direxio-connect.git}"
+_connect_repo() {
+  printf '%s\n' "${DIREXIO_CONNECT_REPO:-https://github.com/YingSuiAI/direxio-connect.git}"
 }
 
-_cc_connect_npm_package() {
-  printf '%s\n' "${DIREXIO_CC_CONNECT_NPM_PACKAGE:-direxio-connent@latest}"
+_connect_npm_package() {
+  printf '%s\n' "${DIREXIO_CONNECT_NPM_PACKAGE:-direxio-connent@latest}"
 }
 
-_cc_connect_ref() {
-  printf '%s\n' "${DIREXIO_CC_CONNECT_REF:-main}"
+_connect_ref() {
+  printf '%s\n' "${DIREXIO_CONNECT_REF:-main}"
 }
 
-_cc_connect_source_dir() {
+_connect_source_dir() {
   local service_dir=$1
-  printf '%s\n' "${DIREXIO_CC_CONNECT_DIR:-$service_dir/cc-connect-src}"
+  printf '%s\n' "${DIREXIO_CONNECT_DIR:-$service_dir/direxio-connect-src}"
 }
 
-_cc_connect_runtime_dir() {
+_connect_runtime_dir() {
   local service_dir=$1
-  printf '%s/cc-connect\n' "$service_dir"
+  printf '%s/direxio-connect\n' "$service_dir"
 }
 
 _agent_workspace() {
@@ -481,9 +481,9 @@ _agent_workspace() {
   printf '%s/workspace\n' "$service_dir"
 }
 
-_cc_connect_config_path() {
+_connect_config_path() {
   local service_dir=$1
-  printf '%s/config.toml\n' "$(_cc_connect_runtime_dir "$service_dir")"
+  printf '%s/config.toml\n' "$(_connect_runtime_dir "$service_dir")"
 }
 
 _mcp_npm_package() {
@@ -539,15 +539,15 @@ _mcp_server_name() {
   printf 'direxio-%s\n' "$service_id" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/_/g; s/^_+//; s/_+$//; s/^$/direxio_local/'
 }
 
-_cc_connect_binary_path() {
+_connect_binary_path() {
   local service_dir=$1
-  printf '%s\n' "${DIREXIO_CC_CONNECT_BIN:-direxio-connect}"
+  printf '%s\n' "${DIREXIO_CONNECT_BIN:-direxio-connect}"
 }
 
-_cc_connect_agent_options_toml() {
+_connect_agent_options_toml() {
   local runtime=${1:-} agent=${2:-} args_toml q_display
-  if [ -n "${DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML:-}" ]; then
-    printf '%s\n' "$DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML"
+  if [ -n "${DIREXIO_CONNECT_AGENT_OPTIONS_TOML:-}" ]; then
+    printf '%s\n' "$DIREXIO_CONNECT_AGENT_OPTIONS_TOML"
     return 0
   fi
   case "$runtime:$agent" in
@@ -634,7 +634,7 @@ _toml_has_key() {
   printf '%s\n' "$toml" | grep -Eq "^[[:space:]]*${key}[[:space:]]*="
 }
 
-_cc_connect_default_agent_options_toml() {
+_connect_default_agent_options_toml() {
   local agent=$1 custom_toml=${2:-}
   case "$agent" in
     codex)
@@ -669,7 +669,7 @@ _lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
-_cc_connect_speech_config_toml() {
+_connect_speech_config_toml() {
   local enabled provider language api_key base_url model
   local q_provider q_language q_api_key q_base_url q_model
   enabled=$(_lower "${DIREXIO_SPEECH_ENABLED:-auto}")
@@ -867,7 +867,7 @@ EOF
   chmod 644 "$readme" 2>/dev/null || true
 }
 
-_create_cc_connect_matrix_session() {
+_create_connect_matrix_session() {
   local asurl=$1 agent_auth_token=$2 device_id=$3 out=$4 body code http_body
   local max_attempts interval max_interval attempt preview sleep_for
   body=$(json_build matrix-session-create "$device_id")
@@ -928,7 +928,7 @@ _is_non_negative_integer() {
   esac
 }
 
-_write_cc_connect_config() {
+_write_connect_config() {
   local config_path=$1 data_dir=$2 project=$3 agent=$4 workspace=$5 homeserver=$6 matrix_token=$7 matrix_user=$8 room_id=$9 admin_from=${10:-} agent_cmd=${11:-} agent_options_toml=${12:-}
   local q_data q_project q_agent q_workspace q_homeserver q_token q_user q_room q_admin_from q_agent_cmd speech_toml default_agent_options_toml
   mkdir -p "$(dirname "$config_path")" "$data_dir"
@@ -942,8 +942,8 @@ _write_cc_connect_config() {
   q_room=$(_toml_escape "$room_id")
   q_admin_from=$(_toml_escape "$admin_from")
   q_agent_cmd=$(_toml_escape "$agent_cmd")
-  speech_toml=$(_cc_connect_speech_config_toml)
-  default_agent_options_toml=$(_cc_connect_default_agent_options_toml "$agent" "$agent_options_toml")
+  speech_toml=$(_connect_speech_config_toml)
+  default_agent_options_toml=$(_connect_default_agent_options_toml "$agent" "$agent_options_toml")
   umask 077
   cat > "$config_path" <<EOF
 language = "zh"
@@ -993,27 +993,27 @@ EOF
   chmod 600 "$config_path"
 }
 
-_cc_connect_install_command() {
+_connect_install_command() {
   local binary=$1 config=$2 service_name=$3
-  [ -n "$service_name" ] || service_name=cc-connect
-  printf 'npm install -g %q && %q daemon install --config %q --service-name %q --force' "$(_cc_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
+  [ -n "$service_name" ] || service_name=direxio-connect
+  printf 'npm install -g %q && %q daemon install --config %q --service-name %q --force' "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
 }
 
-_cc_connect_daemon_is_running() {
+_connect_daemon_is_running() {
   local binary=$1 service_name=$2 status
-  [ -n "$service_name" ] || service_name=cc-connect
+  [ -n "$service_name" ] || service_name=direxio-connect
   status=$("$binary" daemon status --service-name "$service_name" 2>/dev/null || true)
   printf '%s\n' "$status" | grep -Eq 'Status:[[:space:]]*Running'
 }
 
-_cc_connect_daemon_has_agent_startup_error() {
+_connect_daemon_has_agent_startup_error() {
   local binary=$1 service_name=$2 logs
-  [ -n "$service_name" ] || service_name=cc-connect
+  [ -n "$service_name" ] || service_name=direxio-connect
   logs=$("$binary" daemon logs --service-name "$service_name" -n "${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}" 2>/dev/null || true)
   printf '%s\n' "$logs" | grep -Eiq 'ACP_SESSION_INIT_FAILED|ACP metadata is missing|Recreate this ACP session'
 }
 
-_maybe_auto_install_cc_connect() {
+_maybe_auto_install_connect() {
   local policy=$1 runtime=$2 cc_agent=$3 service_dir=$4 config_path=$5 binary=$6 service_name=$7
   local repo ref src commit config_arg
   [ -n "$service_name" ] || service_name=$(basename "$service_dir")
@@ -1022,37 +1022,37 @@ _maybe_auto_install_cc_connect() {
     return 0
   fi
   config_arg=$(_local_connect_path "$config_path")
-  if [ "${DIREXIO_CC_CONNECT_INSTALL_FROM:-npm}" != "source" ]; then
+  if [ "${DIREXIO_CONNECT_INSTALL_FROM:-npm}" != "source" ]; then
     if ! command -v npm >/dev/null 2>&1; then
-      warn "DIREXIO_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js or set DIREXIO_CC_CONNECT_INSTALL_FROM=source."
+      warn "DIREXIO_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js or set DIREXIO_CONNECT_INSTALL_FROM=source."
       state_set agent_install_status "npm_missing" 2>/dev/null || true
       return 0
     fi
-    if npm install -g "$(_cc_connect_npm_package)" && "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
-      if ! _cc_connect_daemon_is_running "$binary" "$service_name"; then
+    if npm install -g "$(_connect_npm_package)" && "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
+      if ! _connect_daemon_is_running "$binary" "$service_name"; then
         state_set agent_install_status "install_failed" 2>/dev/null || true
-        warn "cc-connect daemon install returned success, but daemon status is not Running. Check the local agent command and cc-connect logs."
+        warn "direxio-connect daemon install returned success, but daemon status is not Running. Check the local agent command and direxio-connect logs."
         return 0
       fi
-      if _cc_connect_daemon_has_agent_startup_error "$binary" "$service_name"; then
+      if _connect_daemon_has_agent_startup_error "$binary" "$service_name"; then
         state_set agent_install_status "install_failed" 2>/dev/null || true
-        warn "cc-connect daemon is Running, but logs show ACP session initialization failed. Check OpenClaw ACP URL, token-file, and session."
+        warn "direxio-connect daemon is Running, but logs show ACP session initialization failed. Check OpenClaw ACP URL, token-file, and session."
         return 0
       fi
       state_set agent_install_status "installed" 2>/dev/null || true
-      ok "cc-connect daemon installed from npm for $runtime using Matrix room bridge."
+      ok "direxio-connect daemon installed from npm for $runtime using Matrix room bridge."
     else
       state_set agent_install_status "install_failed" 2>/dev/null || true
-      warn "cc-connect npm install or daemon install failed. Config is available for manual start."
+      warn "direxio-connect npm install or daemon install failed. Config is available for manual start."
     fi
     return 0
   fi
 
-  repo=$(_cc_connect_repo)
-  ref=$(_cc_connect_ref)
-  src=$(_cc_connect_source_dir "$service_dir")
+  repo=$(_connect_repo)
+  ref=$(_connect_ref)
+  src=$(_connect_source_dir "$service_dir")
   if ! command -v git >/dev/null 2>&1 || ! command -v go >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1; then
-    warn "DIREXIO_CC_CONNECT_INSTALL_FROM=source requested, but git, go, and make are required to build cc-connect from source."
+    warn "DIREXIO_CONNECT_INSTALL_FROM=source requested, but git, go, and make are required to build direxio-connect from source."
     state_set agent_install_status "build_tool_missing" 2>/dev/null || true
     return 0
   fi
@@ -1060,28 +1060,28 @@ _maybe_auto_install_cc_connect() {
     mkdir -p "$(dirname "$src")"
     if ! git clone "$repo" "$src"; then
       state_set agent_install_status "clone_failed" 2>/dev/null || true
-      warn "cc-connect clone failed from $repo"
+      warn "direxio-connect clone failed from $repo"
       return 0
     fi
   fi
   if ! git -C "$src" fetch --all --tags --prune; then
     state_set agent_install_status "fetch_failed" 2>/dev/null || true
-    warn "cc-connect fetch failed in $src"
+    warn "direxio-connect fetch failed in $src"
     return 0
   fi
   if ! git -C "$src" checkout "$ref"; then
     state_set agent_install_status "checkout_failed" 2>/dev/null || true
-    warn "cc-connect checkout failed for ref $ref"
+    warn "direxio-connect checkout failed for ref $ref"
     return 0
   fi
   commit=$(git -C "$src" rev-parse --short HEAD 2>/dev/null || true)
-  state_set cc_connect_commit "$commit" 2>/dev/null || true
+  state_set connect_commit "$commit" 2>/dev/null || true
   if ! (cd "$src" && AGENTS="$cc_agent" PLATFORMS_INCLUDE=matrix NO_WEB=1 make build-noweb); then
     state_set agent_install_status "build_failed" 2>/dev/null || true
-    warn "cc-connect build failed for runtime=$runtime agent=$cc_agent"
+    warn "direxio-connect build failed for runtime=$runtime agent=$cc_agent"
     return 0
   fi
-  binary="$(_cc_connect_runtime_dir "$service_dir")/bin/direxio-connect"
+  binary="$(_connect_runtime_dir "$service_dir")/bin/direxio-connect"
   mkdir -p "$(dirname "$binary")"
   if ! cp "$src/direxio-connect" "$binary" 2>/dev/null && ! cp "$src/direxio-connect.exe" "$binary" 2>/dev/null; then
     state_set agent_install_status "binary_copy_failed" 2>/dev/null || true
@@ -1090,21 +1090,21 @@ _maybe_auto_install_cc_connect() {
   fi
   chmod 700 "$binary" 2>/dev/null || true
   if "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
-    if ! _cc_connect_daemon_is_running "$binary" "$service_name"; then
+    if ! _connect_daemon_is_running "$binary" "$service_name"; then
       state_set agent_install_status "install_failed" 2>/dev/null || true
-      warn "cc-connect daemon install returned success, but daemon status is not Running. Check the local agent command and cc-connect logs."
+      warn "direxio-connect daemon install returned success, but daemon status is not Running. Check the local agent command and direxio-connect logs."
       return 0
     fi
-    if _cc_connect_daemon_has_agent_startup_error "$binary" "$service_name"; then
+    if _connect_daemon_has_agent_startup_error "$binary" "$service_name"; then
       state_set agent_install_status "install_failed" 2>/dev/null || true
-      warn "cc-connect daemon is Running, but logs show ACP session initialization failed. Check OpenClaw ACP URL, token-file, and session."
+      warn "direxio-connect daemon is Running, but logs show ACP session initialization failed. Check OpenClaw ACP URL, token-file, and session."
       return 0
     fi
     state_set agent_install_status "installed" 2>/dev/null || true
-    ok "cc-connect daemon installed for $runtime using Matrix room bridge."
+    ok "direxio-connect daemon installed for $runtime using Matrix room bridge."
   else
     state_set agent_install_status "install_failed" 2>/dev/null || true
-    warn "cc-connect daemon install failed. Config and binary are available for manual start."
+    warn "direxio-connect daemon install failed. Config and binary are available for manual start."
   fi
 }
 
@@ -1178,26 +1178,26 @@ _agent_global_skill_install_path() {
 
 _agent_install_command() {
   local binary=$1 config=$2 service_name=$3
-  _cc_connect_install_command "$binary" "$config" "$service_name"
+  _connect_install_command "$binary" "$config" "$service_name"
 }
 
 _print_runtime_install_summary() {
   local runtime=$1 mode=$2 config_path=$3 binary=$4 cc_agent=$5 cc_agent_cmd=${6:-} service_name=${7:-}
   cat >&2 <<EOF
-Recommended cc-connect install:
+Recommended direxio-connect install:
   runtime:        $runtime
-  cc-connect agent: $cc_agent
+  direxio-connect agent: $cc_agent
   agent command:  ${cc_agent_cmd:-default PATH lookup}
   mode:           $mode
   service name:   $service_name
   config:         $config_path
   binary:         $binary
-  daemon install: $(_cc_connect_install_command "$binary" "$config_path" "$service_name")
+  daemon install: $(_connect_install_command "$binary" "$config_path" "$service_name")
 EOF
 }
 
 _maybe_auto_install_agent() {
-  _maybe_auto_install_cc_connect "$@"
+  _maybe_auto_install_connect "$@"
 }
 
 _write_agent_env_file() {
@@ -1255,35 +1255,35 @@ _persist_agent_env() {
   export DIREXIO_DOMAIN="$asurl"
   export DIREXIO_AGENT_TOKEN="$token"
   export DIREXIO_AGENT_ROOM_ID="$agent_room_id"
-  ok "Persisted Direxio cc-connect env vars via $envfile."
+  ok "Persisted Direxio direxio-connect env vars via $envfile."
   echo "$envfile"
 }
 
-_print_cc_connect_guidance() {
+_print_connect_guidance() {
   local runtime=$1 asurl=$2 cred=$3 envfile=$4 policy=$5 mode=$6 install_command=$7 node_id=$8 cc_config=$9 cc_binary=${10} cc_agent=${11} cc_agent_cmd=${12:-} service_name=${13:-}
   local skill_path global_skill_path
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
   if [ "$policy" = "skip" ]; then
-    warn "Direxio cc-connect install guidance skipped by DIREXIO_AGENT_INSTALL=skip."
+    warn "Direxio direxio-connect install guidance skipped by DIREXIO_AGENT_INSTALL=skip."
     return 0
   fi
-  warn "Direxio cc-connect install policy: $policy; platform=$runtime; mode=$mode."
+  warn "Direxio direxio-connect install policy: $policy; platform=$runtime; mode=$mode."
   cat >&2 <<EOF
 Detected agent runtime: $runtime
-cc-connect agent:       $cc_agent
+direxio-connect agent:       $cc_agent
 Local env file:         $envfile
 Credential file:        $cred
-cc-connect config:      $cc_config
-cc-connect binary:      $cc_binary
-cc-connect agent cmd:   ${cc_agent_cmd:-default PATH lookup}
-cc-connect service:     $service_name
+direxio-connect config:      $cc_config
+direxio-connect binary:      $cc_binary
+direxio-connect agent cmd:   ${cc_agent_cmd:-default PATH lookup}
+direxio-connect service:     $service_name
 Install command:        $install_command
 Project skill clone:    $skill_path
 Global skill fallback:  $global_skill_path
 Env keys:               DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID, DIREXIO_AGENT_NODE_ID
 
-cc-connect will use Matrix Client-Server sync as @agent:<server> and is restricted to DIREXIO_AGENT_ROOM_ID.
+direxio-connect will use Matrix Client-Server sync as @agent:<server> and is restricted to DIREXIO_AGENT_ROOM_ID.
 It talks directly to the Direxio homeserver for the agents room conversation.
 EOF
   _print_runtime_install_summary "$runtime" "$mode" "$cc_config" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_name"
@@ -1308,7 +1308,7 @@ EOF
 }
 
 run_phase() {
-  phase_set S6_WIRE_LOCAL in_progress "writing credentials and cc-connect Matrix bridge config"
+  phase_set S6_WIRE_LOCAL in_progress "writing credentials and direxio-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
   local node_id service_dir node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_config cc_config_local cc_data cc_data_local cc_binary cc_session cc_source
   local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_codex_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
@@ -1326,9 +1326,9 @@ run_phase() {
   _validate_real_agent_room_id "$agent_room_id"
 
   runtime=$(_detect_agent_runtime)
-  cc_agent=$(_cc_connect_agent_type "$runtime")
-  cc_agent_cmd=$(_cc_connect_agent_command "$cc_agent" "$runtime")
-  cc_agent_options_toml=$(_cc_connect_agent_options_toml "$runtime" "$cc_agent")
+  cc_agent=$(_connect_agent_type "$runtime")
+  cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime")
+  cc_agent_options_toml=$(_connect_agent_options_toml "$runtime" "$cc_agent")
   node_id=$(_agent_node_id "$runtime" "$domain" "$agent_room_id")
   service_id=$(_direxio_service_id "${asurl:-$domain}")
   service_dir=$(_direxio_service_dir "${asurl:-$domain}")
@@ -1336,14 +1336,14 @@ run_phase() {
   envfile="$service_dir/env"
   workspace=$(_agent_workspace "$service_dir")
   admin_from="@owner:$domain"
-  cc_runtime_dir=$(_cc_connect_runtime_dir "$service_dir")
-  cc_config=$(_cc_connect_config_path "$service_dir")
+  cc_runtime_dir=$(_connect_runtime_dir "$service_dir")
+  cc_config=$(_connect_config_path "$service_dir")
   cc_config_local=$(_local_connect_path "$cc_config")
   cc_data="$cc_runtime_dir/data"
   cc_data_local=$(_local_connect_path "$cc_data")
-  cc_binary=$(_cc_connect_binary_path "$service_dir")
+  cc_binary=$(_connect_binary_path "$service_dir")
   cc_session="$cc_runtime_dir/matrix-session.json"
-  cc_source=$(_cc_connect_source_dir "$service_dir")
+  cc_source=$(_connect_source_dir "$service_dir")
 
   _write_credentials_file "$node_cred" "$domain" "$asurl" "$token" "$password" "$access_token" "$agent_room_id" "$node_id"
   ok "Wrote $node_cred (0600)."
@@ -1371,14 +1371,14 @@ run_phase() {
 
   if ! envfile=$(_persist_agent_env "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id"); then
     phase_set S6_WIRE_LOCAL failed "persistent env write failed"
-    fail "failed to persist Direxio cc-connect env vars."
+    fail "failed to persist Direxio direxio-connect env vars."
   fi
 
   mkdir -p "$workspace"
   mkdir -p "$cc_runtime_dir"
-  if ! _create_cc_connect_matrix_session "$asurl" "$token" "DIREXIO_CC_CONNECT_${node_id}" "$cc_session"; then
+  if ! _create_connect_matrix_session "$asurl" "$token" "DIREXIO_CONNECT_${node_id}" "$cc_session"; then
     phase_set S6_WIRE_LOCAL failed "agent Matrix session creation failed"
-    fail "failed to create cc-connect Matrix session via agent.matrix_session.create."
+    fail "failed to create direxio-connect Matrix session via agent.matrix_session.create."
   fi
   matrix_token=$(json_get "$cc_session" access_token)
   matrix_user=$(json_get "$cc_session" user_id)
@@ -1393,8 +1393,8 @@ run_phase() {
     *) warn "agent.matrix_session.create returned non-standard agent user_id: $matrix_user" ;;
   esac
   workspace_local=$(_local_connect_path "$workspace")
-  _write_cc_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml"
-  ok "Wrote cc-connect Matrix config $cc_config (0600)."
+  _write_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml"
+  ok "Wrote direxio-connect Matrix config $cc_config (0600)."
 
   state_set agent_env_file "$envfile" 2>/dev/null || true
   state_set agent_node_id "$node_id" 2>/dev/null || true
@@ -1415,26 +1415,26 @@ run_phase() {
   state_set mcp_install_command "$mcp_install_command" 2>/dev/null || true
   state_set mcp_doctor_command "$mcp_doctor_command" 2>/dev/null || true
   state_set agent_workspace "$workspace" 2>/dev/null || true
-  state_set cc_connect_agent "$cc_agent" 2>/dev/null || true
-  state_set cc_connect_agent_cmd "$cc_agent_cmd" 2>/dev/null || true
+  state_set connect_agent "$cc_agent" 2>/dev/null || true
+  state_set connect_agent_cmd "$cc_agent_cmd" 2>/dev/null || true
   if [ -n "$cc_agent_options_toml" ]; then
-    state_set cc_connect_agent_options_toml_present "true" 2>/dev/null || true
+    state_set connect_agent_options_toml_present "true" 2>/dev/null || true
   else
-    state_set cc_connect_agent_options_toml_present "false" 2>/dev/null || true
+    state_set connect_agent_options_toml_present "false" 2>/dev/null || true
   fi
-  state_set cc_connect_npm_package "$(_cc_connect_npm_package)" 2>/dev/null || true
-  state_set cc_connect_repo "$(_cc_connect_repo)" 2>/dev/null || true
-  state_set cc_connect_ref "$(_cc_connect_ref)" 2>/dev/null || true
-  state_set cc_connect_source_dir "$cc_source" 2>/dev/null || true
-  state_set cc_connect_runtime_dir "$cc_runtime_dir" 2>/dev/null || true
-  state_set cc_connect_config "$cc_config_local" 2>/dev/null || true
-  state_set cc_connect_binary "$cc_binary" 2>/dev/null || true
-  state_set cc_connect_data_dir "$cc_data_local" 2>/dev/null || true
-  state_set cc_connect_admin_from "$admin_from" 2>/dev/null || true
-  state_set cc_connect_matrix_session_file "$cc_session" 2>/dev/null || true
-  state_set cc_connect_matrix_user "$matrix_user" 2>/dev/null || true
-  state_set cc_connect_matrix_device "$matrix_device" 2>/dev/null || true
-  state_set cc_connect_matrix_homeserver "$matrix_homeserver" 2>/dev/null || true
+  state_set connect_npm_package "$(_connect_npm_package)" 2>/dev/null || true
+  state_set connect_repo "$(_connect_repo)" 2>/dev/null || true
+  state_set connect_ref "$(_connect_ref)" 2>/dev/null || true
+  state_set connect_source_dir "$cc_source" 2>/dev/null || true
+  state_set connect_runtime_dir "$cc_runtime_dir" 2>/dev/null || true
+  state_set connect_config "$cc_config_local" 2>/dev/null || true
+  state_set connect_binary "$cc_binary" 2>/dev/null || true
+  state_set connect_data_dir "$cc_data_local" 2>/dev/null || true
+  state_set connect_admin_from "$admin_from" 2>/dev/null || true
+  state_set connect_matrix_session_file "$cc_session" 2>/dev/null || true
+  state_set connect_matrix_user "$matrix_user" 2>/dev/null || true
+  state_set connect_matrix_device "$matrix_device" 2>/dev/null || true
+  state_set connect_matrix_homeserver "$matrix_homeserver" 2>/dev/null || true
 
   install_policy=$(_agent_install_policy)
   install_mode=$(_agent_install_mode "$runtime")
@@ -1448,12 +1448,12 @@ run_phase() {
   state_set mcp_install_policy "$install_policy" 2>/dev/null || true
   state_set agent_skill_install_path "$skill_path" 2>/dev/null || true
   state_set agent_global_skill_install_path "$global_skill_path" 2>/dev/null || true
-  state_set direxio_agent_bridge "cc-connect" 2>/dev/null || true
-  _print_cc_connect_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_id"
+  state_set direxio_agent_bridge "direxio-connect" 2>/dev/null || true
+  _print_connect_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_id"
   _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_codex_config_local" "$mcp_openclaw_config_local" "$mcp_hermes_config_local" "$mcp_install_command" "$mcp_doctor_command"
   _maybe_auto_install_agent "$install_policy" "$runtime" "$cc_agent" "$service_dir" "$cc_config" "$cc_binary" "$service_id"
   _maybe_auto_install_mcp "$install_policy"
 
-  phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;env_file=$envfile;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;cc_connect_config=$cc_config;mcp_config_dir=$mcp_dir;cc_connect_agent=$cc_agent"
+  phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;env_file=$envfile;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;connect_config=$cc_config;mcp_config_dir=$mcp_dir;connect_agent=$cc_agent"
   return 0
 }

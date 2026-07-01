@@ -507,9 +507,9 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       values_redacted: true
     },
     connect: {
-      package: st.cc_connect_npm_package || "direxio-connent@latest",
-      agent: st.cc_connect_agent || "",
-      config: st.cc_connect_config || "",
+      package: st.connect_npm_package || "direxio-connent@latest",
+      agent: st.connect_agent || "",
+      config: st.connect_config || "",
       install_status: st.agent_install_status || ""
     },
     mcp: {

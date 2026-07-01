@@ -5,10 +5,11 @@
 ## Product Scope
 
 - Deploy, resume, verify, destroy, and locally wire a production Direxio message server.
-- Treat `SKILL.md` as the agent-facing runbook and `scripts/` as implementation details behind stable entrypoints.
-- The supported local conversation bridge is `direxio-connect` from `direxio-connent` or `YingSuiAI/direxio-connect`.
-- Supported local agent targets are the connent/connect agent providers, treated as peers: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
-- Do not reintroduce legacy local MCP/plugin/gateway installation flows or third-party chat platform wiring.
+- Treat `SKILL.md` as the compact agent-facing entrypoint. Detailed runbooks belong in `references/`; `scripts/` are the stable implementation entrypoints.
+- The supported local conversation bridge is `direxio-connect`, installed from `direxio-connent@latest` by default or built from `YingSuiAI/direxio-connect`.
+- The supported local MCP package is `direxio-mcp@latest`.
+- Supported local agent targets are the direxio-connect agent providers, treated as peers: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
+- Do not reintroduce legacy local gateway installation flows or third-party chat platform wiring.
 - Do not hard-code one developer's home directory, shell, agent executable path, AWS region, domain, node id, token, or password.
 
 ## Platform Law
@@ -20,12 +21,14 @@ Every deployer change must classify paths and commands by the platform that will
 - **Local bridge paths** are consumed by `direxio-connect` and the local agent process. On Windows they must be Windows-compatible paths, not `/mnt/c/...` or Git Bash-only `/c/...` paths.
 - **Documentation paths** must be portable examples using `$HOME`, `%USERPROFILE%`, `$env:USERPROFILE`, `<service_id>`, or `<domain>`, not machine-specific absolute paths.
 
-If a change writes a path into `state.json`, `credentials.json`, `env`, `cc-connect/config.toml`, docs, or printed commands, verify which process will read that path and format it for that process.
+If a change writes a path into `state.json`, `credentials.json`, `env`, `direxio-connect/config.toml`, docs, or printed commands, verify which process will read that path and format it for that process.
+Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `scripts/lib/windows-paths.ps1` for PowerShell wrapper conversion. These helpers must lexically recognize `C:\Users\alice`, `C:/Users/alice`, `/mnt/c/Users/alice`, `/cygdrive/c/Users/alice`, and `/c/Users/alice` before calling shell-specific conversion tools.
 
 ## Entrypoints
 
 - POSIX users run `bash scripts/orchestrate.sh`.
 - Windows users run `.\scripts\orchestrate.ps1` from PowerShell. The wrapper may use Git Bash internally for existing Bash phases, but it must set Windows-local wiring variables such as `DIREXIO_LOCAL_PATH_STYLE=windows`.
+- POSIX users run `bash scripts/destroy.sh`; Windows users run `.\scripts\destroy.ps1`.
 - Do not tell Windows users to run WSL unless the user explicitly chooses WSL as the host runtime. WSL and Windows are different local runtimes with different home directories, PATH lookup, daemon process control, and agent executable paths.
 - Keep `scripts/orchestrate.sh` and `scripts/orchestrate.ps1` behaviorally aligned for status, deploy/resume, and local bridge wiring.
 
@@ -34,30 +37,32 @@ If a change writes a path into `state.json`, `credentials.json`, `env`, `cc-conn
 - Keep the state-machine phases idempotent and resumable. A phase should be safe to rerun after token refresh, DNS wait, or partial local wiring.
 - Shell phase files should expose `run_phase` and use `state_get`, `state_set`, and `phase_set` instead of ad hoc state edits.
 - Prefer small helpers for platform conversion, command discovery, and output formatting. Do not scatter OS-specific path rewrites across phase bodies.
+- Use `scripts/json.mjs` through `scripts/lib/json.sh` for JSON reads/writes. Do not reintroduce legacy external JSON CLI dependencies.
 - Remote server commands may assume Linux because the EC2 host is Linux. Local commands must not assume Linux.
 - Use PowerShell for Windows-native process and path behavior when the consumer is Windows-local, especially `direxio-connect.exe`, local agent executables, Windows user profile paths, or npm global binaries.
-- When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXIO_CC_CONNECT_AGENT`, `DIREXIO_CC_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXIO_CODEX_COMMAND`, `DIREXIO_GEMINI_COMMAND`, or `DIREXIO_CLAUDE_CODE_COMMAND`.
-- Do not make Codex, Claude, Gemini, Cursor, or any other provider the semantic default for an unknown runtime. Unknown or ambiguous detection should require an explicit `DIREXIO_CC_CONNECT_AGENT`.
+- When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXIO_CONNECT_AGENT`, `DIREXIO_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXIO_CODEX_COMMAND`, `DIREXIO_GEMINI_COMMAND`, or `DIREXIO_CLAUDE_CODE_COMMAND`.
+- Do not make Codex, Claude, Gemini, Cursor, or any other provider the semantic default for an unknown runtime. Unknown or ambiguous detection should require an explicit `DIREXIO_CONNECT_AGENT`.
 
 ## Direxio Connect Wiring
 
 - S5/S6 must fail closed when `agent_room_id` is missing or uses a legacy pseudo id such as `!agent:<domain>`.
 - S6 must create a Matrix session through `agent.matrix_session.create` using `agent_token`, not owner `access_token`, and require `@agent:<server>` for the bridge. Returning `@owner:<server>` is a server-side compatibility failure.
-- The generated cc-connect config must contain one Matrix platform and must restrict sync/replies to the real `agent_room_id`.
+- The generated direxio-connect config must contain one Matrix platform and must restrict sync/replies to the real `agent_room_id`.
 - The generated agent config must preserve the selected connect agent type and optional agent-specific TOML. Some providers require more than `cmd`; for example `reasonix` needs `serve_url`, `tmux` needs `session`, and generic `acp` may need command/args.
-- `DIREXIO_AGENT_INSTALL=auto` may install/start `direxio-connect`; `recommend` must only write files and print commands.
-- `direxio-connent` publishing and GitHub release assets are part of the install contract. Do not claim npm install works until the package and matching `direxio-connect` assets exist.
+- `DIREXIO_AGENT_INSTALL=auto` is the default and may run `npm install -g direxio-connent@latest`, install the service-scoped `direxio-connect` daemon, and run `npm install -g direxio-mcp@latest`.
+- `recommend` must only write files and print commands; `skip` writes credentials/env/config artifacts only.
+- Do not pin old package versions in runtime defaults. Keep `@latest` defaults and preserve env overrides only for explicit debugging or rollback.
 
 ## Secrets And State
 
-- Never print, commit, or paste AWS secrets, IM passwords, Matrix access tokens, `agent_token`, private keys, or full credential files.
+- Never print, commit, or paste AWS secrets, the eight-digit app initialization code, Matrix access tokens, `agent_token`, private keys, or full credential files.
 - When verifying credentials, print booleans or identities only, such as `has_access_token=true`, `user_id`, `device_id`, and `homeserver`.
 - `credentials.json`, Matrix session files, SSH keys, and generated env files must stay outside the repository and should be written with restrictive permissions when the platform supports it.
 - Do not silently reuse stale `DIREXIO_AGENT_NODE_ID` across domains. Node ids must be scoped to the current deployment unless the operator explicitly forces an override.
 
 ## Documentation Rules
 
-- Keep `README.md`, `README_zh.md`, `SKILL.md`, and `references/*` synchronized when changing deployment contracts, local bridge behavior, install commands, or platform support.
+- Keep `README.md`, `README_zh.md`, `SKILL.md`, `AGENTS.md`, `agents/README.md`, `agents/openai.yaml`, and `references/*` synchronized when changing deployment contracts, local bridge behavior, install commands, or platform support.
 - Keep user-facing docs focused on operating the deployer. Put implementation details and edge cases in `references/`.
 - Document Windows and POSIX examples separately when commands differ.
 - Avoid saying "run bash" as the universal answer. Say which host runtime is intended and why.
@@ -69,9 +74,11 @@ Run focused checks after every change:
 ```bash
 bash tests/skill_structure_test.sh
 bash tests/s6_wire_local_test.sh
+bash tests/local_paths_test.sh
 bash tests/render_userdata_remote_nodes_test.sh
 find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 git diff --check
+npm test
 ```
 
 On Windows-specific changes, also run or inspect:

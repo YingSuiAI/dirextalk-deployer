@@ -63,7 +63,7 @@ DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json
 DIREXIO_AGENT_NODE_ID=__AGENT_NODE_ID__
 ```
 
-This is intentionally separate from the `direxio-connect` bridge. MCP uses the deployer credential file; cc-connect uses a direct Matrix Client-Server session in `cc-connect/config.toml`.
+This is intentionally separate from the `direxio-connect` bridge. MCP uses the deployer credential file; direxio-connect uses a direct Matrix Client-Server session in `direxio-connect/config.toml`.
 
 Install and check the MCP package:
 
@@ -72,18 +72,18 @@ npm install -g direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
 ```
 
-## cc-connect Matrix Bridge
+## direxio-connect Matrix Bridge
 
 S6 calls `agent.matrix_session.create` with the backend `agent_token`, not the owner `access_token`. Current message-server builds must return a Matrix session for `@agent:<server>`, not for `@owner:<server>`. S6 retries transient HTTP 000/404/408/409/425/429/5xx responses before failing, because the Matrix action can become reachable after `/healthz`; defaults are 12 attempts with exponential backoff capped by `DIREXIO_MATRIX_SESSION_RETRY_MAX_INTERVAL`. The resulting session is stored at:
 
 ```text
-~/.direxio/nodes/<service_id>/cc-connect/matrix-session.json
+~/.direxio/nodes/<service_id>/direxio-connect/matrix-session.json
 ```
 
 S6 then writes:
 
 ```text
-~/.direxio/nodes/<service_id>/cc-connect/config.toml
+~/.direxio/nodes/<service_id>/direxio-connect/config.toml
 ```
 
 The config uses:
@@ -97,19 +97,19 @@ The config uses:
 - `auto_join = false` and `auto_verify = false`; message-server creates and joins the real room.
 - `[speech]` is generated and enabled automatically when S6 can find a speech-to-text API key. Without a key, voice input is not enabled and `direxio-connect` will answer voice messages with its speech configuration warning.
 
-`/dir reset` is expected to restore the generated `work_dir` and remove the current project directory override from `cc-connect/data/projects/<project>.state.json`.
+`/dir reset` is expected to restore the generated `work_dir` and remove the current project directory override from `direxio-connect/data/projects/<project>.state.json`.
 
 ## Install Parameters
 
 ```bash
 DIREXIO_AGENT_PLATFORM=auto
-DIREXIO_CC_CONNECT_AGENT=<optional cc-connect agent>
+DIREXIO_CONNECT_AGENT=<optional direxio-connect agent>
 DIREXIO_AGENT_INSTALL=skip|recommend|auto
-DIREXIO_AGENT_INSTALL_MODE=recommended|cc-connect
+DIREXIO_AGENT_INSTALL_MODE=recommended|direxio-connect
 DIREXIO_LOCAL_PATH_STYLE=posix|windows
-DIREXIO_CC_CONNECT_AGENT_CMD=<optional agent executable path>
+DIREXIO_CONNECT_AGENT_CMD=<optional agent executable path>
 DIREXIO_<AGENT>_COMMAND=<optional agent-specific executable path>
-DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML=<optional extra TOML under projects.agent.options>
+DIREXIO_CONNECT_AGENT_OPTIONS_TOML=<optional extra TOML under projects.agent.options>
 DIREXIO_OPENCLAW_COMMAND=<optional OpenClaw executable path>
 DIREXIO_HERMES_COMMAND=<optional Hermes executable path>
 DIREXIO_OPENCLAW_ACP_URL=<optional explicit OpenClaw gateway URL>
@@ -117,8 +117,8 @@ DIREXIO_OPENCLAW_ACP_TOKEN_FILE=<optional explicit OpenClaw ACP token file>
 DIREXIO_OPENCLAW_ACP_SESSION=<optional OpenClaw ACP session; defaults to agent:main:main>
 DIREXIO_OPENCLAW_ACP_ARGS_TOML=<optional OpenClaw ACP TOML array>
 DIREXIO_HERMES_ACP_ARGS_TOML=<optional Hermes ACP TOML array>
-DIREXIO_CC_CONNECT_NPM_PACKAGE=direxio-connent@latest
-DIREXIO_CC_CONNECT_REPO=https://github.com/YingSuiAI/direxio-connect.git
+DIREXIO_CONNECT_NPM_PACKAGE=direxio-connent@latest
+DIREXIO_CONNECT_REPO=https://github.com/YingSuiAI/direxio-connect.git
 DIREXIO_MCP_NPM_PACKAGE=direxio-mcp@latest
 DIREXIO_MCP_COMMAND=direxio-mcp
 DIREXIO_SPEECH_PROVIDER=openai|groq|qwen|gemini
@@ -130,23 +130,23 @@ DIREXIO_SPEECH_LANGUAGE=zh
 
 Defaults:
 
-- `DIREXIO_CC_CONNECT_AGENT` is the preferred explicit selector. It accepts every connent/connect agent: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
+- `DIREXIO_CONNECT_AGENT` is the preferred explicit selector. It accepts every direxio-connect agent: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
 - `DIREXIO_AGENT_PLATFORM=auto` detects the local agent runtime and maps it to a `direxio-connect` agent type only when it can identify one unambiguously. OpenClaw and Hermes map to the generic `acp` connect agent. OpenClaw uses `openclaw acp --session agent:main:main` by default and lets OpenClaw discover its Gateway config; Hermes uses the `direxio-connect hermes-acp-adapter -- hermes acp` compatibility wrapper by default.
 - `DIREXIO_LOCAL_PATH_STYLE=windows` writes Windows-compatible `data_dir`, `work_dir`, config paths, and install commands. `scripts/orchestrate.ps1` sets this automatically. Linux, macOS, and WSL Bash runs should leave the default `posix` style. Windows Git Bash/MSYS2 users who run `scripts/orchestrate.sh` directly must set `DIREXIO_LOCAL_PATH_STYLE=windows` when the local bridge is a Windows process.
-- `DIREXIO_CC_CONNECT_AGENT_CMD` writes `cmd = "<path>"` into `[projects.agent.options]`. Agent-specific forms such as `DIREXIO_CODEX_COMMAND`, `DIREXIO_CLAUDE_CODE_COMMAND`, `DIREXIO_GEMINI_COMMAND`, `DIREXIO_OPENCODE_COMMAND`, `DIREXIO_QODERCLI_COMMAND`, and `DIREXIO_OPENCLAW_COMMAND` are also accepted. For Hermes, `DIREXIO_HERMES_COMMAND` selects the child Hermes executable behind the adapter, while `DIREXIO_HERMES_ACP_ADAPTER_COMMAND` overrides the adapter command itself.
-- `DIREXIO_CC_CONNECT_AGENT_OPTIONS_TOML` appends agent-specific options under `[projects.agent.options]`; use it for agents with required non-command options such as `reasonix` (`serve_url`) or `tmux` (`session`).
+- `DIREXIO_CONNECT_AGENT_CMD` writes `cmd = "<path>"` into `[projects.agent.options]`. Agent-specific forms such as `DIREXIO_CODEX_COMMAND`, `DIREXIO_CLAUDE_CODE_COMMAND`, `DIREXIO_GEMINI_COMMAND`, `DIREXIO_OPENCODE_COMMAND`, `DIREXIO_QODERCLI_COMMAND`, and `DIREXIO_OPENCLAW_COMMAND` are also accepted. For Hermes, `DIREXIO_HERMES_COMMAND` selects the child Hermes executable behind the adapter, while `DIREXIO_HERMES_ACP_ADAPTER_COMMAND` overrides the adapter command itself.
+- `DIREXIO_CONNECT_AGENT_OPTIONS_TOML` appends agent-specific options under `[projects.agent.options]`; use it for agents with required non-command options such as `reasonix` (`serve_url`) or `tmux` (`session`).
 - OpenClaw Gateway ACP auto-detects the Gateway from `~/.openclaw/openclaw.json` when `DIREXIO_OPENCLAW_ACP_URL` and `DIREXIO_OPENCLAW_ACP_TOKEN_FILE` are unset. It uses `DIREXIO_OPENCLAW_ACP_SESSION` when provided, otherwise `agent:main:main`. To force explicit Gateway settings, complete OpenClaw pairing first and set all three real values: `DIREXIO_OPENCLAW_ACP_URL`, `DIREXIO_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXIO_OPENCLAW_ACP_SESSION`.
 - `DIREXIO_OPENCLAW_ACP_ARGS_TOML` replaces the generated OpenClaw ACP args array, for example `["acp", "--url", "wss://gateway.example.test:18789", "--token-file", "$HOME/.openclaw/gateway.token", "--session", "agent:main:main"]`. `DIREXIO_HERMES_ACP_ARGS_TOML` supplies the child Hermes args; S6 prefixes `["hermes-acp-adapter", "--", "<hermes-command>"]` automatically.
-- `DIREXIO_AGENT_INSTALL=auto` is the default. It runs `npm install -g direxio-connent@latest`, installs the `direxio-connect` daemon with the generated config and `--service-name <service_id>`, and runs `npm install -g direxio-mcp@latest`. cc-connect is recorded as installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs do not show ACP session initialization failure; otherwise S6 records `agent_install_status=install_failed`. MCP records `mcp_install_status=installed` only when npm succeeds.
+- `DIREXIO_AGENT_INSTALL=auto` is the default. It runs `npm install -g direxio-connent@latest`, installs the `direxio-connect` daemon with the generated config and `--service-name <service_id>`, and runs `npm install -g direxio-mcp@latest`. direxio-connect is recorded as installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs do not show ACP session initialization failure; otherwise S6 records `agent_install_status=install_failed`. MCP records `mcp_install_status=installed` only when npm succeeds.
 - `DIREXIO_AGENT_INSTALL=recommend` prints and records commands only. `verify runtime` records the daemon check as `manual_pending` in this mode and still verifies MCP doctor/tools/smoke when the MCP command is available.
-- `DIREXIO_AGENT_INSTALL_MODE=recommended` maps every supported local runtime to `cc-connect`.
+- `DIREXIO_AGENT_INSTALL_MODE=recommended` maps every supported local runtime to `direxio-connect`.
 - Speech defaults to `DIREXIO_SPEECH_PROVIDER=openai` and `DIREXIO_SPEECH_LANGUAGE=zh`. Provider-specific keys are also accepted: `DIREXIO_SPEECH_OPENAI_API_KEY` or `OPENAI_API_KEY`, `DIREXIO_SPEECH_GROQ_API_KEY` or `GROQ_API_KEY`, `DIREXIO_SPEECH_QWEN_API_KEY` or `DASHSCOPE_API_KEY`, and `DIREXIO_SPEECH_GEMINI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`. Set `DIREXIO_SPEECH_ENABLED=false` to suppress speech config generation even when a key exists.
 
 Manual command:
 
 ```bash
 npm install -g direxio-connent@latest
-direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/cc-connect/config.toml --service-name <service_id> --force
+direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force
 direxio-connect daemon status --service-name <service_id>
 ```
 
@@ -155,8 +155,8 @@ Source fallback:
 ```bash
 git clone https://github.com/YingSuiAI/direxio-connect.git
 cd connect
-make build AGENTS=<cc-connect-agent> PLATFORMS_INCLUDE=matrix
-./direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/cc-connect/config.toml --service-name <service_id> --force
+make build AGENTS=<direxio-connect-agent> PLATFORMS_INCLUDE=matrix
+./direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force
 ```
 
 ## State Fields
@@ -178,21 +178,21 @@ agent_workspace
 agent_skill_install_path
 agent_global_skill_install_path
 direxio_agent_bridge
-cc_connect_agent
-cc_connect_agent_cmd
-cc_connect_agent_options_toml_present
-cc_connect_npm_package
-cc_connect_repo
-cc_connect_ref
-cc_connect_source_dir
-cc_connect_runtime_dir
-cc_connect_config
-cc_connect_binary
-cc_connect_data_dir
-cc_connect_matrix_session_file
-cc_connect_matrix_user
-cc_connect_matrix_device
-cc_connect_matrix_homeserver
+connect_agent
+connect_agent_cmd
+connect_agent_options_toml_present
+connect_npm_package
+connect_repo
+connect_ref
+connect_source_dir
+connect_runtime_dir
+connect_config
+connect_binary
+connect_data_dir
+connect_matrix_session_file
+connect_matrix_user
+connect_matrix_device
+connect_matrix_homeserver
 mcp_npm_package
 mcp_command
 mcp_server_name

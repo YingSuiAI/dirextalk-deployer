@@ -119,6 +119,14 @@ After login, rerun `.\scripts\orchestrate.ps1`; S6 refreshes
 checks daemon logs for missing CLI, missing login, workspace trust, and other
 agent backend failures.
 
+Cursor MCP is separate from the Cursor Agent CLI bridge. S6 writes a generated
+`mcp\cursor.mcp.json` snippet under the service directory. Cursor can read that
+schema from project-level `.cursor\mcp.json` or global `%USERPROFILE%\.cursor\mcp.json`,
+but S6 does not write those files by default because the snippet contains
+machine-local credential paths. After adding or merging the snippet, restart
+Cursor completely or reload/enable the server in Cursor MCP settings before
+expecting tools to appear.
+
 For Codex Desktop, the wrapper also tries to find the real bundled `codex.exe` because WindowsApps aliases cannot always be spawned by child processes:
 
 ```powershell

@@ -59,6 +59,8 @@ _validate_connect_agent() {
 source "$S6_DIR/../lib/connect-agent-adapters.sh"
 # shellcheck disable=SC1090
 source "$S6_DIR/../lib/connect-daemon-logs.sh"
+# shellcheck disable=SC1090
+source "$S6_DIR/../lib/mcp-client-adapters.sh"
 
 _detect_agent_runtime() {
   local active_runtime explicit_agent home_runtime
@@ -443,66 +445,9 @@ _connect_config_path() {
   printf '%s/config.toml\n' "$(_connect_runtime_dir "$service_dir")"
 }
 
-_mcp_npm_package() {
-  printf '%s\n' "${DIREXIO_MCP_NPM_PACKAGE:-direxio-mcp@latest}"
-}
-
-_mcp_command() {
-  printf '%s\n' "${DIREXIO_MCP_COMMAND:-direxio-mcp}"
-}
-
-_mcp_runtime_dir() {
-  local service_dir=$1
-  printf '%s/mcp\n' "$service_dir"
-}
-
-_mcp_codex_config_path() {
-  local service_dir=$1
-  printf '%s/codex.toml\n' "$(_mcp_runtime_dir "$service_dir")"
-}
-
-_mcp_json_config_path() {
-  local service_dir=$1
-  printf '%s/mcp-servers.json\n' "$(_mcp_runtime_dir "$service_dir")"
-}
-
-_mcp_openclaw_config_path() {
-  local service_dir=$1
-  printf '%s/openclaw.md\n' "$(_mcp_runtime_dir "$service_dir")"
-}
-
-_mcp_openclaw_server_config_path() {
-  local service_dir=$1
-  printf '%s/openclaw-server.json\n' "$(_mcp_runtime_dir "$service_dir")"
-}
-
-_mcp_hermes_config_path() {
-  local service_dir=$1
-  printf '%s/hermes.mcp.json\n' "$(_mcp_runtime_dir "$service_dir")"
-}
-
-_mcp_env_file_path() {
-  local service_dir=$1
-  printf '%s/env\n' "$(_mcp_runtime_dir "$service_dir")"
-}
-
-_mcp_readme_path() {
-  local service_dir=$1
-  printf '%s/README.md\n' "$(_mcp_runtime_dir "$service_dir")"
-}
-
-_mcp_server_name() {
-  local service_id=${1:-local}
-  printf 'direxio-%s\n' "$service_id" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/_/g; s/^_+//; s/_+$//; s/^$/direxio_local/'
-}
-
 _connect_binary_path() {
   local service_dir=$1
   printf '%s\n' "${DIREXIO_CONNECT_BIN:-direxio-connect}"
-}
-
-_powershell_single_quote() {
-  printf '%s' "$1" | sed "s/'/''/g"
 }
 
 _env_first() {
@@ -592,132 +537,6 @@ _local_connect_path() {
   direxio_normalize_local_path "$1"
 }
 
-_mcp_install_command() {
-  printf 'npm install -g %q' "$(_mcp_npm_package)"
-}
-
-_mcp_doctor_command() {
-  local credentials_file=$1 node_id=${2:-}
-  printf 'DIREXIO_CREDENTIALS_FILE=%q' "$(_local_connect_path "$credentials_file")"
-  if [ -n "$node_id" ]; then
-    printf ' DIREXIO_AGENT_NODE_ID=%q' "$node_id"
-  fi
-  printf ' %q doctor --json\n' "$(_mcp_command)"
-}
-
-_write_mcp_json_config() {
-  local path=$1 server_name=$2 command=$3 credentials_file=$4 node_id=${5:-}
-  mkdir -p "$(dirname "$path")"
-  umask 077
-  json_build mcp-json-config "$server_name" "$command" "$credentials_file" "$node_id" > "$path"
-  chmod 600 "$path" 2>/dev/null || true
-}
-
-_write_mcp_openclaw_server_config() {
-  local path=$1 command=$2 credentials_file=$3 node_id=${4:-}
-  mkdir -p "$(dirname "$path")"
-  umask 077
-  json_build mcp-openclaw-server-config "$command" "$credentials_file" "$node_id" > "$path"
-  chmod 600 "$path" 2>/dev/null || true
-}
-
-_write_mcp_config_artifacts() {
-  local service_id=$1 service_dir=$2 credentials_file=$3 node_id=${4:-}
-  local mcp_dir server_name command credentials_local q_server q_command q_credentials q_node
-  local codex_config json_config openclaw_config openclaw_server_config hermes_config env_file readme
-  local openclaw_server_config_local openclaw_server_config_bash openclaw_server_config_ps
-  mcp_dir=$(_mcp_runtime_dir "$service_dir")
-  server_name=$(_mcp_server_name "$service_id")
-  command=$(_mcp_command)
-  credentials_local=$(_local_connect_path "$credentials_file")
-  q_server=$(_toml_escape "$server_name")
-  q_command=$(_toml_escape "$command")
-  q_credentials=$(_toml_escape "$credentials_local")
-  q_node=$(_toml_escape "$node_id")
-  codex_config=$(_mcp_codex_config_path "$service_dir")
-  json_config=$(_mcp_json_config_path "$service_dir")
-  openclaw_config=$(_mcp_openclaw_config_path "$service_dir")
-  openclaw_server_config=$(_mcp_openclaw_server_config_path "$service_dir")
-  hermes_config=$(_mcp_hermes_config_path "$service_dir")
-  env_file=$(_mcp_env_file_path "$service_dir")
-  readme=$(_mcp_readme_path "$service_dir")
-
-  mkdir -p "$mcp_dir"
-  umask 077
-  cat > "$codex_config" <<EOF
-[mcp_servers."$q_server"]
-command = "$q_command"
-env = { DIREXIO_CREDENTIALS_FILE = "$q_credentials", DIREXIO_AGENT_NODE_ID = "$q_node" }
-EOF
-  chmod 600 "$codex_config" 2>/dev/null || true
-
-  rm -f "$mcp_dir/openclaw.mcp.json"
-  _write_mcp_json_config "$json_config" "$server_name" "$command" "$credentials_local" "$node_id"
-  _write_mcp_openclaw_server_config "$openclaw_server_config" "$command" "$credentials_local" "$node_id"
-  _write_mcp_json_config "$hermes_config" "$server_name" "$command" "$credentials_local" "$node_id"
-
-  openclaw_server_config_local=$(_local_connect_path "$openclaw_server_config")
-  openclaw_server_config_bash=$(printf '%q' "$openclaw_server_config_local")
-  openclaw_server_config_ps=$(_powershell_single_quote "$openclaw_server_config_local")
-  cat > "$openclaw_config" <<EOF
-# OpenClaw MCP Setup
-
-OpenClaw must manage MCP servers through its own CLI/schema. Do not paste Codex/Hermes mcpServers snippets, or any raw top-level mcp block from this directory, into openclaw.json.
-
-Server object for openclaw mcp set:
-
-$openclaw_server_config_local
-
-POSIX/Git Bash:
-
-\`\`\`bash
-openclaw mcp set $server_name "\$(cat $openclaw_server_config_bash)"
-openclaw mcp doctor
-openclaw mcp reload
-\`\`\`
-
-PowerShell:
-
-\`\`\`powershell
-openclaw mcp set $server_name (Get-Content -Raw -LiteralPath '$openclaw_server_config_ps')
-openclaw mcp doctor
-openclaw mcp reload
-\`\`\`
-
-This writes the server under OpenClaw's mcp.servers schema after OpenClaw validates it.
-EOF
-  chmod 644 "$openclaw_config" 2>/dev/null || true
-
-  {
-    printf 'export DIREXIO_CREDENTIALS_FILE=%q\n' "$credentials_local"
-    [ -n "$node_id" ] && printf 'export DIREXIO_AGENT_NODE_ID=%q\n' "$node_id"
-  } > "$env_file"
-  chmod 600 "$env_file" 2>/dev/null || true
-
-  cat > "$readme" <<EOF
-# Direxio MCP Config
-
-Install the local MCP package:
-
-\`\`\`bash
-$(_mcp_install_command)
-\`\`\`
-
-Check this service's MCP credentials:
-
-\`\`\`bash
-$(_mcp_doctor_command "$credentials_file" "$node_id")
-\`\`\`
-
-Config snippets:
-
-- Codex TOML: $(_local_connect_path "$codex_config")
-- OpenClaw CLI setup: $(_local_connect_path "$openclaw_config")
-- Hermes JSON: $(_local_connect_path "$hermes_config")
-- Generic JSON: $(_local_connect_path "$json_config")
-EOF
-  chmod 644 "$readme" 2>/dev/null || true
-}
 
 _create_connect_matrix_session() {
   local asurl=$1 agent_auth_token=$2 device_id=$3 out=$4 body code http_body
@@ -960,26 +779,6 @@ _maybe_auto_install_connect() {
   fi
 }
 
-_maybe_auto_install_mcp() {
-  local policy=$1
-  if [ "$policy" != "auto" ]; then
-    state_set mcp_install_status "$policy" 2>/dev/null || true
-    return 0
-  fi
-  if ! command -v npm >/dev/null 2>&1; then
-    warn "DIREXIO_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js to install direxio-mcp automatically."
-    state_set mcp_install_status "npm_missing" 2>/dev/null || true
-    return 0
-  fi
-  if npm install -g "$(_mcp_npm_package)"; then
-    state_set mcp_install_status "installed" 2>/dev/null || true
-    ok "direxio-mcp installed from npm."
-  else
-    state_set mcp_install_status "install_failed" 2>/dev/null || true
-    warn "direxio-mcp npm install failed. MCP config artifacts and install command are available for manual recovery."
-  fi
-}
-
 _agent_skill_install_path() {
   local runtime=$1
   case "$runtime" in
@@ -1141,30 +940,12 @@ EOF
   _print_runtime_install_summary "$runtime" "$mode" "$cc_config" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_name"
 }
 
-_print_mcp_guidance() {
-  local runtime=$1 service_name=$2 server_name=$3 credentials_file=$4 config_dir=$5 codex_config=$6 openclaw_config=$7 hermes_config=$8 install_command=$9 doctor_command=${10}
-  warn "Direxio MCP artifacts written for runtime=$runtime service=$service_name."
-  cat >&2 <<EOF
-MCP server name:        $server_name
-MCP config directory:   $config_dir
-MCP credential file:    $credentials_file
-MCP install command:    $install_command
-MCP doctor command:     $doctor_command
-Codex TOML snippet:     $codex_config
-OpenClaw CLI setup:    $openclaw_config
-Hermes JSON snippet:   $hermes_config
-
-These artifacts use direxio-mcp over stdio and point to the service-scoped DIREXIO_CREDENTIALS_FILE.
-For OpenClaw, use the CLI setup note so OpenClaw validates and writes mcp.servers itself; do not paste MCP JSON into openclaw.json.
-EOF
-}
-
 run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and direxio-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
   local node_id service_dir node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_config cc_config_local cc_data cc_data_local cc_binary cc_session cc_source
-  local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_codex_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
-  local mcp_codex_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_json_config_local mcp_env_file_local mcp_readme_local node_cred_local
+  local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
+  local mcp_codex_config_local mcp_cursor_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_json_config_local mcp_env_file_local mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
   local skill_path global_skill_path
   domain=$(state_get domain)
@@ -1206,12 +987,14 @@ run_phase() {
   mcp_dir_local=$(_local_connect_path "$mcp_dir")
   mcp_server_name=$(_mcp_server_name "$service_id")
   mcp_codex_config=$(_mcp_codex_config_path "$service_dir")
+  mcp_cursor_config=$(_mcp_cursor_config_path "$service_dir")
   mcp_openclaw_config=$(_mcp_openclaw_config_path "$service_dir")
   mcp_hermes_config=$(_mcp_hermes_config_path "$service_dir")
   mcp_json_config=$(_mcp_json_config_path "$service_dir")
   mcp_env_file=$(_mcp_env_file_path "$service_dir")
   mcp_readme=$(_mcp_readme_path "$service_dir")
   mcp_codex_config_local=$(_local_connect_path "$mcp_codex_config")
+  mcp_cursor_config_local=$(_local_connect_path "$mcp_cursor_config")
   mcp_openclaw_config_local=$(_local_connect_path "$mcp_openclaw_config")
   mcp_hermes_config_local=$(_local_connect_path "$mcp_hermes_config")
   mcp_json_config_local=$(_local_connect_path "$mcp_json_config")
@@ -1259,6 +1042,7 @@ run_phase() {
   state_set mcp_config_dir "$mcp_dir_local" 2>/dev/null || true
   state_set mcp_credentials_file "$node_cred_local" 2>/dev/null || true
   state_set mcp_codex_config "$mcp_codex_config_local" 2>/dev/null || true
+  state_set mcp_cursor_config "$mcp_cursor_config_local" 2>/dev/null || true
   state_set mcp_openclaw_config "$mcp_openclaw_config_local" 2>/dev/null || true
   state_set mcp_hermes_config "$mcp_hermes_config_local" 2>/dev/null || true
   state_set mcp_json_config "$mcp_json_config_local" 2>/dev/null || true
@@ -1302,7 +1086,7 @@ run_phase() {
   state_set agent_global_skill_install_path "$global_skill_path" 2>/dev/null || true
   state_set direxio_agent_bridge "direxio-connect" 2>/dev/null || true
   _print_connect_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_id"
-  _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_codex_config_local" "$mcp_openclaw_config_local" "$mcp_hermes_config_local" "$mcp_install_command" "$mcp_doctor_command"
+  _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_codex_config_local" "$mcp_openclaw_config_local" "$mcp_hermes_config_local" "$mcp_install_command" "$mcp_doctor_command" "$mcp_cursor_config_local"
   _maybe_auto_install_agent "$install_policy" "$runtime" "$cc_agent" "$service_dir" "$cc_config" "$cc_binary" "$service_id"
   _maybe_auto_install_mcp "$install_policy"
 

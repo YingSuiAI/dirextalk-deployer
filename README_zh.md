@@ -1,6 +1,6 @@
 # Direxio Deployer
 
-`direxio-deployer` 是用于部署生产 Direxio message server 的通用 Agent Skill，并通过 Direxio 专用 Matrix 桥接把本地 agent room 接到当前 agent。当前本地桥接只支持 `direxio-connect`，安装包是 `direxio-connent`，源码仓库是 `YingSuiAI/direxio-connect`。S6 也会给 Codex、OpenClaw、Hermes 这类支持 MCP 的宿主写入服务级 MCP 配置片段。
+`direxio-deployer` 是用于部署生产 Direxio message server 的通用 Agent Skill，并通过 Direxio 专用 Matrix 桥接把本地 agent room 接到当前 agent。当前本地桥接只支持 `direxio-connect`，安装包是 `direxio-connent`，源码仓库是 `YingSuiAI/direxio-connect`。S6 也会给 Codex、Cursor、OpenClaw、Hermes 这类支持 MCP 的宿主写入服务级 MCP 配置片段。
 
 ## 内容
 
@@ -203,7 +203,7 @@ npm install -g direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
 ```
 
-Codex 使用 `mcp/codex.toml`，Hermes 使用 `mcp/hermes.mcp.json`。OpenClaw 使用 `mcp/openclaw.md` 中生成的 `openclaw mcp set` 命令读取 `mcp/openclaw-server.json`；不要把 MCP JSON 直接粘贴到 `~/.openclaw/openclaw.json`。
+Codex 使用 `mcp/codex.toml`，Cursor 使用 `mcp/cursor.mcp.json`，Hermes 使用 `mcp/hermes.mcp.json`。Cursor 可读取项目级 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`，但 S6 默认不写这两个位置，因为配置里包含本机 credentials 路径；添加片段后需要重启 Cursor，或在 Cursor MCP 设置里 reload/enable 该 server。OpenClaw 使用 `mcp/openclaw.md` 中生成的 `openclaw mcp set` 命令读取 `mcp/openclaw-server.json`；不要把 MCP JSON 直接粘贴到 `~/.openclaw/openclaw.json`。
 
 语音输入在配置 STT provider key 后可用。设置 `DIREXIO_SPEECH_API_KEY` 或 `DIREXIO_SPEECH_QWEN_API_KEY` 等 provider 专用变量后，S6 会在 `direxio-connect/config.toml` 写入 `[speech] enabled = true`。
 

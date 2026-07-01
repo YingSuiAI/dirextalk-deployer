@@ -2,7 +2,7 @@
 
 [简体中文](README_zh.md)
 
-`direxio-deployer` deploys a production Direxio message server and wires the local agent room through Direxio's Matrix bridge. The supported local bridge is `direxio-connect`, installed from the npm package `direxio-connent@latest` by default or built from `YingSuiAI/direxio-connect`. S6 also writes service-scoped MCP snippets for MCP-capable hosts such as Codex, OpenClaw, and Hermes.
+`direxio-deployer` deploys a production Direxio message server and wires the local agent room through Direxio's Matrix bridge. The supported local bridge is `direxio-connect`, installed from the npm package `direxio-connent@latest` by default or built from `YingSuiAI/direxio-connect`. S6 also writes service-scoped MCP snippets for MCP-capable hosts such as Codex, Cursor, OpenClaw, and Hermes.
 
 ## Contents
 
@@ -208,7 +208,7 @@ npm install -g direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
 ```
 
-Use `mcp/codex.toml` for Codex and `mcp/hermes.mcp.json` for Hermes. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
+Use `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, and `mcp/hermes.mcp.json` for Hermes. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain machine-local credential paths; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
 
 Voice input is supported when an STT provider key is available. Set `DIREXIO_SPEECH_API_KEY` or provider-specific variables such as `DIREXIO_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `direxio-connect/config.toml`.
 

@@ -159,7 +159,13 @@ config and restarts the service-scoped daemon. Explicit `DIREXIO_CURSOR_COMMAND`
 `DIREXIO_CONNECT_AGENT_OPTIONS_TOML` overrides still win.
 
 State/report fields include `mcp_config_dir`, `mcp_codex_config`,
-`credentials.status`, and `mcp.status`.
+`mcp_cursor_config`, `mcp_openclaw_config`, `mcp_hermes_config`,
+`mcp_json_config`, `credentials.status`, and `mcp.status`.
+Cursor MCP artifacts are generated as JSON for `.cursor/mcp.json` or
+`~/.cursor/mcp.json`, but the deployer does not write those locations by
+default because they contain machine-local credential paths. Cursor may require
+a full restart or MCP settings reload/enable after the operator adds the
+generated snippet.
 
 ## Product Gates
 

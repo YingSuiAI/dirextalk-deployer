@@ -27,6 +27,9 @@ required=(
   scripts/lib/ops.sh
   scripts/lib/operation_report.sh
   scripts/lib/json.sh
+  scripts/lib/connect-agent-adapters.sh
+  scripts/lib/connect-daemon-logs.sh
+  scripts/lib/mcp-client-adapters.sh
   scripts/phases/s6_wire_local.sh
   tests/json_helper_test.sh
   tests/lib/json_test.sh
@@ -108,8 +111,9 @@ grep -q 'DIREXIO_AGENT_TOKEN' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_AGENT_ROOM_ID' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_CONNECT_REPO' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_LOCAL_PATH_STYLE' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXIO_CREDENTIALS_FILE' scripts/phases/s6_wire_local.sh
-grep -q 'direxio-mcp' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXIO_CREDENTIALS_FILE' scripts/lib/mcp-client-adapters.sh
+grep -q 'direxio-mcp' scripts/lib/mcp-client-adapters.sh
+grep -q 'mcp-client-adapters.sh' scripts/phases/s6_wire_local.sh
 grep -q 'PLATFORMS_INCLUDE=matrix' scripts/phases/s6_wire_local.sh
 grep -q 'YingSuiAI/direxio-connect.git' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXIO_CONNECT_AGENT' scripts/phases/s6_wire_local.sh
@@ -122,6 +126,7 @@ grep -q 'destroy.ps1' references/windows-deployment-notes.md
 grep -q 'direxio-connect' SKILL.md
 grep -q 'mcp_config_dir' SKILL.md
 grep -q 'mcp_codex_config' references/runtime-wiring.md
+grep -q 'mcp_cursor_config' references/runtime-wiring.md
 if grep -R '@direxio/agent-plugins' SKILL.md scripts README.md README_zh.md references >/dev/null; then
   echo "current docs/scripts must not reference legacy agent plugin packages" >&2
   exit 1

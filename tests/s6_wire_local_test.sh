@@ -245,6 +245,7 @@ if command -v cygpath >/dev/null 2>&1; then
 fi
 _write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "$mcp_credentials" "codex-service-example"
 [ -s "$mcp_service_dir/mcp/codex.toml" ]
+[ -s "$mcp_service_dir/mcp/cursor.mcp.json" ]
 [ -s "$mcp_service_dir/mcp/openclaw.md" ]
 [ -s "$mcp_service_dir/mcp/openclaw-server.json" ]
 [ ! -e "$mcp_service_dir/mcp/openclaw.mcp.json" ]
@@ -257,6 +258,8 @@ grep -q 'DIREXIO_CREDENTIALS_FILE' "$mcp_service_dir/mcp/codex.toml"
 grep -q "$(_local_connect_path "$mcp_credentials")" "$mcp_service_dir/mcp/codex.toml"
 json_test_check "$mcp_service_dir/mcp/openclaw-server.json" "data.command === 'direxio-mcp'"
 json_test_check "$mcp_service_dir/mcp/openclaw-server.json" "data.env.DIREXIO_CREDENTIALS_FILE === '$expected_mcp_credentials'"
+json_test_check "$mcp_service_dir/mcp/cursor.mcp.json" "data.mcpServers['direxio-service_example_test'].command === 'direxio-mcp'"
+json_test_check "$mcp_service_dir/mcp/cursor.mcp.json" "data.mcpServers['direxio-service_example_test'].env.DIREXIO_CREDENTIALS_FILE === '$expected_mcp_credentials'"
 if json_check "$mcp_service_dir/mcp/openclaw-server.json" "'mcp' in data || 'mcpServers' in data" >/dev/null; then
   echo "OpenClaw server object must not be a root openclaw.json or mcpServers snippet" >&2
   exit 1
@@ -266,6 +269,8 @@ grep -q 'Do not paste' "$mcp_service_dir/mcp/openclaw.md"
 grep -q 'openclaw.json' "$mcp_service_dir/mcp/openclaw.md"
 json_test_check "$mcp_service_dir/mcp/hermes.mcp.json" "data.mcpServers['direxio-service_example_test'].env.DIREXIO_CREDENTIALS_FILE === '$expected_mcp_credentials'"
 grep -q 'DIREXIO_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
+grep -q 'Cursor JSON:' "$mcp_service_dir/mcp/README.md"
+grep -q '.cursor/mcp.json' "$mcp_service_dir/mcp/README.md"
 mcp_install_command=$(_mcp_install_command)
 [[ "$mcp_install_command" == *"npm install -g"*"direxio-mcp@latest"* ]]
 custom_mcp_install_command=$(DIREXIO_MCP_NPM_PACKAGE='direxio-mcp@override-test' _mcp_install_command)

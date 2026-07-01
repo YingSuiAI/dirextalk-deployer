@@ -50,6 +50,7 @@ S6 writes MCP snippets under the same service directory:
 Generated files:
 
 - `codex.toml`: Codex TOML snippet using `[mcp_servers."<server-name>"]`.
+- `cursor.mcp.json`: Cursor-compatible JSON snippet using `mcpServers`. Operators can merge it into project-level `.cursor/mcp.json` or global `~/.cursor/mcp.json`; S6 does not write those locations by default because they contain machine-local credential paths.
 - `openclaw.md`: OpenClaw CLI setup note. It must use `openclaw mcp set`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
 - `openclaw-server.json`: one OpenClaw MCP server object consumed by `openclaw mcp set`.
 - `hermes.mcp.json`: Hermes JSON snippet using `mcpServers`.
@@ -64,6 +65,7 @@ DIREXIO_AGENT_NODE_ID=__AGENT_NODE_ID__
 ```
 
 This is intentionally separate from the `direxio-connect` bridge. MCP uses the deployer credential file; direxio-connect uses a direct Matrix Client-Server session in `direxio-connect/config.toml`.
+Cursor can load the generated MCP server after the snippet is added to `.cursor/mcp.json` or `~/.cursor/mcp.json`, but Cursor may require a full restart or MCP settings reload/enable before the server starts and tools appear.
 
 Install and check the MCP package:
 
@@ -200,6 +202,7 @@ mcp_server_name
 mcp_config_dir
 mcp_credentials_file
 mcp_codex_config
+mcp_cursor_config
 mcp_openclaw_config
 mcp_hermes_config
 mcp_json_config

@@ -49,7 +49,7 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 - S6 must create a Matrix session through `agent.matrix_session.create` using `agent_token`, not owner `access_token`, and require `@agent:<server>` for the bridge. Returning `@owner:<server>` is a server-side compatibility failure.
 - The generated direxio-connect config must contain one Matrix platform and must restrict sync/replies to the real `agent_room_id`.
 - The generated agent config must preserve the selected connect agent type and optional agent-specific TOML. Some providers require more than `cmd`; for example `reasonix` needs `serve_url`, `tmux` needs `session`, and generic `acp` may need command/args.
-- `DIREXIO_AGENT_INSTALL=auto` is the default and may run `npm install -g direxio-connent@latest`, install the service-scoped `direxio-connect` daemon, and run `npm install -g direxio-mcp@latest`.
+- `DIREXIO_AGENT_INSTALL=auto` is the default and may run `npm install -g direxio-connent@latest`, install the service-scoped `direxio-connect` daemon, run `npm install -g direxio-mcp@latest`, and install the service-scoped `direxio-mcp` daemon used by generated MCP client snippets through `direxio-mcp proxy --url <local-daemon-url>`.
 - `recommend` must only write files and print commands; `skip` writes credentials/env/config artifacts only.
 - Do not pin old package versions in runtime defaults. Keep `@latest` defaults and preserve env overrides only for explicit debugging or rollback.
 

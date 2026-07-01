@@ -114,11 +114,12 @@ The `[speech]` block is present only when S6 finds a speech-to-text API key from
 
 ## MCP Targets
 
-S6 writes MCP artifacts for Codex, OpenClaw, and Hermes under `~/.direxio/nodes/<service_id>/mcp/`. These artifacts use `direxio-mcp` from `direxio-mcp@latest` by default and point to the service credential file through `DIREXIO_CREDENTIALS_FILE`.
+S6 writes MCP artifacts for Codex, Cursor, OpenClaw, Hermes, and generic JSON clients under `~/.direxio/nodes/<service_id>/mcp/`. These artifacts use `direxio-mcp` from `direxio-mcp@latest` by default and point to the service credential file through `DIREXIO_CREDENTIALS_FILE`. Generated client snippets use `direxio-mcp proxy --url <local-daemon-url>` so stdio MCP entrypoints are backed by a service-scoped local daemon.
 
 ```bash
 npm install -g direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
+direxio-mcp daemon install --service-name <service_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --host 127.0.0.1 --port 19757
 ```
 
 Use `mcp/codex.toml` for Codex and `mcp/hermes.mcp.json` for Hermes. For OpenClaw, use `mcp/openclaw.md`; it runs `openclaw mcp set` with `mcp/openclaw-server.json` so OpenClaw validates and writes its own `mcp.servers` config. Do not paste MCP JSON into `~/.openclaw/openclaw.json`. The deployer writes local artifacts only; it does not mutate each host application's global MCP config.
@@ -127,7 +128,7 @@ Use `mcp/codex.toml` for Codex and `mcp/hermes.mcp.json` for Hermes. For OpenCla
 
 - `DIREXIO_AGENT_INSTALL=skip`: write credentials/env and direxio-connect config only.
 - `DIREXIO_AGENT_INSTALL=recommend`: write files, record state, and print the install command.
-- `DIREXIO_AGENT_INSTALL=auto` (default): run `npm install -g direxio-connent@latest`, `direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force`, and `npm install -g direxio-mcp@latest`. S6 records direxio-connect as installed only after `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs show `direxio-connect is running`. Logs that show agent CLI missing, login/auth/trust failures, ACP startup failures, or agent offline state make S6 fail with `connect_install_status=install_failed`; deploy does not continue to completion until the daemon startup is verified. MCP records `mcp_install_status=installed` only when npm succeeds.
+- `DIREXIO_AGENT_INSTALL=auto` (default): run `npm install -g direxio-connent@latest`, `direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force`, `npm install -g direxio-mcp@latest`, and `direxio-mcp daemon install --service-name <service_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --host 127.0.0.1 --port 19757`. S6 records direxio-connect as installed only after `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs show `direxio-connect is running`. Logs that show agent CLI missing, login/auth/trust failures, ACP startup failures, or agent offline state make S6 fail with `connect_install_status=install_failed`; deploy does not continue to completion until the daemon startup is verified. MCP records `mcp_install_status=installed` when npm succeeds and `mcp_daemon_install_status=installed` when daemon install succeeds.
 
 Prefer `DIREXIO_CONNECT_AGENT=<agent>` to choose the local agent that `direxio-connect` should run. Keep `DIREXIO_AGENT_PLATFORM=<runtime>` for auto-detection overrides and legacy host-runtime naming. Use `DIREXIO_AGENT_INSTALL_MODE=direxio-connect` only when overriding the default `recommended` mapping explicitly.
 Use `DIREXIO_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXIO_CONNECT_AGENT_CMD` is not enough.

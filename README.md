@@ -208,14 +208,18 @@ CLI, login/auth/trust failures, ACP startup failure, or agent offline state,
 fail S6 instead of reporting deployment success.
 
 MCP is installed automatically during S6 when `DIREXIO_AGENT_INSTALL=auto`.
+S6 also installs a service-scoped `direxio-mcp` daemon for Hermes-style stable
+local MCP access.
 Manual recovery command:
 
 ```bash
 npm install -g direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
+direxio-mcp daemon install --service-name <service_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --host 127.0.0.1 --port 19757
+direxio-mcp daemon status --service-name <service_id> --json
 ```
 
-Use `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, and `mcp/hermes.mcp.json` for Hermes. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain machine-local credential paths; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
+Use `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, and `mcp/hermes.mcp.json` for Hermes. All generated MCP client snippets run `direxio-mcp proxy --url http://127.0.0.1:19757/mcp`, so stdio-only clients get a compatible entrypoint backed by the service-scoped local daemon. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain machine-local credential paths; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
 
 Voice input is supported when an STT provider key is available. Set `DIREXIO_SPEECH_API_KEY` or provider-specific variables such as `DIREXIO_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `direxio-connect/config.toml`.
 

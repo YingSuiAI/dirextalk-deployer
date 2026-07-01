@@ -265,6 +265,7 @@ function cmdBuild(args) {
       return;
     case "mcp-json-config": {
       const serverName = required(args, 1, "server_name");
+      const argsJson = args[5] || "";
       data = {
         mcpServers: {
           [serverName]: {
@@ -276,6 +277,9 @@ function cmdBuild(args) {
           }
         }
       };
+      if (argsJson) {
+        data.mcpServers[serverName].args = JSON.parse(argsJson);
+      }
       break;
     }
     case "mcp-openclaw-server-config":
@@ -286,6 +290,9 @@ function cmdBuild(args) {
           DIREXIO_AGENT_NODE_ID: args[3] || ""
         }
       };
+      if (args[4]) {
+        data.args = JSON.parse(args[4]);
+      }
       break;
     case "credentials-profile":
       data = {
@@ -374,6 +381,7 @@ function cmdMutate(args) {
       }
       data.connect_install_status = "refresh_pending";
       data.mcp_install_status = "refresh_pending";
+      data.mcp_daemon_install_status = "refresh_pending";
       data.phase = startPhase;
       if (!isObject(data.phases)) data.phases = {};
       if (startPhase === "S4_BOOTSTRAP_STACK") {
@@ -521,7 +529,11 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       codex: st.mcp_codex_config || "",
       openclaw: st.mcp_openclaw_config || "",
       hermes: st.mcp_hermes_config || "",
-      doctor: st.mcp_doctor_command || ""
+      doctor: st.mcp_doctor_command || "",
+      daemon_install_status: st.mcp_daemon_install_status || "",
+      daemon_url: st.mcp_daemon_url || "",
+      daemon_status: st.mcp_daemon_status_command || "",
+      daemon_proxy: st.mcp_daemon_proxy_command || ""
     },
     resources: {
       region: st.region || "",

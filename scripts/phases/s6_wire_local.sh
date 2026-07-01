@@ -966,7 +966,7 @@ run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and direxio-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
   local node_id service_dir node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_config cc_config_local cc_data cc_data_local cc_binary cc_session cc_source
-  local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
+  local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_daemon_install_command mcp_daemon_status_command mcp_daemon_url mcp_daemon_proxy_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
   local mcp_codex_config_local mcp_cursor_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_json_config_local mcp_env_file_local mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
   local skill_path global_skill_path
@@ -1024,6 +1024,10 @@ run_phase() {
   mcp_readme_local=$(_local_connect_path "$mcp_readme")
   mcp_install_command=$(_mcp_install_command)
   mcp_doctor_command=$(_mcp_doctor_command "$node_cred" "$node_id")
+  mcp_daemon_install_command=$(_mcp_daemon_install_command "$service_id" "$node_cred" "$node_id")
+  mcp_daemon_status_command=$(_mcp_daemon_status_command "$service_id")
+  mcp_daemon_url=$(_mcp_daemon_url "$service_id")
+  mcp_daemon_proxy_command=$(_mcp_daemon_proxy_command "$service_id")
   ok "Wrote MCP config snippets under $mcp_dir."
 
   if ! envfile=$(_persist_agent_env "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id"); then
@@ -1072,6 +1076,10 @@ run_phase() {
   state_set mcp_readme "$mcp_readme_local" 2>/dev/null || true
   state_set mcp_install_command "$mcp_install_command" 2>/dev/null || true
   state_set mcp_doctor_command "$mcp_doctor_command" 2>/dev/null || true
+  state_set mcp_daemon_install_command "$mcp_daemon_install_command" 2>/dev/null || true
+  state_set mcp_daemon_status_command "$mcp_daemon_status_command" 2>/dev/null || true
+  state_set mcp_daemon_url "$mcp_daemon_url" 2>/dev/null || true
+  state_set mcp_daemon_proxy_command "$mcp_daemon_proxy_command" 2>/dev/null || true
   state_set agent_workspace "$workspace" 2>/dev/null || true
   state_set connect_agent "$cc_agent" 2>/dev/null || true
   state_set connect_agent_cmd "$cc_agent_cmd" 2>/dev/null || true
@@ -1114,7 +1122,7 @@ run_phase() {
     warn "Run: $cc_binary daemon logs --service-name $service_id -n ${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}"
     return 1
   fi
-  _maybe_auto_install_mcp "$install_policy"
+  _maybe_auto_install_mcp "$install_policy" "$service_id" "$node_cred" "$node_id"
 
   phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;env_file=$envfile;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;connect_config=$cc_config;mcp_config_dir=$mcp_dir;connect_agent=$cc_agent"
   return 0

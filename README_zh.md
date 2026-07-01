@@ -199,14 +199,16 @@ direxio-connect daemon logs --service-name <service_id> -n 120
 
 默认 `DIREXIO_AGENT_INSTALL=auto` 时，S6 会等待 daemon 状态为 `Running`，并在最近日志中看到 `direxio-connect is running` 后才把本地 wiring 标记完成。日志中如果出现 Cursor Agent CLI 未安装、未登录/认证失败、workspace trust、ACP 启动失败或 agent offline 等错误，S6 会失败并保留 `connect_install_status=install_failed`，不会直接报告部署成功。
 
-默认 `DIREXIO_AGENT_INSTALL=auto` 时，S6 会自动安装 MCP。手动恢复命令：
+默认 `DIREXIO_AGENT_INSTALL=auto` 时，S6 会自动安装 MCP，并为 Hermes 这类需要稳定本地 MCP 入口的客户端安装服务级 `direxio-mcp` daemon。手动恢复命令：
 
 ```bash
 npm install -g direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
+direxio-mcp daemon install --service-name <service_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --host 127.0.0.1 --port 19757
+direxio-mcp daemon status --service-name <service_id> --json
 ```
 
-Codex 使用 `mcp/codex.toml`，Cursor 使用 `mcp/cursor.mcp.json`，Hermes 使用 `mcp/hermes.mcp.json`。Cursor 可读取项目级 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`，但 S6 默认不写这两个位置，因为配置里包含本机 credentials 路径；添加片段后需要重启 Cursor，或在 Cursor MCP 设置里 reload/enable 该 server。OpenClaw 使用 `mcp/openclaw.md` 中生成的 `openclaw mcp set` 命令读取 `mcp/openclaw-server.json`；不要把 MCP JSON 直接粘贴到 `~/.openclaw/openclaw.json`。
+Codex 使用 `mcp/codex.toml`，Cursor 使用 `mcp/cursor.mcp.json`，Hermes 使用 `mcp/hermes.mcp.json`。所有生成的 MCP client 片段都会运行 `direxio-mcp proxy --url http://127.0.0.1:19757/mcp`，也就是用 stdio 兼容入口连接到服务级本地 daemon。Cursor 可读取项目级 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`，但 S6 默认不写这两个位置，因为配置里包含本机 credentials 路径；添加片段后需要重启 Cursor，或在 Cursor MCP 设置里 reload/enable 该 server。OpenClaw 使用 `mcp/openclaw.md` 中生成的 `openclaw mcp set` 命令读取 `mcp/openclaw-server.json`；不要把 MCP JSON 直接粘贴到 `~/.openclaw/openclaw.json`。
 
 语音输入在配置 STT provider key 后可用。设置 `DIREXIO_SPEECH_API_KEY` 或 `DIREXIO_SPEECH_QWEN_API_KEY` 等 provider 专用变量后，S6 会在 `direxio-connect/config.toml` 写入 `[speech] enabled = true`。
 

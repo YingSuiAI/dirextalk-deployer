@@ -71,19 +71,77 @@ _mcp_doctor_command() {
   printf ' %q doctor --json\n' "$(_mcp_command)"
 }
 
+_mcp_daemon_host() {
+  printf '%s\n' "${DIREXIO_MCP_DAEMON_HOST:-127.0.0.1}"
+}
+
+_mcp_daemon_port() {
+  printf '%s\n' "${DIREXIO_MCP_DAEMON_PORT:-19757}"
+}
+
+_mcp_daemon_url() {
+  printf 'http://%s:%s/mcp\n' "$(_mcp_daemon_host)" "$(_mcp_daemon_port)"
+}
+
+_mcp_daemon_install_command() {
+  local service_id=$1 credentials_file=$2 node_id=${3:-}
+  printf '%q daemon install --service-name %q --credentials-file %q' "$(_mcp_command)" "$service_id" "$(direxio_normalize_local_path "$credentials_file")"
+  if [ -n "$node_id" ]; then
+    printf ' --node-id %q' "$node_id"
+  fi
+  printf ' --host %q --port %q\n' "$(_mcp_daemon_host)" "$(_mcp_daemon_port)"
+}
+
+_mcp_daemon_status_command() {
+  local service_id=$1
+  printf '%q daemon status --service-name %q --json\n' "$(_mcp_command)" "$service_id"
+}
+
+_mcp_daemon_proxy_args_json() {
+  printf '["proxy","--url","%s"]\n' "$(_mcp_daemon_url "$1")"
+}
+
+_mcp_daemon_proxy_args_toml() {
+  local url
+  url=$(_mcp_toml_escape "$(_mcp_daemon_url "$1")")
+  printf '["proxy", "--url", "%s"]\n' "$url"
+}
+
+_mcp_daemon_proxy_command() {
+  printf '%q proxy --url %q\n' "$(_mcp_command)" "$(_mcp_daemon_url "$1")"
+}
+
+_run_mcp_daemon_install() {
+  local service_id=$1 credentials_file=$2 node_id=${3:-}
+  if [ -n "$node_id" ]; then
+    "$(_mcp_command)" daemon install \
+      --service-name "$service_id" \
+      --credentials-file "$(direxio_normalize_local_path "$credentials_file")" \
+      --node-id "$node_id" \
+      --host "$(_mcp_daemon_host)" \
+      --port "$(_mcp_daemon_port)"
+  else
+    "$(_mcp_command)" daemon install \
+      --service-name "$service_id" \
+      --credentials-file "$(direxio_normalize_local_path "$credentials_file")" \
+      --host "$(_mcp_daemon_host)" \
+      --port "$(_mcp_daemon_port)"
+  fi
+}
+
 _write_mcp_json_config() {
-  local path=$1 server_name=$2 command=$3 credentials_file=$4 node_id=${5:-}
+  local path=$1 server_name=$2 command=$3 credentials_file=$4 node_id=${5:-} args_json=${6:-}
   mkdir -p "$(dirname "$path")"
   umask 077
-  json_build mcp-json-config "$server_name" "$command" "$credentials_file" "$node_id" > "$path"
+  json_build mcp-json-config "$server_name" "$command" "$credentials_file" "$node_id" "$args_json" > "$path"
   chmod 600 "$path" 2>/dev/null || true
 }
 
 _write_mcp_openclaw_server_config() {
-  local path=$1 command=$2 credentials_file=$3 node_id=${4:-}
+  local path=$1 command=$2 credentials_file=$3 node_id=${4:-} args_json=${5:-}
   mkdir -p "$(dirname "$path")"
   umask 077
-  json_build mcp-openclaw-server-config "$command" "$credentials_file" "$node_id" > "$path"
+  json_build mcp-openclaw-server-config "$command" "$credentials_file" "$node_id" "$args_json" > "$path"
   chmod 600 "$path" 2>/dev/null || true
 }
 
@@ -96,6 +154,9 @@ _write_mcp_config_artifacts() {
   mcp_dir=$(_mcp_runtime_dir "$service_dir")
   server_name=$(_mcp_server_name "$service_id")
   command=$(_mcp_command)
+  local proxy_args_json proxy_args_toml
+  proxy_args_json=$(_mcp_daemon_proxy_args_json "$service_id")
+  proxy_args_toml=$(_mcp_daemon_proxy_args_toml "$service_id")
   credentials_local=$(direxio_normalize_local_path "$credentials_file")
   q_server=$(_mcp_toml_escape "$server_name")
   q_command=$(_mcp_toml_escape "$command")
@@ -115,15 +176,16 @@ _write_mcp_config_artifacts() {
   cat > "$codex_config" <<EOF
 [mcp_servers."$q_server"]
 command = "$q_command"
+args = $proxy_args_toml
 env = { DIREXIO_CREDENTIALS_FILE = "$q_credentials", DIREXIO_AGENT_NODE_ID = "$q_node" }
 EOF
   chmod 600 "$codex_config" 2>/dev/null || true
 
   rm -f "$mcp_dir/openclaw.mcp.json"
-  _write_mcp_json_config "$json_config" "$server_name" "$command" "$credentials_local" "$node_id"
-  _write_mcp_json_config "$cursor_config" "$server_name" "$command" "$credentials_local" "$node_id"
-  _write_mcp_openclaw_server_config "$openclaw_server_config" "$command" "$credentials_local" "$node_id"
-  _write_mcp_json_config "$hermes_config" "$server_name" "$command" "$credentials_local" "$node_id"
+  _write_mcp_json_config "$json_config" "$server_name" "$command" "$credentials_local" "$node_id" "$proxy_args_json"
+  _write_mcp_json_config "$cursor_config" "$server_name" "$command" "$credentials_local" "$node_id" "$proxy_args_json"
+  _write_mcp_openclaw_server_config "$openclaw_server_config" "$command" "$credentials_local" "$node_id" "$proxy_args_json"
+  _write_mcp_json_config "$hermes_config" "$server_name" "$command" "$credentials_local" "$node_id" "$proxy_args_json"
 
   openclaw_server_config_local=$(direxio_normalize_local_path "$openclaw_server_config")
   openclaw_server_config_bash=$(printf '%q' "$openclaw_server_config_local")
@@ -191,6 +253,12 @@ Config snippets:
 - Hermes JSON: $(direxio_normalize_local_path "$hermes_config")
 - Generic JSON: $(direxio_normalize_local_path "$json_config")
 
+Generated Codex, Cursor, OpenClaw, Hermes, and generic JSON snippets use a stdio proxy command that connects to the service-scoped direxio-mcp daemon at $(_mcp_daemon_url "$service_id"). Install or refresh that daemon with:
+
+\`\`\`bash
+$(_mcp_daemon_install_command "$service_id" "$credentials_file" "$node_id")
+\`\`\`
+
 Cursor can read MCP servers from \`$cursor_project_config\` in a project or \`$cursor_global_config\` globally. The deployer writes the Cursor-ready JSON snippet here, but does not modify a project or global Cursor config by default because it contains machine-local credential paths. After installing or updating Cursor MCP config, fully restart Cursor or use Cursor's MCP settings to reload/enable the server.
 
 PowerShell example for reviewing the generated Cursor config:
@@ -208,9 +276,10 @@ EOF
 }
 
 _maybe_auto_install_mcp() {
-  local policy=$1
+  local policy=$1 service_id=${2:-} credentials_file=${3:-} node_id=${4:-}
   if [ "$policy" != "auto" ]; then
     state_set mcp_install_status "$policy" 2>/dev/null || true
+    state_set mcp_daemon_install_status "$policy" 2>/dev/null || true
     return 0
   fi
   if ! command -v npm >/dev/null 2>&1; then
@@ -224,6 +293,20 @@ _maybe_auto_install_mcp() {
   else
     state_set mcp_install_status "install_failed" 2>/dev/null || true
     warn "direxio-mcp npm install failed. MCP config artifacts and install command are available for manual recovery."
+    state_set mcp_daemon_install_status "install_skipped" 2>/dev/null || true
+    return 0
+  fi
+  if [ -z "$service_id" ] || [ -z "$credentials_file" ]; then
+    state_set mcp_daemon_install_status "missing_inputs" 2>/dev/null || true
+    warn "direxio-mcp daemon install skipped because service id or credentials file is missing."
+    return 0
+  fi
+  if _run_mcp_daemon_install "$service_id" "$credentials_file" "$node_id"; then
+    state_set mcp_daemon_install_status "installed" 2>/dev/null || true
+    ok "direxio-mcp daemon installed for $service_id."
+  else
+    state_set mcp_daemon_install_status "install_failed" 2>/dev/null || true
+    warn "direxio-mcp daemon install failed. Hermes can still use the generated stdio snippets after manual recovery."
   fi
 }
 
@@ -236,12 +319,16 @@ MCP config directory:   $config_dir
 MCP credential file:    $credentials_file
 MCP install command:    $install_command
 MCP doctor command:     $doctor_command
+MCP daemon install:     $(_mcp_daemon_install_command "$service_name" "$credentials_file" "")
+MCP daemon status:      $(_mcp_daemon_status_command "$service_name")
+MCP daemon URL:         $(_mcp_daemon_url "$service_name")
+MCP stdio proxy:        $(_mcp_daemon_proxy_command "$service_name")
 Codex TOML snippet:     $codex_config
 Cursor JSON snippet:    ${cursor_config:-not generated}
 OpenClaw CLI setup:    $openclaw_config
 Hermes JSON snippet:   $hermes_config
 
-These artifacts use direxio-mcp over stdio and point to the service-scoped DIREXIO_CREDENTIALS_FILE.
+Codex, Cursor, OpenClaw, Hermes, and generic JSON artifacts use direxio-mcp's stdio proxy to reach the service-scoped local MCP daemon, so the tool surface can survive client restarts and host-runtime restarts.
 Cursor can load the generated JSON via .cursor/mcp.json or ~/.cursor/mcp.json, but Cursor may require a full restart or MCP settings reload before the server is enabled.
 For OpenClaw, use the CLI setup note so OpenClaw validates and writes mcp.servers itself; do not paste MCP JSON into openclaw.json.
 EOF

@@ -148,7 +148,9 @@ DIREXIO_AGENT_INSTALL_MODE=recommended
 ```
 
 `DIREXIO_AGENT_INSTALL=auto` installs `direxio-connent@latest`, installs the
-service-scoped `direxio-connect` daemon, and installs `direxio-mcp@latest`.
+service-scoped `direxio-connect` daemon, installs `direxio-mcp@latest`, and
+installs the service-scoped `direxio-mcp` daemon used by Hermes through
+`direxio-mcp proxy --url <local-daemon-url>`.
 S6 only records the daemon as installed after `daemon status` reports Running
 and recent logs show `direxio-connect is running`; logs that show agent CLI
 missing, login/trust failures, ACP startup failures, or agent offline state fail
@@ -164,7 +166,8 @@ config and restarts the service-scoped daemon. Explicit `DIREXIO_CURSOR_COMMAND`
 
 State/report fields include `mcp_config_dir`, `mcp_codex_config`,
 `mcp_cursor_config`, `mcp_openclaw_config`, `mcp_hermes_config`,
-`mcp_json_config`, `credentials.status`, and `mcp.status`.
+`mcp_json_config`, `mcp_daemon_url`, `mcp_daemon_status_command`,
+`credentials.status`, and `mcp.status`.
 Cursor MCP artifacts are generated as JSON for `.cursor/mcp.json` or
 `~/.cursor/mcp.json`, but the deployer does not write those locations by
 default because they contain machine-local credential paths. Cursor may require

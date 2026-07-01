@@ -72,7 +72,12 @@ S6 也会写：
 ```bash
 direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force
 direxio-connect daemon status --service-name <service_id>
+direxio-connect daemon logs --service-name <service_id> -n 120
 ```
+
+默认 `auto` 安装路径会等到 daemon 为 `Running` 且日志出现
+`direxio-connect is running`；Agent CLI 缺失、未登录、workspace trust、ACP
+启动失败或 agent offline 会让 S6 保持失败，修复本地运行时后重新续跑即可。
 
 ## 验证
 

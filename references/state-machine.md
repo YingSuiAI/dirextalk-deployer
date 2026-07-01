@@ -10,7 +10,7 @@
 - **S3_PROVISION**: 创建 EC2、密钥对、安全组、Elastic IP，按 DNS 模式处理 Route53 hosted zone/A 记录或等待外部 DNS，渲染 cloud-init。默认镜像 `MESSAGE_SERVER_IMAGE=direxio/message-server:latest`。
 - **S4_BOOTSTRAP_STACK**: 等 cloud-init 安装 Docker 并启动 `postgres:18 + message-server + caddy + coturn`，轮询 `https://<domain>/healthz`。
 - **S5_INIT_TOKENS**: SSH 读取云端 `init-tokens.sh` 生成的 `/var/direxio-message-server/p2p/bootstrap.json`，归一化 `password`、`access_token`、`agent_token`、真实 `agent_room_id`。云端脚本会先调用 `portal.bootstrap`，用 `agent_token` 创建 `@agent:<server>` Matrix session，再用 owner Matrix token 创建房间并邀请/加入 agent，最后回写真正的 agent room。`password`、owner `access_token` 和 `agent_token` 按一次性/易失凭据处理；需要登录或用 token 调接口前，必须重新从服务器拉取最新 `/var/direxio-message-server/p2p/bootstrap.json`，不要复用旧输出。
-- **S6_WIRE_LOCAL**: 写本地凭据、用 `agent_token` 创建 `@agent:<server>` Matrix session、写 `direxio-connect/config.toml`，写 MCP 配置片段，并按策略安装或推荐 `direxio-connect`。
+- **S6_WIRE_LOCAL**: 写本地凭据、用 `agent_token` 创建 `@agent:<server>` Matrix session、写 `direxio-connect/config.toml`，写 MCP 配置片段，并按策略安装或推荐 `direxio-connect`。默认 `auto` 模式会等待 daemon `Running` 且日志出现 `direxio-connect is running`；如果日志显示 Agent CLI 缺失、未登录、workspace trust、ACP 启动失败或 agent offline，S6 失败，不会继续报告部署完成。
 - **S7_VERIFY_E2E**: 验证 `/_p2p`、Matrix versions、well-known、owner.json+CORS、TURN。
 
 ## 云端 compose
@@ -33,6 +33,7 @@ S7 自动验收通过后应交付:
 - MCP 配置目录: `~/.direxio/nodes/<service_id>/mcp/`
 - Matrix bridge 用户: `@agent:<server>`
 - 安装命令: `npm install -g direxio-connent@latest && direxio-connect daemon install --config <config> --service-name <service_id> --force`
+- 启动验证: `direxio-connect daemon status --service-name <service_id>` 和 `direxio-connect daemon logs --service-name <service_id> -n 120`
 - MCP 检查命令: `DIREXIO_CREDENTIALS_FILE=<credentials.json> direxio-mcp doctor --json`
 - AWS 信息: region、instance id、Elastic IP、Route53 hosted zone、SSH 命令、state.json、destroy 命令
 - 用户确认 gates: App 初始化、消息闭环、Agent/MCP runtime 验证仍需单独记录。

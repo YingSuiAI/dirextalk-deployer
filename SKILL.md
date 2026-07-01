@@ -149,8 +149,12 @@ DIREXIO_AGENT_INSTALL_MODE=recommended
 
 `DIREXIO_AGENT_INSTALL=auto` installs `direxio-connent@latest`, installs the
 service-scoped `direxio-connect` daemon, and installs `direxio-mcp@latest`.
-`recommend` writes files and prints commands only; `skip` writes credentials/env
-and configs only. OpenClaw and Hermes map to the generic ACP backend by default.
+S6 only records the daemon as installed after `daemon status` reports Running
+and recent logs show `direxio-connect is running`; logs that show agent CLI
+missing, login/trust failures, ACP startup failures, or agent offline state fail
+S6 so deploy does not report success prematurely. `recommend` writes files and
+prints commands only; `skip` writes credentials/env and configs only. OpenClaw
+and Hermes map to the generic ACP backend by default.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd` and
 writes `mode = "yolo"` by default. If Cursor Agent CLI is not logged in, the
 operator must run `agent.cmd login` once; rerunning the deployer refreshes

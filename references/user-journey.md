@@ -67,7 +67,7 @@ When all phases complete, report:
 - stop-billing guidance: ask the agent to destroy this node when finished
 - which gates are automated and which still need user confirmation, because S7 green is not the final product-complete state
 
-After delivery, verify the local bridge by checking `direxio-connect daemon status --service-name <service_id>` when installed, or by running the recorded `connect_install_command` if the policy was `recommend`.
+After delivery, verify the local bridge by checking `direxio-connect daemon status --service-name <service_id>` and `direxio-connect daemon logs --service-name <service_id> -n 120` when installed, or by running the recorded `connect_install_command` if the policy was `recommend`. In the default `auto` mode, S6 already waits for `direxio-connect is running` and fails on local Agent startup errors before reporting automated deployment gates.
 
 Destroying AWS resources removes deployer-created Route53 A records and
 attempts to delete hosted zones that state marks as deployer-created. It does

@@ -7,6 +7,7 @@
 - `agent.matrix_session.create` must return `@agent:<server>`. If it returns `@owner:<server>`, deploy a message-server build that includes agent Matrix session support.
 - `direxio-connect/config.toml` must contain one Matrix platform and the same `room_id` as S5/S6 state.
 - `direxio-connect daemon status --service-name <service_id>` checks the local bridge process for the current Direxio node. If no daemon is installed, run the command printed in S6 state `connect_install_command`.
+- In `DIREXIO_AGENT_INSTALL=auto`, S6 also reads `direxio-connect daemon logs --service-name <service_id> -n 120`. It waits for `direxio-connect is running` and fails on Agent startup errors such as missing Cursor Agent CLI, login/auth/trust failures, ACP session initialization failure, or agent offline state. Fix the local agent runtime, then rerun orchestrate to reinstall/restart and verify the daemon before reporting deployment success.
 - If npm install fails, verify `npm view direxio-connent` and that the GitHub release contains the matching `direxio-connect` binary asset.
 
 ## Matrix Checks

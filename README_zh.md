@@ -191,10 +191,13 @@ mcp/mcp-servers.json
 手动安装：
 
 ```bash
-npm install -g direxio-connent
+npm install -g direxio-connent@latest
 direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force
 direxio-connect daemon status --service-name <service_id>
+direxio-connect daemon logs --service-name <service_id> -n 120
 ```
+
+默认 `DIREXIO_AGENT_INSTALL=auto` 时，S6 会等待 daemon 状态为 `Running`，并在最近日志中看到 `direxio-connect is running` 后才把本地 wiring 标记完成。日志中如果出现 Cursor Agent CLI 未安装、未登录/认证失败、workspace trust、ACP 启动失败或 agent offline 等错误，S6 会失败并保留 `connect_install_status=install_failed`，不会直接报告部署成功。
 
 默认 `DIREXIO_AGENT_INSTALL=auto` 时，S6 会自动安装 MCP。手动恢复命令：
 

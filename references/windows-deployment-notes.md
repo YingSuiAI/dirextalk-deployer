@@ -82,7 +82,13 @@ The npm path is the default local install:
 npm install -g direxio-connent@latest
 direxio-connect daemon install --config "$HOME/.direxio/nodes/<service_id>/direxio-connect/config.toml" --service-name <service_id> --force
 direxio-connect daemon status --service-name <service_id>
+direxio-connect daemon logs --service-name <service_id> -n 120
 ```
+
+In `DIREXIO_AGENT_INSTALL=auto`, S6 waits for the daemon to report `Running`
+and for logs to show `direxio-connect is running`. Cursor Agent CLI missing,
+not logged in, workspace trust, ACP startup, or agent offline errors in the logs
+make S6 fail instead of reporting deployment success.
 
 If the command is not found after install, check the npm global bin directory:
 

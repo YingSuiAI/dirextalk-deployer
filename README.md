@@ -198,7 +198,14 @@ Manual install:
 npm install -g direxio-connent@latest
 direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force
 direxio-connect daemon status --service-name <service_id>
+direxio-connect daemon logs --service-name <service_id> -n 120
 ```
+
+With the default `DIREXIO_AGENT_INSTALL=auto`, S6 waits for daemon status
+`Running` and a recent `direxio-connect is running` log before marking local
+wiring done. Agent startup errors in the logs, such as a missing Cursor Agent
+CLI, login/auth/trust failures, ACP startup failure, or agent offline state,
+fail S6 instead of reporting deployment success.
 
 MCP is installed automatically during S6 when `DIREXIO_AGENT_INSTALL=auto`.
 Manual recovery command:

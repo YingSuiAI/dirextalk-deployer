@@ -167,8 +167,9 @@ call. In the `DIREXIO_AGENT_INSTALL=recommend` path, `verify runtime` records
 `connect_daemon=manual_pending` instead of failing the aggregate, because
 daemon installation is an explicit operator action. The default
 `DIREXIO_AGENT_INSTALL=auto` path expects direxio-connect and direxio-mcp to be
-installed automatically during S6. These checks are not the full runtime
-product gate:
+installed automatically during S6. S6 waits for `direxio-connect is running`
+in daemon logs and fails on local Agent startup errors before moving on. These
+checks are not the full runtime product gate:
 
 ```bash
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify runtime

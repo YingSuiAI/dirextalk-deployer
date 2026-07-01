@@ -394,10 +394,16 @@ if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "status" ]; then
   cat <<STATUS
 direxio-connect daemon status
 
-  Status:    Stopped
+  Status:    ${CONNECT_STATUS:-Stopped}
   Platform:  launchd
   WorkDir:   /tmp/direxio-test/direxio-connect
 STATUS
+  exit 0
+fi
+if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "logs" ]; then
+  [ "${3:-}" = "--service-name" ]
+  [ "${4:-}" = "service.example.test" ]
+  printf '%s\n' "${CONNECT_LOG_OUTPUT:-}"
   exit 0
 fi
 exit 1
@@ -405,7 +411,43 @@ EOF
 chmod 700 "$fakebin/npm" "$fakebin/direxio-connect"
 STATE_CALLS="$tmp/state.calls"
 : > "$STATE_CALLS"
+set +e
 PATH="$fakebin:$PATH" _maybe_auto_install_connect auto codex codex "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+connect_stopped_rc=$?
+set -e
+[ "$connect_stopped_rc" -ne 0 ]
+grep -q '^connect_install_status=install_failed$' "$STATE_CALLS"
+
+STATE_CALLS="$tmp/state-agent-log.calls"
+: > "$STATE_CALLS"
+set +e
+PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:00:18 level=ERROR msg="cursorSession: process failed" stderr="Error: Authentication required. Please run '\''agent login'\'' first, or set CURSOR_API_KEY environment variable."' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+connect_agent_log_rc=$?
+set -e
+[ "$connect_agent_log_rc" -ne 0 ]
+grep -q '^connect_install_status=install_failed$' "$STATE_CALLS"
+
+STATE_CALLS="$tmp/state-agent-offline.calls"
+: > "$STATE_CALLS"
+set +e
+PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:05 level=ERROR msg="agent backend offline" project=cursor error="agent is offline"' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+connect_agent_offline_rc=$?
+set -e
+[ "$connect_agent_offline_rc" -ne 0 ]
+grep -q '^connect_install_status=install_failed$' "$STATE_CALLS"
+
+STATE_CALLS="$tmp/state-agent-ready.calls"
+: > "$STATE_CALLS"
+PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="direxio-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+grep -q '^connect_install_status=installed$' "$STATE_CALLS"
+
+STATE_CALLS="$tmp/state-no-ready-log.calls"
+: > "$STATE_CALLS"
+set +e
+PATH="$fakebin:$PATH" CONNECT_STATUS=Running DIREXIO_CONNECT_STARTUP_TIMEOUT_SECONDS=0 CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:07 level=INFO msg="config loaded" path=config.toml' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+connect_no_ready_log_rc=$?
+set -e
+[ "$connect_no_ready_log_rc" -ne 0 ]
 grep -q '^connect_install_status=install_failed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/mcp-state.calls"

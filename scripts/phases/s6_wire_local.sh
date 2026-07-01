@@ -677,16 +677,46 @@ _connect_daemon_is_running() {
   printf '%s\n' "$status" | grep -Eq 'Status:[[:space:]]*Running'
 }
 
-_connect_daemon_has_agent_startup_error() {
-  local binary=$1 service_name=$2 logs
+_connect_daemon_wait_until_ready() {
+  local binary=$1 service_name=$2 timeout interval elapsed logs agent_error ready
   [ -n "$service_name" ] || service_name=direxio-connect
-  logs=$("$binary" daemon logs --service-name "$service_name" -n "${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}" 2>/dev/null || true)
-  [ -n "$(connect_daemon_agent_error_from_text "$logs")" ]
+  timeout=${DIREXIO_CONNECT_STARTUP_TIMEOUT_SECONDS:-30}
+  interval=${DIREXIO_CONNECT_STARTUP_POLL_SECONDS:-2}
+  case "$timeout" in *[!0-9]*|"") timeout=30 ;; esac
+  case "$interval" in *[!0-9]*|"") interval=2 ;; esac
+  [ "$interval" -gt 0 ] || interval=1
+  elapsed=0
+
+  while true; do
+    if ! _connect_daemon_is_running "$binary" "$service_name"; then
+      printf '%s\n' "daemon status is not Running"
+      return 1
+    fi
+
+    logs=$("$binary" daemon logs --service-name "$service_name" -n "${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}" 2>/dev/null || true)
+    agent_error=$(connect_daemon_agent_error_from_text "$logs")
+    if [ -n "$agent_error" ]; then
+      printf '%s\n' "local agent backend failure: $agent_error"
+      return 1
+    fi
+    ready=$(connect_daemon_ready_from_text "$logs")
+    if [ -n "$ready" ]; then
+      printf '%s\n' "$ready"
+      return 0
+    fi
+
+    if [ "$elapsed" -ge "$timeout" ]; then
+      printf '%s\n' "startup logs did not show 'direxio-connect is running' within ${timeout}s"
+      return 1
+    fi
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
 }
 
 _maybe_auto_install_connect() {
   local policy=$1 runtime=$2 cc_agent=$3 service_dir=$4 config_path=$5 binary=$6 service_name=$7
-  local repo ref src commit config_arg
+  local repo ref src commit config_arg ready_evidence
   [ -n "$service_name" ] || service_name=$(basename "$service_dir")
   if [ "$policy" != "auto" ]; then
     state_set connect_install_status "$policy" 2>/dev/null || true
@@ -697,24 +727,20 @@ _maybe_auto_install_connect() {
     if ! command -v npm >/dev/null 2>&1; then
       warn "DIREXIO_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js or set DIREXIO_CONNECT_INSTALL_FROM=source."
       state_set connect_install_status "npm_missing" 2>/dev/null || true
-      return 0
+      return 1
     fi
     if npm install -g "$(_connect_npm_package)" && "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
-      if ! _connect_daemon_is_running "$binary" "$service_name"; then
+      if ! ready_evidence=$(_connect_daemon_wait_until_ready "$binary" "$service_name"); then
         state_set connect_install_status "install_failed" 2>/dev/null || true
-        warn "direxio-connect daemon install returned success, but daemon status is not Running. Check the local agent command and direxio-connect logs."
-        return 0
-      fi
-      if _connect_daemon_has_agent_startup_error "$binary" "$service_name"; then
-        state_set connect_install_status "install_failed" 2>/dev/null || true
-        warn "direxio-connect daemon is Running, but logs show the local agent backend failed. Check agent CLI install/login/trust settings and daemon logs."
-        return 0
+        warn "direxio-connect daemon did not reach verified ready state after install ($ready_evidence). Check the local agent command and direxio-connect logs."
+        return 1
       fi
       state_set connect_install_status "installed" 2>/dev/null || true
-      ok "direxio-connect daemon installed from npm for $runtime using Matrix room bridge."
+      ok "direxio-connect daemon installed from npm for $runtime using Matrix room bridge ($ready_evidence)."
     else
       state_set connect_install_status "install_failed" 2>/dev/null || true
       warn "direxio-connect npm install or daemon install failed. Config is available for manual start."
+      return 1
     fi
     return 0
   fi
@@ -725,57 +751,53 @@ _maybe_auto_install_connect() {
   if ! command -v git >/dev/null 2>&1 || ! command -v go >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1; then
     warn "DIREXIO_CONNECT_INSTALL_FROM=source requested, but git, go, and make are required to build direxio-connect from source."
     state_set connect_install_status "build_tool_missing" 2>/dev/null || true
-    return 0
+    return 1
   fi
   if [ ! -d "$src/.git" ]; then
     mkdir -p "$(dirname "$src")"
     if ! git clone "$repo" "$src"; then
       state_set connect_install_status "clone_failed" 2>/dev/null || true
       warn "direxio-connect clone failed from $repo"
-      return 0
+      return 1
     fi
   fi
   if ! git -C "$src" fetch --all --tags --prune; then
     state_set connect_install_status "fetch_failed" 2>/dev/null || true
     warn "direxio-connect fetch failed in $src"
-    return 0
+    return 1
   fi
   if ! git -C "$src" checkout "$ref"; then
     state_set connect_install_status "checkout_failed" 2>/dev/null || true
     warn "direxio-connect checkout failed for ref $ref"
-    return 0
+    return 1
   fi
   commit=$(git -C "$src" rev-parse --short HEAD 2>/dev/null || true)
   state_set connect_commit "$commit" 2>/dev/null || true
   if ! (cd "$src" && AGENTS="$cc_agent" PLATFORMS_INCLUDE=matrix NO_WEB=1 make build-noweb); then
     state_set connect_install_status "build_failed" 2>/dev/null || true
     warn "direxio-connect build failed for runtime=$runtime agent=$cc_agent"
-    return 0
+    return 1
   fi
   binary="$(_connect_runtime_dir "$service_dir")/bin/direxio-connect"
   mkdir -p "$(dirname "$binary")"
   if ! cp "$src/direxio-connect" "$binary" 2>/dev/null && ! cp "$src/direxio-connect.exe" "$binary" 2>/dev/null; then
     state_set connect_install_status "binary_copy_failed" 2>/dev/null || true
     warn "direxio-connect binary was not found after build in $src"
-    return 0
+    return 1
   fi
   chmod 700 "$binary" 2>/dev/null || true
   if "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
-    if ! _connect_daemon_is_running "$binary" "$service_name"; then
+    if ! ready_evidence=$(_connect_daemon_wait_until_ready "$binary" "$service_name"); then
       state_set connect_install_status "install_failed" 2>/dev/null || true
-      warn "direxio-connect daemon install returned success, but daemon status is not Running. Check the local agent command and direxio-connect logs."
-      return 0
-    fi
-    if _connect_daemon_has_agent_startup_error "$binary" "$service_name"; then
-      state_set connect_install_status "install_failed" 2>/dev/null || true
-      warn "direxio-connect daemon is Running, but logs show the local agent backend failed. Check agent CLI install/login/trust settings and daemon logs."
-      return 0
+      warn "direxio-connect daemon did not reach verified ready state after install ($ready_evidence). Check the local agent command and direxio-connect logs."
+      return 1
     fi
     state_set connect_install_status "installed" 2>/dev/null || true
-    ok "direxio-connect daemon installed for $runtime using Matrix room bridge."
+    ok "direxio-connect daemon installed for $runtime using Matrix room bridge ($ready_evidence)."
   else
     state_set connect_install_status "install_failed" 2>/dev/null || true
     warn "direxio-connect daemon install failed. Config and binary are available for manual start."
+    return 1
   fi
 }
 
@@ -1087,7 +1109,11 @@ run_phase() {
   state_set direxio_agent_bridge "direxio-connect" 2>/dev/null || true
   _print_connect_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_id"
   _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_codex_config_local" "$mcp_openclaw_config_local" "$mcp_hermes_config_local" "$mcp_install_command" "$mcp_doctor_command" "$mcp_cursor_config_local"
-  _maybe_auto_install_agent "$install_policy" "$runtime" "$cc_agent" "$service_dir" "$cc_config" "$cc_binary" "$service_id"
+  if ! _maybe_auto_install_agent "$install_policy" "$runtime" "$cc_agent" "$service_dir" "$cc_config" "$cc_binary" "$service_id"; then
+    phase_set S6_WIRE_LOCAL failed "direxio-connect auto install/startup was not verified; check daemon logs"
+    warn "Run: $cc_binary daemon logs --service-name $service_id -n ${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}"
+    return 1
+  fi
   _maybe_auto_install_mcp "$install_policy"
 
   phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;env_file=$envfile;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;connect_config=$cc_config;mcp_config_dir=$mcp_dir;connect_agent=$cc_agent"

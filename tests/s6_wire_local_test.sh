@@ -47,6 +47,7 @@ clear_speech_env() {
 clear_runtime_env
 clear_speech_env
 export DIREXIO_AGENT_DETECT_PROCESS=0
+export DIREXIO_LOCAL_PATH_STYLE=posix
 
 unset DIREXIO_HOME
 [ "$(_direxio_home)" = "$HOME/.direxio" ]
@@ -251,7 +252,7 @@ _write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "$mcp_cred
 grep -q '\[mcp_servers."direxio-service_example_test"\]' "$mcp_service_dir/mcp/codex.toml"
 grep -q 'command = "direxio-mcp"' "$mcp_service_dir/mcp/codex.toml"
 grep -q 'DIREXIO_CREDENTIALS_FILE' "$mcp_service_dir/mcp/codex.toml"
-grep -q "$mcp_credentials" "$mcp_service_dir/mcp/codex.toml"
+grep -q "$(_local_connect_path "$mcp_credentials")" "$mcp_service_dir/mcp/codex.toml"
 json_test_check "$mcp_service_dir/mcp/openclaw-server.json" "data.command === 'direxio-mcp'"
 json_test_check "$mcp_service_dir/mcp/openclaw-server.json" "data.env.DIREXIO_CREDENTIALS_FILE === '$expected_mcp_credentials'"
 if json_check "$mcp_service_dir/mcp/openclaw-server.json" "'mcp' in data || 'mcpServers' in data" >/dev/null; then
@@ -327,6 +328,28 @@ grep -q 'model = "whisper-test"' "$speech_config_path"
 [ "$(_connect_agent_command acp hermes)" = "direxio-connect" ]
 [ "$(DIREXIO_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _connect_agent_command acp openclaw)" = "/opt/openclaw/bin/openclaw" ]
 [ "$(DIREXIO_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_command acp hermes)" = "direxio-connect" ]
+
+fake_cursor_root="$tmp/Cursor"
+mkdir -p "$fake_cursor_root/resources/app/bin" "$fake_cursor_root/resources/app/out"
+: > "$fake_cursor_root/Cursor.exe"
+: > "$fake_cursor_root/resources/app/out/cli.js"
+cat > "$fake_cursor_root/resources/app/bin/cursor.cmd" <<'EOF'
+@echo off
+EOF
+chmod 700 "$fake_cursor_root/resources/app/bin/cursor.cmd"
+(
+  export PATH="$fake_cursor_root/resources/app/bin:$PATH"
+  export DIREXIO_LOCAL_PATH_STYLE=windows
+  cursor_windows_cmd=$(_connect_agent_command cursor)
+  case "$cursor_windows_cmd" in
+    *Cursor.exe) ;;
+    *) echo "expected Windows Cursor command to resolve to Cursor.exe, got: $cursor_windows_cmd" >&2; exit 1 ;;
+  esac
+  cursor_options=$(_connect_agent_options_toml cursor cursor)
+  [[ "$cursor_options" == *'args = ['* ]]
+  [[ "$cursor_options" == *'cli.js'* ]]
+  [[ "$cursor_options" == *'"--trust"'* ]]
+)
 
 cmd_config_path="$tmp/direxio-connect/config-with-cmd.toml"
 _write_connect_config "$cmd_config_path" "$tmp/direxio-connect/data-cmd" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "/opt/codex/bin/codex"

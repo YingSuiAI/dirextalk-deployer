@@ -39,6 +39,7 @@ csv_column_index() {
     BEGIN {
       n = split(header, cols, ",")
       for (i = 1; i <= n; i++) {
+        sub(/^\xef\xbb\xbf/, "", cols[i])
         gsub(/^"|"$/, "", cols[i])
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", cols[i])
         if (tolower(cols[i]) == tolower(wanted)) {

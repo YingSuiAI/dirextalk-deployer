@@ -125,7 +125,7 @@ bash scripts/orchestrate.sh
 ```
 
 可选安装模式：`recommended`、`direxio-connect`。
-如果 `DIREXIO_AGENT_PLATFORM=auto` 无法唯一识别当前运行时，显式设置 `DIREXIO_CONNECT_AGENT`。需要触发 OpenClaw 或 Hermes 默认配置时，设置 `DIREXIO_AGENT_PLATFORM=openclaw` 或 `DIREXIO_AGENT_PLATFORM=hermes`；只设置 `DIREXIO_CONNECT_AGENT=acp` 会进入通用 ACP，需要手动提供 options。OpenClaw Gateway ACP 默认写入 `["acp", "--session", "agent:main:main"]`，让 `openclaw acp` 从 `~/.openclaw/openclaw.json` 自动发现 Gateway。需要强制指定 Gateway 时，完成 pairing 后从当前 OpenClaw runtime 同时填写 `DIREXIO_OPENCLAW_ACP_URL`、`DIREXIO_OPENCLAW_ACP_TOKEN_FILE` 和 `DIREXIO_OPENCLAW_ACP_SESSION`。只有需要完整覆盖 OpenClaw ACP args 数组时才使用 `DIREXIO_OPENCLAW_ACP_ARGS_TOML`；Hermes 自定义参数用 `DIREXIO_HERMES_ACP_ARGS_TOML`，S6 会自动在前面加上 `hermes-acp-adapter -- <hermes-command>`。
+如果 `DIREXIO_AGENT_PLATFORM=auto` 无法唯一识别当前运行时，显式设置 `DIREXIO_CONNECT_AGENT`。Windows 上的 Cursor 接线在能找到 Cursor CLI 安装树时，会默认解析真实 `Cursor.exe` 并写入 `cli.js --trust`；需要覆盖时设置 `DIREXIO_CURSOR_COMMAND`、`DIREXIO_CONNECT_AGENT_CMD` 或 `DIREXIO_CONNECT_AGENT_OPTIONS_TOML`。需要触发 OpenClaw 或 Hermes 默认配置时，设置 `DIREXIO_AGENT_PLATFORM=openclaw` 或 `DIREXIO_AGENT_PLATFORM=hermes`；只设置 `DIREXIO_CONNECT_AGENT=acp` 会进入通用 ACP，需要手动提供 options。OpenClaw Gateway ACP 默认写入 `["acp", "--session", "agent:main:main"]`，让 `openclaw acp` 从 `~/.openclaw/openclaw.json` 自动发现 Gateway。需要强制指定 Gateway 时，完成 pairing 后从当前 OpenClaw runtime 同时填写 `DIREXIO_OPENCLAW_ACP_URL`、`DIREXIO_OPENCLAW_ACP_TOKEN_FILE` 和 `DIREXIO_OPENCLAW_ACP_SESSION`。只有需要完整覆盖 OpenClaw ACP args 数组时才使用 `DIREXIO_OPENCLAW_ACP_ARGS_TOML`；Hermes 自定义参数用 `DIREXIO_HERMES_ACP_ARGS_TOML`，S6 会自动在前面加上 `hermes-acp-adapter -- <hermes-command>`。
 
 查看状态：
 

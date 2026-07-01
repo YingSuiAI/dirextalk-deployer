@@ -86,7 +86,8 @@ EOF
 cat > "$fake_pkg/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js" <<'EOF'
 export class Client {
   async connect(transport) {
-    if (!transport?.options?.args?.[0]?.endsWith("dist/index.js")) {
+    const serverEntry = String(transport?.options?.args?.[0] || "").replace(/\\/g, "/");
+    if (!serverEntry.endsWith("dist/index.js")) {
       throw new Error("SDK transport did not receive direxio-mcp dist/index.js");
     }
     if (transport.options.env.DIREXIO_CREDENTIALS_FILE !== process.env.EXPECTED_CREDENTIALS_FILE) {

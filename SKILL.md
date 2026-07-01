@@ -151,6 +151,10 @@ DIREXIO_AGENT_INSTALL_MODE=recommended
 service-scoped `direxio-connect` daemon, and installs `direxio-mcp@latest`.
 `recommend` writes files and prints commands only; `skip` writes credentials/env
 and configs only. OpenClaw and Hermes map to the generic ACP backend by default.
+On Windows, Cursor wiring resolves the real `Cursor.exe` and writes
+`cli.js --trust` when the Cursor CLI install tree is discoverable. Explicit
+`DIREXIO_CURSOR_COMMAND`, `DIREXIO_CONNECT_AGENT_CMD`, and
+`DIREXIO_CONNECT_AGENT_OPTIONS_TOML` overrides still win.
 
 State/report fields include `mcp_config_dir`, `mcp_codex_config`,
 `credentials.status`, and `mcp.status`.

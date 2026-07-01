@@ -97,6 +97,17 @@ $env:DIREXIO_CONNECT_AGENT = "gemini"
 $env:DIREXIO_GEMINI_COMMAND = "C:\Tools\gemini.cmd"
 ```
 
+For Cursor on Windows, S6 avoids writing `cursor.cmd` because daemon process
+spawners may not execute `.cmd` files directly. When it finds Cursor's CLI
+install tree, it writes the real `Cursor.exe` path and `cli.js --trust` args.
+If Cursor is installed in a non-standard location, set:
+
+```powershell
+$env:DIREXIO_CONNECT_AGENT = "cursor"
+$env:DIREXIO_CURSOR_COMMAND = "C:\Path\To\Cursor.exe"
+$env:DIREXIO_CONNECT_AGENT_OPTIONS_TOML = 'args = ["C:/Path/To/resources/app/out/cli.js", "--trust"]'
+```
+
 For Codex Desktop, the wrapper also tries to find the real bundled `codex.exe` because WindowsApps aliases cannot always be spawned by child processes:
 
 ```powershell

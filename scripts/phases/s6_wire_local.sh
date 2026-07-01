@@ -425,6 +425,9 @@ _connect_agent_command() {
       return 0
     fi
   done
+  if [ "$agent" = "cursor" ] && [ "$(_local_path_style)" = "windows" ]; then
+    _cursor_windows_exe_command && return 0
+  fi
   case "$runtime" in
     openclaw|hermes) printf '%s\n' "$runtime" ;;
   esac
@@ -444,6 +447,32 @@ _connect_agent_command_aliases() {
     antigravity) printf '%s\n' agy ;;
     qoder) printf '%s\n' qodercli ;;
   esac
+}
+
+_cursor_cli_command_path() {
+  command -v cursor.cmd 2>/dev/null || command -v cursor 2>/dev/null || true
+}
+
+_cursor_windows_install_file() {
+  local kind=$1 cursor_cmd cmd_dir candidate
+  cursor_cmd=$(_cursor_cli_command_path)
+  [ -n "$cursor_cmd" ] || return 1
+  cmd_dir=$(dirname "$cursor_cmd")
+  case "$kind" in
+    exe) candidate="$cmd_dir/../../../Cursor.exe" ;;
+    cli) candidate="$cmd_dir/../out/cli.js" ;;
+    *) return 1 ;;
+  esac
+  [ -f "$candidate" ] || return 1
+  _local_connect_path "$candidate"
+}
+
+_cursor_windows_exe_command() {
+  _cursor_windows_install_file exe
+}
+
+_cursor_windows_cli_arg() {
+  _cursor_windows_install_file cli
 }
 
 _connect_repo() {
@@ -551,6 +580,15 @@ _connect_agent_options_toml() {
     return 0
   fi
   case "$runtime:$agent" in
+    cursor:cursor)
+      local cursor_cli
+      cursor_cli=$(_cursor_windows_cli_arg 2>/dev/null || true)
+      if [ -n "$cursor_cli" ]; then
+        printf 'args = %s\n' "$(_toml_array "$cursor_cli" --trust)"
+      else
+        printf 'args = %s\n' "$(_toml_array --trust)"
+      fi
+      ;;
     openclaw:acp)
       args_toml=$(_openclaw_acp_args_toml) || return 1
       q_display=$(_toml_escape "OpenClaw ACP")

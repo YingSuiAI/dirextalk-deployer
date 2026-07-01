@@ -119,6 +119,18 @@ root_verify_out=$(AWS_PROFILE=root-profile bash "$ROOT/scripts/aws-credentials.s
 [[ "$root_verify_out" == *"profile=root-profile"* ]]
 [[ "$root_verify_out" == *"root=true"* ]]
 
+printf '\xef\xbb\xbfAccess key ID,Secret access key\nAKIABOMTEST,SECRET_BOM_VALUE\n' > "$tmp/bom.csv"
+bom_out=$(bash "$ROOT/scripts/aws-credentials.sh" import-csv "$tmp/bom.csv" bom-profile us-west-2)
+[[ "$bom_out" == *"profile=bom-profile"* ]]
+if [[ "$bom_out" == *"AKIABOMTEST"* || "$bom_out" == *"SECRET_BOM_VALUE"* ]]; then
+  echo "aws-credentials BOM output leaked credential values" >&2
+  printf '%s\n' "$bom_out" >&2
+  exit 1
+fi
+grep -q '^\[bom-profile\]$' "$AWS_SHARED_CREDENTIALS_FILE"
+grep -q '^aws_access_key_id = AKIABOMTEST$' "$AWS_SHARED_CREDENTIALS_FILE"
+grep -q '^aws_secret_access_key = SECRET_BOM_VALUE$' "$AWS_SHARED_CREDENTIALS_FILE"
+
 set +e
 s0_output=$(
   DIREXIO_WORKDIR="$tmp/state-root" AWS_PROFILE=root-profile bash -c '

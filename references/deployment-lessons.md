@@ -31,6 +31,10 @@ Fix now in ops:
 - Local S5 reads the file with `ssh ... sudo cat /var/direxio-message-server/p2p/bootstrap.json`,
   normalizes it into local `outputs.json`, and stores `password`/`agent_token`
   in state.
+- Existing nodes created by older deployer builds may still keep the remote
+  workdir and mirrored bootstrap file under `/opt/p2p`. Current S5 and
+  update/reset helpers keep a legacy fallback only for taking over those nodes;
+  new deployments must use `/var/direxio-message-server`.
 
 ## Windows Runtime Pitfalls
 

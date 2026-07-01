@@ -3,6 +3,7 @@
 # Also verify owner.json so the client does not report Portal as undeployed.
 
 DIREXIO_REMOTE_BOOTSTRAP_FILE=${DIREXIO_REMOTE_BOOTSTRAP_FILE:-/var/direxio-message-server/p2p/bootstrap.json}
+DIREXIO_LEGACY_REMOTE_BOOTSTRAP_FILE=${DIREXIO_LEGACY_REMOTE_BOOTSTRAP_FILE:-/opt/p2p/bootstrap.json}
 
 run_phase() {
   phase_set S5_INIT_TOKENS in_progress "fetching tokens"
@@ -81,7 +82,7 @@ _read_remote_bootstrap() {
     -o ServerAliveInterval="${SSH_SERVER_ALIVE_INTERVAL:-5}"
     -o ServerAliveCountMax="${SSH_SERVER_ALIVE_COUNT_MAX:-2}"
   )
-  cmd=(ssh "${ssh_args[@]}" ubuntu@"$pubip" "sudo test -s '${DIREXIO_REMOTE_BOOTSTRAP_FILE}' && sudo cat '${DIREXIO_REMOTE_BOOTSTRAP_FILE}'")
+  cmd=(ssh "${ssh_args[@]}" ubuntu@"$pubip" "if sudo test -s '${DIREXIO_REMOTE_BOOTSTRAP_FILE}'; then sudo cat '${DIREXIO_REMOTE_BOOTSTRAP_FILE}'; elif sudo test -s '${DIREXIO_LEGACY_REMOTE_BOOTSTRAP_FILE}'; then sudo cat '${DIREXIO_LEGACY_REMOTE_BOOTSTRAP_FILE}'; else exit 1; fi")
   timeout_seconds=${SSH_COMMAND_TIMEOUT:-30}
   if command -v timeout >/dev/null 2>&1; then
     timeout "$timeout_seconds" "${cmd[@]}" > "$out" 2>/dev/null

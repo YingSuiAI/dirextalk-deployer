@@ -94,6 +94,9 @@ grep -q 'scripts/json.mjs' agents/README.md
 grep -q 'direxio-connect' agents/README.md
 grep -q 'direxio-connect' agents/openai.yaml
 grep -q 'direxio-mcp' agents/openai.yaml
+grep -q 'connect_install_status' SKILL.md
+grep -q 'connect_install_status' scripts/phases/s6_wire_local.sh
+grep -q 'connect_install_status' scripts/orchestrate.sh
 grep -q 'skill install --agent' README.md
 grep -q 'skill update --agent' README_zh.md
 grep -q 'skill refresh --agent' SKILL.md
@@ -121,6 +124,12 @@ grep -q 'mcp_config_dir' SKILL.md
 grep -q 'mcp_codex_config' references/runtime-wiring.md
 if grep -R '@direxio/agent-plugins' SKILL.md scripts README.md README_zh.md references >/dev/null; then
   echo "current docs/scripts must not reference legacy agent plugin packages" >&2
+  exit 1
+fi
+legacy_agent_install_prefix=$(printf 'agent_%s' 'install')
+if grep -R -n "${legacy_agent_install_prefix}_status\\|${legacy_agent_install_prefix}_policy\\|${legacy_agent_install_prefix}_mode\\|${legacy_agent_install_prefix}_command" SKILL.md scripts README.md README_zh.md references AGENTS.md agents tests/*.sh >/dev/null; then
+  echo "connect daemon install state must use connect_install_* fields, not stale agent_install_* fields" >&2
+  grep -R -n "${legacy_agent_install_prefix}_status\\|${legacy_agent_install_prefix}_policy\\|${legacy_agent_install_prefix}_mode\\|${legacy_agent_install_prefix}_command" SKILL.md scripts README.md README_zh.md references AGENTS.md agents tests/*.sh >&2
   exit 1
 fi
 legacy_plugin_word=plugin
@@ -264,7 +273,7 @@ grep -q 'scripts/orchestrate.sh report new_deploy' SKILL.md
 grep -q 'scripts/update.sh' SKILL.md
 grep -q 'scripts/reset-app-data.sh' SKILL.md
 grep -q 'clears old user-confirmation/runtime-check evidence' SKILL.md
-grep -q 'agent_install_status=refresh_pending' SKILL.md
+grep -q 'connect_install_status=refresh_pending' SKILL.md
 grep -q 'stops only the matching service-scoped direxio-connect daemon' SKILL.md
 grep -q 'Local refresh:' SKILL.md
 grep -q 'rerun the deployment workflow to refresh S4-S7' SKILL.md

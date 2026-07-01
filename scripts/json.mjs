@@ -372,7 +372,7 @@ function cmdMutate(args) {
       for (const key of ["password", "access_token", "agent_token", "agent_room_id", "user_confirmations", "runtime_checks"]) {
         delete data[key];
       }
-      data.agent_install_status = "refresh_pending";
+      data.connect_install_status = "refresh_pending";
       data.mcp_install_status = "refresh_pending";
       data.phase = startPhase;
       if (!isObject(data.phases)) data.phases = {};
@@ -437,7 +437,7 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
     phaseStatuses[key] = stringValue(value?.status || "unknown");
   }
   const userGate = (gate, fallback) => st.user_confirmations?.[gate]?.status || fallback;
-  const localRefreshStatus = st.agent_install_status === "refresh_pending" ? "refresh_pending" : "current_or_not_recorded";
+  const localRefreshStatus = st.connect_install_status === "refresh_pending" ? "refresh_pending" : "current_or_not_recorded";
   const billable = compact([
     stringValue(st.resources?.instance_id) ? `EC2 ${st.resources.instance_id}` : "",
     stringValue(st.resources?.root_volume_id) ? `EBS root volume ${st.resources.root_volume_id}` : "",
@@ -510,7 +510,7 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       package: st.connect_npm_package || "direxio-connent@latest",
       agent: st.connect_agent || "",
       config: st.connect_config || "",
-      install_status: st.agent_install_status || ""
+      install_status: st.connect_install_status || ""
     },
     mcp: {
       status: localRefreshStatus,

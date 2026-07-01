@@ -6,7 +6,7 @@
 - Current message-server images require `P2P_PORTAL_PASSWORD` and an explicit `portal.bootstrap` call. The cloud `init-tokens.sh` script is responsible for that call and for creating a real Matrix agent room when the backend credentials file does not already include `agent_room_id`.
 - `agent.matrix_session.create` must return `@agent:<server>`. If it returns `@owner:<server>`, deploy a message-server build that includes agent Matrix session support.
 - `direxio-connect/config.toml` must contain one Matrix platform and the same `room_id` as S5/S6 state.
-- `direxio-connect daemon status --service-name <service_id>` checks the local bridge process for the current Direxio node. If no daemon is installed, run the command printed in S6 state `agent_install_command`.
+- `direxio-connect daemon status --service-name <service_id>` checks the local bridge process for the current Direxio node. If no daemon is installed, run the command printed in S6 state `connect_install_command`.
 - If npm install fails, verify `npm view direxio-connent` and that the GitHub release contains the matching `direxio-connect` binary asset.
 
 ## Matrix Checks

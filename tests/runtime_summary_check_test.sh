@@ -186,8 +186,8 @@ set -e
 }
 json_test_check "$state" "data.runtime_checks.summary.status === 'failed' && data.runtime_checks.summary.failed_count === 1 && data.runtime_checks.summary.checks.connect_daemon === 'failed' && data.runtime_checks.summary.checks.mcp_doctor === 'passed' && data.runtime_checks.summary.checks.mcp_tools === 'passed' && data.runtime_checks.summary.checks.mcp_smoke === 'passed'"
 
-json_mutate "$state" set-string agent_install_policy recommend
-json_mutate "$state" set-string agent_install_status recommend
+json_mutate "$state" set-string connect_install_policy recommend
+json_mutate "$state" set-string connect_install_status recommend
 verify_recommend_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.direxio/nodes/other.example.test/direxio-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
 printf '%s\n' "$verify_recommend_output" | grep -q 'verified runtime checks: passed'
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'manual_pending' && data.runtime_checks.connect_daemon.status === 'manual_pending' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"

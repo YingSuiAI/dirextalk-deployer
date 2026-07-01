@@ -71,7 +71,7 @@ assert_contains "$billable_output" "destroy.sh"
 
 refresh_workdir="$tmp/refresh-pending"
 write_state "$refresh_workdir" "S4_BOOTSTRAP_STACK" "pending" '{"instance_id":"i-refresh","root_volume_id":"vol-refresh-root","public_ip":"203.0.113.20"}'
-json_mutate "$refresh_workdir/state.json" set-string agent_install_status refresh_pending
+json_mutate "$refresh_workdir/state.json" set-string connect_install_status refresh_pending
 json_mutate "$refresh_workdir/state.json" set-string agent_service_id status.example.test
 json_mutate "$refresh_workdir/state.json" set-json user_confirmations.app_initialization '{"status":"confirmed","evidence":"old app proof"}'
 json_mutate "$refresh_workdir/state.json" set-json runtime_checks.summary '{"status":"passed"}'

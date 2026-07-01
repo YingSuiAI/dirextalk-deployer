@@ -228,7 +228,7 @@ state, and MCP artifacts unless verification proves credentials were regenerated
 Use `scripts/reset-app-data.sh` only with `DIREXIO_RESET_APP_DATA_CONFIRM=1`.
 It preserves EC2, public IPv4/Elastic IP, DNS, and Caddy TLS storage, clears
 application data, clears old user-confirmation/runtime-check evidence, sets
-`agent_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped direxio-connect daemon. The follow-up
+`connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped direxio-connect daemon. The follow-up
 orchestrate run regenerates credentials and MCP snippets.
 
 Destroy uses `scripts/destroy.sh` on POSIX and `.\scripts\destroy.ps1` on

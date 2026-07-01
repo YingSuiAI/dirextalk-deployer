@@ -60,14 +60,14 @@ When all phases complete, report:
 - local node credential file status
 - persisted `DIREXIO_DOMAIN`, `DIREXIO_AGENT_TOKEN`, `DIREXIO_AGENT_ROOM_ID`, `DIREXIO_AGENT_NODE_ID`
 - `connect_config`, `connect_matrix_user`, `connect_matrix_device`, and `connect_matrix_homeserver`
-- install policy/mode/status from `DIREXIO_AGENT_INSTALL` and `DIREXIO_AGENT_INSTALL_MODE`
+- connect install policy/mode/status from `connect_install_*` state fields; `DIREXIO_AGENT_INSTALL` and `DIREXIO_AGENT_INSTALL_MODE` are the operator selectors
 - manual command: `npm install -g direxio-connent@latest && direxio-connect daemon install --config <connect_config> --service-name <service_id> --force`
 - region, instance ID, public IP, and `state.json` path
 - SSH command
 - stop-billing guidance: ask the agent to destroy this node when finished
 - which gates are automated and which still need user confirmation, because S7 green is not the final product-complete state
 
-After delivery, verify the local bridge by checking `direxio-connect daemon status --service-name <service_id>` when installed, or by running the recorded `agent_install_command` if the policy was `recommend`.
+After delivery, verify the local bridge by checking `direxio-connect daemon status --service-name <service_id>` when installed, or by running the recorded `connect_install_command` if the policy was `recommend`.
 
 Destroying AWS resources removes deployer-created Route53 A records and
 attempts to delete hosted zones that state marks as deployer-created. It does

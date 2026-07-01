@@ -364,7 +364,7 @@ _validate_agent_platform() {
   esac
 }
 
-_agent_install_policy() {
+_connect_install_policy() {
   local policy=${DIREXIO_AGENT_INSTALL:-auto}
   case "$policy" in
     skip|recommend|auto) printf '%s\n' "$policy" ;;
@@ -372,7 +372,7 @@ _agent_install_policy() {
   esac
 }
 
-_agent_install_mode() {
+_connect_install_mode() {
   local runtime=$1 mode=${DIREXIO_AGENT_INSTALL_MODE:-recommended}
   case "$mode" in
     recommended)
@@ -993,7 +993,7 @@ EOF
   chmod 600 "$config_path"
 }
 
-_connect_install_command() {
+_connect_daemon_install_command() {
   local binary=$1 config=$2 service_name=$3
   [ -n "$service_name" ] || service_name=direxio-connect
   printf 'npm install -g %q && %q daemon install --config %q --service-name %q --force' "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
@@ -1018,31 +1018,31 @@ _maybe_auto_install_connect() {
   local repo ref src commit config_arg
   [ -n "$service_name" ] || service_name=$(basename "$service_dir")
   if [ "$policy" != "auto" ]; then
-    state_set agent_install_status "$policy" 2>/dev/null || true
+    state_set connect_install_status "$policy" 2>/dev/null || true
     return 0
   fi
   config_arg=$(_local_connect_path "$config_path")
   if [ "${DIREXIO_CONNECT_INSTALL_FROM:-npm}" != "source" ]; then
     if ! command -v npm >/dev/null 2>&1; then
       warn "DIREXIO_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js or set DIREXIO_CONNECT_INSTALL_FROM=source."
-      state_set agent_install_status "npm_missing" 2>/dev/null || true
+      state_set connect_install_status "npm_missing" 2>/dev/null || true
       return 0
     fi
     if npm install -g "$(_connect_npm_package)" && "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
       if ! _connect_daemon_is_running "$binary" "$service_name"; then
-        state_set agent_install_status "install_failed" 2>/dev/null || true
+        state_set connect_install_status "install_failed" 2>/dev/null || true
         warn "direxio-connect daemon install returned success, but daemon status is not Running. Check the local agent command and direxio-connect logs."
         return 0
       fi
       if _connect_daemon_has_agent_startup_error "$binary" "$service_name"; then
-        state_set agent_install_status "install_failed" 2>/dev/null || true
+        state_set connect_install_status "install_failed" 2>/dev/null || true
         warn "direxio-connect daemon is Running, but logs show ACP session initialization failed. Check OpenClaw ACP URL, token-file, and session."
         return 0
       fi
-      state_set agent_install_status "installed" 2>/dev/null || true
+      state_set connect_install_status "installed" 2>/dev/null || true
       ok "direxio-connect daemon installed from npm for $runtime using Matrix room bridge."
     else
-      state_set agent_install_status "install_failed" 2>/dev/null || true
+      state_set connect_install_status "install_failed" 2>/dev/null || true
       warn "direxio-connect npm install or daemon install failed. Config is available for manual start."
     fi
     return 0
@@ -1053,57 +1053,57 @@ _maybe_auto_install_connect() {
   src=$(_connect_source_dir "$service_dir")
   if ! command -v git >/dev/null 2>&1 || ! command -v go >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1; then
     warn "DIREXIO_CONNECT_INSTALL_FROM=source requested, but git, go, and make are required to build direxio-connect from source."
-    state_set agent_install_status "build_tool_missing" 2>/dev/null || true
+    state_set connect_install_status "build_tool_missing" 2>/dev/null || true
     return 0
   fi
   if [ ! -d "$src/.git" ]; then
     mkdir -p "$(dirname "$src")"
     if ! git clone "$repo" "$src"; then
-      state_set agent_install_status "clone_failed" 2>/dev/null || true
+      state_set connect_install_status "clone_failed" 2>/dev/null || true
       warn "direxio-connect clone failed from $repo"
       return 0
     fi
   fi
   if ! git -C "$src" fetch --all --tags --prune; then
-    state_set agent_install_status "fetch_failed" 2>/dev/null || true
+    state_set connect_install_status "fetch_failed" 2>/dev/null || true
     warn "direxio-connect fetch failed in $src"
     return 0
   fi
   if ! git -C "$src" checkout "$ref"; then
-    state_set agent_install_status "checkout_failed" 2>/dev/null || true
+    state_set connect_install_status "checkout_failed" 2>/dev/null || true
     warn "direxio-connect checkout failed for ref $ref"
     return 0
   fi
   commit=$(git -C "$src" rev-parse --short HEAD 2>/dev/null || true)
   state_set connect_commit "$commit" 2>/dev/null || true
   if ! (cd "$src" && AGENTS="$cc_agent" PLATFORMS_INCLUDE=matrix NO_WEB=1 make build-noweb); then
-    state_set agent_install_status "build_failed" 2>/dev/null || true
+    state_set connect_install_status "build_failed" 2>/dev/null || true
     warn "direxio-connect build failed for runtime=$runtime agent=$cc_agent"
     return 0
   fi
   binary="$(_connect_runtime_dir "$service_dir")/bin/direxio-connect"
   mkdir -p "$(dirname "$binary")"
   if ! cp "$src/direxio-connect" "$binary" 2>/dev/null && ! cp "$src/direxio-connect.exe" "$binary" 2>/dev/null; then
-    state_set agent_install_status "binary_copy_failed" 2>/dev/null || true
+    state_set connect_install_status "binary_copy_failed" 2>/dev/null || true
     warn "direxio-connect binary was not found after build in $src"
     return 0
   fi
   chmod 700 "$binary" 2>/dev/null || true
   if "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
     if ! _connect_daemon_is_running "$binary" "$service_name"; then
-      state_set agent_install_status "install_failed" 2>/dev/null || true
+      state_set connect_install_status "install_failed" 2>/dev/null || true
       warn "direxio-connect daemon install returned success, but daemon status is not Running. Check the local agent command and direxio-connect logs."
       return 0
     fi
     if _connect_daemon_has_agent_startup_error "$binary" "$service_name"; then
-      state_set agent_install_status "install_failed" 2>/dev/null || true
+      state_set connect_install_status "install_failed" 2>/dev/null || true
       warn "direxio-connect daemon is Running, but logs show ACP session initialization failed. Check OpenClaw ACP URL, token-file, and session."
       return 0
     fi
-    state_set agent_install_status "installed" 2>/dev/null || true
+    state_set connect_install_status "installed" 2>/dev/null || true
     ok "direxio-connect daemon installed for $runtime using Matrix room bridge."
   else
-    state_set agent_install_status "install_failed" 2>/dev/null || true
+    state_set connect_install_status "install_failed" 2>/dev/null || true
     warn "direxio-connect daemon install failed. Config and binary are available for manual start."
   fi
 }
@@ -1176,9 +1176,9 @@ _agent_global_skill_install_path() {
   esac
 }
 
-_agent_install_command() {
+_connect_install_command() {
   local binary=$1 config=$2 service_name=$3
-  _connect_install_command "$binary" "$config" "$service_name"
+  _connect_daemon_install_command "$binary" "$config" "$service_name"
 }
 
 _print_runtime_install_summary() {
@@ -1192,7 +1192,7 @@ Recommended direxio-connect install:
   service name:   $service_name
   config:         $config_path
   binary:         $binary
-  daemon install: $(_connect_install_command "$binary" "$config_path" "$service_name")
+  daemon install: $(_connect_daemon_install_command "$binary" "$config_path" "$service_name")
 EOF
 }
 
@@ -1436,15 +1436,15 @@ run_phase() {
   state_set connect_matrix_device "$matrix_device" 2>/dev/null || true
   state_set connect_matrix_homeserver "$matrix_homeserver" 2>/dev/null || true
 
-  install_policy=$(_agent_install_policy)
-  install_mode=$(_agent_install_mode "$runtime")
-  install_command=$(_agent_install_command "$cc_binary" "$cc_config" "$service_id")
+  install_policy=$(_connect_install_policy)
+  install_mode=$(_connect_install_mode "$runtime")
+  install_command=$(_connect_install_command "$cc_binary" "$cc_config" "$service_id")
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
   state_set agent_runtime "$runtime" 2>/dev/null || true
-  state_set agent_install_policy "$install_policy" 2>/dev/null || true
-  state_set agent_install_mode "$install_mode" 2>/dev/null || true
-  state_set agent_install_command "$install_command" 2>/dev/null || true
+  state_set connect_install_policy "$install_policy" 2>/dev/null || true
+  state_set connect_install_mode "$install_mode" 2>/dev/null || true
+  state_set connect_install_command "$install_command" 2>/dev/null || true
   state_set mcp_install_policy "$install_policy" 2>/dev/null || true
   state_set agent_skill_install_path "$skill_path" 2>/dev/null || true
   state_set agent_global_skill_install_path "$global_skill_path" 2>/dev/null || true

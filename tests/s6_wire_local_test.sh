@@ -123,17 +123,17 @@ assert_active_runtime codex .codex/tmp PATH="/tmp/.codex/tmp/codex-arg123:/usr/b
   export CLAUDE_API_KEY=test GEMINI_API_KEY=test
   [ "$(_detect_agent_runtime)" = "unknown" ]
 )
-[ "$(DIREXIO_AGENT_INSTALL=skip _agent_install_policy)" = "skip" ]
-[ "$(DIREXIO_AGENT_INSTALL=recommend _agent_install_policy)" = "recommend" ]
-[ "$(DIREXIO_AGENT_INSTALL=auto _agent_install_policy)" = "auto" ]
-[ "$(_agent_install_policy)" = "auto" ]
-[ "$(_agent_install_mode hermes)" = "direxio-connect" ]
-[ "$(_agent_install_mode openclaw)" = "direxio-connect" ]
-[ "$(_agent_install_mode codex)" = "direxio-connect" ]
-[ "$(_agent_install_mode cursor)" = "direxio-connect" ]
-[ "$(_agent_install_mode opencode)" = "direxio-connect" ]
-[ "$(DIREXIO_AGENT_INSTALL_MODE=direxio-connect _agent_install_mode hermes)" = "direxio-connect" ]
-if DIREXIO_AGENT_INSTALL_MODE=gateway _agent_install_mode hermes >/dev/null 2>&1; then
+[ "$(DIREXIO_AGENT_INSTALL=skip _connect_install_policy)" = "skip" ]
+[ "$(DIREXIO_AGENT_INSTALL=recommend _connect_install_policy)" = "recommend" ]
+[ "$(DIREXIO_AGENT_INSTALL=auto _connect_install_policy)" = "auto" ]
+[ "$(_connect_install_policy)" = "auto" ]
+[ "$(_connect_install_mode hermes)" = "direxio-connect" ]
+[ "$(_connect_install_mode openclaw)" = "direxio-connect" ]
+[ "$(_connect_install_mode codex)" = "direxio-connect" ]
+[ "$(_connect_install_mode cursor)" = "direxio-connect" ]
+[ "$(_connect_install_mode opencode)" = "direxio-connect" ]
+[ "$(DIREXIO_AGENT_INSTALL_MODE=direxio-connect _connect_install_mode hermes)" = "direxio-connect" ]
+if DIREXIO_AGENT_INSTALL_MODE=gateway _connect_install_mode hermes >/dev/null 2>&1; then
   echo "legacy install mode should be rejected" >&2
   exit 1
 fi
@@ -210,7 +210,7 @@ json_test_check "$matrix_retry_dir/session.json" "data.user_id === '@agent:servi
 [ "$(_agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
 [ "$(DIREXIO_AGENT_WORKSPACE="$tmp/custom-workspace" _agent_workspace "$tmp/service")" = "$tmp/custom-workspace" ]
 
-install_command=$(_agent_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/direxio-connect/config.toml" "service.example.test")
+install_command=$(_connect_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/direxio-connect/config.toml" "service.example.test")
 case "$install_command" in
   *"npm install -g"*"direxio-connent@latest"*"direxio-connect"*"daemon install"*"--config"*"service.example.test/direxio-connect/config.toml"*"--service-name"*"service.example.test"*"--force"*) ;;
   *)
@@ -218,12 +218,12 @@ case "$install_command" in
     exit 1
     ;;
 esac
-custom_install_command=$(DIREXIO_CONNECT_NPM_PACKAGE='direxio-connent@override-test' _agent_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/direxio-connect/config.toml" "service.example.test")
+custom_install_command=$(DIREXIO_CONNECT_NPM_PACKAGE='direxio-connent@override-test' _connect_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/direxio-connect/config.toml" "service.example.test")
 [[ "$custom_install_command" == *"direxio-connent@override-test"* ]]
 
 [ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" ]
 [ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" ]
-windows_install_command=$(DIREXIO_LOCAL_PATH_STYLE=windows _agent_install_command "direxio-connect" "/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" "im")
+windows_install_command=$(DIREXIO_LOCAL_PATH_STYLE=windows _connect_install_command "direxio-connect" "/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" "im")
 [[ "$windows_install_command" == *"C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml"* ]]
 [[ "$windows_install_command" == *"--service-name im"* ]]
 
@@ -378,7 +378,7 @@ chmod 700 "$fakebin/npm" "$fakebin/direxio-connect"
 STATE_CALLS="$tmp/state.calls"
 : > "$STATE_CALLS"
 PATH="$fakebin:$PATH" _maybe_auto_install_connect auto codex codex "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
-grep -q '^agent_install_status=install_failed$' "$STATE_CALLS"
+grep -q '^connect_install_status=install_failed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/mcp-state.calls"
 : > "$STATE_CALLS"

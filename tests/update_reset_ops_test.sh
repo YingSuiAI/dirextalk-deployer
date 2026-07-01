@@ -56,7 +56,7 @@ write_state() {
     agent_service_id=ops.example.test \
     "agent_service_dir=$service_dir" \
     "agent_credentials_file=$service_dir/credentials.json" \
-    agent_install_status=installed \
+    connect_install_status=installed \
     "connect_config=$service_dir/direxio-connect/config.toml" \
     connect_binary=direxio-connect \
     connect_agent=codex \
@@ -125,7 +125,7 @@ assert_not_contains "$update_default_calls" 'sudo MESSAGE_SERVER_IMAGE='
 assert_contains "$update_default_calls" 'docker compose --env-file \.env pull'
 assert_contains "$update_default_calls" 'docker compose --env-file \.env up -d'
 
-json_test_check "$state" "String(data.password) === '12345678' && data.access_token === 'ACCESS_SECRET' && data.agent_token === 'AGENT_SECRET' && data.agent_room_id === '!old:ops.example.test' && data.agent_install_status === 'installed' && data.phases.S4_BOOTSTRAP_STACK.status === 'done' && data.phases.S5_INIT_TOKENS.status === 'done' && data.phases.S6_WIRE_LOCAL.status === 'done' && data.phases.S7_VERIFY_E2E.status === 'done' && data.user_confirmations.agent_mcp_runtime.status === 'confirmed' && data.runtime_checks.summary.status === 'passed'"
+json_test_check "$state" "String(data.password) === '12345678' && data.access_token === 'ACCESS_SECRET' && data.agent_token === 'AGENT_SECRET' && data.agent_room_id === '!old:ops.example.test' && data.connect_install_status === 'installed' && data.phases.S4_BOOTSTRAP_STACK.status === 'done' && data.phases.S5_INIT_TOKENS.status === 'done' && data.phases.S6_WIRE_LOCAL.status === 'done' && data.phases.S7_VERIFY_E2E.status === 'done' && data.user_confirmations.agent_mcp_runtime.status === 'confirmed' && data.runtime_checks.summary.status === 'passed'"
 
 update_report="$service_dir/operation-report.json"
 assert_file_exists "$update_report"
@@ -155,7 +155,7 @@ assert_contains "$reset_calls" 'direxio-connect daemon status --service-name ops
 assert_contains "$reset_calls" 'direxio-connect daemon stop --service-name ops\.example\.test'
 assert_not_contains "$reset_calls" 'caddy-data|caddy-config|down -v'
 
-json_test_check "$state" "!(data.password || data.access_token || data.agent_token || data.agent_room_id) && data.agent_install_status === 'refresh_pending' && data.mcp_install_status === 'refresh_pending' && data.phases.S5_INIT_TOKENS.status === 'pending' && data.phases.S6_WIRE_LOCAL.status === 'pending' && data.phases.S7_VERIFY_E2E.status === 'pending' && !data.user_confirmations && !data.runtime_checks"
+json_test_check "$state" "!(data.password || data.access_token || data.agent_token || data.agent_room_id) && data.connect_install_status === 'refresh_pending' && data.mcp_install_status === 'refresh_pending' && data.phases.S5_INIT_TOKENS.status === 'pending' && data.phases.S6_WIRE_LOCAL.status === 'pending' && data.phases.S7_VERIFY_E2E.status === 'pending' && !data.user_confirmations && !data.runtime_checks"
 
 reset_report="$service_dir/operation-report.json"
 assert_file_exists "$reset_report"

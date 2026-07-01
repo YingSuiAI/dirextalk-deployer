@@ -191,7 +191,7 @@ status_resume_safety() {
 }
 
 local_refresh_pending() {
-  [ "$(state_get agent_install_status)" = "refresh_pending" ]
+  [ "$(state_get connect_install_status)" = "refresh_pending" ]
 }
 
 status_local_refresh() {
@@ -309,10 +309,10 @@ print_delivery() {
   cc_agent=$(state_get connect_agent)
   cc_user=$(state_get connect_matrix_user)
   cc_pkg=$(state_get connect_npm_package)
-  install_policy=$(state_get agent_install_policy)
-  install_mode=$(state_get agent_install_mode)
-  install_status=$(state_get agent_install_status)
-  install_command=$(state_get agent_install_command)
+  install_policy=$(state_get connect_install_policy)
+  install_mode=$(state_get connect_install_mode)
+  install_status=$(state_get connect_install_status)
+  install_command=$(state_get connect_install_command)
   runtime_summary=$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")
   app_gate=$(json_get "$STATE_JSON" user_confirmations.app_initialization.status "pending_user_confirmation")
   real_chat_gate=$(json_get "$STATE_JSON" user_confirmations.real_chat.status "pending_user_confirmation")
@@ -963,8 +963,8 @@ cmd_verify_runtime() {
 
   local rc=0 failed_count=0 connect_status doctor_status tools_status smoke_status status install_status install_policy service_name
 
-  install_status=$(json_get "$STATE_JSON" agent_install_status)
-  install_policy=$(json_get "$STATE_JSON" agent_install_policy)
+  install_status=$(json_get "$STATE_JSON" connect_install_status)
+  install_policy=$(json_get "$STATE_JSON" connect_install_policy)
   service_name=$(json_get "$STATE_JSON" agent_service_id)
   [ -n "$service_name" ] || service_name=$(json_get "$STATE_JSON" domain)
   if [ "$install_status" = "recommend" ] || { [ "$install_status" = "skip" ] && [ "${install_policy:-skip}" = "skip" ]; }; then

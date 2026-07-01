@@ -12,6 +12,11 @@ function ConvertTo-GitBashPath([string] $Path) {
     $rest = $normalized.Substring(6)
     return "/$drive$rest"
   }
+  if ($normalized -match '^/cygdrive/[A-Za-z](/|$)') {
+    $drive = $normalized.Substring(10, 1).ToLowerInvariant()
+    $rest = $normalized.Substring(11)
+    return "/$drive$rest"
+  }
   if ($normalized -match '^[A-Za-z]:/') {
     $drive = $normalized.Substring(0, 1).ToLowerInvariant()
     $rest = $normalized.Substring(2)
@@ -27,7 +32,7 @@ function ConvertTo-GitBashPath([string] $Path) {
 function Resolve-WindowsDirexioHome {
   if ($env:DIREXIO_HOME) {
     $normalized = $env:DIREXIO_HOME.Replace('\', '/')
-    if ($normalized -notmatch '^/[A-Za-z](/|$)' -and $normalized -notmatch '^/mnt/[A-Za-z](/|$)') {
+    if ($normalized -notmatch '^/[A-Za-z](/|$)' -and $normalized -notmatch '^/mnt/[A-Za-z](/|$)' -and $normalized -notmatch '^/cygdrive/[A-Za-z](/|$)') {
       return $env:DIREXIO_HOME
     }
   }
@@ -36,6 +41,9 @@ function Resolve-WindowsDirexioHome {
 
 function Convert-ArgumentForGitBash([string] $Value) {
   if ($Value -match '^[A-Za-z]:[\\/]') {
+    return ConvertTo-GitBashPath $Value
+  }
+  if ($Value -match '^/mnt/[A-Za-z](/|$)' -or $Value -match '^/cygdrive/[A-Za-z](/|$)') {
     return ConvertTo-GitBashPath $Value
   }
   if ($Value -match '^\.{1,2}[\\/]') {

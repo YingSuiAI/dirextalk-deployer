@@ -218,8 +218,8 @@ case "$install_command" in
     exit 1
     ;;
 esac
-custom_install_command=$(DIREXIO_CC_CONNECT_NPM_PACKAGE='direxio-connent@1.3.11' _agent_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/cc-connect/config.toml" "service.example.test")
-[[ "$custom_install_command" == *"direxio-connent@1.3.11"* ]]
+custom_install_command=$(DIREXIO_CC_CONNECT_NPM_PACKAGE='direxio-connent@override-test' _agent_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/cc-connect/config.toml" "service.example.test")
+[[ "$custom_install_command" == *"direxio-connent@override-test"* ]]
 
 [ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/mnt/c/Users/alice/.direxio/nodes/im/cc-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/cc-connect/config.toml" ]
 [ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.direxio/nodes/im/cc-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/cc-connect/config.toml" ]
@@ -265,8 +265,8 @@ json_test_check "$mcp_service_dir/mcp/hermes.mcp.json" "data.mcpServers['direxio
 grep -q 'DIREXIO_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
 mcp_install_command=$(_mcp_install_command)
 [[ "$mcp_install_command" == *"npm install -g"*"direxio-mcp@latest"* ]]
-custom_mcp_install_command=$(DIREXIO_MCP_NPM_PACKAGE='direxio-mcp@0.1.7' _mcp_install_command)
-[[ "$custom_mcp_install_command" == *"direxio-mcp@0.1.7"* ]]
+custom_mcp_install_command=$(DIREXIO_MCP_NPM_PACKAGE='direxio-mcp@override-test' _mcp_install_command)
+[[ "$custom_mcp_install_command" == *"direxio-mcp@override-test"* ]]
 mcp_doctor_command=$(_mcp_doctor_command "$mcp_credentials" "codex-service-example")
 [[ "$mcp_doctor_command" == *"DIREXIO_CREDENTIALS_FILE="* ]]
 [[ "$mcp_doctor_command" == *"direxio-mcp doctor --json"* ]]

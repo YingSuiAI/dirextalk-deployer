@@ -11,6 +11,9 @@
 S6_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
 source "$S6_DIR/../lib/paths.sh"
+# shellcheck disable=SC1090
+source "$S6_DIR/../lib/local-paths.sh"
+# S6 local bridge paths honor DIREXIO_LOCAL_PATH_STYLE through local-paths.sh.
 
 _direxio_home() {
   direxio_home
@@ -730,38 +733,11 @@ _upper_drive() {
 }
 
 _local_path_style() {
-  local style="${DIREXIO_LOCAL_PATH_STYLE:-}"
-  if [ -z "$style" ]; then
-    case "$(uname -s)" in
-      *MINGW*|*MSYS*|*CYGWIN*) style=windows ;;
-      *) style=posix ;;
-    esac
-  fi
-  printf '%s\n' "$style"
+  direxio_local_path_style
 }
 
 _local_connect_path() {
-  local path=$1 drive rest
-  case "$(_local_path_style)" in
-    windows)
-      case "$path" in
-        [A-Za-z]:/*|[A-Za-z]:\\*) printf '%s\n' "$path" | sed 's#\\#/#g'; return 0 ;;
-        /mnt/[A-Za-z]/*)
-          drive=$(_upper_drive "$(printf '%s' "$path" | cut -d/ -f3)")
-          rest=$(printf '%s' "$path" | cut -d/ -f4-)
-          printf '%s:/%s\n' "$drive" "$rest"
-          return 0
-          ;;
-        /[A-Za-z]/*)
-          drive=$(_upper_drive "$(printf '%s' "$path" | cut -d/ -f2)")
-          rest=$(printf '%s' "$path" | cut -d/ -f3-)
-          printf '%s:/%s\n' "$drive" "$rest"
-          return 0
-          ;;
-      esac
-      ;;
-  esac
-  printf '%s\n' "$path"
+  direxio_normalize_local_path "$1"
 }
 
 _mcp_install_command() {

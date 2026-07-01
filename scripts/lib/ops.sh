@@ -4,6 +4,8 @@
 OPS_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
 source "$OPS_LIB_DIR/json.sh"
+# shellcheck disable=SC1090
+source "$OPS_LIB_DIR/local-paths.sh"
 
 ops_state_path() {
   local explicit=${1:-}
@@ -42,30 +44,11 @@ ops_path_dirname() {
 }
 
 ops_normalize_path() {
-  local path=$1
-  path=$(printf '%s' "$path" | sed 's#\\#/#g')
-  if command -v cygpath >/dev/null 2>&1; then
-    cygpath -m "$path" 2>/dev/null && return 0
-  fi
-  while [ "${#path}" -gt 1 ] && [ "${path%/}" != "$path" ]; do
-    case "$path" in [A-Za-z]:/) break ;; esac
-    path=${path%/}
-  done
-  printf '%s\n' "$path"
+  direxio_normalize_local_path "$1"
 }
 
 ops_paths_match() {
-  local left right
-  left=$(ops_normalize_path "$1")
-  right=$(ops_normalize_path "$2")
-  case "$left:$right" in
-    [A-Za-z]:/*:[A-Za-z]:/*)
-      [ "$(printf '%s' "$left" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$right" | tr '[:upper:]' '[:lower:]')" ]
-      ;;
-    *)
-      [ "$left" = "$right" ]
-      ;;
-  esac
+  direxio_paths_equal "$1" "$2"
 }
 
 ops_remote_base() {

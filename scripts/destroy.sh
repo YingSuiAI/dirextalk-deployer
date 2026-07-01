@@ -18,6 +18,8 @@ source "$HERE/lib/paths.sh"
 source "$HERE/lib/aws.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/operation_report.sh"
+# shellcheck disable=SC1090
+source "$HERE/lib/local-paths.sh"
 DIREXIO_WORKDIR=$(direxio_default_workdir)
 
 log() { echo -e "\033[33m[destroy]\033[0m $*"; }
@@ -291,39 +293,7 @@ delete_route53_hosted_zone_if_owned() {
 }
 
 normalize_local_path() {
-  local path=$1 drive rest
-  path=$(printf '%s' "$path" | sed 's#\\#/#g')
-  if command -v cygpath >/dev/null 2>&1; then
-    cygpath -m "$path" 2>/dev/null && return 0
-  fi
-  case "$path" in
-    /mnt/[A-Za-z]/*)
-      drive=${path#/mnt/}
-      drive=${drive%%/*}
-      rest=${path#/mnt/$drive/}
-      printf '%s:/%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$rest"
-      return 0
-      ;;
-    /cygdrive/[A-Za-z]/*)
-      drive=${path#/cygdrive/}
-      drive=${drive%%/*}
-      rest=${path#/cygdrive/$drive/}
-      printf '%s:/%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$rest"
-      return 0
-      ;;
-    /[A-Za-z]/*)
-      drive=${path#/}
-      drive=${drive%%/*}
-      rest=${path#/$drive/}
-      printf '%s:/%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$rest"
-      return 0
-      ;;
-  esac
-  while [ "${#path}" -gt 1 ] && [ "${path%/}" != "$path" ]; do
-    case "$path" in [A-Za-z]:/) break ;; esac
-    path=${path%/}
-  done
-  printf '%s\n' "$path"
+  direxio_normalize_local_path "$1"
 }
 
 local_dirname() {
@@ -336,17 +306,7 @@ local_dirname() {
 }
 
 paths_equal() {
-  local left right
-  left=$(normalize_local_path "$1")
-  right=$(normalize_local_path "$2")
-  case "$left:$right" in
-    [A-Za-z]:/*:[A-Za-z]:/*)
-      [ "$(printf '%s' "$left" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$right" | tr '[:upper:]' '[:lower:]')" ]
-      ;;
-    *)
-      [ "$left" = "$right" ]
-      ;;
-  esac
+  direxio_paths_equal "$1" "$2"
 }
 
 current_service_dir() {

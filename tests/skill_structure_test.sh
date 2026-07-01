@@ -31,6 +31,7 @@ required=(
   tests/operation_report_test.sh
   tests/npm_skill_distribution_test.sh
   tests/private_file_permissions_test.sh
+  tests/local_paths_test.sh
   tests/windows_path_wrappers_test.sh
   tests/windows_path_wrappers_test.ps1
   tests/orchestrate_status_recovery_test.sh
@@ -61,6 +62,12 @@ for path in "${required[@]}"; do
     exit 1
   }
 done
+
+skill_lines=$(wc -l < SKILL.md | tr -d ' ')
+if [ "$skill_lines" -gt 360 ]; then
+  echo "SKILL.md should stay concise; move detailed runbook material to references/ (lines=$skill_lines)" >&2
+  exit 1
+fi
 
 legacy_json_cli_name=$(printf '\152\161')
 legacy_json_cli_pattern="(^|[^[:alnum:]_])${legacy_json_cli_name}([^[:alnum:]_]|$)|${legacy_json_cli_name}\\.exe"

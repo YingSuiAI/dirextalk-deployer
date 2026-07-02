@@ -14,7 +14,7 @@
 ## Before Deployment
 
 - Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain.
-- AWS resources created by this deployer can bill until they are destroyed.
+- AWS resources created by this deployer can bill until they are destroyed. New EC2 deployments use a 50 GiB gp3 root EBS volume by default.
 - Use `SKILL.md` as the agent-facing runbook. It contains the detailed deployment rules, confirmation gates, runtime wiring behavior, and recovery procedures.
 
 ## Skill Installation And Updates

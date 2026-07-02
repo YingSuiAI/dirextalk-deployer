@@ -12,7 +12,7 @@
 ## 部署前准备
 
 - 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。
-- deployer 创建的 AWS 资源在销毁前可能持续计费。
+- deployer 创建的 AWS 资源在销毁前可能持续计费。新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
 - `SKILL.md` 是给智能体看的运行手册，详细部署规则、确认门禁、运行时 wiring 和恢复流程都放在那里。
 
 ## Skill 安装和更新

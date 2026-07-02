@@ -229,8 +229,8 @@ eight-or-more digit numeric strings.
 
 Reports include `user_confirmation_details`, `destroy.evidence`,
 `credentials.status`, `mcp.status`, `possible_remaining_billable_resources`,
-AWS resource IDs, EBS root volume evidence, billing reminders, and
-`cost_estimate`.
+AWS resource IDs, EBS root volume evidence, the default 50 GiB gp3 root EBS
+volume size, billing reminders, and `cost_estimate`.
 
 Delivery must include App domain, eight-digit app initialization code, product
 gate status, `agent_room_id`, service directory, direxio-connect config, MCP config

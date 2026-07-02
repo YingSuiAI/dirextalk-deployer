@@ -17,7 +17,7 @@ cat > "$tmp/input.json" <<'JSON'
   "domain": "im.test",
   "resources": {
     "instance_id": "i-123",
-    "root_volume_gb": 8
+    "root_volume_gb": 50
   },
   "messages": [],
   "runtime_checks": {
@@ -31,7 +31,7 @@ JSON
 [ "$($JSON get "$tmp/input.json" domain)" = "im.test" ]
 [ "$($JSON get "$tmp/input.json" resources.instance_id)" = "i-123" ]
 [ "$($JSON get "$tmp/input.json" missing.path fallback)" = "fallback" ]
-[ "$(cat "$tmp/input.json" | $JSON stdin-get resources.root_volume_gb)" = "8" ]
+[ "$(cat "$tmp/input.json" | $JSON stdin-get resources.root_volume_gb)" = "50" ]
 
 $JSON assert "$tmp/input.json" path-equals runtime_checks.summary.status passed
 $JSON assert "$tmp/input.json" path-missing user_confirmations.app_initialization

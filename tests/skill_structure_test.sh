@@ -53,6 +53,7 @@ required=(
   tests/mcp_doctor_runtime_check_test.sh
   tests/mcp_smoke_runtime_check_test.sh
   tests/mcp_tools_runtime_check_test.sh
+  tests/root_volume_size_test.sh
   tests/root_volume_tracking_test.sh
   tests/runtime_summary_check_test.sh
   tests/user_confirmation_gates_test.sh

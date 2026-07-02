@@ -187,12 +187,12 @@ if [ -n "$state" ]; then
   instance_type=${instance_type:-$(json_get "$state" instance_type)}
   domain_mode=${domain_mode:-$(json_get "$state" domain_mode user)}
   disk_gb=${disk_gb:-$(json_get "$state" resources.root_volume_gb)}
-  disk_gb=${disk_gb:-$(json_get "$state" root_volume_gb 8)}
+  disk_gb=${disk_gb:-$(json_get "$state" root_volume_gb 50)}
 fi
 
 region=${region:-${AWS_DEFAULT_REGION:-${AWS_REGION:-}}}
 instance_type=${instance_type:-t3.small}
-disk_gb=${disk_gb:-8}
+disk_gb=${disk_gb:-50}
 domain_mode=${domain_mode:-user}
 
 [ -n "$region" ] || {

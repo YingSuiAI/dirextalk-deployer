@@ -7,6 +7,9 @@
 S3_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 source "$S3_PHASE_DIR/lib/domain.sh"
 
+DIREXIO_ROOT_VOLUME_GB=${DIREXIO_ROOT_VOLUME_GB:-50}
+DIREXIO_ROOT_DEVICE_NAME=${DIREXIO_ROOT_DEVICE_NAME:-/dev/sda1}
+
 run_phase() {
   aws_env_prep
   phase_set S3_PROVISION in_progress "provisioning EC2"
@@ -116,9 +119,11 @@ run_phase() {
     log "Instance $iid already exists; skipping creation."
   else
     log "Launching EC2 instance (x86 $instance_type, $ami)..."
+    res_set root_volume_gb "$DIREXIO_ROOT_VOLUME_GB"
     iid=$(aws ec2 run-instances --image-id "$ami" --instance-type "$instance_type" \
       --key-name "$name" --security-group-ids "$sg" \
       --user-data "file://$userdata_aws" \
+      --block-device-mappings "$(_root_block_device_mappings)" \
       --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$name}]" \
       --query 'Instances[0].InstanceId' --output text) || {
         phase_set S3_PROVISION failed "run-instances failed (possibly VcpuLimitExceeded)"
@@ -183,6 +188,12 @@ run_phase() {
 
   phase_set S3_PROVISION done "instance=$iid ip=$pubip domain=$(state_get domain)"
   return 0
+}
+
+_root_block_device_mappings() {
+  printf '[{"DeviceName":"%s","Ebs":{"VolumeSize":%s,"VolumeType":"gp3","DeleteOnTermination":true}}]\n' \
+    "$DIREXIO_ROOT_DEVICE_NAME" \
+    "$DIREXIO_ROOT_VOLUME_GB"
 }
 
 _record_root_volume_id() {

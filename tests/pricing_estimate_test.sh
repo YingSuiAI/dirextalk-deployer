@@ -84,13 +84,13 @@ json_build object \
   region=ap-northeast-1 \
   domain_mode=route53 \
   instance_type=t3.small \
-  'resources={"root_volume_gb":"8"}' \
+  'resources={"root_volume_gb":"50"}' \
   'phases={"S7_VERIFY_E2E":{"status":"done"}}' > "$state"
 
 estimate=$(bash "$ROOT/scripts/pricing-estimate.sh" --state "$state" --write-state)
 printf '%s\n' "$estimate" > "$tmp/estimate.json"
 
-json_test_check "$tmp/estimate.json" "data.pricing_status === 'queried' && data.region === 'ap-northeast-1' && data.location === 'Asia Pacific (Tokyo)' && data.hours_per_month === 730 && data.components.ec2_instance.hourly_usd === 0.025 && data.components.ec2_instance.monthly_usd === 18.25 && data.components.ebs_gp3.storage_gb === 8 && data.components.public_ipv4.hourly_usd === 0.005 && data.components.public_ipv4.monthly_usd === 3.65 && data.components.route53_hosted_zone.monthly_usd === 0.5 && data.components.public_ipv4.billed_even_when_attached === true && data.recommendations.includes('Set an AWS Budget or billing alert before leaving the node running.') && data.notes.includes('AWS credits may reduce charges only when the account, plan, region, and service usage are eligible; verify in AWS Billing Console.') && data.total_monthly_usd > 23 && data.total_monthly_usd < 24"
+json_test_check "$tmp/estimate.json" "data.pricing_status === 'queried' && data.region === 'ap-northeast-1' && data.location === 'Asia Pacific (Tokyo)' && data.hours_per_month === 730 && data.components.ec2_instance.hourly_usd === 0.025 && data.components.ec2_instance.monthly_usd === 18.25 && data.components.ebs_gp3.storage_gb === 50 && data.components.public_ipv4.hourly_usd === 0.005 && data.components.public_ipv4.monthly_usd === 3.65 && data.components.route53_hosted_zone.monthly_usd === 0.5 && data.components.public_ipv4.billed_even_when_attached === true && data.recommendations.includes('Set an AWS Budget or billing alert before leaving the node running.') && data.notes.includes('AWS credits may reduce charges only when the account, plan, region, and service usage are eligible; verify in AWS Billing Console.') && data.total_monthly_usd > 27 && data.total_monthly_usd < 28"
 
 json_test_check "$state" "data.cost_estimate.pricing_status === 'queried' && data.cost_estimate.components.public_ipv4.billed_even_when_attached === true"
 

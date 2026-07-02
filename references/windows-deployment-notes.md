@@ -106,6 +106,15 @@ $env:DIREXIO_GEMINI_COMMAND = "C:\Tools\gemini.cmd"
 For Cursor on Windows, S6 uses Cursor Agent CLI, not Cursor Desktop CLI. The
 expected command is `%LOCALAPPDATA%\cursor-agent\agent.cmd`. S6 writes that path
 and `mode = "yolo"` so headless turns do not stop at workspace trust prompts.
+Before auto install, S6 also verifies the CLI exists and creates a
+`versions/dist-package` junction to the latest version directory when legacy
+launchers still expect that path. If Cursor Agent CLI is missing, install it:
+
+```powershell
+irm 'https://cursor.com/install?win32=true' | iex
+& "$env:LOCALAPPDATA\cursor-agent\agent.cmd" login
+```
+
 If Cursor Agent CLI is installed in a non-standard location, set:
 
 ```powershell
@@ -131,7 +140,10 @@ schema from project-level `.cursor\mcp.json` or global `%USERPROFILE%\.cursor\mc
 but S6 does not write those files by default because the snippet contains
 machine-local credential paths. After adding or merging the snippet, restart
 Cursor completely or reload/enable the server in Cursor MCP settings before
-expecting tools to appear.
+expecting tools to appear. Do not merge that MCP snippet into the workspace used
+by direxio-connect unless you want IDE-only MCP tools; App chat uses the
+Cursor Agent CLI bridge and S6 defaults `[display]` to `compact` with
+`tool_messages = false` so tool progress is not forwarded into the Matrix room.
 
 For Codex Desktop, the wrapper also tries to find the real bundled `codex.exe` because WindowsApps aliases cannot always be spawned by child processes:
 

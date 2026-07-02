@@ -316,6 +316,10 @@ grep -q 'group_reply_all = true' "$config_path"
 grep -q 'auto_join = false' "$config_path"
 ! grep -q '^\[speech\]' "$config_path"
 ! grep -q 'DIREXIO_CREDENTIALS_FILE' "$config_path"
+grep -q '^\[display\]$' "$config_path"
+grep -q 'mode = "compact"' "$config_path"
+grep -q 'tool_messages = false' "$config_path"
+grep -q 'thinking_messages = false' "$config_path"
 
 speech_config_path="$tmp/direxio-connect/config-with-speech.toml"
 DIREXIO_SPEECH_API_KEY=speech-key \
@@ -370,6 +374,16 @@ chmod 700 "$fake_cursor_agent/agent.cmd"
   [[ "$cursor_options" != *'cli.js'* ]]
 )
 [ "$(DIREXIO_CURSOR_MODE=ask _connect_agent_options_toml cursor cursor)" = 'mode = "ask"' ]
+
+fake_version_dir="$fake_cursor_agent/versions/2026.07.01-abc123"
+mkdir -p "$fake_version_dir"
+echo stub > "$fake_version_dir/node.exe"
+(
+  export LOCALAPPDATA="$tmp/localapp"
+  export DIREXIO_LOCAL_PATH_STYLE=windows
+  _cursor_agent_prepare_windows
+  [ -f "$fake_cursor_agent/versions/dist-package/node.exe" ]
+)
 
 cmd_config_path="$tmp/direxio-connect/config-with-cmd.toml"
 _write_connect_config "$cmd_config_path" "$tmp/direxio-connect/data-cmd" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "/opt/codex/bin/codex"

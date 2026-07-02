@@ -599,9 +599,24 @@ _is_non_negative_integer() {
   esac
 }
 
+_connect_display_config_toml() {
+  local mode tool_messages thinking_messages
+  mode=${DIREXIO_CONNECT_DISPLAY_MODE:-compact}
+  tool_messages=${DIREXIO_CONNECT_DISPLAY_TOOL_MESSAGES:-false}
+  thinking_messages=${DIREXIO_CONNECT_DISPLAY_THINKING_MESSAGES:-false}
+  cat <<EOF
+[display]
+mode = "$(_toml_escape "$mode")"
+tool_messages = $tool_messages
+thinking_messages = $thinking_messages
+reply_footer = true
+show_context_indicator = false
+EOF
+}
+
 _write_connect_config() {
   local config_path=$1 data_dir=$2 project=$3 agent=$4 workspace=$5 homeserver=$6 matrix_token=$7 matrix_user=$8 room_id=$9 admin_from=${10:-} agent_cmd=${11:-} agent_options_toml=${12:-}
-  local q_data q_project q_agent q_workspace q_homeserver q_token q_user q_room q_admin_from q_agent_cmd speech_toml default_agent_options_toml
+  local q_data q_project q_agent q_workspace q_homeserver q_token q_user q_room q_admin_from q_agent_cmd speech_toml default_agent_options_toml display_toml
   mkdir -p "$(dirname "$config_path")" "$data_dir"
   q_data=$(_toml_escape "$data_dir")
   q_project=$(_toml_escape "$project")
@@ -614,6 +629,7 @@ _write_connect_config() {
   q_admin_from=$(_toml_escape "$admin_from")
   q_agent_cmd=$(_toml_escape "$agent_cmd")
   speech_toml=$(_connect_speech_config_toml)
+  display_toml=$(_connect_display_config_toml)
   default_agent_options_toml=$(_connect_default_agent_options_toml "$agent" "$agent_options_toml")
   umask 077
   cat > "$config_path" <<EOF
@@ -622,6 +638,9 @@ data_dir = "$q_data"
 EOF
   if [ -n "$speech_toml" ]; then
     printf '\n%s\n' "$speech_toml" >> "$config_path"
+  fi
+  if [ -n "$display_toml" ]; then
+    printf '\n%s\n' "$display_toml" >> "$config_path"
   fi
   cat >> "$config_path" <<EOF
 
@@ -1054,6 +1073,18 @@ run_phase() {
     *) warn "agent.matrix_session.create returned non-standard agent user_id: $matrix_user" ;;
   esac
   workspace_local=$(_local_connect_path "$workspace")
+  if [ "$runtime" = "cursor" ] && [ "$(direxio_local_path_style)" = "windows" ]; then
+    if ! _cursor_agent_prepare_windows; then
+      install_policy_preview=$(_connect_install_policy)
+      if [ "$install_policy_preview" = "auto" ]; then
+        phase_set S6_WIRE_LOCAL failed "Cursor Agent CLI missing or incomplete"
+        return 1
+      fi
+      warn "Cursor Agent CLI is not ready; continuing in $install_policy_preview mode."
+    else
+      cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime")
+    fi
+  fi
   _write_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml"
   ok "Wrote direxio-connect Matrix config $cc_config (0600)."
 

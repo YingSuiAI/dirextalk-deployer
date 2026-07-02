@@ -76,6 +76,53 @@ _cursor_agent_windows_command() {
   command -v agent.cmd 2>/dev/null || command -v agent 2>/dev/null || true
 }
 
+_cursor_agent_latest_version_dir() {
+  local versions_dir=$1
+  [ -d "$versions_dir" ] || return 1
+  ls -1d "$versions_dir"/[0-9][0-9][0-9][0-9].* 2>/dev/null \
+    | sort -V \
+    | tail -1
+}
+
+_cursor_agent_prepare_windows() {
+  local agent_root="${LOCALAPPDATA:-}/cursor-agent"
+  local versions_dir="$agent_root/versions"
+  local dist_dir="$versions_dir/dist-package"
+  local latest
+
+  if [ ! -f "$agent_root/agent.cmd" ]; then
+    warn "Cursor Agent CLI is missing at $agent_root/agent.cmd. Install it before S6 auto wiring:"
+    warn "  powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm 'https://cursor.com/install?win32=true' | iex\""
+    warn "Then run: & \"\$env:LOCALAPPDATA\\cursor-agent\\agent.cmd\" login"
+    return 1
+  fi
+
+  if [ ! -f "$dist_dir/node.exe" ]; then
+    latest=$(_cursor_agent_latest_version_dir "$versions_dir") || latest=
+    if [ -n "$latest" ] && [ -f "$latest/node.exe" ]; then
+      if [ -e "$dist_dir" ]; then
+        rm -rf "$dist_dir" 2>/dev/null || true
+      fi
+      if command -v cmd.exe >/dev/null 2>&1; then
+        cmd.exe /C mklink /J "$dist_dir" "$latest" >/dev/null 2>&1 || ln -s "$latest" "$dist_dir" 2>/dev/null || true
+      else
+        ln -s "$latest" "$dist_dir" 2>/dev/null || true
+      fi
+      if [ -f "$dist_dir/node.exe" ]; then
+        ok "Linked Cursor Agent dist-package to $(basename "$latest") for legacy launchers."
+      fi
+    fi
+  fi
+
+  if [ ! -f "$dist_dir/node.exe" ]; then
+    warn "Cursor Agent CLI is installed but dist-package/node.exe is missing."
+    warn "Reinstall with: irm 'https://cursor.com/install?win32=true' | iex"
+    return 1
+  fi
+
+  return 0
+}
+
 _connect_agent_options_toml() {
   local runtime=${1:-} agent=${2:-} args_toml q_display
   if [ -n "${DIREXIO_CONNECT_AGENT_OPTIONS_TOML:-}" ]; then

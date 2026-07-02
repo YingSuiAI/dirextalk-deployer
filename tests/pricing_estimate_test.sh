@@ -25,6 +25,10 @@ if [ "${AWS_PRICING_FAIL:-0}" = "1" ]; then
 fi
 
 case "${1:-} ${2:-}" in
+  "lightsail get-bundles")
+    printf '{"bundles":[{"bundleId":"nano_3_1","price":5,"ramSizeInGb":0.5,"diskSizeInGb":20,"transferPerMonthInGb":1024,"cpuCount":2,"supportedPlatforms":["LINUX_UNIX"]},{"bundleId":"small_3_1","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"transferPerMonthInGb":3072,"cpuCount":2,"supportedPlatforms":["LINUX_UNIX"]}]}\n'
+    exit 0
+    ;;
   "sts get-caller-identity")
     if [ "${AWS_STS_OK:-0}" = "1" ]; then
       printf '{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/DirexioDeployer","UserId":"AIDAEXAMPLE"}\n'
@@ -97,7 +101,7 @@ json_test_check "$state" "data.cost_estimate.pricing_status === 'queried' && dat
 
 lightsail=$(bash "$ROOT/scripts/pricing-estimate.sh" --region ap-northeast-1 --cloud-provider lightsail --domain-mode user)
 printf '%s\n' "$lightsail" > "$tmp/lightsail.json"
-json_test_check "$tmp/lightsail.json" "data.provider === 'lightsail' && data.pricing_status === 'bundle_price_recorded' && data.components.lightsail_bundle.monthly_usd === 12 && data.components.lightsail_bundle.ram_gb === 2 && data.components.lightsail_bundle.disk_gb === 60 && data.total_monthly_usd === 12"
+json_test_check "$tmp/lightsail.json" "data.provider === 'lightsail' && data.pricing_status === 'bundle_price_recorded' && data.components.lightsail_bundle.bundle_id === 'small_3_1' && data.components.lightsail_bundle.monthly_usd === 12 && data.components.lightsail_bundle.ram_gb === 2 && data.components.lightsail_bundle.disk_gb === 60 && data.total_monthly_usd === 12"
 
 auto_workdir="$HOME/.direxio/nodes/auto-pricing.example.test"
 set +e

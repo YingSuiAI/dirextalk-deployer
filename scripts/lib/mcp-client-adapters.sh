@@ -111,6 +111,52 @@ _mcp_daemon_proxy_command() {
   printf '%q proxy --url %q\n' "$(_mcp_command)" "$(_mcp_daemon_url "$1")"
 }
 
+_mcp_expand_home_path() {
+  local path=$1
+  case "$path" in
+    "~") printf '%s\n' "$HOME" ;;
+    "~/"*) printf '%s/%s\n' "$HOME" "${path#~/}" ;;
+    *) printf '%s\n' "$path" ;;
+  esac
+}
+
+_mcp_config_conflict_paths() {
+  if [ -n "${DIREXIO_MCP_CONFIG_CONFLICT_PATHS:-}" ]; then
+    printf '%s\n' "$DIREXIO_MCP_CONFIG_CONFLICT_PATHS" | tr ';' '\n'
+    return 0
+  fi
+  printf '%s\n' \
+    '~/.codex/config.toml' \
+    '~/.cursor/mcp.json' \
+    '~/.hermes/mcp.json' \
+    '~/.config/hermes/mcp.json'
+}
+
+_mcp_warn_existing_config_conflicts() {
+  local server_name=$1 credentials_file=$2 service_id=$3
+  local credentials_local daemon_url raw_path path found=0
+  credentials_local=$(direxio_normalize_local_path "$credentials_file")
+  daemon_url=$(_mcp_daemon_url "$service_id")
+  while IFS= read -r raw_path; do
+    [ -n "$raw_path" ] || continue
+    path=$(_mcp_expand_home_path "$raw_path")
+    [ -f "$path" ] || continue
+    if grep -Fq "$server_name" "$path" &&
+      { ! grep -Fq "$credentials_local" "$path" || ! grep -Fq "$daemon_url" "$path"; }; then
+      if [ "$found" -eq 0 ]; then
+        warn "Existing MCP config may shadow this deployment because it defines the same server name with different credentials or proxy URL:"
+        found=1
+      fi
+      warn "  $path"
+    fi
+  done <<EOF
+$(_mcp_config_conflict_paths)
+EOF
+  if [ "$found" -ne 0 ]; then
+    warn "Replace or unset that MCP server entry before testing $server_name, then reload or restart the MCP client."
+  fi
+}
+
 _run_mcp_daemon_install() {
   local service_id=$1 credentials_file=$2 node_id=${3:-}
   if [ -n "$node_id" ]; then
@@ -261,6 +307,8 @@ $(_mcp_daemon_install_command "$service_id" "$credentials_file" "$node_id")
 
 Cursor can read MCP servers from \`$cursor_project_config\` in a project or \`$cursor_global_config\` globally. The deployer writes the Cursor-ready JSON snippet here, but does not modify a project or global Cursor config by default because it contains machine-local credential paths. After installing or updating Cursor MCP config, fully restart Cursor or use Cursor's MCP settings to reload/enable the server.
 
+If a client already has the same MCP server name, replace or unset that old entry when its \`DIREXIO_CREDENTIALS_FILE\` or proxy URL differs from this deployment. Otherwise the client can keep talking to a stale node even after this deployer writes fresh snippets.
+
 PowerShell example for reviewing the generated Cursor config:
 
 \`\`\`powershell
@@ -332,6 +380,7 @@ Codex, Cursor, OpenClaw, Hermes, and generic JSON artifacts use direxio-mcp's st
 Cursor can load the generated JSON via .cursor/mcp.json or ~/.cursor/mcp.json, but Cursor may require a full restart or MCP settings reload before the server is enabled.
 For OpenClaw, use the CLI setup note so OpenClaw validates and writes mcp.servers itself; do not paste MCP JSON into openclaw.json.
 EOF
+  _mcp_warn_existing_config_conflicts "$server_name" "$credentials_file" "$service_name"
 }
 
 _mcp_toml_escape() {

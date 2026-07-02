@@ -4,7 +4,7 @@
 # Flow: install Docker -> write deployment files -> generate local secrets ->
 # docker compose up -> wait for message-server bootstrap credentials.
 
-package_update: true
+package_update: false
 package_upgrade: false
 
 write_files:
@@ -28,13 +28,17 @@ runcmd:
     grep -q '^P2P_PORTAL_PASSWORD=' /var/direxio-message-server/.env || \
       echo "P2P_PORTAL_PASSWORD=$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", $1 % 100000000}')" >> /var/direxio-message-server/.env
   - export DOMAIN=$(grep '^DOMAIN=' /var/direxio-message-server/.env | cut -d= -f2)
-  - curl -fsSL https://get.docker.com | sh
+  - |
+    if ! command -v docker >/dev/null 2>&1; then
+      curl -fsSL https://get.docker.com | sh
+    fi
   - systemctl enable --now docker
   - mkdir -p /var/direxio-message-server/p2p
   - chmod 700 /var/direxio-message-server
   - |
     set -e
     cd /var/direxio-message-server
+    docker compose --env-file .env pull
     docker compose --env-file .env up -d
     DOMAIN=$(grep '^DOMAIN=' .env | cut -d= -f2) bash init-tokens.sh
     touch /var/direxio-message-server/.deploy-done

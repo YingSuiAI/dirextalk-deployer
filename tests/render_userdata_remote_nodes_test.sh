@@ -20,6 +20,15 @@ bash "$ROOT/scripts/render/render-userdata.sh" \
 
 grep -q '^#cloud-config' "$tmp/user-data.yaml"
 grep -q '^#!/usr/bin/env bash' "$tmp/user-data.sh"
+grep -q '^package_update: false' "$tmp/user-data.yaml"
+if grep -q '^package_update: true' "$tmp/user-data.yaml"; then
+  echo "cloud-init user-data must not run a redundant package update before Docker's installer" >&2
+  exit 1
+fi
+grep -q 'if ! command -v docker >/dev/null 2>&1' "$tmp/user-data.yaml"
+grep -q 'if ! command -v docker >/dev/null 2>&1' "$tmp/user-data.sh"
+grep -q 'docker compose --env-file .env pull' "$tmp/user-data.yaml"
+grep -q 'docker compose --env-file .env pull' "$tmp/user-data.sh"
 if grep -q '^#cloud-config' "$tmp/user-data.sh"; then
   echo "Lightsail shell user-data must not be rendered as cloud-config" >&2
   exit 1

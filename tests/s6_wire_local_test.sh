@@ -14,6 +14,17 @@ mkdir -p "$HOME"
 # shellcheck disable=SC1090
 source "$ROOT/scripts/phases/s6_wire_local.sh"
 
+(
+  unset -f json_build json_get json_assert json_valid json_type json_length json_stdin_get json_stdin_assert json_check 2>/dev/null || true
+  # shellcheck disable=SC1090
+  source "$ROOT/scripts/phases/s6_wire_local.sh"
+  declare -F json_build >/dev/null || {
+    echo "s6_wire_local.sh must source JSON helpers for direct phase execution" >&2
+    exit 1
+  }
+  json_build matrix-session-create DIRECT_DEVICE | grep -q 'agent.matrix_session.create'
+)
+
 ok() { echo "[test-ok] $*" >&2; }
 warn() { echo "[test-warn] $*" >&2; }
 fail() { echo "$*" >&2; return 1; }
@@ -276,6 +287,7 @@ json_test_check "$mcp_service_dir/mcp/hermes.mcp.json" "data.mcpServers['direxio
 grep -q 'DIREXIO_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
 grep -q 'Cursor JSON:' "$mcp_service_dir/mcp/README.md"
 grep -q '.cursor/mcp.json' "$mcp_service_dir/mcp/README.md"
+grep -q 'same MCP server name' "$mcp_service_dir/mcp/README.md"
 mcp_install_command=$(_mcp_install_command)
 [[ "$mcp_install_command" == *"npm install -g"*"direxio-mcp@latest"* ]]
 custom_mcp_install_command=$(DIREXIO_MCP_NPM_PACKAGE='direxio-mcp@override-test' _mcp_install_command)
@@ -593,5 +605,16 @@ if [[ "$guidance" == *"$bad_credentials_env_name"* ]]; then
   echo "direxio-connect guidance must not use $bad_credentials_env_name; it writes direct Matrix config" >&2
   exit 1
 fi
+
+stale_mcp_config="$tmp/stale-mcp.json"
+cat > "$stale_mcp_config" <<'EOF'
+{"mcpServers":{"direxio-service_example_test":{"command":"direxio-mcp","env":{"DIREXIO_CREDENTIALS_FILE":"/old/credentials.json"},"args":["proxy","--url","http://127.0.0.1:19999/mcp"]}}}
+EOF
+mcp_guidance=$(
+  DIREXIO_MCP_CONFIG_CONFLICT_PATHS="$stale_mcp_config" \
+    _print_mcp_guidance codex service.example.test direxio-service_example_test "$mcp_credentials" "$mcp_service_dir/mcp" "$mcp_service_dir/mcp/codex.toml" "$mcp_service_dir/mcp/openclaw.md" "$mcp_service_dir/mcp/hermes.mcp.json" "$mcp_install_command" "$mcp_doctor_command" "$mcp_service_dir/mcp/cursor.mcp.json" 2>&1 >/dev/null
+)
+[[ "$mcp_guidance" == *"Existing MCP config may shadow this deployment"* ]]
+[[ "$mcp_guidance" == *"$stale_mcp_config"* ]]
 
 echo "s6 wire local ok"

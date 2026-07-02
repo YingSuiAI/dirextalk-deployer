@@ -220,13 +220,14 @@ function resolveTarget({ agent, scope, project, home }) {
 function installSkill({ agent, scope, target, dryRun, force }) {
   if (dryRun) return { action: "would-install", fileCount: skillFiles.length };
 
+  let action = "installed";
   if (existsSync(target)) {
     const entries = readdirSync(target);
     const managed = isManagedTarget(target);
     if (entries.length > 0 && !managed && !force) {
       throwUserError(`refusing to overwrite unmanaged target: ${target}. Re-run with --force if this is intentional.`);
     }
-    rmSync(target, { recursive: true, force: true });
+    if (removeInstallTarget(target) === "in-place") action = "installed-in-place";
   }
 
   mkdirSync(target, { recursive: true });
@@ -245,7 +246,35 @@ function installSkill({ agent, scope, target, dryRun, force }) {
     installedAt: new Date().toISOString()
   };
   writeFileSync(path.join(target, ".direxio-skill-install.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  return { action: "installed", manifest: path.join(target, ".direxio-skill-install.json") };
+  return { action, manifest: path.join(target, ".direxio-skill-install.json") };
+}
+
+function removeInstallTarget(target) {
+  try {
+    if (process.env.DIREXIO_DEPLOYER_TEST_RM_EBUSY === "1") {
+      const error = new Error(`simulated busy target: ${target}`);
+      error.code = "EBUSY";
+      throw error;
+    }
+    rmSync(target, { recursive: true, force: true });
+    return "removed";
+  } catch (error) {
+    if (!isBusyRemovalError(error)) throw error;
+    clearTargetContents(target);
+    return "in-place";
+  }
+}
+
+function clearTargetContents(target) {
+  for (const entry of readdirSync(target)) {
+    rmSync(path.join(target, entry), { recursive: true, force: true });
+  }
+}
+
+function isBusyRemovalError(error) {
+  return process.platform === "win32" || process.env.DIREXIO_DEPLOYER_TEST_RM_EBUSY === "1"
+    ? ["EBUSY", "EPERM", "ENOTEMPTY"].includes(error?.code)
+    : false;
 }
 
 function isManagedTarget(target) {

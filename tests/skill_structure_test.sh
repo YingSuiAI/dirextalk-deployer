@@ -342,6 +342,16 @@ grep -q 'authoritative DNS' SKILL.md
 grep -q 'AWS Budget' SKILL.md
 grep -q 'AWS Budget' references/deployment-workflow.md
 grep -q 'AWS Billing Console' SKILL.md
+grep -q 'aws lightsail get-regions --include-availability-zones' SKILL.md
+grep -q 'aws lightsail get-regions --include-availability-zones' README.md
+grep -q 'aws lightsail get-regions --include-availability-zones' README_zh.md
+grep -q 'aws lightsail get-regions --include-availability-zones' references/deployment-workflow.md
+grep -q 'remaining credits' SKILL.md
+grep -q 'trial eligibility' SKILL.md
+grep -q 'Free Tier status' SKILL.md
+grep -q 'remaining credits' references/deployment-workflow.md
+grep -q 'trial eligibility' references/deployment-workflow.md
+grep -q 'Free Tier status' references/deployment-workflow.md
 grep -q 'Default cloud provider is Lightsail' SKILL.md
 grep -q 'S1 queries Free Tier usage, Lightsail bundle availability, and Lightsail availability zones' SKILL.md
 grep -q 'rotate/remove root access keys if used' SKILL.md

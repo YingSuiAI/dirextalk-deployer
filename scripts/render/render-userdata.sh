@@ -93,6 +93,7 @@ systemctl enable --now docker
 mkdir -p /var/direxio-message-server/p2p
 chmod 700 /var/direxio-message-server
 cd /var/direxio-message-server
+docker compose --env-file .env pull
 docker compose --env-file .env up -d
 DOMAIN="\$DOMAIN" bash init-tokens.sh
 touch /var/direxio-message-server/.deploy-done

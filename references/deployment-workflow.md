@@ -6,6 +6,10 @@
 2. Confirm AWS region, credentials, billing, cloud provider, and costs.
 3. Default cloud provider is Lightsail. S1 queries AWS Free Tier usage,
    Lightsail bundles, and Lightsail availability zones before provisioning.
+   For manual Lightsail zone checks, use
+   `aws lightsail get-regions --include-availability-zones --output json`;
+   plain `aws lightsail get-regions` can omit availability-zone details and
+   should not be used to decide that a region is unsupported.
    The explicit default Lightsail zone is `<region>a`; if it is unavailable,
    select another available Lightsail zone. If the selected region has no
    usable Lightsail bundle or availability zone and the operator did not
@@ -86,9 +90,10 @@ account plan with `aws freetier get-account-plan-state --output json`;
 otherwise tell the user that AWS currently advertises 100 USD initial credits
 for new customer accounts plus possible additional credits after Free Tier
 activities, and that Lightsail may offer three months free on select Lightsail bundles.
-Credit and bundle-trial coverage is not guaranteed; verify credits and
-actual charges in AWS Billing Console, and set an AWS Budget or billing alert
-before leaving the node running.
+Credit and bundle-trial coverage is not guaranteed; record Free Tier status,
+remaining credits when AWS exposes them, trial eligibility, AWS Billing Console
+verification, and set an AWS Budget or billing alert before leaving the node
+running.
 
 ## Destroy
 
@@ -161,7 +166,9 @@ service directory is removed:
 Reports include operation type, S0-S7 gate status, user-confirmation gates,
 credential/config paths, direxio-connect/MCP metadata, AWS resource IDs, billing
 reminders, `billing.cost_estimate`, destroy read-back evidence under
-`destroy.evidence` when applicable, and redaction evidence. They must not
+`destroy.evidence` when applicable, Free Tier status, remaining credits/trial
+eligibility when visible, AWS Billing Console verification reminder, and
+redaction evidence. They must not
 contain the initialization code, AWS secrets, access tokens, agent tokens, or
 Matrix session tokens. User/runtime evidence is also scrubbed for
 eight-or-more digit numeric strings because users may paste initialization

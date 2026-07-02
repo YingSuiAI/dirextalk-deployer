@@ -17,7 +17,7 @@ EOF
 }
 
 DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
-DEFAULT_LIGHTSAIL_BUNDLE_ID=${DEFAULT_LIGHTSAIL_BUNDLE_ID:-medium_3_0}
+DEFAULT_LIGHTSAIL_BUNDLE_ID=${DEFAULT_LIGHTSAIL_BUNDLE_ID:-small_3_1}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
 DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_TRANSFER_GB=${DEFAULT_LIGHTSAIL_TRANSFER_GB:-3072}
@@ -184,6 +184,39 @@ build_lightsail_estimate() {
     'recommendations=["Set an AWS Budget or billing alert before leaving the node running.","Review AWS Billing Console after deployment and after destroy to confirm actual charges and remaining credits."]'
 }
 
+lookup_lightsail_bundle() {
+  local wanted_id=$1 bundles
+  bundles=$(aws lightsail get-bundles --include-inactive --output json 2>/dev/null) || return 1
+  printf '%s\n' "$bundles" | "$(json_node)" -e '
+let input = "";
+process.stdin.on("data", (chunk) => input += chunk);
+process.stdin.on("end", () => {
+  const wantedId = process.argv[1] || "";
+  const wantedRam = Number(process.argv[2] || "2");
+  const wantedDisk = Number(process.argv[3] || "60");
+  const data = JSON.parse(input || "{}");
+  const bundles = Array.isArray(data.bundles) ? data.bundles : [];
+  const linux = bundles.filter((bundle) =>
+    Array.isArray(bundle.supportedPlatforms) && bundle.supportedPlatforms.includes("LINUX_UNIX")
+  );
+  const selected = linux.find((bundle) => wantedId && bundle.bundleId === wantedId) ||
+    linux.find((bundle) => Number(bundle.ramSizeInGb) === wantedRam && Number(bundle.diskSizeInGb) === wantedDisk) ||
+    linux.find((bundle) => Number(bundle.price) === 12) ||
+    linux[0];
+  if (!selected) process.exit(1);
+  const fields = [
+    selected.bundleId,
+    selected.price,
+    selected.ramSizeInGb,
+    selected.diskSizeInGb,
+    selected.transferPerMonthInGb || 0,
+    selected.cpuCount || 0
+  ];
+  process.stdout.write(`${fields.join("\t")}\n`);
+});
+' "$wanted_id" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB"
+}
+
 state=""
 write_state=0
 region=""
@@ -252,6 +285,13 @@ lightsail_cpu=${lightsail_cpu:-$DEFAULT_LIGHTSAIL_CPU_COUNT}
 
 case "$cloud_provider" in
   lightsail)
+    if [ -z "${state:-}" ] || [ -z "${lightsail_price:-}" ] || [ "$lightsail_bundle_id" = "$DEFAULT_LIGHTSAIL_BUNDLE_ID" ]; then
+      if bundle_row=$(lookup_lightsail_bundle "${DIREXIO_LIGHTSAIL_BUNDLE_ID:-}"); then
+        IFS=$'\t' read -r lightsail_bundle_id lightsail_price lightsail_ram lightsail_disk lightsail_transfer lightsail_cpu <<EOF
+$bundle_row
+EOF
+      fi
+    fi
     estimate=$(build_lightsail_estimate "$region" "$domain_mode" "$lightsail_bundle_id" "$lightsail_price" "$lightsail_ram" "$lightsail_disk" "$lightsail_transfer" "$lightsail_cpu")
     ;;
   ec2)

@@ -12,6 +12,8 @@ S6_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
 source "$S6_DIR/../lib/paths.sh"
 # shellcheck disable=SC1090
+source "$S6_DIR/../lib/json.sh"
+# shellcheck disable=SC1090
 source "$S6_DIR/../lib/local-paths.sh"
 # S6 local bridge paths honor DIREXIO_LOCAL_PATH_STYLE through local-paths.sh.
 

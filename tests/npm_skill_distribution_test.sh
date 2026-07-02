@@ -78,6 +78,15 @@ if [ -f "$target/STALE.txt" ]; then
   exit 1
 fi
 
+printf 'busy stale\n' > "$target/STALE_BUSY.txt"
+DIREXIO_DEPLOYER_TEST_RM_EBUSY=1 "$NODE_BIN" bin/direxio-deployer.mjs skill update --agent codex --scope project --project "$project" > "$tmp/update-busy.out"
+assert_file_exists "$target/SKILL.md"
+assert_contains "$tmp/update-busy.out" 'installed-in-place'
+if [ -f "$target/STALE_BUSY.txt" ]; then
+  echo "managed update should clear stale files when root removal is busy" >&2
+  exit 1
+fi
+
 unmanaged_project="$tmp/unmanaged"
 mkdir -p "$unmanaged_project/.codex/skills/direxio-deployer"
 printf 'manual\n' > "$unmanaged_project/.codex/skills/direxio-deployer/manual.txt"

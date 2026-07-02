@@ -13,6 +13,7 @@ DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
 DEFAULT_LIGHTSAIL_BLUEPRINT_ID=${DEFAULT_LIGHTSAIL_BLUEPRINT_ID:-ubuntu_22_04}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
 DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
+DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
 
 run_phase() {
   aws_env_prep
@@ -231,7 +232,11 @@ _run_phase_lightsail() {
   zone=$(res_get lightsail_availability_zone)
   zone=${DIREXIO_LIGHTSAIL_AVAILABILITY_ZONE:-${zone:-}}
   if [ -z "$zone" ]; then
-    zone=$(_lightsail_default_zone "$region")
+    zone=$(_lightsail_default_zone "$region") || {
+      phase_set S3_PROVISION failed "no available Lightsail availability zone"
+      warn "No Lightsail availability zone is available in region $region. Rerun S1 preflight to select EC2, or choose another region."
+      return 1
+    }
   fi
   res_set lightsail_availability_zone "$zone"
   instance_name=$(res_get lightsail_instance_name)
@@ -370,21 +375,49 @@ _decode_lightsail_private_key() {
 }
 
 _lightsail_default_zone() {
-  local region=$1 tmp zone
+  local region=$1 tmp line rc zone default_zone available unavailable reason status
   tmp=$(mktemp)
-  if aws lightsail get-regions --include-availability-zones --output json > "$tmp" 2>/dev/null; then
-    zone=$("$(json_node)" - "$tmp" "$region" <<'NODE'
-const fs = require("fs");
-const [file, regionName] = process.argv.slice(2);
-const data = JSON.parse(fs.readFileSync(file, "utf8"));
-const region = (Array.isArray(data.regions) ? data.regions : []).find((item) => item.name === regionName);
-const zone = (Array.isArray(region?.availabilityZones) ? region.availabilityZones : []).find((item) => String(item.state || "").toLowerCase() !== "unavailable");
-if (zone?.zoneName) process.stdout.write(zone.zoneName);
-NODE
-    )
+  if ! aws lightsail get-regions --include-availability-zones --output json > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    res_set lightsail_availability_status unknown
+    res_set lightsail_default_availability_zone "${region}${DEFAULT_LIGHTSAIL_ZONE_SUFFIX}"
+    return 1
   fi
+  rc=0
+  line=$("$(json_node)" - "$tmp" "$region" "$DEFAULT_LIGHTSAIL_ZONE_SUFFIX" <<'NODE'
+const fs = require("fs");
+const [file, regionName, suffix] = process.argv.slice(2);
+const data = JSON.parse(fs.readFileSync(file, "utf8"));
+const defaultZone = `${regionName}${suffix || "a"}`;
+const region = (Array.isArray(data.regions) ? data.regions : []).find((item) => item.name === regionName);
+if (!region) {
+  process.stdout.write(["", defaultZone, "", "", `Lightsail region ${regionName} was not returned by get-regions`].join("\t"));
+  process.exit(2);
+}
+const zones = Array.isArray(region.availabilityZones) ? region.availabilityZones : [];
+const available = zones.filter((item) => String(item.zoneName || "") && String(item.state || "").toLowerCase() !== "unavailable").map((item) => String(item.zoneName));
+const unavailable = zones.filter((item) => String(item.zoneName || "") && String(item.state || "").toLowerCase() === "unavailable").map((item) => String(item.zoneName));
+const selected = available.includes(defaultZone) ? defaultZone : (available[0] || "");
+const reason = selected
+  ? (selected === defaultZone ? "" : `default Lightsail zone ${defaultZone} is unavailable; selected ${selected}`)
+  : `no available Lightsail availability zone found for region ${regionName}`;
+process.stdout.write([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("\t"));
+if (!selected) process.exit(2);
+NODE
+  ) || rc=$?
   rm -f "$tmp"
-  printf '%s\n' "${zone:-${region}a}"
+  IFS=$'\t' read -r zone default_zone available unavailable reason <<EOF
+$line
+EOF
+  status=available
+  [ "$rc" -eq 0 ] || status=unavailable
+  res_set lightsail_availability_status "$status"
+  res_set lightsail_default_availability_zone "$default_zone"
+  res_set lightsail_available_zones "$available"
+  res_set lightsail_unavailable_zones "$unavailable"
+  res_set lightsail_availability_reason "$reason"
+  [ "$rc" -eq 0 ] || return 1
+  printf '%s\n' "$zone"
 }
 
 _select_lightsail_bundle() {

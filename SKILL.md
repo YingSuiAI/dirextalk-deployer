@@ -109,7 +109,7 @@ record. If an existing A record points elsewhere, require
 `DIREXIO_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
 authoritative DNS before continuing.
 
-Default cloud provider is Lightsail. Lightsail automatic deployment is supported through `DIREXIO_CLOUD_PROVIDER=lightsail` and uses the $12/month Linux bundle by default. EC2 remains supported only when the operator sets `DIREXIO_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
+Default cloud provider is Lightsail. S1 queries Free Tier usage, Lightsail bundle availability, and Lightsail availability zones before provisioning. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone. If Lightsail has no usable bundle or availability zone in the selected region and the operator did not explicitly force Lightsail, S1 records EC2 as the selected/recommended provider before provisioning. EC2 remains supported explicitly with `DIREXIO_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
 
 ## Local Runtime Wiring
 

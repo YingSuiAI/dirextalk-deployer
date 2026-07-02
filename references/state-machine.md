@@ -5,9 +5,9 @@
 ## 阶段
 
 - **S0_PREREQ_AWS**: 校验 AWS CLI、凭据和账号身份。
-- **S1_PREFLIGHT**: 校验 region、查询 Free Tier 使用情况、选择云提供方。默认 Lightsail；仅在 `DIREXIO_CLOUD_PROVIDER=ec2` 时校验默认 VPC、vCPU 配额、Elastic IP 可用配额、Ubuntu amd64 AMI。
+- **S1_PREFLIGHT**: 校验 region、查询 Free Tier 使用情况、Lightsail 套餐和 Lightsail 可用区，然后选择云提供方。默认 Lightsail，默认 AZ 是 `<region>a`；如果默认 AZ 不可用则选择同 region 其他可用 Lightsail AZ；如果 Lightsail 当前 region 没有可用套餐或可用区，且用户没有显式强制 Lightsail，则在 S1 记录选择 EC2。EC2 路径会校验默认 VPC、vCPU 配额、Elastic IP 可用配额、Ubuntu amd64 AMI。
 - **S2_DOMAIN**: 确认正式长期域名和 Matrix `server_name` 不可逆绑定。
-- **S3_PROVISION**: 默认创建 Lightsail $12 Linux 实例、密钥对、静态 IP 和防火墙端口；当 `DIREXIO_CLOUD_PROVIDER=ec2` 时创建 EC2、密钥对、安全组、Elastic IP 和 50 GiB gp3 root EBS。两条路径都会按 DNS 模式处理 Route53 hosted zone/A 记录或等待外部 DNS，渲染 cloud-init。默认镜像 `MESSAGE_SERVER_IMAGE=direxio/message-server:latest`。
+- **S3_PROVISION**: 按 S1 记录的 provider 创建资源。Lightsail 路径创建 $12 Linux 实例、密钥对、静态 IP 和防火墙端口，并只使用已查询到的可用 Lightsail AZ；执行阶段不会静默切到 EC2。当 `DIREXIO_CLOUD_PROVIDER=ec2` 或 S1 已记录 EC2 fallback 时，创建 EC2、密钥对、安全组、Elastic IP 和 50 GiB gp3 root EBS。两条路径都会按 DNS 模式处理 Route53 hosted zone/A 记录或等待外部 DNS，渲染 cloud-init。默认镜像 `MESSAGE_SERVER_IMAGE=direxio/message-server:latest`。
 - **S4_BOOTSTRAP_STACK**: 等 cloud-init 安装 Docker 并启动 `postgres:18 + message-server + caddy + coturn`，轮询 `https://<domain>/healthz`。
 - **S5_INIT_TOKENS**: SSH 读取云端 `init-tokens.sh` 生成的 `/var/direxio-message-server/p2p/bootstrap.json`，归一化 `password`、`access_token`、`agent_token`、真实 `agent_room_id`。云端脚本会先调用 `portal.bootstrap`，用 `agent_token` 创建 `@agent:<server>` Matrix session，再用 owner Matrix token 创建房间并邀请/加入 agent，最后回写真正的 agent room。`password`、owner `access_token` 和 `agent_token` 按一次性/易失凭据处理；需要登录或用 token 调接口前，必须重新从服务器拉取最新 `/var/direxio-message-server/p2p/bootstrap.json`，不要复用旧输出。
 - **S6_WIRE_LOCAL**: 写本地凭据、用 `agent_token` 创建 `@agent:<server>` Matrix session、写 `direxio-connect/config.toml`，写 MCP 配置片段，并按策略安装或推荐 `direxio-connect`。默认 `auto` 模式会等待 daemon `Running` 且日志出现 `direxio-connect is running`；如果日志显示 Agent CLI 缺失、未登录、workspace trust、ACP 启动失败或 agent offline，S6 失败，不会继续报告部署完成。

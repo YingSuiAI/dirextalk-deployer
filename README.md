@@ -14,7 +14,7 @@
 ## Before Deployment
 
 - Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain.
-- AWS resources created by this deployer can bill until they are destroyed. New deployments use the Lightsail $12/month Linux bundle by default; EC2 remains available with `DIREXIO_CLOUD_PROVIDER=ec2`. New EC2 deployments use a 50 GiB gp3 root EBS volume by default.
+- AWS resources created by this deployer can bill until they are destroyed. New deployments prefer the Lightsail $12/month Linux bundle by default. S1 checks Lightsail bundle and availability-zone availability before confirmation; if Lightsail has no usable resource in the selected region, the recommendation switches to EC2. EC2 remains available with `DIREXIO_CLOUD_PROVIDER=ec2` and uses a 50 GiB gp3 root EBS volume by default.
 - Use `SKILL.md` as the agent-facing runbook. It contains the detailed deployment rules, confirmation gates, runtime wiring behavior, and recovery procedures.
 
 ## Skill Installation And Updates
@@ -94,12 +94,11 @@ AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
-DIREXIO_CLOUD_PROVIDER=lightsail \
 MESSAGE_SERVER_IMAGE=direxio/message-server:latest \
 bash scripts/orchestrate.sh
 ```
 
-To use the retained EC2 path instead, add `DIREXIO_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default.
+`DIREXIO_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXIO_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records EC2 as the selected provider before provisioning.
 
 On Windows, use the PowerShell entrypoint so the deployer selects Git Bash for the cloud phases while writing Windows-compatible local `direxio-connect` paths:
 

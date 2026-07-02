@@ -4,11 +4,15 @@
 
 1. Confirm `DOMAIN`, `DOMAIN_MODE`, and `CONFIRM_DOMAIN_BINDING=1`.
 2. Confirm AWS region, credentials, billing, cloud provider, and costs.
-3. Default cloud provider is Lightsail. S1 queries AWS Free Tier usage and
-   recommends Lightsail unless the operator explicitly selects EC2 with
-   `DIREXIO_CLOUD_PROVIDER=ec2`. For EC2 only, check regional hard blockers
-   before mutating resources: default VPC, EC2 vCPU quota, Elastic IP
-   quota/current allocation, and Ubuntu AMI availability. For a manual EIP
+3. Default cloud provider is Lightsail. S1 queries AWS Free Tier usage,
+   Lightsail bundles, and Lightsail availability zones before provisioning.
+   The explicit default Lightsail zone is `<region>a`; if it is unavailable,
+   select another available Lightsail zone. If the selected region has no
+   usable Lightsail bundle or availability zone and the operator did not
+   explicitly force Lightsail, S1 records EC2 as the selected provider before
+   provisioning. For EC2, including this availability fallback path, check
+   regional hard blockers before mutating resources: default VPC, EC2 vCPU
+   quota, Elastic IP quota/current allocation, and Ubuntu AMI availability. For a manual EIP
    check, compare:
 
 ```bash

@@ -12,7 +12,7 @@
 ## 部署前准备
 
 - 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。
-- deployer 创建的 AWS 资源在销毁前可能持续计费。新部署默认使用 Lightsail 12 美元/月 Linux 套餐；需要 EC2 时设置 `DIREXIO_CLOUD_PROVIDER=ec2`。新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
+- deployer 创建的 AWS 资源在销毁前可能持续计费。新部署默认优先使用 Lightsail 12 美元/月 Linux 套餐。S1 会在确认前查询 Lightsail 套餐和可用区；如果所选 region 没有可用 Lightsail 资源，推荐和选择会切到 EC2。需要显式 EC2 时设置 `DIREXIO_CLOUD_PROVIDER=ec2`，新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
 - `SKILL.md` 是给智能体看的运行手册，详细部署规则、确认门禁、运行时 wiring 和恢复流程都放在那里。
 
 ## Skill 安装和更新
@@ -91,12 +91,11 @@ AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
-DIREXIO_CLOUD_PROVIDER=lightsail \
 MESSAGE_SERVER_IMAGE=direxio/message-server:latest \
 bash scripts/orchestrate.sh
 ```
 
-如需保留的 EC2 部署路径，添加 `DIREXIO_CLOUD_PROVIDER=ec2`。EC2 可继续设置 `INSTANCE_TYPE=t3.small` 或更大的显式规格，并默认使用 50 GiB gp3 root EBS 卷。
+`DIREXIO_CLOUD_PROVIDER=lightsail` 可省略，因为 Lightsail 是默认选择。如需保留的 EC2 部署路径，添加 `DIREXIO_CLOUD_PROVIDER=ec2`。EC2 可继续设置 `INSTANCE_TYPE=t3.small` 或更大的显式规格，并默认使用 50 GiB gp3 root EBS 卷。如果默认 Lightsail 在当前 region 没有可用套餐或可用区，S1 会在 provisioning 前把选择记录为 EC2。
 
 Windows 用户使用 PowerShell 入口。它会选择 Git Bash 执行云端 phase，同时给本地 `direxio-connect` 写入 Windows 可直接使用的路径：
 

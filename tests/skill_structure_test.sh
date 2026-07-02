@@ -45,6 +45,7 @@ required=(
   tests/connect_daemon_runtime_check_test.sh
   tests/pricing_estimate_test.sh
   tests/eip_preflight_test.sh
+  tests/s1_lightsail_availability_fallback_test.sh
   tests/s3_lightsail_provision_test.sh
   tests/destroy_lightsail_test.sh
   tests/route53_zone_auto_create_test.sh
@@ -338,7 +339,7 @@ grep -q 'AWS Budget' SKILL.md
 grep -q 'AWS Budget' references/deployment-workflow.md
 grep -q 'AWS Billing Console' SKILL.md
 grep -q 'Default cloud provider is Lightsail' SKILL.md
-grep -q 'Lightsail automatic deployment is supported' SKILL.md
+grep -q 'S1 queries Free Tier usage, Lightsail bundle availability, and Lightsail availability zones' SKILL.md
 grep -q 'rotate/remove root access keys if used' SKILL.md
 grep -q 'temporary IAM key' scripts/orchestrate.sh
 

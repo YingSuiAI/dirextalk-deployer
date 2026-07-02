@@ -273,9 +273,10 @@ _run_phase_lightsail() {
     log "Lightsail key pair already exists; skipping."; keyfile=$(res_get key_file)
   fi
 
-  userdata="$DIREXIO_WORKDIR/user-data.yaml"
-  log "Rendering cloud-init (domain_mode=$domain_mode, provider=lightsail)..."
+  userdata="$DIREXIO_WORKDIR/user-data.sh"
+  log "Rendering Lightsail launch script (domain_mode=$domain_mode, provider=lightsail)..."
   bash "$scripts_dir/render/render-userdata.sh" \
+    --format shell \
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \

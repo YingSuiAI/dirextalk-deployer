@@ -81,6 +81,12 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
 fi
 
 json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'direxio-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'direxio-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12"
+userdata_file=$(json_get "$STATE_JSON" resources.user_data)
+grep -q '^#!/usr/bin/env bash' "$userdata_file" || {
+  echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
+  sed -n '1,12p' "$userdata_file" >&2
+  exit 1
+}
 key_file=$(json_get "$STATE_JSON" resources.key_file)
 grep -q -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$key_file" || {
   echo "Lightsail private key should be written as PEM text when AWS returns PEM text" >&2

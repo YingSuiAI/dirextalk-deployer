@@ -7,7 +7,7 @@
 ## Contents
 
 - `SKILL.md`: Agent entrypoint, confirmation rules, deployment/destroy flow, and delivery format.
-- `scripts/`: State machine, AWS Lightsail/EC2/DNS/cloud-init/verification/destroy scripts.
+- `scripts/`: State machine, AWS Lightsail/EC2/DNS/user-data/verification/destroy scripts.
 - `references/`: Tooling, deployment resume flow, direxio-connect wiring, state machine, architecture, troubleshooting, and recovery notes.
 - `agents/`: Runtime metadata and recognition notes for agent hosts.
 

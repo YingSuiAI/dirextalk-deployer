@@ -5,7 +5,7 @@
 ## 内容
 
 - `SKILL.md`: 智能体主入口、确认规则、部署/销毁流程和交付格式。
-- `scripts/`: 状态机、AWS/EC2/DNS/cloud-init/验证/销毁脚本。
+- `scripts/`: 状态机、AWS Lightsail/EC2/DNS/user-data/验证/销毁脚本。
 - `references/`: 工具准备、部署续跑、direxio-connect wiring、状态机、架构、排障和恢复说明。
 - `agents/`: 面向不同智能体运行时的展示元数据和识别说明。
 

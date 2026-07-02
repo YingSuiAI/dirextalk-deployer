@@ -1,6 +1,6 @@
 {
   "name": "direxio-deployer",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "Versioned Direxio deployer agent skill and portable deployment orchestration tools.",
   "type": "module",
   "bin": {

@@ -11,6 +11,22 @@ bash "$ROOT/scripts/render/render-userdata.sh" \
   --message-server-image direxio/message-server:test \
   > "$tmp/user-data.yaml"
 
+bash "$ROOT/scripts/render/render-userdata.sh" \
+  --format shell \
+  --domain service.example.test \
+  --acme ops@example.test \
+  --message-server-image direxio/message-server:test \
+  > "$tmp/user-data.sh"
+
+grep -q '^#cloud-config' "$tmp/user-data.yaml"
+grep -q '^#!/usr/bin/env bash' "$tmp/user-data.sh"
+if grep -q '^#cloud-config' "$tmp/user-data.sh"; then
+  echo "Lightsail shell user-data must not be rendered as cloud-config" >&2
+  exit 1
+fi
+grep -q 'base64 --decode > /var/direxio-message-server/bundle.tar.gz' "$tmp/user-data.sh"
+grep -q 'docker compose --env-file .env up -d' "$tmp/user-data.sh"
+
 awk '/encoding: b64/ { getline; sub(/^    content: /, ""); print; exit }' "$tmp/user-data.yaml" \
   | base64 -d > "$tmp/bundle.tar.gz"
 mkdir "$tmp/bundle"

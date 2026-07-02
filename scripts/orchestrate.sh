@@ -123,10 +123,10 @@ cmd_status_inventory() {
 phase_user_meaning() {
   case "$1" in
     S0_PREREQ_AWS)      echo "AWS credentials, CLI tooling, or account identity are not ready." ;;
-    S1_PREFLIGHT)       echo "AWS region, default VPC, EC2/EIP quota, or Ubuntu AMI checks are not ready." ;;
+    S1_PREFLIGHT)       echo "AWS region, cloud provider choice, Free Tier query, or provider-specific checks are not ready." ;;
     S2_DOMAIN)          echo "The long-lived domain, DNS authority, or irreversible Matrix server_name binding is not confirmed." ;;
     S3_PROVISION)       echo "AWS infrastructure provisioning, fixed public IP, security group, or DNS record setup is not complete." ;;
-    S4_BOOTSTRAP_STACK) echo "The EC2 instance exists, but cloud-init, Docker, Caddy/TLS, or message-server has not reached healthy state." ;;
+    S4_BOOTSTRAP_STACK) echo "The cloud instance exists, but cloud-init, Docker, Caddy/TLS, or message-server has not reached healthy state." ;;
     S5_INIT_TOKENS)     echo "The server is not yet returning fresh bootstrap credentials from /var/direxio-message-server/p2p/bootstrap.json." ;;
     S6_WIRE_LOCAL)      echo "The cloud service is likely up, but local direxio-connect, service credentials, or MCP snippets are not wired." ;;
     S7_VERIFY_E2E)      echo "The deployed service failed one or more final automated health, Matrix, CORS, TURN, or API checks." ;;
@@ -143,13 +143,24 @@ phase_at_or_after_s3() {
 }
 
 recorded_billable_resources() {
-  local iid volume pubip eip zone out=""
+  local provider iid volume pubip eip zone lightsail_instance static_ip out=""
+  provider=$(state_get cloud_provider)
   iid=$(res_get instance_id)
+  lightsail_instance=$(res_get lightsail_instance_name)
+  static_ip=$(res_get lightsail_static_ip_name)
   volume=$(res_get root_volume_id)
   pubip=$(res_get public_ip)
   eip=$(res_get eip_id)
   zone=$(res_get route53_zone_id)
-  [ -n "$iid" ] && out="EC2 $iid"
+  if [ "$provider" = "lightsail" ]; then
+    [ -n "$lightsail_instance" ] && out="Lightsail instance $lightsail_instance"
+    if [ -n "$static_ip" ]; then
+      [ -n "$out" ] && out="$out, "
+      out="${out}Lightsail static IP $static_ip"
+    fi
+  else
+    [ -n "$iid" ] && out="EC2 $iid"
+  fi
   if [ -n "$volume" ]; then
     [ -n "$out" ] && out="$out, "
     out="${out}EBS root volume $volume"
@@ -177,7 +188,7 @@ status_billing_impact() {
   elif phase_at_or_after_s3 "$current"; then
     echo "S3 or later may have created billable AWS resources; inspect AWS if state is incomplete"
   else
-    echo "no EC2, public IPv4, or EBS resource is recorded yet"
+    echo "no cloud instance, public IPv4, or storage resource is recorded yet"
   fi
 }
 
@@ -213,9 +224,9 @@ status_next_action() {
 
   case "$1" in
     S0_PREREQ_AWS)      echo "configure AWS CLI credentials for the selected deployment identity and rerun status" ;;
-    S1_PREFLIGHT)       echo "fix AWS region, default VPC, EC2/EIP quota, or AMI availability before creating resources" ;;
+    S1_PREFLIGHT)       echo "fix AWS region, cloud provider choice, Free Tier visibility, or provider-specific quota before creating resources" ;;
     S2_DOMAIN)          echo "confirm the long-lived domain, DNS authority, and irreversible Matrix server_name binding" ;;
-    S3_PROVISION)       echo "inspect EC2 provisioning, Elastic IP allocation, security group creation, and DNS record setup" ;;
+    S3_PROVISION)       echo "inspect Lightsail/EC2 provisioning, fixed public IP allocation, firewall/security group creation, and DNS record setup" ;;
     S4_BOOTSTRAP_STACK) echo "inspect cloud-init, Docker, Caddy/TLS, and message-server logs over SSH" ;;
     S5_INIT_TOKENS)     echo "inspect /var/direxio-message-server/p2p/bootstrap.json, init-tokens.sh, and message-server bootstrap logs" ;;
     S6_WIRE_LOCAL)      echo "refresh local credentials, direxio-connect config, MCP snippets, and agent runtime settings without destroying cloud resources" ;;
@@ -268,6 +279,7 @@ cmd_status() {
   fi
   echo "run_id     : $(state_get run_id)"
 	  echo "region     : $(state_get region)"
+	  echo "cloud      : $(state_get cloud_provider)"
 	  echo "domain_mode: $(state_get domain_mode)"
 	  echo "domain     : $(state_get domain)"
 	  echo "instance   : $(state_get instance_type)"
@@ -288,6 +300,7 @@ cmd_status() {
 # Delivery summary.
 print_delivery() {
   local domain password keyfile pubip iid region statejson envfile agent_room_id runtime install_policy install_mode install_status install_command
+  local cloud_provider cloud_label
   local agent_node_id agent_service_id agent_service_dir agent_cred cc_config cc_binary cc_agent cc_user cc_pkg
   local report_path runtime_summary app_gate real_chat_gate agent_runtime_gate
   domain=$(state_get domain)
@@ -298,6 +311,12 @@ print_delivery() {
   fi
   keyfile=$(res_get key_file); pubip=$(res_get public_ip)
   iid=$(res_get instance_id); region=$(state_get region); statejson="$STATE_JSON"
+  cloud_provider=$(state_get cloud_provider)
+  if [ "$cloud_provider" = "lightsail" ]; then
+    cloud_label="Lightsail"
+  else
+    cloud_label="EC2"
+  fi
   envfile=$(state_get agent_env_file)
   agent_node_id=$(state_get agent_node_id)
   agent_service_id=$(state_get agent_service_id)
@@ -338,11 +357,12 @@ print_delivery() {
   echo "  daemon       : ${cc_binary:-direxio-connect} daemon status --service-name ${agent_service_id:-direxio-connect}"
   echo "  env vars     : DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID persisted${envfile:+ via $envfile}"
   echo "  AWS region   : $region"
-  echo "  EC2          : $iid ($pubip)"
+  echo "  cloud        : ${cloud_provider:-ec2}"
+  echo "  $cloud_label          : $iid ($pubip)"
   echo "  SSH          : ssh -i $keyfile ubuntu@$pubip"
   echo "  state.json   : $statejson"
   echo "  stop billing : ask the agent to destroy this node when finished"
-  echo "  Note         : EC2/public IPv4/EBS resources keep billing until destroy is run."
+  echo "  Note         : cloud instances, public IPv4/static IPs, storage, and Route53 resources can keep billing until destroy is run."
   echo "  security     : delete/disable temporary IAM keys after deployment; rotate/remove root keys if used."
   echo "  Product gate : S7 is green; final product completion still needs App initialization and agent/MCP runtime confirmation."
   if report_path=$(operation_report_write new_deploy automated_gates_complete_user_confirmation_pending "$STATE_JSON" 2>/dev/null); then
@@ -378,9 +398,15 @@ ensure_region_selected() {
 }
 
 ensure_cost_estimate() {
-  local output status total region instance_type args
+  local output status total region instance_type cloud_provider bundle args
+  cloud_provider=$(state_get cloud_provider)
+  cloud_provider=${DIREXIO_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXIO_DEPLOY_PROVIDER:-$cloud_provider}}}
+  cloud_provider=${cloud_provider:-lightsail}
+  cloud_provider=$(printf '%s' "$cloud_provider" | tr '[:upper:]' '[:lower:]')
+  state_set cloud_provider "$cloud_provider"
   args=(--state "$STATE_JSON" --write-state)
-  if [ -n "${INSTANCE_TYPE:-}" ]; then
+  args+=(--cloud-provider "$cloud_provider")
+  if [ "$cloud_provider" = "ec2" ] && [ -n "${INSTANCE_TYPE:-}" ]; then
     args+=(--instance-type "$INSTANCE_TYPE")
   fi
 
@@ -388,8 +414,13 @@ ensure_cost_estimate() {
     status=$(printf '%s\n' "$output" | json_stdin_get pricing_status "unknown" 2>/dev/null)
     total=$(printf '%s\n' "$output" | json_stdin_get total_monthly_usd "unknown" 2>/dev/null)
     region=$(printf '%s\n' "$output" | json_stdin_get region "unknown" 2>/dev/null)
-    instance_type=$(printf '%s\n' "$output" | json_stdin_get components.ec2_instance.instance_type "unknown" 2>/dev/null)
-    log "Cost estimate recorded (status=${status:-unknown}, region=${region:-unknown}, instance=${instance_type:-unknown}, monthly_usd≈${total:-unknown})."
+    if [ "$cloud_provider" = "lightsail" ]; then
+      bundle=$(printf '%s\n' "$output" | json_stdin_get components.lightsail_bundle.bundle_id "unknown" 2>/dev/null)
+      log "Cost estimate recorded (status=${status:-unknown}, region=${region:-unknown}, provider=lightsail, bundle=${bundle:-unknown}, monthly_usd≈${total:-unknown})."
+    else
+      instance_type=$(printf '%s\n' "$output" | json_stdin_get components.ec2_instance.instance_type "unknown" 2>/dev/null)
+      log "Cost estimate recorded (status=${status:-unknown}, region=${region:-unknown}, provider=ec2, instance=${instance_type:-unknown}, monthly_usd≈${total:-unknown})."
+    fi
     if [ "$status" = "fallback" ]; then
       warn "AWS Pricing API was unavailable or incomplete; cost_estimate uses conservative fallback values."
     fi

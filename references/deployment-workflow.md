@@ -3,11 +3,13 @@
 ## Preflight
 
 1. Confirm `DOMAIN`, `DOMAIN_MODE`, and `CONFIRM_DOMAIN_BINDING=1`.
-2. Confirm AWS region, credentials, billing, instance type, and costs.
-3. Before asking for final deployment confirmation, check regional hard blockers
-   that can be read without creating resources: default VPC, EC2 vCPU quota,
-   Elastic IP quota/current allocation, and Ubuntu AMI availability. The S1
-   preflight performs these checks; for a manual EIP check, compare:
+2. Confirm AWS region, credentials, billing, cloud provider, and costs.
+3. Default cloud provider is Lightsail. S1 queries AWS Free Tier usage and
+   recommends Lightsail unless the operator explicitly selects EC2 with
+   `DIREXIO_CLOUD_PROVIDER=ec2`. For EC2 only, check regional hard blockers
+   before mutating resources: default VPC, EC2 vCPU quota, Elastic IP
+   quota/current allocation, and Ubuntu AMI availability. For a manual EIP
+   check, compare:
 
 ```bash
 aws service-quotas get-service-quota --service-code ec2 --quota-code L-0263D0A3 --query 'Quota.Value' --output text
@@ -52,13 +54,12 @@ bash scripts/aws-credentials.sh verify direxio-deployer
 ```
 
 Before the first mutating AWS phase, produce a monthly estimate for the selected
-region and instance size:
+region and cloud provider:
 
 ```bash
 bash scripts/pricing-estimate.sh \
   --region <region> \
-  --instance-type t3.small \
-  --disk-gb 8 \
+  --cloud-provider lightsail \
   --domain-mode user
 ```
 
@@ -68,11 +69,15 @@ When `state.json` already exists, refresh and persist the same estimate:
 bash scripts/pricing-estimate.sh --state ~/.direxio/nodes/<service_id>/state.json --write-state
 ```
 
+For EC2 estimates, pass `--cloud-provider ec2 --instance-type t3.small --disk-gb 50`.
+
 `scripts/orchestrate.sh` also writes `cost_estimate` automatically after region
-selection and refreshes it in S3 after the final EC2 instance type is known.
-The estimate includes EC2, gp3 storage, public IPv4, and Route53 hosted-zone
-cost when applicable. It excludes data transfer, TURN relay traffic, domain
-registration, taxes, and AWS credits. When available, check the Free Tier
+selection and refreshes it in S3 after the final Lightsail bundle or EC2
+instance type is known. Lightsail estimates include the default $12 bundle and
+Route53 hosted-zone cost when applicable; EC2 estimates include EC2, gp3
+storage, public IPv4, and Route53 hosted-zone cost when applicable. Estimates
+exclude data transfer beyond included bundle allowances, TURN relay traffic,
+domain registration, taxes, and AWS credits. When available, check the Free Tier
 account plan with `aws freetier get-account-plan-state --output json`;
 otherwise tell the user that AWS currently advertises 100 USD initial credits
 for new customer accounts plus possible additional credits after Free Tier
@@ -96,7 +101,7 @@ $env:DOMAIN = "__DOMAIN__"
 .\scripts\destroy.ps1
 ```
 
-Destroy stops and uninstalls the local `direxio-connect` daemon only when `direxio-connect daemon status --service-name <service_id>` reports a `WorkDir` matching the current service directory, `~/.direxio/nodes/<service_id>/direxio-connect`. It then terminates the recorded EC2 instance, verifies the recorded EBS root volume, releases the Elastic IP, deletes the security group and key pair, removes Route53 records/zones created by the deployer, records AWS read-back results under `destroy.evidence`, and removes the corresponding local service directory under `~/.direxio/nodes/<service_id>`. This prevents stale credentials, `state.json` files, and local service registrations from being treated as active deployments later while preserving an audit report for cleanup.
+Destroy stops and uninstalls the local `direxio-connect` daemon only when `direxio-connect daemon status --service-name <service_id>` reports a `WorkDir` matching the current service directory, `~/.direxio/nodes/<service_id>/direxio-connect`. It then removes resources based on `cloud_provider`: Lightsail destroy releases the recorded static IP, deletes the Lightsail instance and key pair; EC2 destroy terminates the recorded EC2 instance, verifies the recorded EBS root volume, releases the Elastic IP, deletes the security group and key pair. Both paths remove Route53 records/zones created by the deployer, record AWS read-back results under `destroy.evidence`, and remove the corresponding local service directory under `~/.direxio/nodes/<service_id>`.
 
 Destroy allows root AWS access-key identity when the operator explicitly chose
 root credentials. Use the same deployment profile for teardown that was used
@@ -114,10 +119,12 @@ AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
-INSTANCE_TYPE=t3.small \
+DIREXIO_CLOUD_PROVIDER=lightsail \
 MESSAGE_SERVER_IMAGE=direxio/message-server:latest \
 bash scripts/orchestrate.sh
 ```
+
+For EC2, replace `DIREXIO_CLOUD_PROVIDER=lightsail` with `DIREXIO_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
 
 Exit codes:
 
@@ -212,7 +219,7 @@ DOMAIN=__DOMAIN__ MESSAGE_SERVER_IMAGE=direxio/message-server:latest bash script
 DIREXIO_EXISTING_STATE_ACTION=continue DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
 ```
 
-`update.sh` SSHes to the recorded EC2 instance, runs Docker Compose pull/up,
+`update.sh` SSHes to the recorded cloud instance, runs Docker Compose pull/up,
 reruns `/var/direxio-message-server/init-tokens.sh`, clears stale local secret fields, stops only
 the matching service-scoped direxio-connect daemon when its `WorkDir` matches
 this service, and marks S4-S7 pending so health, credential sync, local
@@ -221,8 +228,8 @@ volumes.
 
 ## Existing Node App Data Reset
 
-Reset application data while preserving EC2, public IPv4/EIP, DNS, and Caddy
-TLS volumes:
+Reset application data while preserving the cloud instance, fixed public
+IP/static IP or Elastic IP, DNS, and Caddy TLS volumes:
 
 ```bash
 DIREXIO_RESET_APP_DATA_CONFIRM=1 DOMAIN=__DOMAIN__ bash scripts/reset-app-data.sh
@@ -269,7 +276,7 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
    DOMAIN=<DOMAIN> \
    DOMAIN_MODE=route53 \
    CONFIRM_DOMAIN_BINDING=1 \
-   INSTANCE_TYPE=t3.small \
+   DIREXIO_CLOUD_PROVIDER=lightsail \
    bash scripts/orchestrate.sh
    ```
 
@@ -330,7 +337,7 @@ left in place.
 ## Manual DNS Mode
 
 Use manual DNS mode only when no DNS provider automation is available. When S3
-emits an Elastic IP, ask the user to set:
+emits the fixed public IP, ask the user to set:
 
 ```text
 <DOMAIN>  A  <PUBLIC_IP>
@@ -347,7 +354,7 @@ AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
-INSTANCE_TYPE=t3.small \
+DIREXIO_CLOUD_PROVIDER=lightsail \
 MESSAGE_SERVER_IMAGE=direxio/message-server:latest \
 DIREXIO_EXISTING_STATE_ACTION=continue \
 bash scripts/orchestrate.sh

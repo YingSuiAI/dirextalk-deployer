@@ -1,17 +1,36 @@
 #!/usr/bin/env bash
-# S3 PROVISION_EC2 - key pair, security group, cloud-init, EC2, EIP, DNS.
+# S3 PROVISION - Lightsail by default, EC2 when explicitly selected.
 #
-# Default instance type is x86/amd64 t3.small (2 vCPU / 2GB). Every resource is
-# persisted immediately so deployment can resume and destroy.sh can clean up.
+# Every resource is persisted immediately so deployment can resume and
+# destroy.sh can clean up.
 
 S3_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 source "$S3_PHASE_DIR/lib/domain.sh"
 
 DIREXIO_ROOT_VOLUME_GB=${DIREXIO_ROOT_VOLUME_GB:-50}
 DIREXIO_ROOT_DEVICE_NAME=${DIREXIO_ROOT_DEVICE_NAME:-/dev/sda1}
+DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
+DEFAULT_LIGHTSAIL_BLUEPRINT_ID=${DEFAULT_LIGHTSAIL_BLUEPRINT_ID:-ubuntu_22_04}
+DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
+DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 
 run_phase() {
   aws_env_prep
+  local cloud_provider
+  cloud_provider=$(_resolve_cloud_provider)
+  state_set cloud_provider "$cloud_provider"
+  case "$cloud_provider" in
+    lightsail) _run_phase_lightsail ;;
+    ec2) _run_phase_ec2 ;;
+    *)
+      phase_set S3_PROVISION waiting_user "unknown cloud provider"
+      warn "Unknown cloud provider: $cloud_provider. Expected lightsail or ec2."
+      return 2
+      ;;
+  esac
+}
+
+_run_phase_ec2() {
   phase_set S3_PROVISION in_progress "provisioning EC2"
 
   local name region instance_type ami sg vpc
@@ -188,6 +207,279 @@ run_phase() {
 
   phase_set S3_PROVISION done "instance=$iid ip=$pubip domain=$(state_get domain)"
   return 0
+}
+
+_run_phase_lightsail() {
+  phase_set S3_PROVISION in_progress "provisioning Lightsail"
+
+  local name region bundle blueprint zone keyfile domain_mode domain message_server_image scripts_dir userdata userdata_aws
+  local instance_name static_ip_name pubip
+  name=$(state_get run_id)
+  region=$(state_get region)
+  bundle=$(res_get lightsail_bundle_id)
+  if [ -z "$bundle" ]; then
+    bundle=$(_select_lightsail_bundle) || {
+      phase_set S3_PROVISION failed "Lightsail $DEFAULT_LIGHTSAIL_MONTHLY_USD bundle unavailable"
+      warn "Could not select a Lightsail Linux/Unix bundle near $DEFAULT_LIGHTSAIL_MONTHLY_USD USD/month."
+      warn "Set DIREXIO_LIGHTSAIL_BUNDLE_ID to override, or DIREXIO_CLOUD_PROVIDER=ec2 to use EC2."
+      return 1
+    }
+  fi
+  blueprint=$(res_get lightsail_blueprint_id)
+  blueprint=${DIREXIO_LIGHTSAIL_BLUEPRINT_ID:-${blueprint:-$DEFAULT_LIGHTSAIL_BLUEPRINT_ID}}
+  res_set lightsail_blueprint_id "$blueprint"
+  zone=$(res_get lightsail_availability_zone)
+  zone=${DIREXIO_LIGHTSAIL_AVAILABILITY_ZONE:-${zone:-}}
+  if [ -z "$zone" ]; then
+    zone=$(_lightsail_default_zone "$region")
+  fi
+  res_set lightsail_availability_zone "$zone"
+  instance_name=$(res_get lightsail_instance_name)
+  instance_name=${instance_name:-$(_aws_resource_name direxio "$(state_get domain)")}
+  static_ip_name=$(res_get lightsail_static_ip_name)
+  static_ip_name=${static_ip_name:-$(_aws_resource_name direxio-ip "$(state_get domain)")}
+  res_set lightsail_instance_name "$instance_name"
+  res_set lightsail_static_ip_name "$static_ip_name"
+
+  domain_mode=$(state_get domain_mode)
+  domain=$(state_get domain)
+  domain=$(domain_normalize "$domain")
+  if [ -z "$domain" ]; then
+    phase_set S3_PROVISION waiting_user "production domain missing"
+    warn "S3 requires a production DOMAIN. Complete S2_DOMAIN first."
+    return 2
+  fi
+  message_server_image=${MESSAGE_SERVER_IMAGE:-direxio/message-server:latest}
+  scripts_dir=${DIREXIO_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
+
+  keyfile="$DIREXIO_WORKDIR/${name}.pem"
+  if [ -z "$(res_get key_name)" ]; then
+    log "Creating Lightsail key pair $name ..."
+    aws lightsail create-key-pair --key-pair-name "$name" --query privateKeyBase64 --output text \
+      | _decode_lightsail_private_key > "$keyfile"
+    restrict_private_file "$keyfile"
+    res_set key_name "$name"; res_set key_file "$keyfile"
+  else
+    log "Lightsail key pair already exists; skipping."; keyfile=$(res_get key_file)
+  fi
+
+  userdata="$DIREXIO_WORKDIR/user-data.yaml"
+  log "Rendering cloud-init (domain_mode=$domain_mode, provider=lightsail)..."
+  bash "$scripts_dir/render/render-userdata.sh" \
+    --domain "$domain" \
+    --acme "${ACME_EMAIL:-}" \
+    --message-server-image "$message_server_image" \
+    > "$userdata"
+  userdata_aws="$userdata"
+  if command -v cygpath >/dev/null 2>&1; then
+    userdata_aws=$(cygpath -w "$userdata")
+  fi
+  res_set user_data "$userdata"
+
+  if [ -n "$(res_get instance_id)" ] && aws lightsail get-instance --instance-name "$instance_name" >/dev/null 2>&1; then
+    log "Lightsail instance $instance_name already exists; skipping creation."
+  else
+    log "Launching Lightsail instance ($bundle, $blueprint, $zone)..."
+    aws lightsail create-instances \
+      --instance-names "$instance_name" \
+      --availability-zone "$zone" \
+      --blueprint-id "$blueprint" \
+      --bundle-id "$bundle" \
+      --key-pair-name "$name" \
+      --user-data "file://$userdata_aws" \
+      --tags "key=Name,value=$name" >/dev/null || {
+        phase_set S3_PROVISION failed "Lightsail create-instances failed"
+        warn "Lightsail instance creation failed. Check Lightsail availability, bundle support, and AWS permissions."
+        return 1
+    }
+    res_set instance_id "$instance_name"
+    res_set lightsail_instance_created "true"
+  fi
+  if [ "$(res_get lightsail_ports_configured)" != "true" ]; then
+    _open_lightsail_ports "$instance_name" || return $?
+    res_set lightsail_ports_configured "true"
+  fi
+
+  if [ -z "$(res_get public_ip)" ]; then
+    if ! aws lightsail get-static-ip --static-ip-name "$static_ip_name" >/dev/null 2>&1; then
+      log "Allocating Lightsail static IP $static_ip_name ..."
+      aws lightsail allocate-static-ip --static-ip-name "$static_ip_name" >/dev/null || {
+        phase_set S3_PROVISION failed "failed to allocate Lightsail static IP"
+        warn "Failed to allocate Lightsail static IP. Check regional Lightsail quota and AWS permissions."
+        return 1
+      }
+    fi
+    log "Attaching Lightsail static IP $static_ip_name to $instance_name ..."
+    aws lightsail attach-static-ip --static-ip-name "$static_ip_name" --instance-name "$instance_name" >/dev/null || {
+      phase_set S3_PROVISION failed "failed to attach Lightsail static IP"
+      warn "Failed to attach Lightsail static IP. Check instance status and rerun to resume."
+      return 1
+    }
+    pubip=$(aws lightsail get-static-ip --static-ip-name "$static_ip_name" --query 'staticIp.ipAddress' --output text) || {
+      phase_set S3_PROVISION failed "failed to read Lightsail static IP"
+      warn "Failed to read Lightsail static IP address."
+      return 1
+    }
+    [ -n "$pubip" ] && [ "$pubip" != "None" ] || {
+      phase_set S3_PROVISION failed "Lightsail static IP returned no public IP"
+      warn "Lightsail static IP returned no public IP. Check AWS response and rerun."
+      return 1
+    }
+    res_set public_ip "$pubip"
+    res_set static_ip_name "$static_ip_name"
+  else
+    pubip=$(res_get public_ip)
+  fi
+  log "Public IP = $pubip; domain = $(state_get domain)"
+
+  if [ "$domain_mode" = "route53" ]; then
+    local route53_rc=0
+    _upsert_route53_record "$domain" "$pubip" || route53_rc=$?
+    [ "$route53_rc" -eq 0 ] || return "$route53_rc"
+  fi
+
+  if [ "$domain_mode" = "user" ] || [ "$domain_mode" = "route53" ]; then
+    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "DIREXIO_CLOUD_PROVIDER=lightsail" || return 2
+  fi
+
+  _record_lightsail_cost_estimate "$bundle"
+  phase_set S3_PROVISION done "lightsail_instance=$instance_name ip=$pubip domain=$(state_get domain)"
+  return 0
+}
+
+_resolve_cloud_provider() {
+  local provider
+  provider=$(state_get cloud_provider)
+  provider=${DIREXIO_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXIO_DEPLOY_PROVIDER:-$provider}}}
+  provider=${provider:-lightsail}
+  provider=$(printf '%s' "$provider" | tr '[:upper:]' '[:lower:]')
+  case "$provider" in
+    lightsail|ec2) printf '%s\n' "$provider" ;;
+    *) printf '%s\n' "$provider" ;;
+  esac
+}
+
+_aws_resource_name() {
+  local prefix=$1 value=$2 suffix
+  suffix=$(printf '%s' "$value" | sed -E 's#^https?://##; s#[^A-Za-z0-9-]+#-#g; s#^-+##; s#-+$##' | tr '[:upper:]' '[:lower:]')
+  printf '%s-%s\n' "$prefix" "$suffix" | cut -c1-255
+}
+
+_decode_lightsail_private_key() {
+  "$(json_node)" -e 'let input=""; process.stdin.on("data", d => input += d); process.stdin.on("end", () => process.stdout.write(Buffer.from(input.trim(), "base64").toString("utf8")));'
+}
+
+_lightsail_default_zone() {
+  local region=$1 tmp zone
+  tmp=$(mktemp)
+  if aws lightsail get-regions --include-availability-zones --output json > "$tmp" 2>/dev/null; then
+    zone=$("$(json_node)" - "$tmp" "$region" <<'NODE'
+const fs = require("fs");
+const [file, regionName] = process.argv.slice(2);
+const data = JSON.parse(fs.readFileSync(file, "utf8"));
+const region = (Array.isArray(data.regions) ? data.regions : []).find((item) => item.name === regionName);
+const zone = (Array.isArray(region?.availabilityZones) ? region.availabilityZones : []).find((item) => String(item.state || "").toLowerCase() !== "unavailable");
+if (zone?.zoneName) process.stdout.write(zone.zoneName);
+NODE
+    )
+  fi
+  rm -f "$tmp"
+  printf '%s\n' "${zone:-${region}a}"
+}
+
+_select_lightsail_bundle() {
+  local override tmp selected price ram disk transfer cpu
+  override=${DIREXIO_LIGHTSAIL_BUNDLE_ID:-}
+  if [ -n "$override" ]; then
+    res_set lightsail_bundle_id "$override"
+    res_set lightsail_bundle_price_usd "$DEFAULT_LIGHTSAIL_MONTHLY_USD"
+    res_set lightsail_bundle_ram_gb "$DEFAULT_LIGHTSAIL_RAM_GB"
+    res_set lightsail_bundle_disk_gb "$DEFAULT_LIGHTSAIL_DISK_GB"
+    printf '%s\n' "$override"
+    return 0
+  fi
+  tmp=$(mktemp)
+  aws lightsail get-bundles --output json > "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  selected=$("$(json_node)" - "$tmp" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB" <<'NODE'
+const fs = require("fs");
+const [file, targetPrice, targetRam, targetDisk] = process.argv.slice(2);
+const data = JSON.parse(fs.readFileSync(file, "utf8"));
+const num = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const platformOk = (bundle) => {
+  const text = String(bundle.supportedPlatforms || bundle.supportedPlatform || bundle.platform || "").toLowerCase();
+  return !text || text.includes("linux") || text.includes("unix");
+};
+const candidates = (Array.isArray(data.bundles) ? data.bundles : [])
+  .filter(platformOk)
+  .map((bundle) => ({
+    id: String(bundle.bundleId || ""),
+    price: num(bundle.price),
+    ram: num(bundle.ramSizeInGb),
+    disk: num(bundle.diskSizeInGb),
+    transfer: num(bundle.transferPerMonthInGb),
+    cpu: num(bundle.cpuCount)
+  }))
+  .filter((bundle) => bundle.id && bundle.price > 0);
+const exact = candidates.filter((bundle) => Math.abs(bundle.price - Number(targetPrice)) < 0.01 && bundle.ram >= Number(targetRam) && bundle.disk >= Number(targetDisk));
+const fallback = candidates.filter((bundle) => bundle.price >= Number(targetPrice) && bundle.ram >= Number(targetRam));
+const selected = (exact.length ? exact : fallback).sort((a, b) => a.price - b.price || a.ram - b.ram || a.disk - b.disk)[0];
+if (!selected) process.exit(1);
+process.stdout.write([selected.id, selected.price, selected.ram, selected.disk, selected.transfer, selected.cpu].join("\t"));
+NODE
+  ) || {
+    rm -f "$tmp"
+    return 1
+  }
+  rm -f "$tmp"
+  IFS=$'\t' read -r selected price ram disk transfer cpu <<EOF
+$selected
+EOF
+  res_set lightsail_bundle_id "$selected"
+  res_set lightsail_bundle_price_usd "$price"
+  res_set lightsail_bundle_ram_gb "$ram"
+  res_set lightsail_bundle_disk_gb "$disk"
+  res_set lightsail_bundle_transfer_gb "$transfer"
+  res_set lightsail_bundle_cpu_count "$cpu"
+  printf '%s\n' "$selected"
+}
+
+_open_lightsail_ports() {
+  local instance_name=$1 rule protocol from to
+  for rule in tcp:22:22 tcp:80:80 tcp:443:443 tcp:3478:3478 udp:3478:3478 udp:49160:49200; do
+    IFS=: read -r protocol from to <<EOF
+$rule
+EOF
+    aws lightsail open-instance-public-ports \
+      --instance-name "$instance_name" \
+      --port-info "fromPort=$from,toPort=$to,protocol=$protocol" >/dev/null || {
+        phase_set S3_PROVISION failed "failed to open Lightsail public ports"
+        warn "Failed to open Lightsail port $protocol $from-$to. Check AWS permissions and rerun."
+        return 1
+      }
+  done
+}
+
+_record_lightsail_cost_estimate() {
+  local bundle=$1 price ram disk transfer cpu route53_monthly total estimate
+  price=$(res_get lightsail_bundle_price_usd)
+  ram=$(res_get lightsail_bundle_ram_gb)
+  disk=$(res_get lightsail_bundle_disk_gb)
+  transfer=$(res_get lightsail_bundle_transfer_gb)
+  cpu=$(res_get lightsail_bundle_cpu_count)
+  route53_monthly=0
+  [ "$(state_get domain_mode)" = "route53" ] && route53_monthly=${DIREXIO_ROUTE53_HOSTED_ZONE_MONTHLY_USD:-0.50}
+  total=$(awk -v p="${price:-$DEFAULT_LIGHTSAIL_MONTHLY_USD}" -v r="$route53_monthly" 'BEGIN { printf "%.2f", p + r }')
+  estimate=$(json_build object \
+    provider=lightsail \
+    pricing_status=bundle_price_recorded \
+    "total_monthly_usd=$total" \
+    "components={\"lightsail_bundle\":{\"bundle_id\":\"$bundle\",\"monthly_usd\":${price:-$DEFAULT_LIGHTSAIL_MONTHLY_USD},\"ram_gb\":${ram:-$DEFAULT_LIGHTSAIL_RAM_GB},\"disk_gb\":${disk:-$DEFAULT_LIGHTSAIL_DISK_GB},\"transfer_gb\":${transfer:-0},\"cpu_count\":${cpu:-0}},\"route53_hosted_zone\":{\"monthly_usd\":$route53_monthly,\"included\":$( [ "$(state_get domain_mode)" = "route53" ] && printf true || printf false )}}" \
+    'notes=["Estimate excludes data transfer beyond the Lightsail bundle, TURN relay traffic, domain registration, taxes, and AWS credit eligibility."]' \
+    'recommendations=["Set an AWS Budget or billing alert before leaving the node running.","Review AWS Billing Console after deployment and after destroy to confirm actual charges and remaining credits."]')
+  state_set_raw cost_estimate "$estimate"
 }
 
 _root_block_device_mappings() {
@@ -399,7 +691,7 @@ _require_user_dns_ready() {
     warn "Route53 A record was submitted, but $domain does not resolve to ${pubip} yet."
     warn "This is usually DNS propagation delay; rerun later to continue."
   else
-    warn "Update DNS so $domain has an A record pointing to this EC2 public IP:"
+    warn "Update DNS so $domain has an A record pointing to this public IP:"
     warn "  $domain  A  $pubip"
     warn "Use a subdomain such as __DOMAIN__. If DNS is on Cloudflare, set it to DNS only; do not enable proxying."
   fi
@@ -422,6 +714,10 @@ _require_user_dns_ready() {
 
   phase_set S3_PROVISION waiting_user "waiting for DNS A record $domain -> $pubip"
   warn "After DNS is ready, rerun:"
-  warn "  DOMAIN=$domain DOMAIN_MODE=$domain_mode CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=$instance_type bash scripts/orchestrate.sh"
+  if [ "$instance_type" = "DIREXIO_CLOUD_PROVIDER=lightsail" ]; then
+    warn "  DOMAIN=$domain DOMAIN_MODE=$domain_mode CONFIRM_DOMAIN_BINDING=1 DIREXIO_CLOUD_PROVIDER=lightsail bash scripts/orchestrate.sh"
+  else
+    warn "  DOMAIN=$domain DOMAIN_MODE=$domain_mode CONFIRM_DOMAIN_BINDING=1 DIREXIO_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=$instance_type bash scripts/orchestrate.sh"
+  fi
   return 2
 }

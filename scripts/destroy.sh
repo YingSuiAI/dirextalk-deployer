@@ -161,6 +161,54 @@ verify_key_pair_deleted() {
   fi
 }
 
+verify_lightsail_instance_deleted() {
+  local instance_name=$1 out
+  if [ -z "$instance_name" ]; then
+    destroy_evidence_set lightsail_instance skipped "missing Lightsail instance name"
+    return 0
+  fi
+  if out=$(aws lightsail get-instance --instance-name "$instance_name" --query 'instance.name' --output text 2>/dev/null); then
+    case "$out" in
+      ""|"None") destroy_evidence_set lightsail_instance deleted "Lightsail instance $instance_name is absent" ;;
+      *) destroy_evidence_set lightsail_instance still_present "Lightsail instance $instance_name still exists" ;;
+    esac
+  else
+    destroy_evidence_set lightsail_instance deleted "Lightsail instance $instance_name is absent"
+  fi
+}
+
+verify_lightsail_static_ip_released() {
+  local static_ip_name=$1 out
+  if [ -z "$static_ip_name" ]; then
+    destroy_evidence_set lightsail_static_ip skipped "missing Lightsail static IP name"
+    return 0
+  fi
+  if out=$(aws lightsail get-static-ip --static-ip-name "$static_ip_name" --query 'staticIp.name' --output text 2>/dev/null); then
+    case "$out" in
+      ""|"None") destroy_evidence_set lightsail_static_ip released "Lightsail static IP $static_ip_name is absent" ;;
+      *) destroy_evidence_set lightsail_static_ip still_allocated "Lightsail static IP $static_ip_name still exists" ;;
+    esac
+  else
+    destroy_evidence_set lightsail_static_ip released "Lightsail static IP $static_ip_name is absent"
+  fi
+}
+
+verify_lightsail_key_pair_deleted() {
+  local key_name=$1 out
+  if [ -z "$key_name" ]; then
+    destroy_evidence_set key_pair skipped "missing key pair name"
+    return 0
+  fi
+  if out=$(aws lightsail get-key-pair --key-pair-name "$key_name" --query 'keyPair.name' --output text 2>/dev/null); then
+    case "$out" in
+      ""|"None") destroy_evidence_set key_pair deleted "Lightsail key pair $key_name is absent" ;;
+      *) destroy_evidence_set key_pair still_present "Lightsail key pair $key_name still exists" ;;
+    esac
+  else
+    destroy_evidence_set key_pair deleted "Lightsail key pair $key_name is absent"
+  fi
+}
+
 # Resolve source and load INSTANCE_ID/EIP_ID/SG_ID/KEY_NAME/KEY_FILE/REGION.
 SRC=${1:-}
 if [ -z "$SRC" ]; then
@@ -172,7 +220,12 @@ fi
 DIREXIO_ROOT=$(cd "${DIREXIO_HOME:-$HOME/.direxio}" 2>/dev/null && pwd -P || printf '%s' "${DIREXIO_HOME:-$HOME/.direxio}")
 
 REGION=$(json_get "$SRC" region)
+CLOUD_PROVIDER=$(json_get "$SRC" cloud_provider)
+CLOUD_PROVIDER=${CLOUD_PROVIDER:-ec2}
 INSTANCE_ID=$(json_get "$SRC" resources.instance_id)
+LIGHTSAIL_INSTANCE_NAME=$(json_get "$SRC" resources.lightsail_instance_name)
+LIGHTSAIL_STATIC_IP_NAME=$(json_get "$SRC" resources.lightsail_static_ip_name)
+STATIC_IP_NAME=$(json_get "$SRC" resources.static_ip_name)
 ROOT_VOLUME_ID=$(json_get "$SRC" resources.root_volume_id)
 EIP_ID=$(json_get "$SRC" resources.eip_id)
 SG_ID=$(json_get "$SRC" resources.sg_id)
@@ -477,47 +530,78 @@ if [ "${DOMAIN_MODE:-}" = "route53" ]; then
   delete_route53_hosted_zone_if_owned
 fi
 
-# 1. Terminate instance.
-if [ -n "${INSTANCE_ID:-}" ]; then
-  log "terminating instance $INSTANCE_ID ..."
-  aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" >/dev/null 2>&1 || log "  (instance may already be gone)"
-  aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" 2>/dev/null || true
-  verify_ec2_instance_terminated "$INSTANCE_ID"
-else
-  verify_ec2_instance_terminated ""
-fi
-verify_ebs_root_volume_deleted "${ROOT_VOLUME_ID:-}"
+if [ "$CLOUD_PROVIDER" = "lightsail" ]; then
+  LIGHTSAIL_INSTANCE_NAME=${LIGHTSAIL_INSTANCE_NAME:-$INSTANCE_ID}
+  LIGHTSAIL_STATIC_IP_NAME=${LIGHTSAIL_STATIC_IP_NAME:-$STATIC_IP_NAME}
 
-# 2. Release Elastic IP.
-if [ -n "${EIP_ID:-}" ]; then
-  log "releasing Elastic IP $EIP_ID ..."
-  aws ec2 release-address --allocation-id "$EIP_ID" 2>/dev/null || log "  (EIP may already be released)"
-  verify_elastic_ip_released "$EIP_ID"
-else
-  verify_elastic_ip_released ""
-fi
+  if [ -n "${LIGHTSAIL_STATIC_IP_NAME:-}" ]; then
+    log "detaching and releasing Lightsail static IP $LIGHTSAIL_STATIC_IP_NAME ..."
+    aws lightsail detach-static-ip --static-ip-name "$LIGHTSAIL_STATIC_IP_NAME" >/dev/null 2>&1 || true
+    aws lightsail release-static-ip --static-ip-name "$LIGHTSAIL_STATIC_IP_NAME" >/dev/null 2>&1 || log "  (Lightsail static IP may already be released)"
+    verify_lightsail_static_ip_released "$LIGHTSAIL_STATIC_IP_NAME"
+  else
+    verify_lightsail_static_ip_released ""
+  fi
 
-# 3. Delete security group after instance/network interfaces detach.
-if [ -n "${SG_ID:-}" ]; then
-  log "deleting security group $SG_ID ..."
-  for i in 1 2 3 4 5; do
-    if aws ec2 delete-security-group --group-id "$SG_ID" 2>/dev/null; then break; fi
-    sleep 6
-    [ "$i" = 5 ] && log "  (security group delete failed; an ENI may still be attached, delete it manually later)"
-  done
-  verify_security_group_deleted "$SG_ID"
-else
-  verify_security_group_deleted ""
-fi
+  if [ -n "${LIGHTSAIL_INSTANCE_NAME:-}" ]; then
+    log "deleting Lightsail instance $LIGHTSAIL_INSTANCE_NAME ..."
+    aws lightsail delete-instance --instance-name "$LIGHTSAIL_INSTANCE_NAME" >/dev/null 2>&1 || log "  (Lightsail instance may already be gone)"
+    verify_lightsail_instance_deleted "$LIGHTSAIL_INSTANCE_NAME"
+  else
+    verify_lightsail_instance_deleted ""
+  fi
 
-# 4. Delete key pair and local private key.
-if [ -n "${KEY_NAME:-}" ]; then
-  log "deleting key pair $KEY_NAME ..."
-  aws ec2 delete-key-pair --key-name "$KEY_NAME" 2>/dev/null || true
-  [ -n "${KEY_FILE:-}" ] && [ -f "$KEY_FILE" ] && rm -f "$KEY_FILE"
-  verify_key_pair_deleted "$KEY_NAME"
+  if [ -n "${KEY_NAME:-}" ]; then
+    log "deleting Lightsail key pair $KEY_NAME ..."
+    aws lightsail delete-key-pair --key-pair-name "$KEY_NAME" 2>/dev/null || true
+    [ -n "${KEY_FILE:-}" ] && [ -f "$KEY_FILE" ] && rm -f "$KEY_FILE"
+    verify_lightsail_key_pair_deleted "$KEY_NAME"
+  else
+    verify_lightsail_key_pair_deleted ""
+  fi
 else
-  verify_key_pair_deleted ""
+  # 1. Terminate instance.
+  if [ -n "${INSTANCE_ID:-}" ]; then
+    log "terminating instance $INSTANCE_ID ..."
+    aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" >/dev/null 2>&1 || log "  (instance may already be gone)"
+    aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" 2>/dev/null || true
+    verify_ec2_instance_terminated "$INSTANCE_ID"
+  else
+    verify_ec2_instance_terminated ""
+  fi
+  verify_ebs_root_volume_deleted "${ROOT_VOLUME_ID:-}"
+
+  # 2. Release Elastic IP.
+  if [ -n "${EIP_ID:-}" ]; then
+    log "releasing Elastic IP $EIP_ID ..."
+    aws ec2 release-address --allocation-id "$EIP_ID" 2>/dev/null || log "  (EIP may already be released)"
+    verify_elastic_ip_released "$EIP_ID"
+  else
+    verify_elastic_ip_released ""
+  fi
+
+  # 3. Delete security group after instance/network interfaces detach.
+  if [ -n "${SG_ID:-}" ]; then
+    log "deleting security group $SG_ID ..."
+    for i in 1 2 3 4 5; do
+      if aws ec2 delete-security-group --group-id "$SG_ID" 2>/dev/null; then break; fi
+      sleep 6
+      [ "$i" = 5 ] && log "  (security group delete failed; an ENI may still be attached, delete it manually later)"
+    done
+    verify_security_group_deleted "$SG_ID"
+  else
+    verify_security_group_deleted ""
+  fi
+
+  # 4. Delete key pair and local private key.
+  if [ -n "${KEY_NAME:-}" ]; then
+    log "deleting key pair $KEY_NAME ..."
+    aws ec2 delete-key-pair --key-name "$KEY_NAME" 2>/dev/null || true
+    [ -n "${KEY_FILE:-}" ] && [ -f "$KEY_FILE" ] && rm -f "$KEY_FILE"
+    verify_key_pair_deleted "$KEY_NAME"
+  else
+    verify_key_pair_deleted ""
+  fi
 fi
 
 log "Done. Processed resources recorded in $SRC."

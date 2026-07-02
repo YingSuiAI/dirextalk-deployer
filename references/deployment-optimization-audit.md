@@ -11,14 +11,16 @@ claim that every App or host-agent runtime has been proven in a real session.
 - Runtime evidence still required: this repository can prepare or check the
   condition, but a real App, Codex, OpenClaw, Hermes, or MCP runtime must still
   provide final evidence.
-- Deferred by design: not part of the current EC2 MVP path.
+- Deferred by design: intentionally outside the current deployer-side scope.
 
 ## Current Best Plan
 
 Current best plan is the stricter plan now encoded in this branch:
 
-1. Keep one EC2 MVP path first, with `t3.small` default, dynamic cost estimate,
-   Route53 automation, temporary IAM user guidance, and destroy evidence.
+1. Use Lightsail as the default AWS path with the $12/month Linux bundle,
+   dynamic cost estimate, Route53 automation, temporary IAM user guidance, and
+   destroy evidence. Keep EC2 as an explicit `DIREXIO_CLOUD_PROVIDER=ec2`
+   option with the existing 50 GiB gp3 root volume default.
 2. Keep all node-local deployment state under `~/.direxio/nodes/<service_id>/`.
    Do not mutate global host MCP configs or assume one computer has only one
    agent or one backend node.
@@ -34,16 +36,16 @@ Current best plan is the stricter plan now encoded in this branch:
    clears old credentials, user confirmations, runtime checks, bridge install
    proof, and MCP install proof, so the next action is to rerun S4-S7 and
    runtime checks. Image-only update keeps local state intact.
-8. Keep Lightsail out of the current user-facing path. Lightsail remains
-   deferred until it has an independent resource model, pricing, state,
-   destroy, and test matrix.
+8. Keep Lightsail and EC2 resource models separate: Lightsail has its own
+   bundle/static-IP/state/destroy tests, while EC2 keeps VPC/EIP/security-group
+   preflight and cleanup.
 
 Audit anchors:
 - verify runtime is an internal non-polluting check
 - user App initialization and real chat evidence
 - update/reset are now first-class scripts
 - Local refresh
-- Lightsail remains deferred
+- Lightsail default path is implemented
 
 ## Requirement Mapping
 
@@ -93,8 +95,9 @@ Remaining evidence:
 Status: Deployer-side implemented.
 
 Current evidence:
-- `scripts/pricing-estimate.sh` records EC2, EBS, public IPv4/EIP, and Route53
-  estimate fields, with fallback status when AWS Pricing cannot answer.
+- `scripts/pricing-estimate.sh` records Lightsail bundle estimates by default
+  and EC2/EBS/public IPv4/EIP estimates when `--cloud-provider ec2` is used,
+  with fallback status when AWS Pricing cannot answer.
 - `scripts/destroy.sh` reads AWS resources back and records `destroy.evidence`.
 - `operation-report.json` includes `billing.destroy_cleanup_status` and
   `billing.possible_remaining_billable_resources`.
@@ -153,7 +156,8 @@ Remaining evidence:
 Status: Deployer-side implemented.
 
 Current evidence:
-- `SKILL.md` keeps the current MVP path as EC2 `t3.small` by default.
+- `SKILL.md` keeps Lightsail as the default path and documents
+  `DIREXIO_CLOUD_PROVIDER=ec2` for EC2.
 - Pricing is region-aware where AWS Pricing lookup succeeds, otherwise marked
   fallback.
 - Docs steer ordinary users away from `t2.micro`/`t3.micro` as default
@@ -168,20 +172,19 @@ Remaining evidence:
 
 ### DEPLOY-P1-002 - EC2 And Lightsail Path Separation
 
-Status: Deployer-side implemented for EC2 boundary, Deferred by design for
-Lightsail.
+Status: Deployer-side implemented.
 
 Current evidence:
-- `SKILL.md` says the current MVP deployment path is EC2-only.
-- Tests reject wording that offers Lightsail as an implemented automatic path.
+- `SKILL.md` says the default cloud provider is Lightsail and EC2 is explicit.
+- Tests cover Lightsail S3 provisioning and Lightsail destroy, while EC2 tests
+  still cover EIP preflight and 50 GiB root EBS mapping.
 
 Difference from the checklist:
-- No current script attempts to mix Lightsail into the EC2 state machine. That
-  is the safer plan.
+- The deployer now provides both paths without mixing resource models.
 
 Remaining evidence:
-- A future `deploy_mode=lightsail` must have independent provision, DNS,
-  state, pricing, destroy, and tests before being offered.
+- Live Lightsail and EC2 deployments should still be exercised against disposable
+  accounts before treating both paths as production-proven.
 
 ### DEPLOY-P1-003 - Recovery For Nontechnical Users
 

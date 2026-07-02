@@ -5,9 +5,9 @@
 ## 阶段
 
 - **S0_PREREQ_AWS**: 校验 AWS CLI、凭据和账号身份。
-- **S1_PREFLIGHT**: 校验 region、默认 VPC、vCPU 配额、Elastic IP 可用配额、Ubuntu amd64 AMI。
+- **S1_PREFLIGHT**: 校验 region、查询 Free Tier 使用情况、选择云提供方。默认 Lightsail；仅在 `DIREXIO_CLOUD_PROVIDER=ec2` 时校验默认 VPC、vCPU 配额、Elastic IP 可用配额、Ubuntu amd64 AMI。
 - **S2_DOMAIN**: 确认正式长期域名和 Matrix `server_name` 不可逆绑定。
-- **S3_PROVISION**: 创建 EC2、密钥对、安全组、Elastic IP，按 DNS 模式处理 Route53 hosted zone/A 记录或等待外部 DNS，渲染 cloud-init。默认镜像 `MESSAGE_SERVER_IMAGE=direxio/message-server:latest`。
+- **S3_PROVISION**: 默认创建 Lightsail $12 Linux 实例、密钥对、静态 IP 和防火墙端口；当 `DIREXIO_CLOUD_PROVIDER=ec2` 时创建 EC2、密钥对、安全组、Elastic IP 和 50 GiB gp3 root EBS。两条路径都会按 DNS 模式处理 Route53 hosted zone/A 记录或等待外部 DNS，渲染 cloud-init。默认镜像 `MESSAGE_SERVER_IMAGE=direxio/message-server:latest`。
 - **S4_BOOTSTRAP_STACK**: 等 cloud-init 安装 Docker 并启动 `postgres:18 + message-server + caddy + coturn`，轮询 `https://<domain>/healthz`。
 - **S5_INIT_TOKENS**: SSH 读取云端 `init-tokens.sh` 生成的 `/var/direxio-message-server/p2p/bootstrap.json`，归一化 `password`、`access_token`、`agent_token`、真实 `agent_room_id`。云端脚本会先调用 `portal.bootstrap`，用 `agent_token` 创建 `@agent:<server>` Matrix session，再用 owner Matrix token 创建房间并邀请/加入 agent，最后回写真正的 agent room。`password`、owner `access_token` 和 `agent_token` 按一次性/易失凭据处理；需要登录或用 token 调接口前，必须重新从服务器拉取最新 `/var/direxio-message-server/p2p/bootstrap.json`，不要复用旧输出。
 - **S6_WIRE_LOCAL**: 写本地凭据、用 `agent_token` 创建 `@agent:<server>` Matrix session、写 `direxio-connect/config.toml`，写 MCP 配置片段，并按策略安装或推荐 `direxio-connect`。默认 `auto` 模式会等待 daemon `Running` 且日志出现 `direxio-connect is running`；如果日志显示 Agent CLI 缺失、未登录、workspace trust、ACP 启动失败或 agent offline，S6 失败，不会继续报告部署完成。
@@ -35,12 +35,12 @@ S7 自动验收通过后应交付:
 - 安装命令: `npm install -g direxio-connent@latest && direxio-connect daemon install --config <config> --service-name <service_id> --force`
 - 启动验证: `direxio-connect daemon status --service-name <service_id>` 和 `direxio-connect daemon logs --service-name <service_id> -n 120`
 - MCP 检查命令: `DIREXIO_CREDENTIALS_FILE=<credentials.json> direxio-mcp doctor --json`
-- AWS 信息: region、instance id、Elastic IP、Route53 hosted zone、SSH 命令、state.json、destroy 命令
+- AWS 信息: region、cloud provider、instance id、固定 public IP、Route53 hosted zone、SSH 命令、state.json、destroy 命令
 - 用户确认 gates: App 初始化、消息闭环、Agent/MCP runtime 验证仍需单独记录。
 
 ## 常见阻断
 
-- DNS 未指向 EIP: S3 返回 waiting。Route53 模式下先检查 hosted zone/NS 委托；manual DNS fallback 下用户或 DNS provider automation 设置 A 记录后用 `DNS_READY=1` 续跑。
+- DNS 未指向固定 public IP: S3 返回 waiting。Route53 模式下先检查 hosted zone/NS 委托；manual DNS fallback 下用户或 DNS provider automation 设置 A 记录后用 `DNS_READY=1` 续跑。
 - `/healthz` 不通: 看 `/var/log/cloud-init-output.log` 和 `docker compose logs message-server`。
 - bootstrap 缺字段: 在实例上重跑 `sudo sh -lc 'cd /var/direxio-message-server && DOMAIN=<domain> bash /var/direxio-message-server/init-tokens.sh'`，再看宿主 `/var/direxio-message-server/p2p/bootstrap.json` 和容器内 `/var/direxio-message-server/p2p/bootstrap.json`。
 - `agent_room_id` 缺失或是旧伪 ID: 确认 `.env` 有 `P2P_PORTAL_PASSWORD`，然后重跑 `/var/direxio-message-server/init-tokens.sh`；脚本应创建真实 Matrix room 并回写。

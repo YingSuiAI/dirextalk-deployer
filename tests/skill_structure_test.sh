@@ -45,6 +45,8 @@ required=(
   tests/connect_daemon_runtime_check_test.sh
   tests/pricing_estimate_test.sh
   tests/eip_preflight_test.sh
+  tests/s3_lightsail_provision_test.sh
+  tests/destroy_lightsail_test.sh
   tests/route53_zone_auto_create_test.sh
   tests/route53_overwrite_guard_test.sh
   tests/destroy_root_identity_test.sh
@@ -305,6 +307,8 @@ grep -q 'should run the npm install commands below' README.md
 grep -q '应执行下方 npm 安装命令' README_zh.md
 grep -q 'do not use a generic GitHub skill installer' SKILL.md
 grep -q 'Read https://github.com/YingSuiAI/direxio-deployer README and follow its npm install rule' references/agent-targets.md
+grep -q 'DIREXIO_CLOUD_PROVIDER=lightsail' SKILL.md
+grep -q 'DIREXIO_CLOUD_PROVIDER=ec2' SKILL.md
 grep -q 'EC2-VPC Elastic IP quota' SKILL.md
 grep -q 'EC2-VPC Elastic IP quota' references/deployment-workflow.md
 grep -q 'orchestrate.sh confirm app_initialization' SKILL.md
@@ -333,8 +337,8 @@ grep -q 'authoritative DNS' SKILL.md
 grep -q 'AWS Budget' SKILL.md
 grep -q 'AWS Budget' references/deployment-workflow.md
 grep -q 'AWS Billing Console' SKILL.md
-grep -q 'Current MVP deployment path is EC2-only' SKILL.md
-grep -q 'Lightsail requires a separate deploy_mode=lightsail implementation before it can be offered' SKILL.md
+grep -q 'Default cloud provider is Lightsail' SKILL.md
+grep -q 'Lightsail automatic deployment is supported' SKILL.md
 grep -q 'rotate/remove root access keys if used' SKILL.md
 grep -q 'temporary IAM key' scripts/orchestrate.sh
 
@@ -366,10 +370,10 @@ grep -q 'update/reset are now first-class scripts' references/deployment-optimiz
 grep -q 'Local refresh' references/deployment-optimization-audit.md
 grep -q 'clears old credentials, user confirmations, runtime checks, bridge install' references/deployment-optimization-audit.md
 grep -q 'stops only the matching service-scoped direxio-connect daemon' references/deployment-optimization-audit.md
-grep -q 'Lightsail remains deferred' references/deployment-optimization-audit.md
+grep -q 'Lightsail default path is implemented' references/deployment-optimization-audit.md
 
-if grep -RE 'DOMAIN_MODE=lightsail|DEPLOY_MODE=lightsail|choose between EC2 and Lightsail|Lightsail automatic deployment is supported' SKILL.md README.md README_zh.md references scripts >/dev/null; then
-  echo "current docs/scripts must not offer Lightsail as an implemented automatic deployment path" >&2
+if grep -RE 'DOMAIN_MODE=lightsail' SKILL.md README.md README_zh.md references scripts >/dev/null; then
+  echo "cloud provider selection must not be documented as DOMAIN_MODE=lightsail" >&2
   exit 1
 fi
 

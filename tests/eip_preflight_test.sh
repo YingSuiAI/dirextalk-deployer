@@ -46,6 +46,7 @@ EOF
 chmod 700 "$fakebin/aws"
 export PATH="$fakebin:$PATH"
 export AWS_DEFAULT_REGION=ap-northeast-1
+export DIREXIO_CLOUD_PROVIDER=ec2
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"

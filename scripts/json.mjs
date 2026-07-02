@@ -440,6 +440,7 @@ function cmdOperationReport(args) {
 
 function buildOperationReport(operation, status, stateFile, generatedAt, st) {
   const redactedStatus = stringValue(st.password).length > 0 ? "available_in_state_password_field_redacted" : "missing";
+  const cloudProvider = stringValue(st.cloud_provider || "");
   const phaseStatuses = {};
   for (const [key, value] of Object.entries(objectValue(st.phases))) {
     phaseStatuses[key] = stringValue(value?.status || "unknown");
@@ -447,20 +448,26 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
   const userGate = (gate, fallback) => st.user_confirmations?.[gate]?.status || fallback;
   const localRefreshStatus = st.connect_install_status === "refresh_pending" ? "refresh_pending" : "current_or_not_recorded";
   const billable = compact([
-    stringValue(st.resources?.instance_id) ? `EC2 ${st.resources.instance_id}` : "",
-    stringValue(st.resources?.root_volume_id) ? `EBS root volume ${st.resources.root_volume_id}` : "",
+    stringValue(st.resources?.lightsail_instance_name) ? `Lightsail instance ${st.resources.lightsail_instance_name}` : "",
+    stringValue(st.resources?.lightsail_static_ip_name) ? `Lightsail static IP ${st.resources.lightsail_static_ip_name}` : "",
+    cloudProvider !== "lightsail" && stringValue(st.resources?.instance_id) ? `EC2 ${st.resources.instance_id}` : "",
+    cloudProvider !== "lightsail" && stringValue(st.resources?.root_volume_id) ? `EBS root volume ${st.resources.root_volume_id}` : "",
     stringValue(st.resources?.public_ip) ? `public IPv4 ${st.resources.public_ip}` : "",
-    stringValue(st.resources?.eip_id) ? `Elastic IP ${st.resources.eip_id}` : "",
+    cloudProvider !== "lightsail" && stringValue(st.resources?.eip_id) ? `Elastic IP ${st.resources.eip_id}` : "",
     stringValue(st.resources?.route53_zone_id) ? `Route53 hosted zone ${st.resources.route53_zone_id}` : ""
   ]);
   const destroyStatus = (key) => st.destroy_evidence?.[key]?.status || "not_checked";
   const statusNotIn = (value, safe) => !safe.includes(value);
   const destroyBillableResidue = compact([
-    stringValue(st.resources?.instance_id) && statusNotIn(destroyStatus("ec2_instance"), ["terminated", "not_found", "skipped"])
+    stringValue(st.resources?.lightsail_instance_name) && statusNotIn(destroyStatus("lightsail_instance"), ["deleted", "not_found", "skipped"])
+      ? `Lightsail instance ${st.resources.lightsail_instance_name} status=${destroyStatus("lightsail_instance")}` : "",
+    stringValue(st.resources?.lightsail_static_ip_name) && statusNotIn(destroyStatus("lightsail_static_ip"), ["released", "not_found", "skipped"])
+      ? `Lightsail static IP ${st.resources.lightsail_static_ip_name} status=${destroyStatus("lightsail_static_ip")}` : "",
+    cloudProvider !== "lightsail" && stringValue(st.resources?.instance_id) && statusNotIn(destroyStatus("ec2_instance"), ["terminated", "not_found", "skipped"])
       ? `EC2 ${st.resources.instance_id} status=${destroyStatus("ec2_instance")}` : "",
-    stringValue(st.resources?.root_volume_id) && statusNotIn(destroyStatus("ebs_root_volume"), ["deleted", "skipped"])
+    cloudProvider !== "lightsail" && stringValue(st.resources?.root_volume_id) && statusNotIn(destroyStatus("ebs_root_volume"), ["deleted", "skipped"])
       ? `EBS root volume ${st.resources.root_volume_id} status=${destroyStatus("ebs_root_volume")}` : "",
-    stringValue(st.resources?.eip_id) && statusNotIn(destroyStatus("elastic_ip"), ["released", "skipped"])
+    cloudProvider !== "lightsail" && stringValue(st.resources?.eip_id) && statusNotIn(destroyStatus("elastic_ip"), ["released", "skipped"])
       ? `Elastic IP ${st.resources.eip_id} status=${destroyStatus("elastic_ip")}` : "",
     stringValue(st.resources?.route53_zone_id) && statusNotIn(destroyStatus("route53_hosted_zone"), ["deleted", "skipped"])
       ? `Route53 hosted zone ${st.resources.route53_zone_id} status=${destroyStatus("route53_hosted_zone")}` : ""
@@ -537,12 +544,17 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
     },
     resources: {
       region: st.region || "",
+      cloud_provider: st.cloud_provider || "",
       domain_mode: st.domain_mode || "",
       instance_type: st.instance_type || "",
       instance_id: st.resources?.instance_id || "",
       root_volume_id: st.resources?.root_volume_id || "",
       public_ip: st.resources?.public_ip || "",
       eip_id: st.resources?.eip_id || "",
+      lightsail_instance_name: st.resources?.lightsail_instance_name || "",
+      lightsail_static_ip_name: st.resources?.lightsail_static_ip_name || "",
+      lightsail_bundle_id: st.resources?.lightsail_bundle_id || "",
+      lightsail_bundle_price_usd: st.resources?.lightsail_bundle_price_usd || "",
       route53_zone_id: st.resources?.route53_zone_id || "",
       route53_zone_name: st.resources?.route53_zone_name || "",
       route53_zone_created_by_deployer: st.resources?.route53_zone_created_by_deployer || "",

@@ -87,7 +87,7 @@ Before final deployment confirmation:
 
 ```bash
 aws freetier get-account-plan-state --output json
-bash scripts/pricing-estimate.sh --region <aws-region> --instance-type t3.small --disk-gb 8 --domain-mode <user|route53>
+bash scripts/pricing-estimate.sh --region <aws-region> --cloud-provider lightsail --domain-mode <user|route53>
 bash scripts/pricing-estimate.sh --state ~/.direxio/nodes/<service_id>/state.json --write-state
 ```
 
@@ -101,6 +101,7 @@ DOMAIN=<final-domain>
 DOMAIN_MODE=user
 CONFIRM_DOMAIN_BINDING=1
 MESSAGE_SERVER_IMAGE=direxio/message-server:latest
+DIREXIO_CLOUD_PROVIDER=lightsail
 ```
 
 Use `DOMAIN_MODE=route53` only when the user authorizes AWS to manage the A
@@ -108,7 +109,7 @@ record. If an existing A record points elsewhere, require
 `DIREXIO_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
 authoritative DNS before continuing.
 
-Current MVP deployment path is EC2-only. Lightsail requires a separate deploy_mode=lightsail implementation before it can be offered.
+Default cloud provider is Lightsail. Lightsail automatic deployment is supported through `DIREXIO_CLOUD_PROVIDER=lightsail` and uses the $12/month Linux bundle by default. EC2 remains supported only when the operator sets `DIREXIO_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
 
 ## Local Runtime Wiring
 
@@ -234,7 +235,7 @@ volume size, billing reminders, and `cost_estimate`.
 
 Delivery must include App domain, eight-digit app initialization code, product
 gate status, `agent_room_id`, service directory, direxio-connect config, MCP config
-paths, Matrix bridge user/device, AWS region, EC2 instance/public IP, SSH path,
+paths, Matrix bridge user/device, AWS region, cloud provider, cloud instance/public IP, SSH path,
 state path, report path, stop-billing reminder, and security reminder to delete
 or disable temporary credentials and rotate/remove root access keys if used.
 
@@ -245,7 +246,7 @@ TLS storage, local credentials, confirmations, runtime checks, direxio-connect d
 state, and MCP artifacts unless verification proves credentials were regenerated.
 
 Use `scripts/reset-app-data.sh` only with `DIREXIO_RESET_APP_DATA_CONFIRM=1`.
-It preserves EC2, public IPv4/Elastic IP, DNS, and Caddy TLS storage, clears
+It preserves the cloud instance, fixed public IP/static IP or Elastic IP, DNS, and Caddy TLS storage, clears
 application data, clears old user-confirmation/runtime-check evidence, sets
 `connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped direxio-connect daemon. The follow-up
 orchestrate run regenerates credentials and MCP snippets.

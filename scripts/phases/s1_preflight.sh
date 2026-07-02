@@ -1,12 +1,34 @@
 #!/usr/bin/env bash
-# S1 PREFLIGHT - default VPC, EC2 vCPU quota, Elastic IP, and AMI checks.
+# S1 PREFLIGHT - cloud provider choice, Free Tier usage, and provider checks.
 #
-# New AWS accounts often start with low or exhausted EC2/EIP quota. Report the
-# blocker before S3 creates resources.
+# New deployments default to Lightsail's fixed $12/month Linux bundle. EC2
+# remains available through DIREXIO_CLOUD_PROVIDER=ec2 or DEPLOY_MODE=ec2.
+
+DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
+DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
+DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
+DEFAULT_EC2_INSTANCE_TYPE=${DEFAULT_EC2_INSTANCE_TYPE:-t3.small}
 
 run_phase() {
   aws_env_prep
   phase_set S1_PREFLIGHT in_progress "running preflight checks"
+  local cloud_provider
+  cloud_provider=$(_resolve_cloud_provider)
+  state_set cloud_provider "$cloud_provider"
+  _record_free_tier_usage "$cloud_provider"
+  _record_cloud_recommendation "$cloud_provider"
+
+  if [ "$cloud_provider" = "lightsail" ]; then
+    _preflight_lightsail
+    phase_set S1_PREFLIGHT done "cloud_provider=lightsail bundle=$(_state_or_default resources.lightsail_bundle_id unknown)"
+    return 0
+  fi
+
+  _preflight_ec2
+}
+
+_preflight_ec2() {
+  phase_set S1_PREFLIGHT in_progress "running EC2 preflight checks"
 
   # 1) Default VPC.
   local vpc
@@ -50,8 +72,141 @@ run_phase() {
   res_set ami_id "$ami"
   log "AMI = $ami (Ubuntu 22.04 amd64/x86, user=ubuntu)"
 
-  phase_set S1_PREFLIGHT done "vpc=$vpc quota=$quota ami=$ami"
+  phase_set S1_PREFLIGHT done "cloud_provider=ec2 vpc=$vpc quota=$quota ami=$ami"
   return 0
+}
+
+_resolve_cloud_provider() {
+  local provider
+  provider=$(state_get cloud_provider)
+  provider=${DIREXIO_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXIO_DEPLOY_PROVIDER:-$provider}}}
+  provider=${provider:-lightsail}
+  provider=$(printf '%s' "$provider" | tr '[:upper:]' '[:lower:]')
+  case "$provider" in
+    lightsail|ec2) printf '%s\n' "$provider" ;;
+    *)
+      phase_set S1_PREFLIGHT waiting_user "unknown cloud provider"
+      warn "Unknown cloud provider: $provider. Expected lightsail or ec2."
+      warn "Use DIREXIO_CLOUD_PROVIDER=lightsail for the default $12 Lightsail bundle, or DIREXIO_CLOUD_PROVIDER=ec2 for the EC2 path."
+      return 2
+      ;;
+  esac
+}
+
+_record_free_tier_usage() {
+  local provider=$1 tmp status count
+  tmp=$(mktemp)
+  if aws freetier get-free-tier-usage --output json > "$tmp" 2>/dev/null; then
+    count=$(json_get "$tmp" 'freeTierUsages.length' 2>/dev/null || printf '')
+    status=queried
+    state_set_object aws_free_tier \
+      status=queried \
+      "checked_at=$(_now)" \
+      "usage_count=${count:-unknown}" \
+      "provider=$provider"
+  else
+    state_set_object aws_free_tier \
+      status=unavailable \
+      "checked_at=$(_now)" \
+      "provider=$provider" \
+      "evidence=aws freetier get-free-tier-usage failed or is not permitted"
+  fi
+  rm -f "$tmp"
+}
+
+_record_cloud_recommendation() {
+  local selected=$1 recommended=lightsail reason
+  if [ "$selected" = "ec2" ]; then
+    reason="operator selected EC2; default recommendation remains Lightsail unless EC2-specific controls are required"
+  else
+    reason="Lightsail $12 Linux bundle gives fixed 2GB/2vCPU/60GB capacity and avoids EC2/EIP setup for the default path"
+  fi
+  state_set_object cloud_recommendation \
+    default_provider=lightsail \
+    "selected_provider=$selected" \
+    "recommended_provider=$recommended" \
+    choices=lightsail,ec2 \
+    "lightsail_monthly_usd=$DEFAULT_LIGHTSAIL_MONTHLY_USD" \
+    "lightsail_ram_gb=$DEFAULT_LIGHTSAIL_RAM_GB" \
+    "lightsail_disk_gb=$DEFAULT_LIGHTSAIL_DISK_GB" \
+    "ec2_instance_type=$DEFAULT_EC2_INSTANCE_TYPE" \
+    "reason=$reason"
+}
+
+_preflight_lightsail() {
+  local bundle
+  bundle=$(res_get lightsail_bundle_id)
+  if [ -z "$bundle" ]; then
+    bundle=$(_select_lightsail_bundle) || {
+      phase_set S1_PREFLIGHT failed "Lightsail $12 bundle unavailable"
+      warn "Could not find a Lightsail Linux/Unix bundle near $12/month in this account/region."
+      warn "Set DIREXIO_LIGHTSAIL_BUNDLE_ID to override, or use DIREXIO_CLOUD_PROVIDER=ec2."
+      return 1
+    }
+  fi
+  log "Cloud provider = Lightsail; selected bundle = $bundle"
+  warn "Default deployment uses Lightsail $DEFAULT_LIGHTSAIL_MONTHLY_USD/month Linux bundle. Use DIREXIO_CLOUD_PROVIDER=ec2 to choose the EC2 path."
+  return 0
+}
+
+_select_lightsail_bundle() {
+  local override tmp selected price ram disk transfer cpu
+  override=${DIREXIO_LIGHTSAIL_BUNDLE_ID:-}
+  if [ -n "$override" ]; then
+    res_set lightsail_bundle_id "$override"
+    res_set lightsail_bundle_price_usd "$DEFAULT_LIGHTSAIL_MONTHLY_USD"
+    res_set lightsail_bundle_ram_gb "$DEFAULT_LIGHTSAIL_RAM_GB"
+    res_set lightsail_bundle_disk_gb "$DEFAULT_LIGHTSAIL_DISK_GB"
+    printf '%s\n' "$override"
+    return 0
+  fi
+  tmp=$(mktemp)
+  aws lightsail get-bundles --output json > "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  selected=$("$(json_node)" - "$tmp" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB" <<'NODE'
+const fs = require("fs");
+const [file, targetPrice, targetRam, targetDisk] = process.argv.slice(2);
+const data = JSON.parse(fs.readFileSync(file, "utf8"));
+const num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
+const platformOk = (b) => String(b.supportedPlatforms || b.supportedPlatform || b.platform || "").toLowerCase().includes("linux")
+  || String(b.supportedPlatforms || b.supportedPlatform || b.platform || "") === "";
+const bundles = Array.isArray(data.bundles) ? data.bundles : [];
+const candidates = bundles.filter(platformOk).map((b) => ({
+  id: String(b.bundleId || ""),
+  price: num(b.price),
+  ram: num(b.ramSizeInGb),
+  disk: num(b.diskSizeInGb),
+  transfer: num(b.transferPerMonthInGb),
+  cpu: num(b.cpuCount)
+})).filter((b) => b.id && b.price > 0);
+const exact = candidates.filter((b) => Math.abs(b.price - Number(targetPrice)) < 0.01 && b.ram >= Number(targetRam) && b.disk >= Number(targetDisk));
+const fallback = candidates.filter((b) => b.price >= Number(targetPrice) && b.ram >= Number(targetRam));
+const selected = (exact.length ? exact : fallback).sort((a, b) => a.price - b.price || a.ram - b.ram || a.disk - b.disk)[0];
+if (!selected) process.exit(1);
+process.stdout.write([selected.id, selected.price, selected.ram, selected.disk, selected.transfer, selected.cpu].join("\t"));
+NODE
+  ) || {
+    rm -f "$tmp"
+    return 1
+  }
+  rm -f "$tmp"
+  IFS=$'\t' read -r selected price ram disk transfer cpu <<EOF
+$selected
+EOF
+  res_set lightsail_bundle_id "$selected"
+  res_set lightsail_bundle_price_usd "$price"
+  res_set lightsail_bundle_ram_gb "$ram"
+  res_set lightsail_bundle_disk_gb "$disk"
+  res_set lightsail_bundle_transfer_gb "$transfer"
+  res_set lightsail_bundle_cpu_count "$cpu"
+  printf '%s\n' "$selected"
+}
+
+_state_or_default() {
+  local path=$1 fallback=${2:-}
+  json_get "$STATE_JSON" "$path" "$fallback"
 }
 
 # Values used when quota cannot be read. These warn but do not block.

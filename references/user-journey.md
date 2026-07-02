@@ -31,7 +31,7 @@ bash -lc 'echo ok; command -v node; command -v aws; command -v ssh; command -v s
 | Mode | Meaning | DNS behavior |
 |---|---|---|
 | `route53` | User authorizes AWS Route53 automation | S3 reuses or creates the hosted zone, records NS, upserts the A record, and waits for DNS to resolve |
-| `user` | Fallback when no DNS provider automation is available | S3 emits the EIP and waits until the domain A record resolves to it |
+| `user` | Fallback when no DNS provider automation is available | S3 emits the fixed public IP and waits until the domain A record resolves to it |
 
 ## Minimal Command
 
@@ -41,10 +41,12 @@ AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
-INSTANCE_TYPE=t3.small \
+DIREXIO_CLOUD_PROVIDER=lightsail \
 MESSAGE_SERVER_IMAGE=direxio/message-server:latest \
 bash scripts/orchestrate.sh
 ```
+
+Use `DIREXIO_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=t3.small` only when the operator explicitly chooses the retained EC2 path.
 
 ## Token Initialization
 
@@ -62,7 +64,7 @@ When all phases complete, report:
 - `connect_config`, `connect_matrix_user`, `connect_matrix_device`, and `connect_matrix_homeserver`
 - connect install policy/mode/status from `connect_install_*` state fields; `DIREXIO_AGENT_INSTALL` and `DIREXIO_AGENT_INSTALL_MODE` are the operator selectors
 - manual command: `npm install -g direxio-connent@latest && direxio-connect daemon install --config <connect_config> --service-name <service_id> --force`
-- region, instance ID, public IP, and `state.json` path
+- region, cloud provider, instance ID, public IP, and `state.json` path
 - SSH command
 - stop-billing guidance: ask the agent to destroy this node when finished
 - which gates are automated and which still need user confirmation, because S7 green is not the final product-complete state

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pricing-estimate.sh - estimate monthly AWS costs for a Direxio EC2 node.
+# pricing-estimate.sh - estimate monthly AWS costs for a Direxio node.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -10,11 +10,18 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   scripts/pricing-estimate.sh --state <state.json> [--write-state]
-  scripts/pricing-estimate.sh --region <region> --instance-type <type> --disk-gb <gb> --domain-mode <user|route53>
+  scripts/pricing-estimate.sh --region <region> --cloud-provider <lightsail|ec2> [--instance-type <type>] [--disk-gb <gb>] --domain-mode <user|route53>
 
 Queries AWS Price List where possible. Falls back conservatively when pricing is unavailable.
 EOF
 }
+
+DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
+DEFAULT_LIGHTSAIL_BUNDLE_ID=${DEFAULT_LIGHTSAIL_BUNDLE_ID:-medium_3_0}
+DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
+DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
+DEFAULT_LIGHTSAIL_TRANSFER_GB=${DEFAULT_LIGHTSAIL_TRANSFER_GB:-3072}
+DEFAULT_LIGHTSAIL_CPU_COUNT=${DEFAULT_LIGHTSAIL_CPU_COUNT:-2}
 
 region_location() {
   case "$1" in
@@ -158,21 +165,49 @@ build_estimate() {
     "$route53_monthly"
 }
 
+build_lightsail_estimate() {
+  local region=$1 domain_mode=$2 bundle_id=$3 price=$4 ram=$5 disk=$6 transfer=$7 cpu=$8 route53_monthly total
+  if [ "$domain_mode" = "route53" ]; then
+    route53_monthly=${DIREXIO_ROUTE53_HOSTED_ZONE_MONTHLY_USD:-0.50}
+  else
+    route53_monthly=0
+  fi
+  total=$(round2 "$(awk -v p="$price" -v r="$route53_monthly" 'BEGIN { print p+r }')")
+  json_build object \
+    provider=lightsail \
+    pricing_status=bundle_price_recorded \
+    "region=$region" \
+    "domain_mode=$domain_mode" \
+    "total_monthly_usd=$total" \
+    "components={\"lightsail_bundle\":{\"bundle_id\":\"$bundle_id\",\"monthly_usd\":$price,\"ram_gb\":$ram,\"disk_gb\":$disk,\"transfer_gb\":$transfer,\"cpu_count\":$cpu},\"route53_hosted_zone\":{\"monthly_usd\":$route53_monthly,\"included\":$( [ "$domain_mode" = "route53" ] && printf true || printf false )}}" \
+    'notes=["Estimate excludes data transfer beyond the Lightsail bundle, TURN relay traffic, domain registration, taxes, and AWS credit eligibility.","AWS credits may reduce charges only when the account, plan, region, and service usage are eligible; verify in AWS Billing Console."]' \
+    'recommendations=["Set an AWS Budget or billing alert before leaving the node running.","Review AWS Billing Console after deployment and after destroy to confirm actual charges and remaining credits."]'
+}
+
 state=""
 write_state=0
 region=""
+cloud_provider=""
 instance_type=""
 disk_gb=""
 domain_mode=""
+lightsail_bundle_id=""
+lightsail_price=""
+lightsail_ram=""
+lightsail_disk=""
+lightsail_transfer=""
+lightsail_cpu=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --state) state=${2:-}; shift 2 ;;
     --write-state) write_state=1; shift ;;
     --region) region=${2:-}; shift 2 ;;
+    --cloud-provider|--provider|--cloud) cloud_provider=${2:-}; shift 2 ;;
     --instance-type) instance_type=${2:-}; shift 2 ;;
     --disk-gb) disk_gb=${2:-}; shift 2 ;;
     --domain-mode) domain_mode=${2:-}; shift 2 ;;
+    --lightsail-bundle-id|--bundle-id) lightsail_bundle_id=${2:-}; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 1 ;;
   esac
@@ -184,23 +219,49 @@ if [ -n "$state" ]; then
     exit 1
   }
   region=${region:-$(json_get "$state" region)}
+  cloud_provider=${cloud_provider:-$(json_get "$state" cloud_provider)}
   instance_type=${instance_type:-$(json_get "$state" instance_type)}
   domain_mode=${domain_mode:-$(json_get "$state" domain_mode user)}
   disk_gb=${disk_gb:-$(json_get "$state" resources.root_volume_gb)}
   disk_gb=${disk_gb:-$(json_get "$state" root_volume_gb 50)}
+  lightsail_bundle_id=${lightsail_bundle_id:-$(json_get "$state" resources.lightsail_bundle_id)}
+  lightsail_price=${lightsail_price:-$(json_get "$state" resources.lightsail_bundle_price_usd)}
+  lightsail_ram=${lightsail_ram:-$(json_get "$state" resources.lightsail_bundle_ram_gb)}
+  lightsail_disk=${lightsail_disk:-$(json_get "$state" resources.lightsail_bundle_disk_gb)}
+  lightsail_transfer=${lightsail_transfer:-$(json_get "$state" resources.lightsail_bundle_transfer_gb)}
+  lightsail_cpu=${lightsail_cpu:-$(json_get "$state" resources.lightsail_bundle_cpu_count)}
 fi
 
 region=${region:-${AWS_DEFAULT_REGION:-${AWS_REGION:-}}}
+cloud_provider=${cloud_provider:-${DIREXIO_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXIO_DEPLOY_PROVIDER:-lightsail}}}}
+cloud_provider=$(printf '%s' "$cloud_provider" | tr '[:upper:]' '[:lower:]')
 instance_type=${instance_type:-t3.small}
 disk_gb=${disk_gb:-50}
 domain_mode=${domain_mode:-user}
+lightsail_bundle_id=${lightsail_bundle_id:-${DIREXIO_LIGHTSAIL_BUNDLE_ID:-$DEFAULT_LIGHTSAIL_BUNDLE_ID}}
+lightsail_price=${lightsail_price:-$DEFAULT_LIGHTSAIL_MONTHLY_USD}
+lightsail_ram=${lightsail_ram:-$DEFAULT_LIGHTSAIL_RAM_GB}
+lightsail_disk=${lightsail_disk:-$DEFAULT_LIGHTSAIL_DISK_GB}
+lightsail_transfer=${lightsail_transfer:-$DEFAULT_LIGHTSAIL_TRANSFER_GB}
+lightsail_cpu=${lightsail_cpu:-$DEFAULT_LIGHTSAIL_CPU_COUNT}
 
 [ -n "$region" ] || {
   echo "region is required for pricing estimate" >&2
   exit 1
 }
 
-estimate=$(build_estimate "$region" "$instance_type" "$disk_gb" "$domain_mode")
+case "$cloud_provider" in
+  lightsail)
+    estimate=$(build_lightsail_estimate "$region" "$domain_mode" "$lightsail_bundle_id" "$lightsail_price" "$lightsail_ram" "$lightsail_disk" "$lightsail_transfer" "$lightsail_cpu")
+    ;;
+  ec2)
+    estimate=$(build_estimate "$region" "$instance_type" "$disk_gb" "$domain_mode")
+    ;;
+  *)
+    echo "unknown cloud provider: $cloud_provider" >&2
+    exit 1
+    ;;
+esac
 if [ "$write_state" = "1" ]; then
   [ -n "$state" ] || {
     echo "--write-state requires --state" >&2

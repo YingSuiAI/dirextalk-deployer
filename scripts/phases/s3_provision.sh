@@ -260,8 +260,13 @@ _run_phase_lightsail() {
   keyfile="$DIREXIO_WORKDIR/${name}.pem"
   if [ -z "$(res_get key_name)" ]; then
     log "Creating Lightsail key pair $name ..."
-    aws lightsail create-key-pair --key-pair-name "$name" --query privateKeyBase64 --output text \
-      | _decode_lightsail_private_key > "$keyfile"
+    if ! aws lightsail create-key-pair --key-pair-name "$name" --query privateKeyBase64 --output text \
+      | _decode_lightsail_private_key > "$keyfile"; then
+      rm -f "$keyfile"
+      phase_set S3_PROVISION failed "failed to write Lightsail private key"
+      warn "Lightsail private key was not PEM text or base64-encoded PEM text. Delete the partial key pair or rerun after checking AWS CLI output."
+      return 1
+    fi
     restrict_private_file "$keyfile"
     res_set key_name "$name"; res_set key_file "$keyfile"
   else
@@ -300,6 +305,7 @@ _run_phase_lightsail() {
     res_set instance_id "$instance_name"
     res_set lightsail_instance_created "true"
   fi
+  _wait_lightsail_instance_running "$instance_name" || return $?
   if [ "$(res_get lightsail_ports_configured)" != "true" ]; then
     _open_lightsail_ports "$instance_name" || return $?
     res_set lightsail_ports_configured "true"
@@ -371,7 +377,52 @@ _aws_resource_name() {
 }
 
 _decode_lightsail_private_key() {
-  "$(json_node)" -e 'let input=""; process.stdin.on("data", d => input += d); process.stdin.on("end", () => process.stdout.write(Buffer.from(input.trim(), "base64").toString("utf8")));'
+  "$(json_node)" -e '
+let input = "";
+process.stdin.on("data", (d) => input += d);
+process.stdin.on("end", () => {
+  const raw = input.replace(/\r\n/g, "\n").trim();
+  const pemRe = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/;
+  const writePem = (value) => {
+    const pem = value.replace(/\r\n/g, "\n").trim();
+    process.stdout.write(pem.endsWith("\n") ? pem : `${pem}\n`);
+  };
+  if (pemRe.test(raw)) {
+    writePem(raw);
+    return;
+  }
+  const decoded = Buffer.from(raw.replace(/\s+/g, ""), "base64").toString("utf8");
+  if (pemRe.test(decoded)) {
+    writePem(decoded);
+    return;
+  }
+  console.error("Lightsail private key was neither PEM text nor base64-encoded PEM text.");
+  process.exit(1);
+});'
+}
+
+_wait_lightsail_instance_running() {
+  local instance_name=$1 attempts=${DIREXIO_LIGHTSAIL_READY_ATTEMPTS:-60} interval=${DIREXIO_LIGHTSAIL_READY_INTERVAL_SECONDS:-5}
+  local i state
+  log "Waiting for Lightsail instance $instance_name to become running ..."
+  for ((i=1; i<=attempts; i++)); do
+    state=$(aws lightsail get-instance --instance-name "$instance_name" --query 'instance.state.name' --output text 2>/dev/null | tr -d '\r' || true)
+    case "$state" in
+      running)
+        res_set lightsail_instance_state running
+        return 0
+        ;;
+      pending|starting|stopping|stopped|"")
+        ;;
+      *)
+        warn "Lightsail instance $instance_name state is $state; waiting before network operations."
+        ;;
+    esac
+    [ "$i" -lt "$attempts" ] && sleep "$interval"
+  done
+  phase_set S3_PROVISION failed "Lightsail instance did not become running before timeout"
+  warn "Timed out waiting for Lightsail instance $instance_name to become running. Check AWS Lightsail instance state, then rerun to resume."
+  return 1
 }
 
 _lightsail_default_zone() {

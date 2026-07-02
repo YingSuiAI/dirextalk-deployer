@@ -12,7 +12,7 @@
 ## 部署前准备
 
 - 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。
-- deployer 创建的 AWS 资源在销毁前可能持续计费。新部署默认优先使用 Lightsail 12 美元/月 Linux 套餐。S1 会在确认前查询 Lightsail 套餐和可用区；如果所选 region 没有可用 Lightsail 资源，推荐和选择会切到 EC2。需要显式 EC2 时设置 `DIREXIO_CLOUD_PROVIDER=ec2`，新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
+- deployer 创建的 AWS 资源在销毁前可能持续计费。新部署默认优先使用 Lightsail 12 美元/月 Linux 套餐。AWS 可能为符合条件的账号提供部分 Lightsail 套餐三个月免费额度，但资格需要在 AWS Billing Console 中确认。S1 会在确认前查询 Lightsail 套餐和可用区；如果所选 region 没有可用 Lightsail 资源，推荐和选择会切到 EC2。需要显式 EC2 时设置 `DIREXIO_CLOUD_PROVIDER=ec2`，新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
 - `SKILL.md` 是给智能体看的运行手册，详细部署规则、确认门禁、运行时 wiring 和恢复流程都放在那里。
 
 ## Skill 安装和更新

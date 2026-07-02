@@ -85,9 +85,10 @@ domain registration, taxes, and AWS credits. When available, check the Free Tier
 account plan with `aws freetier get-account-plan-state --output json`;
 otherwise tell the user that AWS currently advertises 100 USD initial credits
 for new customer accounts plus possible additional credits after Free Tier
-activities. Credit coverage is not guaranteed; verify credits and actual
-charges in AWS Billing Console, and set an AWS Budget or billing alert before
-leaving the node running.
+activities, and that Lightsail may offer three months free on select Lightsail bundles.
+Credit and bundle-trial coverage is not guaranteed; verify credits and
+actual charges in AWS Billing Console, and set an AWS Budget or billing alert
+before leaving the node running.
 
 ## Destroy
 

@@ -445,7 +445,7 @@ ensure_free_tier_credit_notice() {
     fi
   fi
   warn "AWS new customer accounts may include Free Tier credits, currently advertised as 100 USD initial credits plus possible additional credits."
-  warn "Credits may cover a small trial deployment, but coverage is account-specific; verify credits in AWS Billing Console and destroy the node when finished."
+  warn "Lightsail may also offer three months free on select Lightsail bundles. Credits and bundle trials are account-specific; verify coverage in AWS Billing Console and destroy the node when finished."
 }
 
 precheck_new_deploy_domain_env() {

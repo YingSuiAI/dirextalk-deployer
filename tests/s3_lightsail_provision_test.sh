@@ -29,7 +29,12 @@ case "${1:-} ${2:-}" in
     printf '{"regions":[{"name":"us-east-1","availabilityZones":[{"zoneName":"us-east-1a","state":"unavailable"},{"zoneName":"us-east-1b","state":"available"}]}]}\n'
     ;;
   "lightsail create-key-pair")
-    printf '%s\n' "$(printf 'PRIVATE_KEY' | base64 | tr -d '\n')"
+    printf '%s\n' '-----BEGIN OPENSSH PRIVATE KEY-----'
+    printf '%s\n' 'test-key-material'
+    printf '%s\n' '-----END OPENSSH PRIVATE KEY-----'
+    ;;
+  "lightsail get-instance")
+    printf 'running\n'
     ;;
   "lightsail get-static-ip")
     count_file="$TMPDIR/get-static-ip.count"
@@ -76,7 +81,18 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
 fi
 
 json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'direxio-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'direxio-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12"
+key_file=$(json_get "$STATE_JSON" resources.key_file)
+grep -q -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$key_file" || {
+  echo "Lightsail private key should be written as PEM text when AWS returns PEM text" >&2
+  xxd -l 32 "$key_file" >&2
+  exit 1
+}
 grep -q 'lightsail create-instances' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q 'lightsail get-instance' "$CALLS" || {
+  echo "Lightsail provisioning should wait for instance state before port/static IP operations" >&2
+  cat "$CALLS" >&2
+  exit 1
+}
 grep -q -- '--availability-zone us-east-1b' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail allocate-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail attach-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }

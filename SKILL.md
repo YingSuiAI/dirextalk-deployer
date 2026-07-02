@@ -91,7 +91,7 @@ bash scripts/pricing-estimate.sh --region <aws-region> --cloud-provider lightsai
 bash scripts/pricing-estimate.sh --state ~/.direxio/nodes/<service_id>/state.json --write-state
 ```
 
-Record and report `cost_estimate`. Mention that AWS may advertise `100 USD initial credits`, but coverage is account-specific and must be verified in AWS Billing Console. Recommend an AWS Budget. Check EC2-VPC Elastic IP quota before
+Record and report `cost_estimate`. Mention that AWS may advertise `100 USD initial credits`, and that Lightsail may offer three months free on select Lightsail bundles, but coverage is account-specific and must be verified in AWS Billing Console. Recommend an AWS Budget. Check EC2-VPC Elastic IP quota before
 mutating AWS resources.
 
 Required deployment env:

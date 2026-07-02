@@ -220,9 +220,9 @@ _connect_default_agent_options_toml() {
     codex)
       _toml_has_key "$custom_toml" backend || printf 'backend = "app_server"\n'
       _toml_has_key "$custom_toml" app_server_url || printf 'app_server_url = "stdio"\n'
-      _toml_has_key "$custom_toml" mode || printf 'mode = "yolo"\n'
       ;;
   esac
+  _toml_has_key "$custom_toml" mode || printf 'mode = "yolo"\n'
 }
 
 _toml_escape() {

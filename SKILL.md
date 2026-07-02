@@ -157,12 +157,13 @@ and recent logs show `direxio-connect is running`; logs that show agent CLI
 missing, login/trust failures, ACP startup failures, or agent offline state fail
 S6 so deploy does not report success prematurely. `recommend` writes files and
 prints commands only; `skip` writes credentials/env and configs only. OpenClaw
-and Hermes map to the generic ACP backend by default.
-On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd` and
-writes `mode = "yolo"` by default. If Cursor Agent CLI is not logged in, the
-operator must run `agent.cmd login` once; rerunning the deployer refreshes
-config and restarts the service-scoped daemon. Explicit `DIREXIO_CURSOR_COMMAND`,
-`DIREXIO_CURSOR_AGENT_COMMAND`, `DIREXIO_CONNECT_AGENT_CMD`, and
+and Hermes map to the generic ACP backend by default. Generated agent options
+write `mode = "yolo"` by default unless an explicit `mode` is supplied.
+On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
+Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
+once; rerunning the deployer refreshes config and restarts the service-scoped
+daemon. Explicit `DIREXIO_CURSOR_COMMAND`, `DIREXIO_CURSOR_AGENT_COMMAND`,
+`DIREXIO_CONNECT_AGENT_CMD`, `DIREXIO_CURSOR_MODE`, and
 `DIREXIO_CONNECT_AGENT_OPTIONS_TOML` overrides still win.
 
 State/report fields include `mcp_config_dir`, `mcp_codex_config`,

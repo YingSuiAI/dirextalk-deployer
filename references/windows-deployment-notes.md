@@ -104,8 +104,9 @@ $env:DIREXIO_GEMINI_COMMAND = "C:\Tools\gemini.cmd"
 ```
 
 For Cursor on Windows, S6 uses Cursor Agent CLI, not Cursor Desktop CLI. The
-expected command is `%LOCALAPPDATA%\cursor-agent\agent.cmd`. S6 writes that path
-and `mode = "yolo"` so headless turns do not stop at workspace trust prompts.
+expected command is `%LOCALAPPDATA%\cursor-agent\agent.cmd`. S6 writes that path.
+Generated agent options also default to `mode = "yolo"` so headless turns do not
+stop at workspace trust prompts.
 Before auto install, S6 also verifies the CLI exists and creates a
 `versions/dist-package` junction to the latest version directory when legacy
 launchers still expect that path. If Cursor Agent CLI is missing, install it:

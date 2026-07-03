@@ -87,7 +87,19 @@ grep -q -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$key_file" || {
   xxd -l 32 "$key_file" >&2
   exit 1
 }
+user_data=$(json_get "$STATE_JSON" resources.user_data)
+[ "${user_data##*/}" = "user-data.sh" ] || {
+  echo "Lightsail provisioning should render shell user-data, got: $user_data" >&2
+  exit 1
+}
+head -n 1 "$user_data" | grep -Fx -q '#!/usr/bin/env bash'
+if grep -q '^#cloud-config\|^package_update:' "$user_data"; then
+  echo "Lightsail provisioning must not pass cloud-config YAML to create-instances" >&2
+  exit 1
+fi
+grep -q 'docker compose --env-file .env up -d' "$user_data"
 grep -q 'lightsail create-instances' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q -- '--user-data .*user-data.sh' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail get-instance' "$CALLS" || {
   echo "Lightsail provisioning should wait for instance state before port/static IP operations" >&2
   cat "$CALLS" >&2

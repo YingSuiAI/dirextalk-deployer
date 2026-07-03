@@ -400,7 +400,7 @@ _write_connect_config "$codex_options_config_path" "$tmp/direxio-connect/data-co
 grep -q 'backend = "app_server"' "$codex_options_config_path"
 grep -q 'app_server_url = "stdio"' "$codex_options_config_path"
 grep -q 'mode = "full-auto"' "$codex_options_config_path"
-[ "$(grep -c '^[[:space:]]*mode[[:space:]]*=' "$codex_options_config_path")" = "1" ]
+[ "$(awk '/^\[projects.agent.options\]/{in_options=1; next} /^\[/{in_options=0} in_options && /^[[:space:]]*mode[[:space:]]*=/ {count++} END { print count + 0 }' "$codex_options_config_path")" = "1" ]
 grep -q 'model = "gpt-5.5"' "$codex_options_config_path"
 
 fakebin="$tmp/fakebin"

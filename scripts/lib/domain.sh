@@ -134,16 +134,51 @@ domain_authoritative_resolves_to_ip() {
   return 2
 }
 
+domain_public_doh_resolves_to_ip() {
+  local domain=$1 ip=$2 endpoint response timeout
+  [ -n "$domain" ] && [ -n "$ip" ] || return 1
+  command -v curl >/dev/null 2>&1 || return 2
+  declare -F json_node >/dev/null 2>&1 || return 2
+
+  timeout=${DIREXIO_DNS_DOH_TIMEOUT_SECONDS:-5}
+  for endpoint in \
+    "https://cloudflare-dns.com/dns-query?name=$domain&type=A" \
+    "https://dns.google/resolve?name=$domain&type=A"; do
+    response=$(curl -fsSL --max-time "$timeout" -H 'accept: application/dns-json' "$endpoint" 2>/dev/null) || continue
+    printf '%s\n' "$response" | "$(json_node)" - "$ip" <<'NODE' && return 0
+const want = process.argv[2];
+let input = "";
+process.stdin.on("data", (chunk) => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const data = JSON.parse(input);
+    const answers = Array.isArray(data.Answer) ? data.Answer : [];
+    const ok = answers.some((answer) => Number(answer.type) === 1 && String(answer.data || "") === want);
+    process.exit(ok ? 0 : 1);
+  } catch {
+    process.exit(1);
+  }
+});
+NODE
+  done
+  return 1
+}
+
 domain_resolves_to_ip() {
   local domain=$1 ip=$2 auth_rc
   [ -n "$domain" ] && [ -n "$ip" ] || return 1
 
-  domain_authoritative_resolves_to_ip "$domain" "$ip"
-  auth_rc=$?
+  if domain_authoritative_resolves_to_ip "$domain" "$ip"; then
+    auth_rc=0
+  else
+    auth_rc=$?
+  fi
   case "$auth_rc" in
     0) return 0 ;;
     1) return 1 ;;
   esac
+
+  domain_public_doh_resolves_to_ip "$domain" "$ip" && return 0
 
   if command -v dig >/dev/null 2>&1; then
     dig +short A "$domain" 2>/dev/null | grep -qFx "$ip" && return 0

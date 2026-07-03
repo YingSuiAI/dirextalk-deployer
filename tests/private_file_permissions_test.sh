@@ -42,6 +42,7 @@ chmod 700 "$tmp/bin/icacls"
 
 export PATH="$tmp/bin:$PATH"
 export USERDOMAIN=ADAM
+export USERNAME=84960
 export ICACLS_LOG="$tmp/icacls.log"
 
 # shellcheck disable=SC1090

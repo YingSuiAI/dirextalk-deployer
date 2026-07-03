@@ -315,7 +315,12 @@ _run_phase_lightsail() {
   if [ -z "$(res_get public_ip)" ]; then
     if ! aws lightsail get-static-ip --static-ip-name "$static_ip_name" >/dev/null 2>&1; then
       log "Allocating Lightsail static IP $static_ip_name ..."
-      aws lightsail allocate-static-ip --static-ip-name "$static_ip_name" >/dev/null || {
+      local allocate_rc=0
+      _allocate_lightsail_static_ip "$static_ip_name" || allocate_rc=$?
+      if [ "$allocate_rc" -eq 2 ]; then
+        return 2
+      fi
+      [ "$allocate_rc" -eq 0 ] || {
         phase_set S3_PROVISION failed "failed to allocate Lightsail static IP"
         warn "Failed to allocate Lightsail static IP. Check regional Lightsail quota and AWS permissions."
         return 1
@@ -424,6 +429,25 @@ _wait_lightsail_instance_running() {
   phase_set S3_PROVISION failed "Lightsail instance did not become running before timeout"
   warn "Timed out waiting for Lightsail instance $instance_name to become running. Check AWS Lightsail instance state, then rerun to resume."
   return 1
+}
+
+_allocate_lightsail_static_ip() {
+  local static_ip_name=$1 out rc
+  out=$(aws lightsail allocate-static-ip --static-ip-name "$static_ip_name" 2>&1) && return 0
+  rc=$?
+  if printf '%s\n' "$out" | grep -Eiq 'maximum number of static IP|static ip.*quota|quota.*static ip|limitexceeded'; then
+    res_set lightsail_static_ip_allocation_status quota_exceeded
+    res_set lightsail_static_ip_quota_action "Run aws lightsail get-static-ips --region $(state_get region), detach and release an unused static IP or request a quota increase, then rerun the deployer."
+    phase_set S3_PROVISION waiting_user "Lightsail static IP quota exhausted"
+    [ -z "$out" ] || warn "$out"
+    warn "Lightsail static IP quota is exhausted in region $(state_get region)."
+    warn "List existing static IPs:"
+    warn "  aws lightsail get-static-ips --region $(state_get region) --output table"
+    warn "Detach and release an unused static IP, or request a Lightsail static IP quota increase, then rerun to resume."
+    return 2
+  fi
+  [ -z "$out" ] || printf '%s\n' "$out" >&2
+  return "$rc"
 }
 
 _lightsail_default_zone() {

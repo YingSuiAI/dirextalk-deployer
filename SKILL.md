@@ -167,7 +167,8 @@ On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
 once; rerunning the deployer refreshes config and restarts the service-scoped
 daemon. Explicit `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CURSOR_AGENT_COMMAND`,
-`DIREXTALK_CONNECT_AGENT_CMD`, `DIREXTALK_CURSOR_MODE`, and
+`DIREXTALK_OPENCODE_COMMAND`, `DIREXTALK_CONNECT_AGENT_CMD`,
+`DIREXTALK_CURSOR_MODE`, and
 `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides still win.
 
 State/report fields include `mcp_config_dir`, `mcp_selected_config_type`,

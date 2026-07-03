@@ -20,7 +20,7 @@
 # Exit codes: 0=DONE / 1=phase failed / 2=waiting for user action.
 set -uo pipefail
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 DIREXTALK_INSTALL_SCRIPTS_DIR="$HERE"
 
 # Prefer workspace-local tools when present.
@@ -384,7 +384,7 @@ record_region_recommendation() {
 }
 
 ensure_region_selected() {
-  local region source timezone offset reason row selected
+  local region source timezone= offset= reason= row selected
   region=$(state_get region)
   if [ -z "$region" ]; then
     region=${AWS_DEFAULT_REGION:-${AWS_REGION:-}}
@@ -1082,6 +1082,10 @@ cmd_verify() {
       ;;
   esac
 }
+
+if [ "${DIREXTALK_ORCHESTRATE_LIB_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 # Entry point.
 case "${1:-run}" in

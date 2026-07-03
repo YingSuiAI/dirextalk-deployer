@@ -46,9 +46,11 @@ required=(
   tests/connect_daemon_runtime_check_test.sh
   tests/pricing_estimate_test.sh
   tests/region_recommendation_test.sh
+  tests/orchestrate_region_env_test.sh
   tests/eip_preflight_test.sh
   tests/s1_lightsail_availability_fallback_test.sh
   tests/s3_lightsail_provision_test.sh
+  tests/lightsail_static_ip_quota_test.sh
   tests/destroy_lightsail_test.sh
   tests/route53_zone_auto_create_test.sh
   tests/route53_overwrite_guard_test.sh

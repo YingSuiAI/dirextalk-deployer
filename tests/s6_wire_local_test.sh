@@ -378,6 +378,7 @@ grep -q 'model = "whisper-test"' "$speech_config_path"
 [ "$(DIREXTALK_GEMINI_COMMAND=/opt/gemini/bin/gemini _connect_agent_command gemini)" = "/opt/gemini/bin/gemini" ]
 [ "$(DIREXTALK_CLAUDE_CODE_COMMAND=/opt/claude/bin/claude _connect_agent_command claudecode)" = "/opt/claude/bin/claude" ]
 [ "$(DIREXTALK_QODERCLI_COMMAND=/opt/qoder/qodercli _connect_agent_command qoder)" = "/opt/qoder/qodercli" ]
+[ "$(DIREXTALK_OPENCODE_AI_COMMAND=/opt/opencode-ai/bin/opencode _connect_agent_command opencode)" = "/opt/opencode-ai/bin/opencode" ]
 [ "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/agent _connect_agent_command codex)" = "/custom/agent" ]
 [ "$(_connect_agent_command acp openclaw)" = "openclaw" ]
 [ "$(_connect_agent_command acp hermes)" = "dirextalk-connect" ]

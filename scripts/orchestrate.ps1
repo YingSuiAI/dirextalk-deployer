@@ -51,17 +51,70 @@ function Find-CommandPath([string[]] $Names) {
   return $null
 }
 
-function Set-AgentCommandIfMissing([string[]] $EnvNames, [string[]] $CommandNames) {
+function Test-AnyEnvSet([string[]] $EnvNames) {
   foreach ($envName in $EnvNames) {
     if ([Environment]::GetEnvironmentVariable($envName, 'Process')) {
-      return
+      return $true
     }
+  }
+  return $false
+}
+
+function Set-AgentCommandIfMissing([string[]] $EnvNames, [string[]] $CommandNames) {
+  if (Test-AnyEnvSet $EnvNames) {
+    return
   }
   $path = Find-CommandPath $CommandNames
   if (-not $path) {
     return
   }
   [Environment]::SetEnvironmentVariable($EnvNames[0], $path, 'Process')
+}
+
+function Find-OpenCodeBinary {
+  $path = Find-CommandPath @('opencode.exe', 'opencode.cmd', 'opencode')
+  if ($path) {
+    return $path
+  }
+
+  $npm = Find-CommandPath @('npm.cmd', 'npm.exe', 'npm')
+  if (-not $npm) {
+    return $null
+  }
+
+  try {
+    $prefix = (& $npm prefix -g 2>$null | Select-Object -First 1)
+  } catch {
+    $prefix = $null
+  }
+  if (-not $prefix) {
+    return $null
+  }
+
+  $prefix = $prefix.Trim()
+  $candidates = @(
+    (Join-Path $prefix 'node_modules\opencode-ai\bin\opencode.exe'),
+    (Join-Path $prefix 'node_modules\opencode-ai\bin\opencode.cmd'),
+    (Join-Path $prefix 'node_modules\.bin\opencode.cmd'),
+    (Join-Path $prefix 'node_modules\.bin\opencode.exe')
+  )
+  foreach ($candidate in $candidates) {
+    if ($candidate -and (Test-Path $candidate)) {
+      return $candidate
+    }
+  }
+  return $null
+}
+
+function Set-OpenCodeCommandIfMissing {
+  $envNames = @('DIREXTALK_OPENCODE_COMMAND', 'DIREXTALK_OPEN_CODE_COMMAND', 'DIREXTALK_OPENCODE_AI_COMMAND')
+  if (Test-AnyEnvSet $envNames) {
+    return
+  }
+  $path = Find-OpenCodeBinary
+  if ($path) {
+    $env:DIREXTALK_OPENCODE_COMMAND = $path
+  }
 }
 
 $bash = Find-GitBash
@@ -90,7 +143,7 @@ Set-AgentCommandIfMissing @('DIREXTALK_GEMINI_COMMAND') @('gemini.exe', 'gemini.
 Set-AgentCommandIfMissing @('DIREXTALK_COPILOT_COMMAND') @('copilot.exe', 'copilot.cmd', 'copilot')
 Set-AgentCommandIfMissing @('DIREXTALK_DEVIN_COMMAND') @('devin.exe', 'devin.cmd', 'devin')
 Set-AgentCommandIfMissing @('DIREXTALK_KIMI_COMMAND') @('kimi.exe', 'kimi.cmd', 'kimi')
-Set-AgentCommandIfMissing @('DIREXTALK_OPENCODE_COMMAND', 'DIREXTALK_OPEN_CODE_COMMAND') @('opencode.exe', 'opencode.cmd', 'opencode')
+Set-OpenCodeCommandIfMissing
 Set-AgentCommandIfMissing @('DIREXTALK_IFLOW_COMMAND') @('iflow.exe', 'iflow.cmd', 'iflow')
 Set-AgentCommandIfMissing @('DIREXTALK_QODER_COMMAND', 'DIREXTALK_QODERCLI_COMMAND') @('qodercli.exe', 'qodercli.cmd', 'qodercli', 'qoder.exe', 'qoder.cmd', 'qoder')
 Set-AgentCommandIfMissing @('DIREXTALK_PI_COMMAND') @('pi.exe', 'pi.cmd', 'pi')

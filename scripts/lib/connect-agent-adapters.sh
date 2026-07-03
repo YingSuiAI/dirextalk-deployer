@@ -54,7 +54,7 @@ _connect_runtime_command_aliases() {
 _connect_agent_command_aliases() {
   case "$1" in
     claudecode) printf '%s\n' claude-code claude ;;
-    opencode) printf '%s\n' open-code ;;
+    opencode) printf '%s\n' open-code opencode-ai ;;
     antigravity) printf '%s\n' agy ;;
     qoder) printf '%s\n' qodercli ;;
   esac

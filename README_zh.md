@@ -21,13 +21,17 @@
 
 GitHub 仓库保留测试用于维护和 CI，但发布到 npm 的包以及安装到智能体 skill 目录的副本不包含 `tests/`，以减小用户安装体积。
 
-如果你想让 Codex 一句话安装并开始部署，不要说“安装 skills <GitHub 链接>”。那会触发 GitHub skill 安装器，而不是 npm 管理的安装器。推荐只说短句，把仓库地址作为读取 README 的位置，并让 agent 按 README 中的 npm 安装规则执行：
+普通用户场景下，GitHub 仓库只是文档和源码位置，不是 skill 安装路径。不要为了安装或使用 skill 去 clone `YingSuiAI/dirextalk-deployer`。只有在开发 deployer、本地打 patch，或明确要求 project-local 安装时，才 clone 这个仓库。
+
+如果你想让 Codex 一句话安装并开始部署，不要说“安装 skills <GitHub 链接>”或“把这个 GitHub 仓库安装成 skill”。那可能触发 GitHub skill 安装器、仓库 clone 或 project-local copy，而不是 npm 管理的安装器。推荐只说短句，把仓库地址作为读取 README 的位置，并让 agent 按 README 中的 npm 安装规则执行：
 
 ```text
 请阅读 https://github.com/YingSuiAI/dirextalk-deployer 的 README，并按其中 npm 安装规则安装 skill，然后部署 Dirextalk，域名 __DOMAIN__。
 ```
 
 Agent 读到这句后应执行下方 npm 安装命令；不要改用 GitHub skill installer。
+
+如果 Codex 已经能在可用 skills 中看到 `dirextalk-deployer`，直接要求它使用已安装的 skill。如果看不到，先安装或刷新：
 
 POSIX shell：
 

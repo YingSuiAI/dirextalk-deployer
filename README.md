@@ -23,13 +23,17 @@ Install the deployer skill from npm, then place it into the current agent runtim
 
 The GitHub repository keeps tests for maintainers and CI, but the published npm package and installed skill copy exclude `tests/` to keep user installs small.
 
-If you want Codex to install and deploy in one instruction, do not say "install skills <GitHub URL>". That triggers GitHub skill installation instead of the npm-managed installer. Use a short instruction that gives the repository address for reading only and tells the agent to follow the README's npm install rule:
+For normal users, the GitHub repository is documentation and source code, not the skill installation path. Do not clone `YingSuiAI/dirextalk-deployer` just to install or use the skill. Clone this repository only for deployer development, local patching, or an explicitly requested project-local install.
+
+If you want Codex to install and deploy in one instruction, do not say "install skills <GitHub URL>" or "install this GitHub repo as a skill". That can trigger GitHub skill installation, repository cloning, or a project-local copy instead of the npm-managed installer. Use a short instruction that gives the repository address for reading only and tells the agent to follow the README's npm install rule:
 
 ```text
 Read https://github.com/YingSuiAI/dirextalk-deployer README and follow its npm install rule, then deploy Dirextalk with domain __DOMAIN__.
 ```
 
 After reading this instruction, the agent should run the npm install commands below; it should not switch to a GitHub skill installer.
+
+If Codex already lists `dirextalk-deployer` in its available skills, ask it to use that installed skill directly. If it does not, install or refresh it first:
 
 POSIX shells:
 

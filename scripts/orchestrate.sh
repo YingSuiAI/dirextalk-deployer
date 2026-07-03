@@ -123,7 +123,7 @@ cmd_status_inventory() {
 phase_user_meaning() {
   case "$1" in
     S0_PREREQ_AWS)      echo "AWS credentials, CLI tooling, or account identity are not ready." ;;
-    S1_PREFLIGHT)       echo "AWS region, cloud provider choice, Free Tier query, or provider-specific checks are not ready." ;;
+    S1_PREFLIGHT)       echo "AWS region, cloud provider choice, or provider-specific checks are not ready." ;;
     S2_DOMAIN)          echo "The long-lived domain, DNS authority, or irreversible Matrix server_name binding is not confirmed." ;;
     S3_PROVISION)       echo "AWS infrastructure provisioning, fixed public IP, security group, or DNS record setup is not complete." ;;
     S4_BOOTSTRAP_STACK) echo "The cloud instance exists, but cloud-init, Docker, Caddy/TLS, or message-server has not reached healthy state." ;;
@@ -224,7 +224,7 @@ status_next_action() {
 
   case "$1" in
     S0_PREREQ_AWS)      echo "configure AWS CLI credentials for the selected deployment identity and rerun status" ;;
-    S1_PREFLIGHT)       echo "fix AWS region, cloud provider choice, Free Tier visibility, or provider-specific quota before creating resources" ;;
+    S1_PREFLIGHT)       echo "fix AWS region, cloud provider choice, or provider-specific quota before creating resources" ;;
     S2_DOMAIN)          echo "confirm the long-lived domain, DNS authority, and irreversible Matrix server_name binding" ;;
     S3_PROVISION)       echo "inspect Lightsail/EC2 provisioning, fixed public IP allocation, firewall/security group creation, and DNS record setup" ;;
     S4_BOOTSTRAP_STACK) echo "inspect cloud-init, Docker, Caddy/TLS, and message-server logs over SSH" ;;
@@ -431,21 +431,9 @@ ensure_cost_estimate() {
 }
 
 ensure_free_tier_credit_notice() {
-  local output plan_status plan_type amount unit expires
-  if output=$(aws freetier get-account-plan-state --output json 2>/dev/null); then
-    plan_type=$(printf '%s\n' "$output" | json_stdin_get accountPlanType "unknown" 2>/dev/null)
-    plan_status=$(printf '%s\n' "$output" | json_stdin_get accountPlanStatus "unknown" 2>/dev/null)
-    amount=$(printf '%s\n' "$output" | json_stdin_get accountPlanRemainingCredits.amount "" 2>/dev/null)
-    unit=$(printf '%s\n' "$output" | json_stdin_get accountPlanRemainingCredits.unit "USD" 2>/dev/null)
-    expires=$(printf '%s\n' "$output" | json_stdin_get accountPlanExpirationDate "" 2>/dev/null)
-    if [ -n "$amount" ]; then
-      log "AWS Free Tier plan: type=${plan_type:-unknown}, status=${plan_status:-unknown}, remaining_credits=${amount} ${unit:-USD}${expires:+, expires=$expires}."
-      warn "Credits can reduce actual charges, but AWS resources still accrue charges until destroyed; verify credit coverage in AWS Billing Console."
-      return 0
-    fi
-  fi
-  warn "AWS new customer accounts may include Free Tier credits, currently advertised as 100 USD initial credits plus possible additional credits."
-  warn "Lightsail may also offer three months free on select Lightsail bundles. Credits and bundle trials are account-specific; verify coverage in AWS Billing Console and destroy the node when finished."
+  warn "AWS new customer accounts generally receive 100-200 USD in free credits."
+  warn "Users who have not used Lightsail generally receive three months of free Lightsail usage."
+  warn "Credits and bundle trials are account-specific. Destroy the node when finished; AWS official real-time policy prevails."
 }
 
 precheck_new_deploy_domain_env() {

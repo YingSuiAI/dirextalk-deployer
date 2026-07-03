@@ -22,9 +22,6 @@ printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 
 case "${1:-} ${2:-}" in
-  "freetier get-free-tier-usage")
-    printf '{"freeTierUsages":[]}\n'
-    ;;
   "lightsail get-bundles")
     printf '{"bundles":[{"bundleId":"medium_3_0","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"supportedPlatforms":["LINUX_UNIX"]}]}\n'
     ;;
@@ -79,5 +76,6 @@ fi
 json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.cloud_recommendation.selected_provider === 'ec2' && data.cloud_recommendation.recommended_provider === 'ec2' && data.resources.lightsail_availability_status === 'unavailable' && data.resources.vpc_id === 'vpc-fallback' && data.resources.ami_id === 'ami-fallback'"
 grep -q 'lightsail get-regions' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'ec2 describe-vpcs' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+! grep -q 'freetier' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 
 echo "s1 lightsail availability fallback ok"

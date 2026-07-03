@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# S1 PREFLIGHT - cloud provider choice, Free Tier usage, and provider checks.
+# S1 PREFLIGHT - cloud provider choice and provider checks.
 #
 # New deployments default to Lightsail's fixed $12/month Linux bundle. EC2
 # remains available through DIREXIO_CLOUD_PROVIDER=ec2 or DEPLOY_MODE=ec2.
@@ -16,7 +16,6 @@ run_phase() {
   local cloud_provider
   cloud_provider=$(_resolve_cloud_provider)
   state_set cloud_provider "$cloud_provider"
-  _record_free_tier_usage "$cloud_provider"
 
   if [ "$cloud_provider" = "lightsail" ]; then
     if _preflight_lightsail; then
@@ -105,27 +104,6 @@ _resolve_cloud_provider() {
       return 2
       ;;
   esac
-}
-
-_record_free_tier_usage() {
-  local provider=$1 tmp status count
-  tmp=$(mktemp)
-  if aws freetier get-free-tier-usage --output json > "$tmp" 2>/dev/null; then
-    count=$(json_get "$tmp" 'freeTierUsages.length' 2>/dev/null || printf '')
-    status=queried
-    state_set_object aws_free_tier \
-      status=queried \
-      "checked_at=$(_now)" \
-      "usage_count=${count:-unknown}" \
-      "provider=$provider"
-  else
-    state_set_object aws_free_tier \
-      status=unavailable \
-      "checked_at=$(_now)" \
-      "provider=$provider" \
-      "evidence=aws freetier get-free-tier-usage failed or is not permitted"
-  fi
-  rm -f "$tmp"
 }
 
 _record_cloud_recommendation() {

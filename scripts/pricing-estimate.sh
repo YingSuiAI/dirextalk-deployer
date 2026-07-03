@@ -181,7 +181,7 @@ build_lightsail_estimate() {
     "total_monthly_usd=$total" \
     "components={\"lightsail_bundle\":{\"bundle_id\":\"$bundle_id\",\"monthly_usd\":$price,\"ram_gb\":$ram,\"disk_gb\":$disk,\"transfer_gb\":$transfer,\"cpu_count\":$cpu},\"route53_hosted_zone\":{\"monthly_usd\":$route53_monthly,\"included\":$( [ "$domain_mode" = "route53" ] && printf true || printf false )}}" \
     'notes=["Estimate excludes data transfer beyond the Lightsail bundle, TURN relay traffic, domain registration, taxes, and AWS credit eligibility.","AWS credits may reduce charges only when the account, plan, region, and service usage are eligible; verify in AWS Billing Console."]' \
-    'recommendations=["Set an AWS Budget or billing alert before leaving the node running.","Review AWS Billing Console after deployment and after destroy to confirm actual charges and remaining credits."]'
+    'recommendations=["Set an AWS Budget or billing alert before leaving the node running.","Review AWS Billing Console after deployment and after destroy to confirm actual charges."]'
 }
 
 lookup_lightsail_bundle() {

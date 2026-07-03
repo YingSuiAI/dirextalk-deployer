@@ -86,13 +86,12 @@ bash scripts/aws-credentials.sh verify direxio-deployer
 Before final deployment confirmation:
 
 ```bash
-aws freetier get-account-plan-state --output json
 aws lightsail get-regions --include-availability-zones --output json
 bash scripts/pricing-estimate.sh --region <aws-region> --cloud-provider lightsail --domain-mode <user|route53>
 bash scripts/pricing-estimate.sh --state ~/.direxio/nodes/<service_id>/state.json --write-state
 ```
 
-Record and report `cost_estimate`, Free Tier status, remaining credits when AWS exposes them, and Lightsail trial eligibility. Mention that AWS may advertise `100 USD initial credits`, and that Lightsail may offer three months free on select Lightsail bundles, but coverage is account-specific and must be verified in AWS Billing Console. Recommend an AWS Budget. Check EC2-VPC Elastic IP quota before mutating AWS resources.
+Record and report `cost_estimate` and billing reminders. Tell the operator that new AWS customer accounts generally receive `100-200 USD` in free credits, and that users who have not used Lightsail generally receive three months of free Lightsail usage. Coverage is account-specific; recommend an AWS Budget, AWS Billing Console review, and say AWS official real-time policy prevails. Check EC2-VPC Elastic IP quota before mutating AWS resources.
 
 Required deployment env:
 
@@ -109,7 +108,7 @@ record. If an existing A record points elsewhere, require
 `DIREXIO_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
 authoritative DNS before continuing.
 
-Default cloud provider is Lightsail. S1 queries Free Tier usage, Lightsail bundle availability, and Lightsail availability zones before provisioning. For manual Lightsail zone checks, use `aws lightsail get-regions --include-availability-zones --output json`; plain `aws lightsail get-regions` can omit availability-zone details. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone. If Lightsail has no usable bundle or availability zone in the selected region and the operator did not explicitly force Lightsail, S1 records EC2 as the selected/recommended provider before provisioning. EC2 remains supported explicitly with `DIREXIO_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
+Default cloud provider is Lightsail. S1 queries Lightsail bundle availability and Lightsail availability zones before provisioning, but it does not query AWS Free Tier or credit usage. For manual Lightsail zone checks, use `aws lightsail get-regions --include-availability-zones --output json`; plain `aws lightsail get-regions` can omit availability-zone details. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone. If Lightsail has no usable bundle or availability zone in the selected region and the operator did not explicitly force Lightsail, S1 records EC2 as the selected/recommended provider before provisioning. EC2 remains supported explicitly with `DIREXIO_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
 
 ## Local Runtime Wiring
 
@@ -237,8 +236,8 @@ volume size, billing reminders, and `cost_estimate`.
 Delivery must include App domain, eight-digit app initialization code, product
 gate status, `agent_room_id`, service directory, direxio-connect config, MCP config
 paths, Matrix bridge user/device, AWS region, cloud provider, cloud instance/public IP, SSH path,
-state path, report path, Free Tier status, remaining credits/trial eligibility
-when visible, AWS Billing Console verification reminder, stop-billing reminder, and security reminder to delete
+state path, report path, AWS credit/Lightsail trial reminder, AWS official policy reminder,
+AWS Billing Console verification reminder, stop-billing reminder, and security reminder to delete
 or disable temporary credentials and rotate/remove root access keys if used.
 
 ## Update, Reset, And Destroy

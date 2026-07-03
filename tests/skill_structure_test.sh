@@ -298,14 +298,22 @@ grep -q 'scripts/pricing-estimate.sh' SKILL.md
 grep -q 'pricing-estimate.sh --state' references/deployment-workflow.md
 grep -q 'cost_estimate' SKILL.md
 grep -q 'cost_estimate' references/deployment-workflow.md
-grep -q 'aws freetier get-account-plan-state --output json' SKILL.md
-grep -q 'aws freetier get-account-plan-state --output json' references/deployment-workflow.md
-grep -q '100 USD initial credits' SKILL.md
-grep -q '100 USD initial credits' references/deployment-workflow.md
-grep -q 'three months free on select Lightsail bundles' SKILL.md
-grep -q 'three months free on select Lightsail bundles' references/deployment-workflow.md
-grep -q 'three months free on select Lightsail bundles' README.md
+if grep -R 'aws freetier' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+  echo "published docs/scripts must not instruct agents to query AWS Free Tier" >&2
+  exit 1
+fi
+grep -q '100-200 USD' SKILL.md
+grep -q '100-200 USD' references/deployment-workflow.md
+grep -q '100-200 USD' README.md
+grep -q 'three months of free Lightsail usage' SKILL.md
+grep -q 'three months of free Lightsail usage' references/deployment-workflow.md
+grep -q 'three months of free Lightsail usage' README.md
 grep -q '三个月免费额度' README_zh.md
+grep -q '100-200 美元' README_zh.md
+grep -q 'AWS official real-time policy prevails' SKILL.md
+grep -q 'AWS official real-time policy prevails' README.md
+grep -q 'AWS official real-time policy prevails' references/deployment-workflow.md
+grep -q '一切以 AWS 官方实时政策为准' README_zh.md
 grep -q 'Read https://github.com/YingSuiAI/direxio-deployer README and follow its npm install rule' README.md
 grep -q '请阅读 https://github.com/YingSuiAI/direxio-deployer 的 README，并按其中 npm 安装规则安装 skill' README_zh.md
 grep -q 'should run the npm install commands below' README.md
@@ -346,14 +354,10 @@ grep -q 'aws lightsail get-regions --include-availability-zones' SKILL.md
 grep -q 'aws lightsail get-regions --include-availability-zones' README.md
 grep -q 'aws lightsail get-regions --include-availability-zones' README_zh.md
 grep -q 'aws lightsail get-regions --include-availability-zones' references/deployment-workflow.md
-grep -q 'remaining credits' SKILL.md
-grep -q 'trial eligibility' SKILL.md
-grep -q 'Free Tier status' SKILL.md
-grep -q 'remaining credits' references/deployment-workflow.md
-grep -q 'trial eligibility' references/deployment-workflow.md
-grep -q 'Free Tier status' references/deployment-workflow.md
+grep -q 'AWS credit/Lightsail trial reminder' SKILL.md
+grep -q 'AWS credit/Lightsail trial reminder' references/deployment-workflow.md
 grep -q 'Default cloud provider is Lightsail' SKILL.md
-grep -q 'S1 queries Free Tier usage, Lightsail bundle availability, and Lightsail availability zones' SKILL.md
+grep -q 'does not query AWS Free Tier or credit usage' SKILL.md
 grep -q 'rotate/remove root access keys if used' SKILL.md
 grep -q 'temporary IAM key' scripts/orchestrate.sh
 

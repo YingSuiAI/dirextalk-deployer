@@ -780,7 +780,7 @@ function buildPricingEstimate(args) {
     ],
     recommendations: [
       "Set an AWS Budget or billing alert before leaving the node running.",
-      "Review AWS Billing Console after deployment and after destroy to confirm actual charges and remaining credits."
+      "Review AWS Billing Console after deployment and after destroy to confirm actual charges."
     ],
     total_monthly_usd: Math.round(total * 100) / 100
   };

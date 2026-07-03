@@ -4,8 +4,9 @@
 
 1. Confirm `DOMAIN`, `DOMAIN_MODE`, and `CONFIRM_DOMAIN_BINDING=1`.
 2. Confirm AWS region, credentials, billing, cloud provider, and costs.
-3. Default cloud provider is Lightsail. S1 queries AWS Free Tier usage,
-   Lightsail bundles, and Lightsail availability zones before provisioning.
+3. Default cloud provider is Lightsail. S1 queries Lightsail bundles and
+   Lightsail availability zones before provisioning, but does not query AWS
+   Free Tier or credit usage.
    For manual Lightsail zone checks, use
    `aws lightsail get-regions --include-availability-zones --output json`;
    plain `aws lightsail get-regions` can omit availability-zone details and
@@ -85,15 +86,13 @@ instance type is known. Lightsail estimates include the default $12 bundle and
 Route53 hosted-zone cost when applicable; EC2 estimates include EC2, gp3
 storage, public IPv4, and Route53 hosted-zone cost when applicable. Estimates
 exclude data transfer beyond included bundle allowances, TURN relay traffic,
-domain registration, taxes, and AWS credits. When available, check the Free Tier
-account plan with `aws freetier get-account-plan-state --output json`;
-otherwise tell the user that AWS currently advertises 100 USD initial credits
-for new customer accounts plus possible additional credits after Free Tier
-activities, and that Lightsail may offer three months free on select Lightsail bundles.
-Credit and bundle-trial coverage is not guaranteed; record Free Tier status,
-remaining credits when AWS exposes them, trial eligibility, AWS Billing Console
-verification, and set an AWS Budget or billing alert before leaving the node
-running.
+domain registration, taxes, and AWS credits. Do not query AWS Free Tier or
+credit usage. Tell the user that new AWS customer accounts generally receive
+100-200 USD in free credits, and that users who have not used Lightsail
+generally receive three months of free Lightsail usage. Credit and bundle-trial
+coverage is account-specific; record the credit/trial reminder, AWS Billing
+Console verification reminder, and that AWS official real-time policy prevails.
+Set an AWS Budget or billing alert before leaving the node running.
 
 ## Destroy
 
@@ -166,8 +165,8 @@ service directory is removed:
 Reports include operation type, S0-S7 gate status, user-confirmation gates,
 credential/config paths, direxio-connect/MCP metadata, AWS resource IDs, billing
 reminders, `billing.cost_estimate`, destroy read-back evidence under
-`destroy.evidence` when applicable, Free Tier status, remaining credits/trial
-eligibility when visible, AWS Billing Console verification reminder, and
+`destroy.evidence` when applicable, AWS credit/Lightsail trial reminder,
+AWS official policy reminder, AWS Billing Console verification reminder, and
 redaction evidence. They must not
 contain the initialization code, AWS secrets, access tokens, agent tokens, or
 Matrix session tokens. User/runtime evidence is also scrubbed for

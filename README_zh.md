@@ -12,7 +12,7 @@
 ## 部署前准备
 
 - 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。
-- deployer 创建的 AWS 资源在销毁前可能持续计费。新部署默认优先使用 Lightsail 12 美元/月 Linux 套餐。未使用过 Lightsail 的用户一般会有三个月免费额度；新用户注册 AWS 一般有 100-200 美元的免费额度。一切以 AWS 官方实时政策为准。S1 会在确认前查询 Lightsail 套餐和可用区；如果要手工查可用区，使用 `aws lightsail get-regions --include-availability-zones --output json`，裸 `get-regions` 可能不返回可用区明细。如果所选 region 没有可用 Lightsail 资源，推荐和选择会切到 EC2。需要显式 EC2 时设置 `DIREXIO_CLOUD_PROVIDER=ec2`，新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
+- deployer 创建的 AWS 资源在销毁前可能持续计费。新部署默认优先使用 Lightsail 12 美元/月 Linux 套餐。未使用过 Lightsail 的用户一般会有三个月免费额度；新用户注册 AWS 一般有 100-200 美元的免费额度。一切以 AWS 官方实时政策为准。如果没有配置 region，deployer 会根据本机时区推荐默认 AWS region，并且非交互式运行也会使用该推荐；可用 `AWS_DEFAULT_REGION`、`AWS_REGION`、AWS profile region 或 `DIREXIO_DEFAULT_REGION` 覆盖。S1 会在确认前查询 Lightsail 套餐和可用区；如果要手工查可用区，使用 `aws lightsail get-regions --include-availability-zones --output json`，裸 `get-regions` 可能不返回可用区明细。如果所选 region 没有可用 Lightsail 资源，S1 不会自动切换到 EC2；它会记录 EC2 费用估算，并等待操作者选择其他 Lightsail 可用 region/zone，或显式设置 `DIREXIO_CLOUD_PROVIDER=ec2`。新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
 - `SKILL.md` 是给智能体看的运行手册，详细部署规则、确认门禁、运行时 wiring 和恢复流程都放在那里。
 
 ## Skill 安装和更新
@@ -95,7 +95,7 @@ MESSAGE_SERVER_IMAGE=direxio/message-server:latest \
 bash scripts/orchestrate.sh
 ```
 
-`DIREXIO_CLOUD_PROVIDER=lightsail` 可省略，因为 Lightsail 是默认选择。如需保留的 EC2 部署路径，添加 `DIREXIO_CLOUD_PROVIDER=ec2`。EC2 可继续设置 `INSTANCE_TYPE=t3.small` 或更大的显式规格，并默认使用 50 GiB gp3 root EBS 卷。如果默认 Lightsail 在当前 region 没有可用套餐或可用区，S1 会在 provisioning 前把选择记录为 EC2。除非在排查 AWS 返回值，否则让 S1 自动检测 Lightsail 可用性；安全的手工命令是 `aws lightsail get-regions --include-availability-zones --output json`。
+`DIREXIO_CLOUD_PROVIDER=lightsail` 可省略，因为 Lightsail 是默认选择。如需保留的 EC2 部署路径，添加 `DIREXIO_CLOUD_PROVIDER=ec2`。EC2 可继续设置 `INSTANCE_TYPE=t3.small` 或更大的显式规格，并默认使用 50 GiB gp3 root EBS 卷。如果默认 Lightsail 在当前 region 没有可用套餐或可用区，S1 会记录 EC2 费用估算，但不会自动切换到 EC2；请选择其他 Lightsail 可用 region/zone，或显式用 `DIREXIO_CLOUD_PROVIDER=ec2` 重新运行。如果未配置 region，非交互式运行会使用本机时区推荐；可用 `DIREXIO_DEFAULT_REGION` 或标准 AWS region 设置覆盖。除非在排查 AWS 返回值，否则让 S1 自动检测 Lightsail 可用性；安全的手工命令是 `aws lightsail get-regions --include-availability-zones --output json`。
 
 Windows 用户使用 PowerShell 入口。它会选择 Git Bash 执行云端 phase，同时给本地 `direxio-connect` 写入 Windows 可直接使用的路径：
 

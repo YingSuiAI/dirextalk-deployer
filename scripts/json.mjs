@@ -774,6 +774,7 @@ function buildPricingEstimate(args) {
     components.public_ipv4.monthly_usd +
     components.route53_hosted_zone.monthly_usd;
   return {
+    provider: "ec2",
     pricing_status: pricingStatus,
     region,
     location,

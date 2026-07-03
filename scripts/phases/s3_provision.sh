@@ -453,12 +453,12 @@ const selected = available.includes(defaultZone) ? defaultZone : (available[0] |
 const reason = selected
   ? (selected === defaultZone ? "" : `default Lightsail zone ${defaultZone} is unavailable; selected ${selected}`)
   : `no available Lightsail availability zone found for region ${regionName}`;
-process.stdout.write([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("\t"));
+process.stdout.write([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("|"));
 if (!selected) process.exit(2);
 NODE
   ) || rc=$?
   rm -f "$tmp"
-  IFS=$'\t' read -r zone default_zone available unavailable reason <<EOF
+  IFS='|' read -r zone default_zone available unavailable reason <<EOF
 $line
 EOF
   status=available

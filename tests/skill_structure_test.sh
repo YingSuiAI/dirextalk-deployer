@@ -27,6 +27,7 @@ required=(
   scripts/lib/ops.sh
   scripts/lib/operation_report.sh
   scripts/lib/json.sh
+  scripts/lib/region.sh
   scripts/lib/connect-agent-adapters.sh
   scripts/lib/connect-daemon-logs.sh
   scripts/lib/mcp-client-adapters.sh
@@ -44,6 +45,7 @@ required=(
   tests/aws_credentials_test.sh
   tests/connect_daemon_runtime_check_test.sh
   tests/pricing_estimate_test.sh
+  tests/region_recommendation_test.sh
   tests/eip_preflight_test.sh
   tests/s1_lightsail_availability_fallback_test.sh
   tests/s3_lightsail_provision_test.sh
@@ -322,6 +324,10 @@ grep -q 'do not use a generic GitHub skill installer' SKILL.md
 grep -q 'Read https://github.com/YingSuiAI/direxio-deployer README and follow its npm install rule' references/agent-targets.md
 grep -q 'DIREXIO_CLOUD_PROVIDER=lightsail' SKILL.md
 grep -q 'DIREXIO_CLOUD_PROVIDER=ec2' SKILL.md
+grep -q 'DIREXIO_DEFAULT_REGION' SKILL.md
+grep -q 'timezone' references/deployment-workflow.md
+grep -q 'does not automatically switch to EC2' README.md
+grep -q '不会自动切换到 EC2' README_zh.md
 grep -q 'EC2-VPC Elastic IP quota' SKILL.md
 grep -q 'EC2-VPC Elastic IP quota' references/deployment-workflow.md
 grep -q 'orchestrate.sh confirm app_initialization' SKILL.md

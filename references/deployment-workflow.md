@@ -3,7 +3,12 @@
 ## Preflight
 
 1. Confirm `DOMAIN`, `DOMAIN_MODE`, and `CONFIRM_DOMAIN_BINDING=1`.
-2. Confirm AWS region, credentials, billing, cloud provider, and costs.
+2. Confirm AWS region, credentials, billing, cloud provider, and costs. If no
+   region is configured in state, `AWS_DEFAULT_REGION`/`AWS_REGION`, or the AWS
+   profile, `scripts/orchestrate.sh` recommends a default region from the local
+   timezone and uses it in non-interactive runs. Use `DIREXIO_DEFAULT_REGION`
+   for an explicit deployer default, or the standard AWS region settings for a
+   run-specific choice.
 3. Default cloud provider is Lightsail. S1 queries Lightsail bundles and
    Lightsail availability zones before provisioning, but does not query AWS
    Free Tier or credit usage.
@@ -12,13 +17,14 @@
    plain `aws lightsail get-regions` can omit availability-zone details and
    should not be used to decide that a region is unsupported.
    The explicit default Lightsail zone is `<region>a`; if it is unavailable,
-   select another available Lightsail zone. If the selected region has no
-   usable Lightsail bundle or availability zone and the operator did not
-   explicitly force Lightsail, S1 records EC2 as the selected provider before
-   provisioning. For EC2, including this availability fallback path, check
-   regional hard blockers before mutating resources: default VPC, EC2 vCPU
-   quota, Elastic IP quota/current allocation, and Ubuntu AMI availability. For a manual EIP
-   check, compare:
+   select another available Lightsail zone in the same region. If the selected
+   region has no usable Lightsail bundle or availability zone, S1 records an EC2
+   cost estimate but does not automatically switch to EC2. Ask the operator to
+   choose another Lightsail-capable region/zone, or explicitly rerun with
+   `DIREXIO_CLOUD_PROVIDER=ec2` after reviewing the EC2 estimate. For explicit
+   EC2, check regional hard blockers before mutating resources: default VPC, EC2
+   vCPU quota, Elastic IP quota/current allocation, and Ubuntu AMI availability.
+   For a manual EIP check, compare:
 
 ```bash
 aws service-quotas get-service-quota --service-code ec2 --quota-code L-0263D0A3 --query 'Quota.Value' --output text

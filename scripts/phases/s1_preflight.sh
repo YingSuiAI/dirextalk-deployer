@@ -9,6 +9,7 @@ DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
 DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
 DEFAULT_EC2_INSTANCE_TYPE=${DEFAULT_EC2_INSTANCE_TYPE:-t3.small}
+S1_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 
 run_phase() {
   aws_env_prep
@@ -24,12 +25,8 @@ run_phase() {
       return 0
     else
       local lightsail_rc=$?
-      if [ "$lightsail_rc" -eq 3 ] && _cloud_provider_allows_availability_fallback; then
-        warn "Default Lightsail resources are unavailable in this region; selecting EC2 for the confirmation plan."
-        cloud_provider=ec2
-        state_set cloud_provider "$cloud_provider"
-        _record_cloud_recommendation "$cloud_provider" "lightsail_unavailable"
-        _preflight_ec2
+      if [ "$lightsail_rc" -eq 3 ]; then
+        _wait_for_lightsail_or_ec2_choice
         return $?
       fi
       return 1
@@ -108,13 +105,10 @@ _resolve_cloud_provider() {
 
 _record_cloud_recommendation() {
   local selected=$1 cause=${2:-} recommended=lightsail reason
-  if [ "$selected" = "ec2" ]; then
-    if [ "$cause" = "lightsail_unavailable" ]; then
-      recommended=ec2
-      reason="Lightsail was queried before confirmation and has no usable $DEFAULT_LIGHTSAIL_MONTHLY_USD USD bundle or availability zone in this region; EC2 is the available fallback"
-    else
-      reason="operator selected EC2; default recommendation remains Lightsail unless EC2-specific controls are required"
-    fi
+  if [ "$cause" = "lightsail_unavailable" ]; then
+    reason="Lightsail has no usable $DEFAULT_LIGHTSAIL_MONTHLY_USD USD bundle or availability zone in this region; choose another Lightsail-capable region or explicitly select EC2 after reviewing the EC2 estimate"
+  elif [ "$selected" = "ec2" ]; then
+    reason="operator selected EC2; default recommendation remains Lightsail unless EC2-specific controls are required"
   else
     reason="Lightsail $12 Linux bundle gives fixed 2GB/2vCPU/60GB capacity and avoids EC2/EIP setup for the default path"
   fi
@@ -131,6 +125,31 @@ _record_cloud_recommendation() {
     "lightsail_availability_status=$(_state_or_default resources.lightsail_availability_status unknown)" \
     "ec2_instance_type=$DEFAULT_EC2_INSTANCE_TYPE" \
     "reason=$reason"
+}
+
+_wait_for_lightsail_or_ec2_choice() {
+  local region domain_mode estimate
+  region=$(state_get region)
+  domain_mode=$(state_get domain_mode)
+  domain_mode=${domain_mode:-user}
+  state_set cloud_provider lightsail
+  _record_cloud_recommendation lightsail "lightsail_unavailable"
+  if estimate=$(bash "$S1_PHASE_DIR/pricing-estimate.sh" \
+      --region "$region" \
+      --cloud-provider ec2 \
+      --instance-type "$DEFAULT_EC2_INSTANCE_TYPE" \
+      --disk-gb "${DIREXIO_ROOT_VOLUME_GB:-50}" \
+      --domain-mode "$domain_mode" 2>/dev/null); then
+    state_set_raw cloud_recommendation.ec2_cost_estimate "$estimate"
+  else
+    warn "Could not record EC2 cost estimate automatically. Run scripts/pricing-estimate.sh manually before choosing EC2."
+  fi
+  phase_set S1_PREFLIGHT waiting_user "Lightsail unavailable in $region; waiting for region or explicit EC2 choice"
+  warn "Lightsail is unavailable in AWS region $region for this deployment."
+  warn "Choose another Lightsail-capable region, or explicitly choose EC2 after reviewing the EC2 estimate."
+  warn "Lightsail region option: AWS_DEFAULT_REGION=<region> bash scripts/orchestrate.sh"
+  warn "EC2 option: DIREXIO_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=$DEFAULT_EC2_INSTANCE_TYPE bash scripts/orchestrate.sh"
+  return 2
 }
 
 _preflight_lightsail() {
@@ -162,10 +181,6 @@ _preflight_lightsail() {
   return 0
 }
 
-_cloud_provider_allows_availability_fallback() {
-  [ -z "${DIREXIO_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXIO_DEPLOY_PROVIDER:-}}}" ]
-}
-
 _select_lightsail_availability_zone() {
   local region=$1 tmp line rc zone default_zone available unavailable reason status
   tmp=$(mktemp)
@@ -193,12 +208,12 @@ const selected = available.includes(defaultZone) ? defaultZone : (available[0] |
 const reason = selected
   ? (selected === defaultZone ? "" : `default Lightsail zone ${defaultZone} is unavailable; selected ${selected}`)
   : `no available Lightsail availability zone found for region ${regionName}`;
-process.stdout.write([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("\t"));
+process.stdout.write([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("|"));
 if (!selected) process.exit(2);
 NODE
   ) || rc=$?
   rm -f "$tmp"
-  IFS=$'\t' read -r zone default_zone available unavailable reason <<EOF
+  IFS='|' read -r zone default_zone available unavailable reason <<EOF
 $line
 EOF
   status=available

@@ -38,6 +38,7 @@ source "$HERE/lib/domain.sh"
 source "$HERE/lib/operation_report.sh"
 source "$HERE/lib/local-paths.sh"
 source "$HERE/lib/connect-daemon-logs.sh"
+source "$HERE/lib/region.sh"
 
 # Phase -> script mapping. Use case instead of declare -A for macOS bash 3.2.
 phase_file() {
@@ -372,26 +373,65 @@ print_delivery() {
   fi
 }
 
+record_region_recommendation() {
+  local source=$1 region=$2 timezone=${3:-} offset=${4:-} reason=${5:-}
+  state_set_object region_recommendation \
+    "source=$source" \
+    "region=$region" \
+    "timezone=${timezone:-unknown}" \
+    "utc_offset_hours=${offset:-unknown}" \
+    "reason=$reason"
+}
+
 ensure_region_selected() {
-  local region
+  local region source timezone offset reason row selected
   region=$(state_get region)
   if [ -z "$region" ]; then
     region=${AWS_DEFAULT_REGION:-${AWS_REGION:-}}
-    [ -z "$region" ] && region=$(aws_configured_region)
-    if [ -z "$region" ] && [ -t 0 ]; then
-      warn "Choose an AWS region. Region affects latency, price, default VPC, and EC2 quota."
-      printf "AWS region [us-east-1]: " >&2
-      read -r region
-      region=${region:-us-east-1}
+    if [ -n "$region" ]; then
+      source=environment
+      reason="region selected from AWS_DEFAULT_REGION or AWS_REGION"
     fi
     if [ -z "$region" ]; then
-      warn "Confirm AWS region first. This script will not silently default to us-east-1."
-      warn "Set it with aws configure or AWS_DEFAULT_REGION."
-      warn "Example: AWS_DEFAULT_REGION=ap-southeast-1 bash $0"
-      warn "Or:      AWS_DEFAULT_REGION=us-east-1 bash $0"
-      return 2
+      region=$(aws_configured_region)
+      if [ -n "$region" ]; then
+        source=aws_profile
+        reason="region selected from AWS CLI profile configuration"
+      fi
+    fi
+    if [ -z "$region" ] && [ -n "${DIREXIO_DEFAULT_REGION:-}" ]; then
+      region=$DIREXIO_DEFAULT_REGION
+      source=env
+      reason="region selected from DIREXIO_DEFAULT_REGION"
+    fi
+    if [ -z "$region" ] && [ -t 0 ]; then
+      row=$(direxio_recommend_region)
+      IFS=$'\t' read -r region timezone offset reason <<EOF
+$row
+EOF
+      warn "Choose an AWS region. Region affects latency, price, default VPC, and EC2 quota."
+      warn "Recommended AWS region: $region ($reason)."
+      printf "AWS region [%s]: " "$region" >&2
+      read -r selected
+      if [ -n "$selected" ]; then
+        region=$selected
+        source=prompt
+        reason="operator selected region interactively"
+      else
+        source=timezone
+      fi
+    fi
+    if [ -z "$region" ]; then
+      row=$(direxio_recommend_region)
+      IFS=$'\t' read -r region timezone offset reason <<EOF
+$row
+EOF
+      source=timezone
+      warn "No AWS region was configured; using recommended default $region ($reason)."
+      warn "Override with AWS_DEFAULT_REGION, AWS_REGION, AWS profile region, or DIREXIO_DEFAULT_REGION."
     fi
     state_set region "$region"
+    record_region_recommendation "$source" "$region" "$timezone" "$offset" "$reason"
   fi
   export AWS_DEFAULT_REGION="$region"
   return 0

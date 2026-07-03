@@ -209,17 +209,14 @@ fail S6 instead of reporting deployment success.
 
 MCP is installed into the current service directory during S6 when
 `DIREXIO_AGENT_INSTALL=auto`. Generated MCP client snippets launch that
-service-scoped `direxio-mcp` binary directly over stdio. S6 also attempts to
-install a service-scoped `direxio-mcp` daemon as an optional HTTP proxy
-endpoint; if Windows denies scheduled-task creation, the stdio snippets remain
-usable.
+service-scoped `direxio-mcp` binary directly over stdio. MCP does not require a
+local daemon, HTTP proxy, or listening port; the MCP client starts the command
+when it needs tools.
 Manual recovery command:
 
 ```bash
 npm install --prefix ~/.direxio/nodes/<service_id>/mcp direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json ~/.direxio/nodes/<service_id>/mcp/direxio-mcp doctor --json
-~/.direxio/nodes/<service_id>/mcp/direxio-mcp daemon install --service-name <service_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --host 127.0.0.1 --port 19757
-~/.direxio/nodes/<service_id>/mcp/direxio-mcp daemon status --service-name <service_id> --json
 ```
 
 S6 writes only the MCP snippet for the detected runtime: `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, `mcp/openclaw.md` plus `mcp/openclaw-server.json` for OpenClaw, `mcp/hermes.mcp.json` for Hermes, or `mcp/mcp-servers.json` for other MCP-capable supported runtimes. Generated MCP client snippets run the service-scoped `direxio-mcp` over stdio with `DIREXIO_CREDENTIALS_FILE` set to the service credentials, so clients can start the MCP tool process without a daemon. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain machine-local credential paths; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.

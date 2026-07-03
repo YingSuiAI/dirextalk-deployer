@@ -153,15 +153,14 @@ global prefix, unless explicit binary/command overrides are set. S6 writes only
 the MCP snippet selected for the detected runtime: Codex, Cursor, OpenClaw, and
 Hermes have dedicated snippets; other MCP-capable supported runtimes use the
 generic `mcp-servers.json`. Generated MCP snippets launch the current service's
-`direxio-mcp` directly over stdio with the service credential file. S6 also
-attempts to install the service-scoped `direxio-mcp` daemon as an optional HTTP
-proxy endpoint, but a daemon install failure such as Windows scheduled-task
-access denial must not make the stdio MCP snippet unusable.
-S6 only records the daemon as installed after `daemon status` reports Running
-and recent logs show `direxio-connect is running`; logs that show agent CLI
-missing, login/trust failures, ACP startup failures, or agent offline state fail
-S6 so deploy does not report success prematurely. `recommend` writes files and
-prints commands only; `skip` writes credentials/env and configs only. OpenClaw
+`direxio-mcp` directly over stdio with the service credential file; MCP does not
+need a local daemon, HTTP proxy, or listening port. S6 installs the
+service-scoped `direxio-connect` daemon and records it as installed only after
+`daemon status` reports Running and recent logs show `direxio-connect is
+running`; logs that show agent CLI missing, login/trust failures, ACP startup
+failures, or agent offline state fail S6 so deploy does not report success
+prematurely. `recommend` writes files and prints commands only; `skip` writes
+credentials/env and configs only. OpenClaw
 and Hermes map to the generic ACP backend by default. Generated agent options
 write `mode = "yolo"` by default unless an explicit `mode` is supplied.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
@@ -174,7 +173,7 @@ daemon. Explicit `DIREXIO_CURSOR_COMMAND`, `DIREXIO_CURSOR_AGENT_COMMAND`,
 State/report fields include `mcp_config_dir`, `mcp_selected_config_type`,
 `mcp_selected_config`, selected runtime-specific fields such as
 `mcp_codex_config`, `mcp_cursor_config`, `mcp_openclaw_config`,
-`mcp_hermes_config`, or `mcp_json_config`, `mcp_daemon_url`, `mcp_daemon_status_command`,
+`mcp_hermes_config`, or `mcp_json_config`, `mcp_command`, `mcp_package_dir`,
 `credentials.status`, and `mcp.status`.
 Cursor MCP artifacts are generated as JSON for `.cursor/mcp.json` or
 `~/.cursor/mcp.json`, but the deployer does not write those locations by

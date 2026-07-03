@@ -149,47 +149,6 @@ _mcp_doctor_command() {
   printf ' %q doctor --json\n' "$(_mcp_command "$service_dir")"
 }
 
-_mcp_daemon_host() {
-  printf '%s\n' "${DIREXIO_MCP_DAEMON_HOST:-127.0.0.1}"
-}
-
-_mcp_daemon_port() {
-  printf '%s\n' "${DIREXIO_MCP_DAEMON_PORT:-19757}"
-}
-
-_mcp_daemon_url() {
-  printf 'http://%s:%s/mcp\n' "$(_mcp_daemon_host)" "$(_mcp_daemon_port)"
-}
-
-_mcp_daemon_install_command() {
-  local service_id=$1 credentials_file=$2 node_id=${3:-} service_dir=${4:-}
-  printf '%q daemon install --service-name %q --credentials-file %q' "$(_mcp_command "$service_dir")" "$service_id" "$(direxio_normalize_local_path "$credentials_file")"
-  if [ -n "$node_id" ]; then
-    printf ' --node-id %q' "$node_id"
-  fi
-  printf ' --host %q --port %q\n' "$(_mcp_daemon_host)" "$(_mcp_daemon_port)"
-}
-
-_mcp_daemon_status_command() {
-  local service_id=$1 service_dir=${2:-}
-  printf '%q daemon status --service-name %q --json\n' "$(_mcp_command "$service_dir")" "$service_id"
-}
-
-_mcp_daemon_proxy_args_json() {
-  printf '["proxy","--url","%s"]\n' "$(_mcp_daemon_url "$1")"
-}
-
-_mcp_daemon_proxy_args_toml() {
-  local url
-  url=$(_mcp_toml_escape "$(_mcp_daemon_url "$1")")
-  printf '["proxy", "--url", "%s"]\n' "$url"
-}
-
-_mcp_daemon_proxy_command() {
-  local service_id=$1 service_dir=${2:-}
-  printf '%q proxy --url %q\n' "$(_mcp_command "$service_dir")" "$(_mcp_daemon_url "$service_id")"
-}
-
 _mcp_command_available() {
   local service_dir=${1:-} command
   command=$(_mcp_command "$service_dir")
@@ -238,25 +197,6 @@ $(_mcp_config_conflict_paths)
 EOF
   if [ "$found" -ne 0 ]; then
     warn "Replace or unset that MCP server entry before testing $server_name, then reload or restart the MCP client."
-  fi
-}
-
-_run_mcp_daemon_install() {
-  local service_id=$1 credentials_file=$2 node_id=${3:-} service_dir=${4:-} command
-  command=$(_mcp_command "$service_dir")
-  if [ -n "$node_id" ]; then
-    "$command" daemon install \
-      --service-name "$service_id" \
-      --credentials-file "$(direxio_normalize_local_path "$credentials_file")" \
-      --node-id "$node_id" \
-      --host "$(_mcp_daemon_host)" \
-      --port "$(_mcp_daemon_port)"
-  else
-    "$command" daemon install \
-      --service-name "$service_id" \
-      --credentials-file "$(direxio_normalize_local_path "$credentials_file")" \
-      --host "$(_mcp_daemon_host)" \
-      --port "$(_mcp_daemon_port)"
   fi
 }
 
@@ -400,11 +340,7 @@ Config snippets:
 - Selected MCP config: $selected_config_local
 - Selected MCP label: $selected_label
 
-The deployer writes only the MCP config for the detected runtime. Runtime-specific snippets are used for Codex, Cursor, OpenClaw, and Hermes. Other MCP-capable supported runtimes receive the generic mcpServers JSON. The selected snippet launches this service's direxio-mcp binary directly over stdio with this service's credentials. A service-scoped daemon is optional; install or refresh it only when a client explicitly needs the HTTP proxy endpoint:
-
-\`\`\`bash
-$(_mcp_daemon_install_command "$service_id" "$credentials_file" "$node_id" "$service_dir")
-\`\`\`
+The deployer writes only the MCP config for the detected runtime. Runtime-specific snippets are used for Codex, Cursor, OpenClaw, and Hermes. Other MCP-capable supported runtimes receive the generic mcpServers JSON. The selected snippet launches this service's direxio-mcp binary directly over stdio with this service's credentials, so no local MCP daemon, HTTP proxy, or listening port is required.
 
 Cursor can read MCP servers from \`$cursor_project_config\` in a project or \`$cursor_global_config\` globally. The deployer writes the Cursor-ready JSON snippet here, but does not modify a project or global Cursor config by default because it contains machine-local credential paths. After installing or updating Cursor MCP config, fully restart Cursor or use Cursor's MCP settings to reload/enable the server.
 
@@ -429,7 +365,6 @@ _maybe_auto_install_mcp() {
   local package_dir
   if [ "$policy" != "auto" ]; then
     state_set mcp_install_status "$policy" 2>/dev/null || true
-    state_set mcp_daemon_install_status "$policy" 2>/dev/null || true
     return 0
   fi
   if [ -z "$service_dir" ] && [ -n "$credentials_file" ]; then
@@ -437,9 +372,6 @@ _maybe_auto_install_mcp() {
   fi
   package_dir=$(_mcp_package_dir "$service_dir")
   if command -v npm >/dev/null 2>&1; then
-    if _mcp_command_available "$service_dir"; then
-      "$(_mcp_command "$service_dir")" daemon stop --service-name "$service_id" >/dev/null 2>&1 || true
-    fi
     mkdir -p "$package_dir"
     if npm install --prefix "$package_dir" "$(_mcp_npm_package)"; then
       _ensure_mcp_wrapper "$service_dir"
@@ -447,7 +379,6 @@ _maybe_auto_install_mcp() {
     elif ! _mcp_command_available "$service_dir"; then
       state_set mcp_install_status "install_failed" 2>/dev/null || true
       warn "direxio-mcp service-scoped npm install failed and no existing service binary is available. MCP config artifacts and install command are available for manual recovery."
-      state_set mcp_daemon_install_status "install_skipped" 2>/dev/null || true
       return 0
     else
       warn "direxio-mcp service-scoped npm update failed; continuing with the existing service binary."
@@ -460,18 +391,6 @@ _maybe_auto_install_mcp() {
     warn "npm is not on PATH; continuing with the existing service-scoped direxio-mcp binary."
   fi
   state_set mcp_install_status "installed" 2>/dev/null || true
-  if [ -z "$service_id" ] || [ -z "$credentials_file" ]; then
-    state_set mcp_daemon_install_status "missing_inputs" 2>/dev/null || true
-    warn "direxio-mcp daemon install skipped because service id or credentials file is missing."
-    return 0
-  fi
-  if _run_mcp_daemon_install "$service_id" "$credentials_file" "$node_id" "$service_dir"; then
-    state_set mcp_daemon_install_status "installed" 2>/dev/null || true
-    ok "direxio-mcp daemon installed for $service_id."
-  else
-    state_set mcp_daemon_install_status "install_failed" 2>/dev/null || true
-    warn "direxio-mcp daemon install failed. Generated MCP snippets launch direxio-mcp directly over stdio, so MCP clients can still use this service without the daemon."
-  fi
 }
 
 _print_mcp_guidance() {
@@ -483,14 +402,10 @@ MCP config directory:   $config_dir
 MCP credential file:    $credentials_file
 MCP install command:    $install_command
 MCP doctor command:     $doctor_command
-MCP optional daemon:    $(_mcp_daemon_install_command "$service_name" "$credentials_file" "" "$service_dir")
-MCP daemon status:      $(_mcp_daemon_status_command "$service_name" "$service_dir")
-MCP daemon URL:         $(_mcp_daemon_url "$service_name")
-MCP proxy command:      $(_mcp_daemon_proxy_command "$service_name" "$service_dir")
 Selected MCP type:     $selected_type
 Selected MCP config:   $selected_config
 
-S6 writes only the MCP config selected for the detected runtime. Codex, Cursor, OpenClaw, and Hermes have dedicated snippets; other MCP-capable supported runtimes use the generic mcpServers JSON. The selected snippet launches this service's direxio-mcp directly over stdio with the generated service credentials. The daemon/proxy endpoint is optional.
+S6 writes only the MCP config selected for the detected runtime. Codex, Cursor, OpenClaw, and Hermes have dedicated snippets; other MCP-capable supported runtimes use the generic mcpServers JSON. The selected snippet launches this service's direxio-mcp directly over stdio with the generated service credentials. No MCP daemon, HTTP proxy, or listening port is required.
 Cursor can load its selected JSON via .cursor/mcp.json or ~/.cursor/mcp.json, but Cursor may require a full restart or MCP settings reload before the server is enabled.
 For OpenClaw, use the selected CLI setup note so OpenClaw validates and writes mcp.servers itself; do not paste MCP JSON into openclaw.json.
 EOF

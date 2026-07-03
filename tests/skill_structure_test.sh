@@ -290,7 +290,7 @@ grep -q 'refresh_pending' references/token-refresh.md
 grep -q 'user_confirmations.*runtime_checks' references/token-refresh.md
 grep -q 'stops only the matching service-scoped direxio-connect daemon' references/token-refresh.md
 grep -q '重新生成本地 credentials/MCP snippets' references/token-refresh.md
-grep -q '默认自动重新安装/重启 direxio-connect 和 direxio-mcp' references/token-refresh.md
+grep -q '刷新 direxio-mcp stdio command' references/token-refresh.md
 grep -q 'DIREXIO_RESET_APP_DATA_CONFIRM=1' SKILL.md
 grep -q 'scripts/aws-credentials.sh import-csv' SKILL.md
 grep -q 'scripts/aws-credentials.sh verify' SKILL.md

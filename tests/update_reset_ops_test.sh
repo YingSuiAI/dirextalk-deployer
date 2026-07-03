@@ -67,6 +67,10 @@ write_state() {
     "mcp_doctor_command=DIREXIO_CREDENTIALS_FILE=$service_dir/credentials.json direxio-mcp doctor --json" \
     mcp_install_status=installed \
     mcp_daemon_install_status=installed \
+    'mcp_daemon_install_command=direxio-mcp daemon install --service-name ops.example.test' \
+    'mcp_daemon_status_command=direxio-mcp daemon status --service-name ops.example.test --json' \
+    mcp_daemon_url=http://127.0.0.1:19757/mcp \
+    'mcp_daemon_proxy_command=direxio-mcp proxy --url http://127.0.0.1:19757/mcp' \
     'resources={"instance_id":"i-ops","public_ip":"203.0.113.77","eip_id":"eipalloc-ops","key_file":"/tmp/ops.pem"}' \
     'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
     'user_confirmations={"app_initialization":{"status":"confirmed","evidence":"old app confirmation"},"real_chat":{"status":"confirmed","evidence":"old chat confirmation"},"agent_mcp_runtime":{"status":"confirmed","evidence":"old runtime confirmation","runtime_summary_status":"passed","runtime_probe_confirmed":true}}' \
@@ -166,10 +170,10 @@ assert_contains "$reset_calls" 'direxio-connect daemon status --service-name ops
 assert_contains "$reset_calls" 'direxio-connect daemon stop --service-name ops\.example\.test'
 assert_not_contains "$reset_calls" 'caddy-data|caddy-config|down -v'
 
-json_test_check "$state" "!(data.password || data.access_token || data.agent_token || data.agent_room_id) && data.connect_install_status === 'refresh_pending' && data.mcp_install_status === 'refresh_pending' && data.mcp_daemon_install_status === 'refresh_pending' && data.phases.S5_INIT_TOKENS.status === 'pending' && data.phases.S6_WIRE_LOCAL.status === 'pending' && data.phases.S7_VERIFY_E2E.status === 'pending' && !data.user_confirmations && !data.runtime_checks"
+json_test_check "$state" "!(data.password || data.access_token || data.agent_token || data.agent_room_id) && data.connect_install_status === 'refresh_pending' && data.mcp_install_status === 'refresh_pending' && !('mcp_daemon_install_status' in data) && !('mcp_daemon_install_command' in data) && !('mcp_daemon_status_command' in data) && !('mcp_daemon_url' in data) && !('mcp_daemon_proxy_command' in data) && data.phases.S5_INIT_TOKENS.status === 'pending' && data.phases.S6_WIRE_LOCAL.status === 'pending' && data.phases.S7_VERIFY_E2E.status === 'pending' && !data.user_confirmations && !data.runtime_checks"
 
 reset_report="$service_dir/operation-report.json"
 assert_file_exists "$reset_report"
-json_test_check "$reset_report" "data.operation_type === 'reset_app_data' && data.status === 'reset_remote_data_cleared_refresh_pending' && data.security.secrets_included === false && data.gates.user_confirmation.app_initialization === 'pending_user_confirmation' && data.gates.user_confirmation.real_chat === 'pending_user_confirmation' && data.gates.user_confirmation.agent_mcp_runtime === 'pending_runtime_confirmation' && data.runtime_checks.summary.status === 'not_run' && data.connect.install_status === 'refresh_pending' && data.credentials.status === 'refresh_pending' && data.mcp.status === 'refresh_pending' && data.mcp.install_status === 'refresh_pending' && data.mcp.daemon_install_status === 'refresh_pending'"
+json_test_check "$reset_report" "data.operation_type === 'reset_app_data' && data.status === 'reset_remote_data_cleared_refresh_pending' && data.security.secrets_included === false && data.gates.user_confirmation.app_initialization === 'pending_user_confirmation' && data.gates.user_confirmation.real_chat === 'pending_user_confirmation' && data.gates.user_confirmation.agent_mcp_runtime === 'pending_runtime_confirmation' && data.runtime_checks.summary.status === 'not_run' && data.connect.install_status === 'refresh_pending' && data.credentials.status === 'refresh_pending' && data.mcp.status === 'refresh_pending' && data.mcp.install_status === 'refresh_pending' && !('daemon_install_status' in data.mcp)"
 
 echo "update reset ops ok"

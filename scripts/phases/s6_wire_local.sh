@@ -1054,11 +1054,25 @@ EOF
   _print_runtime_install_summary "$runtime" "$mode" "$cc_config" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_name"
 }
 
+_clear_mcp_daemon_state() {
+  local key
+  [ -n "${STATE_JSON:-}" ] && [ -f "$STATE_JSON" ] || return 0
+  for key in \
+    mcp_daemon_install_command \
+    mcp_daemon_status_command \
+    mcp_daemon_url \
+    mcp_daemon_proxy_command \
+    mcp_daemon_install_status
+  do
+    json_mutate "$STATE_JSON" delete "$key" 2>/dev/null || true
+  done
+}
+
 run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and direxio-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
   local node_id service_dir node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_config cc_config_local cc_data cc_data_local cc_binary cc_session cc_source cc_package_dir
-  local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_daemon_install_command mcp_daemon_status_command mcp_daemon_url mcp_daemon_proxy_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
+  local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
   local mcp_selected_config_type mcp_selected_config mcp_selected_config_local mcp_codex_config_local mcp_cursor_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_json_config_local mcp_env_file_local mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
   local skill_path global_skill_path
@@ -1128,10 +1142,6 @@ run_phase() {
   mcp_readme_local=$(_local_connect_path "$mcp_readme")
   mcp_install_command=$(_mcp_install_command "$service_dir")
   mcp_doctor_command=$(_mcp_doctor_command "$node_cred" "$node_id" "$service_dir")
-  mcp_daemon_install_command=$(_mcp_daemon_install_command "$service_id" "$node_cred" "$node_id" "$service_dir")
-  mcp_daemon_status_command=$(_mcp_daemon_status_command "$service_id" "$service_dir")
-  mcp_daemon_url=$(_mcp_daemon_url "$service_id")
-  mcp_daemon_proxy_command=$(_mcp_daemon_proxy_command "$service_id")
   ok "Wrote MCP config snippets under $mcp_dir."
 
   if ! envfile=$(_persist_agent_env "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id"); then
@@ -1195,10 +1205,7 @@ run_phase() {
   state_set mcp_readme "$mcp_readme_local" 2>/dev/null || true
   state_set mcp_install_command "$mcp_install_command" 2>/dev/null || true
   state_set mcp_doctor_command "$mcp_doctor_command" 2>/dev/null || true
-  state_set mcp_daemon_install_command "$mcp_daemon_install_command" 2>/dev/null || true
-  state_set mcp_daemon_status_command "$mcp_daemon_status_command" 2>/dev/null || true
-  state_set mcp_daemon_url "$mcp_daemon_url" 2>/dev/null || true
-  state_set mcp_daemon_proxy_command "$mcp_daemon_proxy_command" 2>/dev/null || true
+  _clear_mcp_daemon_state
   state_set agent_workspace "$workspace" 2>/dev/null || true
   state_set connect_agent "$cc_agent" 2>/dev/null || true
   state_set connect_agent_cmd "$cc_agent_cmd" 2>/dev/null || true

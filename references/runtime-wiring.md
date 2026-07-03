@@ -64,7 +64,7 @@ DIREXIO_AGENT_NODE_ID=__AGENT_NODE_ID__
 ```
 
 This is intentionally separate from the `direxio-connect` bridge. MCP uses the deployer credential file; direxio-connect uses a direct Matrix Client-Server session in `direxio-connect/config.toml`.
-Generated MCP client snippets do not require a service-scoped `direxio-mcp` daemon. The daemon remains available as an optional Streamable HTTP proxy endpoint for clients that explicitly need an HTTP MCP URL.
+Generated MCP client snippets launch the service-scoped `direxio-mcp` command directly over stdio. MCP does not require a local daemon, Streamable HTTP proxy endpoint, or listening port.
 Cursor can load the generated MCP server after the snippet is added to `.cursor/mcp.json` or `~/.cursor/mcp.json`, but Cursor may require a full restart or MCP settings reload/enable before the server starts and tools appear.
 
 Install and check the MCP package:
@@ -72,8 +72,6 @@ Install and check the MCP package:
 ```bash
 npm install --prefix ~/.direxio/nodes/<service_id>/mcp direxio-mcp@latest
 DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json ~/.direxio/nodes/<service_id>/mcp/direxio-mcp doctor --json
-~/.direxio/nodes/<service_id>/mcp/direxio-mcp daemon install --service-name <service_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --host 127.0.0.1 --port 19757
-~/.direxio/nodes/<service_id>/mcp/direxio-mcp daemon status --service-name <service_id> --json
 ```
 
 ## direxio-connect Matrix Bridge
@@ -125,8 +123,6 @@ DIREXIO_CONNECT_NPM_PACKAGE=direxio-connent@latest
 DIREXIO_CONNECT_REPO=https://github.com/YingSuiAI/direxio-connect.git
 DIREXIO_MCP_NPM_PACKAGE=direxio-mcp@latest
 DIREXIO_MCP_COMMAND=direxio-mcp
-DIREXIO_MCP_DAEMON_HOST=127.0.0.1
-DIREXIO_MCP_DAEMON_PORT=19757
 DIREXIO_SPEECH_PROVIDER=openai|groq|qwen|gemini
 DIREXIO_SPEECH_API_KEY=<optional generic STT key>
 DIREXIO_SPEECH_BASE_URL=<optional OpenAI-compatible STT base URL>
@@ -145,7 +141,7 @@ Defaults:
 - `DIREXIO_CONNECT_AGENT_OPTIONS_TOML` appends agent-specific options under `[projects.agent.options]`; use it for agents with required non-command options such as `reasonix` (`serve_url`) or `tmux` (`session`).
 - OpenClaw Gateway ACP auto-detects the Gateway from `~/.openclaw/openclaw.json` when `DIREXIO_OPENCLAW_ACP_URL` and `DIREXIO_OPENCLAW_ACP_TOKEN_FILE` are unset. It uses `DIREXIO_OPENCLAW_ACP_SESSION` when provided, otherwise `agent:main:main`. To force explicit Gateway settings, complete OpenClaw pairing first and set all three real values: `DIREXIO_OPENCLAW_ACP_URL`, `DIREXIO_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXIO_OPENCLAW_ACP_SESSION`.
 - `DIREXIO_OPENCLAW_ACP_ARGS_TOML` replaces the generated OpenClaw ACP args array, for example `["acp", "--url", "wss://gateway.example.test:18789", "--token-file", "$HOME/.openclaw/gateway.token", "--session", "agent:main:main"]`. `DIREXIO_HERMES_ACP_ARGS_TOML` supplies the child Hermes args; S6 prefixes `["hermes-acp-adapter", "--", "<hermes-command>"]` automatically.
-- `DIREXIO_AGENT_INSTALL=auto` is the default. It installs `direxio-connent@latest` and `direxio-mcp@latest` under the current service directory unless explicit binary/command overrides are set. It installs the `direxio-connect` daemon with the generated config and `--service-name <service_id>`, then attempts the optional service-scoped `direxio-mcp daemon`. direxio-connect is recorded as installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs show `direxio-connect is running`. Logs that show local agent backend failures such as missing CLI, missing login/auth, workspace trust prompts, ACP session initialization failure, or agent offline state make S6 fail with `connect_install_status=install_failed`. MCP records `mcp_install_status=installed` when the service-scoped command is available and `mcp_daemon_install_status=installed` only when optional daemon install succeeds.
+- `DIREXIO_AGENT_INSTALL=auto` is the default. It installs `direxio-connent@latest` and `direxio-mcp@latest` under the current service directory unless explicit binary/command overrides are set. It installs the `direxio-connect` daemon with the generated config and `--service-name <service_id>`. direxio-connect is recorded as installed only when `direxio-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs show `direxio-connect is running`. Logs that show local agent backend failures such as missing CLI, missing login/auth, workspace trust prompts, ACP session initialization failure, or agent offline state make S6 fail with `connect_install_status=install_failed`. MCP records `mcp_install_status=installed` when the service-scoped stdio command is available.
 - `DIREXIO_AGENT_INSTALL=recommend` prints and records commands only. `verify runtime` records the daemon check as `manual_pending` in this mode and still verifies MCP doctor/tools/smoke when the MCP command is available.
 - `DIREXIO_AGENT_INSTALL_MODE=recommended` maps every supported local runtime to `direxio-connect`.
 - Speech defaults to `DIREXIO_SPEECH_PROVIDER=openai` and `DIREXIO_SPEECH_LANGUAGE=zh`. Provider-specific keys are also accepted: `DIREXIO_SPEECH_OPENAI_API_KEY` or `OPENAI_API_KEY`, `DIREXIO_SPEECH_GROQ_API_KEY` or `GROQ_API_KEY`, `DIREXIO_SPEECH_QWEN_API_KEY` or `DASHSCOPE_API_KEY`, and `DIREXIO_SPEECH_GEMINI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`. Set `DIREXIO_SPEECH_ENABLED=false` to suppress speech config generation even when a key exists.
@@ -216,8 +212,4 @@ mcp_env_file
 mcp_readme
 mcp_install_command
 mcp_doctor_command
-mcp_daemon_install_command
-mcp_daemon_status_command
-mcp_daemon_url
-mcp_daemon_proxy_command
 ```

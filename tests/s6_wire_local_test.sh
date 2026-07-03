@@ -278,6 +278,7 @@ grep -q "$(_local_connect_path "$mcp_credentials")" "$mcp_service_dir/mcp/codex.
 grep -q 'DIREXIO_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
 grep -q 'Selected MCP type: codex' "$mcp_service_dir/mcp/README.md"
 grep -q 'same MCP server name' "$mcp_service_dir/mcp/README.md"
+! grep -R '19757\|proxy --url\|"proxy"' "$mcp_service_dir/mcp"
 [ "$(_mcp_config_type_for_runtime codex)" = "codex" ]
 [ "$(_mcp_config_type_for_runtime cursor)" = "cursor" ]
 [ "$(_mcp_config_type_for_runtime openclaw)" = "openclaw" ]
@@ -321,16 +322,6 @@ custom_mcp_install_command=$(DIREXIO_MCP_NPM_PACKAGE='direxio-mcp@override-test'
 mcp_doctor_command=$(_mcp_doctor_command "$mcp_credentials" "codex-service-example" "$mcp_service_dir")
 [[ "$mcp_doctor_command" == *"DIREXIO_CREDENTIALS_FILE="* ]]
 [[ "$mcp_doctor_command" == *"mcp/direxio-mcp doctor --json"* ]]
-mcp_daemon_url=$(_mcp_daemon_url "service.example.test")
-[ "$mcp_daemon_url" = "http://127.0.0.1:19757/mcp" ]
-mcp_daemon_install_command=$(_mcp_daemon_install_command "service.example.test" "$mcp_credentials" "codex-service-example" "$mcp_service_dir")
-[[ "$mcp_daemon_install_command" == *"direxio-mcp daemon install"* ]]
-[[ "$mcp_daemon_install_command" == *"--service-name service.example.test"* ]]
-[[ "$mcp_daemon_install_command" == *"--credentials-file"* ]]
-[[ "$mcp_daemon_install_command" == *"--node-id codex-service-example"* ]]
-[[ "$mcp_daemon_install_command" == *"--port 19757"* ]]
-mcp_daemon_proxy_command=$(_mcp_daemon_proxy_command "service.example.test" "$mcp_service_dir")
-[[ "$mcp_daemon_proxy_command" == *"direxio-mcp proxy --url http://127.0.0.1:19757/mcp"* ]]
 
 stale_node_id=$(DIREXIO_AGENT_NODE_ID=codex-old.example.test _agent_node_id codex new.example.test '!agents-real:new.example.test')
 [[ "$stale_node_id" == codex-new.example.test-* ]]
@@ -453,20 +444,7 @@ EOF
 cat > "$fakebin/direxio-mcp" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "install" ]; then
-  [ "${3:-}" = "--service-name" ]
-  [ "${4:-}" = "service.example.test" ]
-  [ "${5:-}" = "--credentials-file" ]
-  [ -n "${6:-}" ]
-  [ "${7:-}" = "--node-id" ]
-  [ "${8:-}" = "codex-service-example" ]
-  [ "${9:-}" = "--host" ]
-  [ "${10:-}" = "127.0.0.1" ]
-  [ "${11:-}" = "--port" ]
-  [ "${12:-}" = "19757" ]
-  exit 0
-fi
-exit 1
+exit 0
 EOF
 cat > "$fakebin/direxio-connect" <<'EOF'
 #!/usr/bin/env bash
@@ -557,31 +535,16 @@ NPM_CALLS="$tmp/npm-mcp-update.calls"
 : > "$NPM_CALLS"
 PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 _maybe_auto_install_mcp auto service.example.test "$mcp_credentials" codex-service-example
 grep -q '^mcp_install_status=installed$' "$STATE_CALLS"
-grep -q '^mcp_daemon_install_status=installed$' "$STATE_CALLS"
+! grep -q '^mcp_daemon_' "$STATE_CALLS"
 [ -s "$NPM_CALLS" ]
 grep -q -- '--prefix' "$NPM_CALLS"
 grep -q 'direxio-mcp@latest' "$NPM_CALLS"
-
-cat > "$expected_mcp_command" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "install" ]; then
-  printf 'schtasks install failed: Access is denied\n' >&2
-  exit 1
-fi
-exit 0
-EOF
-chmod 700 "$expected_mcp_command"
-STATE_CALLS="$tmp/mcp-daemon-denied-state.calls"
-: > "$STATE_CALLS"
-PATH="$fakebin:$PATH" NPM_FAIL=1 _maybe_auto_install_mcp auto service.example.test "$mcp_credentials" codex-service-example
-grep -q '^mcp_install_status=installed$' "$STATE_CALLS"
-grep -q '^mcp_daemon_install_status=install_failed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/mcp-recommend-state.calls"
 : > "$STATE_CALLS"
 PATH="$fakebin:$PATH" _maybe_auto_install_mcp recommend
 grep -q '^mcp_install_status=recommend$' "$STATE_CALLS"
+! grep -q '^mcp_daemon_' "$STATE_CALLS"
 
 # When explicit Gateway settings are not set, OpenClaw ACP should auto-discover
 # the Gateway from ~/.openclaw/openclaw.json.
@@ -681,5 +644,10 @@ mcp_guidance=$(
 [[ "$mcp_guidance" == *"Selected MCP type:"* ]]
 [[ "$mcp_guidance" == *"Selected MCP config:"* ]]
 [[ "$mcp_guidance" == *"S6 writes only the MCP config selected for the detected runtime"* ]]
+[[ "$mcp_guidance" != *"MCP optional daemon"* ]]
+[[ "$mcp_guidance" != *"MCP daemon URL"* ]]
+[[ "$mcp_guidance" != *"MCP proxy command"* ]]
+[[ "$mcp_guidance" != *"daemon install"* ]]
+[[ "$mcp_guidance" != *"19757"* ]]
 
 echo "s6 wire local ok"

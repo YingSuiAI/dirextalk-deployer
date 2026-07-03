@@ -1,9 +1,9 @@
 ---
-name: direxio-deployer
-description: Deploy, resume, verify, destroy, and locally wire a production Direxio message server on AWS for any local agent runtime supported by direxio-connect. Use when installing or updating this skill itself; install the versioned npm package `direxio-deployer` and use its CLI to place the skill in the runtime-specific global path from references/agent-targets.md unless the user explicitly asks for a project-local installation.
+name: dirextalk-deployer
+description: Deploy, resume, verify, destroy, and locally wire a production Dirextalk message server on AWS for any local agent runtime supported by dirextalk-connect. Use when installing or updating this skill itself; install the versioned npm package `dirextalk-deployer` and use its CLI to place the skill in the runtime-specific global path from references/agent-targets.md unless the user explicitly asks for a project-local installation.
 ---
 
-# Direxio Deployer
+# Dirextalk Deployer
 
 This skill is the compact agent-facing entrypoint. Treat this repository root
 as the execution engine and read the referenced docs only when that phase needs
@@ -26,37 +26,37 @@ Before deployment, repair, verification, teardown, runtime wiring, or skill
 installation, make one freshness attempt:
 
 ```bash
-npm install -g direxio-deployer@latest
-direxio-deployer skill refresh --agent <runtime>
+npm install -g dirextalk-deployer@latest
+dirextalk-deployer skill refresh --agent <runtime>
 ```
 
 Use project scope only when the user explicitly asks for repository-local
 installation:
 
 ```bash
-direxio-deployer skill refresh --agent <runtime> --scope project --project <project-root>
+dirextalk-deployer skill refresh --agent <runtime> --scope project --project <project-root>
 ```
 
 If npm is unavailable, report that freshness could not be checked and continue
-with the local copy. If the user asks to install from `YingSuiAI/direxio-deployer`,
+with the local copy. If the user asks to install from `YingSuiAI/dirextalk-deployer`,
 do not use a generic GitHub skill installer; read the README and follow the npm
 install rule. Use a Git clone only for deployer development or local patching.
 
 ## Platform Law
 
 Classify every path by consumer before writing it to `state.json`,
-`credentials.json`, `env`, `direxio-connect/config.toml`, docs, or printed commands:
+`credentials.json`, `env`, `dirextalk-connect/config.toml`, docs, or printed commands:
 
-- Remote server paths are Linux paths consumed on EC2, such as `/var/direxio-message-server`.
+- Remote server paths are Linux paths consumed on EC2, such as `/var/dirextalk-message-server`.
 - Deployer execution paths may be POSIX paths inside Bash phases.
-- Local bridge paths are consumed by `direxio-connect` and local agent
+- Local bridge paths are consumed by `dirextalk-connect` and local agent
   processes. On Windows they must be Windows-compatible paths.
 - Documentation paths must be portable examples using `$HOME`, `%USERPROFILE%`,
   `$env:USERPROFILE`, `<service_id>`, or `<domain>`.
 
 Windows users run `.\scripts\orchestrate.ps1` and `.\scripts\destroy.ps1` from
 Windows PowerShell. These wrappers may use Git Bash internally, but must set
-`DIREXIO_LOCAL_PATH_STYLE=windows`. POSIX users run `bash scripts/orchestrate.sh`
+`DIREXTALK_LOCAL_PATH_STYLE=windows`. POSIX users run `bash scripts/orchestrate.sh`
 and `bash scripts/destroy.sh`. Do not tell Windows users to use WSL unless they
 explicitly choose WSL as the host runtime.
 
@@ -71,7 +71,7 @@ Credential choices for first-time users:
   highly privileged, must be saved securely, never pasted into chat, and deleted
   or rotated after use.
 - **Dedicated IAM deployment user:** safer because it avoids root keys. Create a
-  temporary `DirexioDeployer` user with `AdministratorAccess`, then delete or
+  temporary `DirextalkDeployer` user with `AdministratorAccess`, then delete or
   disable it after deployment.
 
 Root access keys are allowed when the operator explicitly chooses them. Report
@@ -79,8 +79,8 @@ only redacted identity details, such as account, `root=true|false`, and a
 redacted ARN. Prefer the helpers:
 
 ```bash
-bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv direxio-deployer <region>
-bash scripts/aws-credentials.sh verify direxio-deployer
+bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv dirextalk-deployer <region>
+bash scripts/aws-credentials.sh verify dirextalk-deployer
 ```
 
 Before final deployment confirmation:
@@ -88,7 +88,7 @@ Before final deployment confirmation:
 ```bash
 aws lightsail get-regions --include-availability-zones --output json
 bash scripts/pricing-estimate.sh --region <aws-region> --cloud-provider lightsail --domain-mode <user|route53>
-bash scripts/pricing-estimate.sh --state ~/.direxio/nodes/<service_id>/state.json --write-state
+bash scripts/pricing-estimate.sh --state ~/.dirextalk/nodes/<service_id>/state.json --write-state
 ```
 
 Record and report `cost_estimate` and billing reminders. Tell the operator that new AWS customer accounts generally receive `100-200 USD` in free credits, and that users who have not used Lightsail generally receive three months of free Lightsail usage. Coverage is account-specific; recommend an AWS Budget, AWS Billing Console review, and say AWS official real-time policy prevails. Check EC2-VPC Elastic IP quota before mutating AWS resources.
@@ -99,16 +99,16 @@ Required deployment env:
 DOMAIN=<final-domain>
 DOMAIN_MODE=user
 CONFIRM_DOMAIN_BINDING=1
-MESSAGE_SERVER_IMAGE=direxio/message-server:latest
-DIREXIO_CLOUD_PROVIDER=lightsail
+MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
+DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
 Use `DOMAIN_MODE=route53` only when the user authorizes AWS to manage the A
 record. If an existing A record points elsewhere, require
-`DIREXIO_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
+`DIREXTALK_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
 authoritative DNS before continuing.
 
-Default cloud provider is Lightsail. If no AWS region is configured in state, `AWS_DEFAULT_REGION`/`AWS_REGION`, or the AWS profile, the deployer recommends a default region from the local timezone and uses it in non-interactive runs; `DIREXIO_DEFAULT_REGION` is the explicit deployer override. S1 queries Lightsail bundle availability and Lightsail availability zones before provisioning, but it does not query AWS Free Tier or credit usage. For manual Lightsail zone checks, use `aws lightsail get-regions --include-availability-zones --output json`; plain `aws lightsail get-regions` can omit availability-zone details. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone in the same region. If Lightsail has no usable bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; ask the operator to choose another Lightsail-capable region/zone or explicitly rerun with `DIREXIO_CLOUD_PROVIDER=ec2` after reviewing the estimate. EC2 remains supported explicitly with `DIREXIO_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
+Default cloud provider is Lightsail. If no AWS region is configured in state, `AWS_DEFAULT_REGION`/`AWS_REGION`, or the AWS profile, the deployer recommends a default region from the local timezone and uses it in non-interactive runs; `DIREXTALK_DEFAULT_REGION` is the explicit deployer override. S1 queries Lightsail bundle availability and Lightsail availability zones before provisioning, but it does not query AWS Free Tier or credit usage. For manual Lightsail zone checks, use `aws lightsail get-regions --include-availability-zones --output json`; plain `aws lightsail get-regions` can omit availability-zone details. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone in the same region. If Lightsail has no usable bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; ask the operator to choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2` after reviewing the estimate. EC2 remains supported explicitly with `DIREXTALK_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
 
 ## Local Runtime Wiring
 
@@ -119,44 +119,44 @@ wiring a runtime. Supported connect agents are:
 acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode pi qoder reasonix tmux
 ```
 
-The supported local bridge is `direxio-connect`, installed from
-`direxio-connent@latest` by default or built from
-`https://github.com/YingSuiAI/direxio-connect.git`. The MCP tool surface is
-`direxio-mcp@latest`.
+The supported local bridge is `dirextalk-connect`, installed from
+`dirextalk-connect@latest` by default or built from
+`https://github.com/YingSuiAI/dirextalk-connect.git`. The MCP tool surface is
+`dirextalk-mcp@latest`.
 
-S6 writes service-scoped files under `~/.direxio/nodes/<service_id>/`:
+S6 writes service-scoped files under `~/.dirextalk/nodes/<service_id>/`:
 
 ```text
 credentials.json
 env
-direxio-connect/config.toml
+dirextalk-connect/config.toml
 mcp/
 ```
 
-The direxio-connect config must use a direct Matrix config, create the Matrix session
+The dirextalk-connect config must use a direct Matrix config, create the Matrix session
 through `agent.matrix_session.create` with `agent_token`, require `@agent:<server>`,
 and restrict sync/replies to the real `agent_room_id`. It must not use
-`DIREXIO_CREDENTIALS_FILE`; MCP owns that variable.
+`DIREXTALK_CREDENTIALS_FILE`; MCP owns that variable.
 
 Key selectors:
 
 ```bash
-DIREXIO_AGENT_PLATFORM=auto
-DIREXIO_CONNECT_AGENT=<optional connect agent>
-DIREXIO_AGENT_INSTALL=auto
-DIREXIO_AGENT_INSTALL_MODE=recommended
+DIREXTALK_AGENT_PLATFORM=auto
+DIREXTALK_CONNECT_AGENT=<optional connect agent>
+DIREXTALK_AGENT_INSTALL=auto
+DIREXTALK_AGENT_INSTALL_MODE=recommended
 ```
 
-`DIREXIO_AGENT_INSTALL=auto` installs `direxio-connent@latest` and
-`direxio-mcp@latest` into the current service directory, not into the npm
+`DIREXTALK_AGENT_INSTALL=auto` installs `dirextalk-connect@latest` and
+`dirextalk-mcp@latest` into the current service directory, not into the npm
 global prefix, unless explicit binary/command overrides are set. S6 writes only
 the MCP snippet selected for the detected runtime: Codex, Cursor, OpenClaw, and
 Hermes have dedicated snippets; other MCP-capable supported runtimes use the
 generic `mcp-servers.json`. Generated MCP snippets launch the current service's
-`direxio-mcp` directly over stdio with the service credential file; MCP does not
+`dirextalk-mcp` directly over stdio with the service credential file; MCP does not
 need a local daemon, HTTP proxy, or listening port. S6 installs the
-service-scoped `direxio-connect` daemon and records it as installed only after
-`daemon status` reports Running and recent logs show `direxio-connect is
+service-scoped `dirextalk-connect` daemon and records it as installed only after
+`daemon status` reports Running and recent logs show `dirextalk-connect is
 running`; logs that show agent CLI missing, login/trust failures, ACP startup
 failures, or agent offline state fail S6 so deploy does not report success
 prematurely. `recommend` writes files and prints commands only; `skip` writes
@@ -166,9 +166,9 @@ write `mode = "yolo"` by default unless an explicit `mode` is supplied.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
 once; rerunning the deployer refreshes config and restarts the service-scoped
-daemon. Explicit `DIREXIO_CURSOR_COMMAND`, `DIREXIO_CURSOR_AGENT_COMMAND`,
-`DIREXIO_CONNECT_AGENT_CMD`, `DIREXIO_CURSOR_MODE`, and
-`DIREXIO_CONNECT_AGENT_OPTIONS_TOML` overrides still win.
+daemon. Explicit `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CURSOR_AGENT_COMMAND`,
+`DIREXTALK_CONNECT_AGENT_CMD`, `DIREXTALK_CURSOR_MODE`, and
+`DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides still win.
 
 State/report fields include `mcp_config_dir`, `mcp_selected_config_type`,
 `mcp_selected_config`, selected runtime-specific fields such as
@@ -188,8 +188,8 @@ only after:
 
 1. The user receives the App domain and eight-digit app initialization code.
 2. The user confirms App initialization.
-3. direxio-connect is wired to the real `agent_room_id`.
-4. MCP snippets exist and `direxio-mcp doctor --json` succeeds.
+3. dirextalk-connect is wired to the real `agent_room_id`.
+4. MCP snippets exist and `dirextalk-mcp doctor --json` succeeds.
 5. Agent/MCP validation is non-polluting; prefer read-only checks and do not
    auto-send a normal chat message.
 
@@ -206,13 +206,13 @@ DOMAIN=<DOMAIN> bash scripts/orchestrate.sh verify runtime
 Manual confirmation commands:
 
 ```bash
-DIREXIO_CONFIRM_EVIDENCE="user completed app initialization" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm app_initialization
-DIREXIO_CONFIRM_RUNTIME_PROBE=1 DIREXIO_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm agent_mcp_runtime
+DIREXTALK_CONFIRM_EVIDENCE="user completed app initialization" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm app_initialization
+DIREXTALK_CONFIRM_RUNTIME_PROBE=1 DIREXTALK_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm agent_mcp_runtime
 ```
 
-Every `confirm` command requires `DIREXIO_CONFIRM_EVIDENCE`; evidence must be
+Every `confirm` command requires `DIREXTALK_CONFIRM_EVIDENCE`; evidence must be
 concrete and at least 12 characters. For `agent_mcp_runtime`, first require
-`runtime_checks.summary.status=passed`, then set `DIREXIO_CONFIRM_RUNTIME_PROBE=1`
+`runtime_checks.summary.status=passed`, then set `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`
 only after a real runtime/channel probe sees the service-scoped MCP tools.
 
 ## Status, Reports, And Delivery
@@ -240,7 +240,7 @@ AWS resource IDs, EBS root volume evidence, the default 50 GiB gp3 root EBS
 volume size, billing reminders, and `cost_estimate`.
 
 Delivery must include App domain, eight-digit app initialization code, product
-gate status, `agent_room_id`, service directory, direxio-connect config, MCP config
+gate status, `agent_room_id`, service directory, dirextalk-connect config, MCP config
 paths, Matrix bridge user/device, AWS region, cloud provider, cloud instance/public IP, SSH path,
 state path, report path, AWS credit/Lightsail trial reminder, AWS official policy reminder,
 AWS Billing Console verification reminder, stop-billing reminder, and security reminder to delete
@@ -249,20 +249,20 @@ or disable temporary credentials and rotate/remove root access keys if used.
 ## Update, Reset, And Destroy
 
 Use `scripts/update.sh` for image-only refresh. It preserves infrastructure,
-TLS storage, local credentials, confirmations, runtime checks, direxio-connect daemon
+TLS storage, local credentials, confirmations, runtime checks, dirextalk-connect daemon
 state, and MCP artifacts unless verification proves credentials were regenerated.
 
-Use `scripts/reset-app-data.sh` only with `DIREXIO_RESET_APP_DATA_CONFIRM=1`.
+Use `scripts/reset-app-data.sh` only with `DIREXTALK_RESET_APP_DATA_CONFIRM=1`.
 It preserves the cloud instance, fixed public IP/static IP or Elastic IP, DNS, and Caddy TLS storage, clears
 application data, clears old user-confirmation/runtime-check evidence, sets
-`connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped direxio-connect daemon. The follow-up
+`connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped dirextalk-connect daemon. The follow-up
 orchestrate run regenerates credentials and MCP snippets.
 
 Destroy uses `scripts/destroy.sh` on POSIX and `.\scripts\destroy.ps1` on
 Windows PowerShell. Destroy uses the same AWS identity boundary as deployment.
 Root AWS access-key identity is allowed when the operator explicitly chose it.
 Destroy stops and uninstalls only the service-scoped daemon whose WorkDir
-matches `~/.direxio/nodes/<service_id>/direxio-connect`, then removes recorded AWS
+matches `~/.dirextalk/nodes/<service_id>/dirextalk-connect`, then removes recorded AWS
 resources and writes `destroy.evidence`. If `possible_remaining_billable_resources`
 is present, AWS Console/Billing is the source of truth and cleanup must continue.
 

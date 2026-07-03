@@ -23,10 +23,10 @@ exit 0
 EOF
 chmod 700 "$fakebin/ssh"
 
-cat > "$fakebin/direxio-connect" <<'EOF'
+cat > "$fakebin/dirextalk-connect" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'direxio-connect' >> "$CALLS"
+printf 'dirextalk-connect' >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "status" ]; then
@@ -37,7 +37,7 @@ STATUS
 fi
 exit 0
 EOF
-chmod 700 "$fakebin/direxio-connect"
+chmod 700 "$fakebin/dirextalk-connect"
 
 write_state() {
   local state=$1 service_dir=$2
@@ -57,20 +57,20 @@ write_state() {
     "agent_service_dir=$service_dir" \
     "agent_credentials_file=$service_dir/credentials.json" \
     connect_install_status=installed \
-    "connect_config=$service_dir/direxio-connect/config.toml" \
-    connect_binary=direxio-connect \
+    "connect_config=$service_dir/dirextalk-connect/config.toml" \
+    connect_binary=dirextalk-connect \
     connect_agent=codex \
     "mcp_config_dir=$service_dir/mcp" \
     "mcp_codex_config=$service_dir/mcp/codex.toml" \
     "mcp_openclaw_config=$service_dir/mcp/openclaw.md" \
     "mcp_hermes_config=$service_dir/mcp/hermes.mcp.json" \
-    "mcp_doctor_command=DIREXIO_CREDENTIALS_FILE=$service_dir/credentials.json direxio-mcp doctor --json" \
+    "mcp_doctor_command=DIREXTALK_CREDENTIALS_FILE=$service_dir/credentials.json dirextalk-mcp doctor --json" \
     mcp_install_status=installed \
     mcp_daemon_install_status=installed \
-    'mcp_daemon_install_command=direxio-mcp daemon install --service-name ops.example.test' \
-    'mcp_daemon_status_command=direxio-mcp daemon status --service-name ops.example.test --json' \
+    'mcp_daemon_install_command=dirextalk-mcp daemon install --service-name ops.example.test' \
+    'mcp_daemon_status_command=dirextalk-mcp daemon status --service-name ops.example.test --json' \
     mcp_daemon_url=http://127.0.0.1:19757/mcp \
-    'mcp_daemon_proxy_command=direxio-mcp proxy --url http://127.0.0.1:19757/mcp' \
+    'mcp_daemon_proxy_command=dirextalk-mcp proxy --url http://127.0.0.1:19757/mcp' \
     'resources={"instance_id":"i-ops","public_ip":"203.0.113.77","eip_id":"eipalloc-ops","key_file":"/tmp/ops.pem"}' \
     'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
     'user_confirmations={"app_initialization":{"status":"confirmed","evidence":"old app confirmation"},"real_chat":{"status":"confirmed","evidence":"old chat confirmation"},"agent_mcp_runtime":{"status":"confirmed","evidence":"old runtime confirmation","runtime_summary_status":"passed","runtime_probe_confirmed":true}}' \
@@ -102,34 +102,34 @@ assert_contains() {
   fi
 }
 
-service_dir="$HOME/.direxio/nodes/ops.example.test"
+service_dir="$HOME/.dirextalk/nodes/ops.example.test"
 state="$service_dir/state.json"
 write_state "$state" "$service_dir"
 
 update_calls="$tmp/update.calls"
 : > "$update_calls"
-CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/direxio-connect" MESSAGE_SERVER_IMAGE="direxio/message-server:test" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
+CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" MESSAGE_SERVER_IMAGE="dirextalk/message-server:test" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
 assert_not_contains "$tmp/update.out" 'Old user confirmations and runtime checks were cleared'
 assert_not_contains "$tmp/update.out" 'Scoped local bridge daemon was stopped'
-assert_not_contains "$tmp/update.out" 'rerun orchestrate with DIREXIO_EXISTING_STATE_ACTION=continue'
+assert_not_contains "$tmp/update.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'
 
 assert_contains "$update_calls" 'docker compose --env-file \.env pull'
 assert_contains "$update_calls" 'docker compose --env-file \.env up -d'
-assert_contains "$update_calls" 'cd /var/direxio-message-server'
-assert_contains "$update_calls" 'bash /var/direxio-message-server/init-tokens\.sh'
-assert_contains "$update_calls" '/var/direxio-message-server/p2p/bootstrap\.json'
-assert_contains "$update_calls" 'direxio/message-server:test'
+assert_contains "$update_calls" 'cd /var/dirextalk-message-server'
+assert_contains "$update_calls" 'bash /var/dirextalk-message-server/init-tokens\.sh'
+assert_contains "$update_calls" '/var/dirextalk-message-server/p2p/bootstrap\.json'
+assert_contains "$update_calls" 'dirextalk/message-server:test'
 assert_contains "$update_calls" 'MESSAGE_SERVER_IMAGE=\$escaped_image'
 deprecated_remote_dir="/opt""/p2p"
 assert_not_contains "$update_calls" "$deprecated_remote_dir|exec -T message-server sh -c .*bootstrap\\.json"
-assert_not_contains "$update_calls" 'direxio-connect daemon status --service-name ops\.example\.test'
-assert_not_contains "$update_calls" 'direxio-connect daemon stop --service-name ops\.example\.test'
+assert_not_contains "$update_calls" 'dirextalk-connect daemon status --service-name ops\.example\.test'
+assert_not_contains "$update_calls" 'dirextalk-connect daemon stop --service-name ops\.example\.test'
 assert_not_contains "$update_calls" 'volume rm|down -v|postgres-data|message-config|message-data|caddy-data|caddy-config'
 
 write_state "$state" "$service_dir"
 update_default_calls="$tmp/update-default.calls"
 : > "$update_default_calls"
-env -u MESSAGE_SERVER_IMAGE CALLS="$update_default_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/direxio-connect" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-default.out"
+env -u MESSAGE_SERVER_IMAGE CALLS="$update_default_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-default.out"
 assert_contains "$update_default_calls" 'sudo sh -lc'
 assert_not_contains "$update_default_calls" 'sudo MESSAGE_SERVER_IMAGE='
 assert_contains "$update_default_calls" 'docker compose --env-file \.env pull'
@@ -149,10 +149,10 @@ fi
 
 reset_calls="$tmp/reset.calls"
 : > "$reset_calls"
-CALLS="$reset_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/direxio-connect" DIREXIO_RESET_APP_DATA_CONFIRM=1 bash "$ROOT/scripts/reset-app-data.sh" "$state" > "$tmp/reset.out"
+CALLS="$reset_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" DIREXTALK_RESET_APP_DATA_CONFIRM=1 bash "$ROOT/scripts/reset-app-data.sh" "$state" > "$tmp/reset.out"
 assert_contains "$tmp/reset.out" 'Old user confirmations and runtime checks were cleared'
 assert_contains "$tmp/reset.out" 'Scoped local bridge daemon was stopped'
-assert_contains "$tmp/reset.out" 'rerun orchestrate with DIREXIO_EXISTING_STATE_ACTION=continue'
+assert_contains "$tmp/reset.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'
 
 assert_contains "$reset_calls" 'docker compose --env-file \.env down'
 assert_contains "$reset_calls" 'docker volume rm'
@@ -160,14 +160,14 @@ assert_contains "$reset_calls" 'postgres-data'
 assert_contains "$reset_calls" 'message-config'
 assert_contains "$reset_calls" 'message-data'
 assert_contains "$reset_calls" 'docker compose --env-file \.env up -d'
-assert_contains "$reset_calls" 'cd /var/direxio-message-server'
-assert_contains "$reset_calls" 'bash /var/direxio-message-server/init-tokens\.sh'
-assert_contains "$reset_calls" '/var/direxio-message-server/p2p/bootstrap\.json'
-assert_contains "$reset_calls" 'rm -f /var/direxio-message-server/p2p/bootstrap\.json'
+assert_contains "$reset_calls" 'cd /var/dirextalk-message-server'
+assert_contains "$reset_calls" 'bash /var/dirextalk-message-server/init-tokens\.sh'
+assert_contains "$reset_calls" '/var/dirextalk-message-server/p2p/bootstrap\.json'
+assert_contains "$reset_calls" 'rm -f /var/dirextalk-message-server/p2p/bootstrap\.json'
 deprecated_owner_file="wellknown/""owner\\.json"
 assert_not_contains "$reset_calls" "$deprecated_remote_dir|$deprecated_owner_file"
-assert_contains "$reset_calls" 'direxio-connect daemon status --service-name ops\.example\.test'
-assert_contains "$reset_calls" 'direxio-connect daemon stop --service-name ops\.example\.test'
+assert_contains "$reset_calls" 'dirextalk-connect daemon status --service-name ops\.example\.test'
+assert_contains "$reset_calls" 'dirextalk-connect daemon stop --service-name ops\.example\.test'
 assert_not_contains "$reset_calls" 'caddy-data|caddy-config|down -v'
 
 json_test_check "$state" "!(data.password || data.access_token || data.agent_token || data.agent_room_id) && data.connect_install_status === 'refresh_pending' && data.mcp_install_status === 'refresh_pending' && !('mcp_daemon_install_status' in data) && !('mcp_daemon_install_command' in data) && !('mcp_daemon_status_command' in data) && !('mcp_daemon_url' in data) && !('mcp_daemon_proxy_command' in data) && data.phases.S5_INIT_TOKENS.status === 'pending' && data.phases.S6_WIRE_LOCAL.status === 'pending' && data.phases.S7_VERIFY_E2E.status === 'pending' && !data.user_confirmations && !data.runtime_checks"

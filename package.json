@@ -1,10 +1,10 @@
 {
-  "name": "direxio-deployer",
+  "name": "dirextalk-deployer",
   "version": "0.1.22",
-  "description": "Versioned Direxio deployer agent skill and portable deployment orchestration tools.",
+  "description": "Versioned Dirextalk deployer agent skill and portable deployment orchestration tools.",
   "type": "module",
   "bin": {
-    "direxio-deployer": "bin/direxio-deployer.mjs"
+    "dirextalk-deployer": "bin/dirextalk-deployer.mjs"
   },
   "files": [
     "AGENTS.md",

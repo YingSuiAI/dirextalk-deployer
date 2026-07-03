@@ -4,7 +4,7 @@
 
 **Goal:** Make Windows Cursor deployments fail or recover at the right point by wiring Cursor Agent CLI correctly and verifying that the local agent backend can actually answer.
 
-**Architecture:** Keep S6 as the owner of generated `direxio-connect/config.toml` and local install decisions, but keep agent-specific command/options logic in `scripts/lib/connect-agent-adapters.sh`. Keep `scripts/orchestrate.sh verify runtime` as the owner of post-deploy runtime truth, with daemon log classification shared through `scripts/lib/connect-daemon-logs.sh`. Documentation describes when a human login is unavoidable and what the deployer does automatically afterward.
+**Architecture:** Keep S6 as the owner of generated `dirextalk-connect/config.toml` and local install decisions, but keep agent-specific command/options logic in `scripts/lib/connect-agent-adapters.sh`. Keep `scripts/orchestrate.sh verify runtime` as the owner of post-deploy runtime truth, with daemon log classification shared through `scripts/lib/connect-daemon-logs.sh`. Documentation describes when a human login is unavoidable and what the deployer does automatically afterward.
 
 **Tech Stack:** Bash state-machine scripts, PowerShell Windows entrypoints, Node-backed JSON helpers, shell integration tests.
 
@@ -27,7 +27,7 @@ mkdir -p "$fake_cursor_agent"
 : > "$fake_cursor_agent/agent.cmd"
 (
   export LOCALAPPDATA="$tmp/localapp"
-  export DIREXIO_LOCAL_PATH_STYLE=windows
+  export DIREXTALK_LOCAL_PATH_STYLE=windows
   cursor_cmd=$(_connect_agent_command cursor)
   case "$cursor_cmd" in
     */cursor-agent/agent.cmd|*:*/cursor-agent/agent.cmd) ;;
@@ -54,8 +54,8 @@ Move agent command defaults into `scripts/lib/connect-agent-adapters.sh` and rep
 _cursor_agent_windows_command() {
   local candidate
   for candidate in \
-    "${DIREXIO_CURSOR_AGENT_COMMAND:-}" \
-    "${DIREXIO_CURSOR_COMMAND:-}" \
+    "${DIREXTALK_CURSOR_AGENT_COMMAND:-}" \
+    "${DIREXTALK_CURSOR_COMMAND:-}" \
     "${LOCALAPPDATA:-}/cursor-agent/agent.cmd" \
     "${LOCALAPPDATA:-}/Programs/cursor-agent/agent.cmd"
   do
@@ -93,7 +93,7 @@ Assert Cursor config options contain `mode = "yolo"` and no obsolete `cli.js` ar
 
 ```bash
 cursor_options=$(
-  DIREXIO_LOCAL_PATH_STYLE=windows \
+  DIREXTALK_LOCAL_PATH_STYLE=windows \
   _connect_agent_options_toml cursor cursor
 )
 [[ "$cursor_options" == *'mode = "yolo"'* ]]
@@ -108,7 +108,7 @@ Make the Cursor default TOML:
 mode = "yolo"
 ```
 
-Let `DIREXIO_CONNECT_AGENT_OPTIONS_TOML` keep full override priority.
+Let `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` keep full override priority.
 
 - [ ] **Step 3: Verify test passes**
 

@@ -23,7 +23,7 @@ operation_report_default_path() {
   [ -n "$service_dir" ] || service_dir=$(dirname "$state")
   case "$operation" in
     destroy)
-      root=${DIREXIO_HOME:-$HOME/.direxio}
+      root=${DIREXTALK_HOME:-$HOME/.dirextalk}
       printf '%s/reports/%s/operation-report.json\n' "$root" "$service_id"
       ;;
     *)

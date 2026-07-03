@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# connect-agent-adapters.sh - direxio-connect agent backend defaults.
+# connect-agent-adapters.sh - dirextalk-connect agent backend defaults.
 #
 # This module hides agent/platform-specific command and TOML option details
 # behind the small interface S6 needs.
 
 _connect_agent_type() {
-  local runtime=$1 explicit=${DIREXIO_CONNECT_AGENT:-}
+  local runtime=$1 explicit=${DIREXTALK_CONNECT_AGENT:-}
   if [ -n "$explicit" ]; then
     _validate_connect_agent "$explicit"
     return 0
@@ -20,23 +20,23 @@ _connect_agent_command() {
   local agent runtime raw_key var value
   runtime=${2:-$1}
   agent=$(_connect_agent_alias "$1" 2>/dev/null || printf '%s\n' "$1")
-  if [ -n "${DIREXIO_CONNECT_AGENT_CMD:-}" ]; then
-    printf '%s\n' "$DIREXIO_CONNECT_AGENT_CMD"
+  if [ -n "${DIREXTALK_CONNECT_AGENT_CMD:-}" ]; then
+    printf '%s\n' "$DIREXTALK_CONNECT_AGENT_CMD"
     return 0
   fi
   if [ "$runtime" = "hermes" ] && [ "$agent" = "acp" ]; then
-    direxio_normalize_local_path "${DIREXIO_HERMES_ACP_ADAPTER_COMMAND:-${DIREXIO_CONNECT_BIN:-direxio-connect}}"
+    dirextalk_normalize_local_path "${DIREXTALK_HERMES_ACP_ADAPTER_COMMAND:-${DIREXTALK_CONNECT_BIN:-dirextalk-connect}}"
     return 0
   fi
   for raw_key in $(_connect_runtime_command_aliases "$runtime") "$agent" $(_connect_agent_command_aliases "$agent"); do
-    var="DIREXIO_$(printf '%s' "$raw_key" | tr '[:lower:]-' '[:upper:]_')_COMMAND"
+    var="DIREXTALK_$(printf '%s' "$raw_key" | tr '[:lower:]-' '[:upper:]_')_COMMAND"
     value=$(printenv "$var" 2>/dev/null || true)
     if [ -n "$value" ]; then
       printf '%s\n' "$value"
       return 0
     fi
   done
-  if [ "$agent" = "cursor" ] && [ "$(direxio_local_path_style)" = "windows" ]; then
+  if [ "$agent" = "cursor" ] && [ "$(dirextalk_local_path_style)" = "windows" ]; then
     _cursor_agent_windows_command && return 0
   fi
   case "$runtime" in
@@ -63,14 +63,14 @@ _connect_agent_command_aliases() {
 _cursor_agent_windows_command() {
   local candidate
   for candidate in \
-    "${DIREXIO_CURSOR_AGENT_COMMAND:-}" \
-    "${DIREXIO_CURSOR_COMMAND:-}" \
+    "${DIREXTALK_CURSOR_AGENT_COMMAND:-}" \
+    "${DIREXTALK_CURSOR_COMMAND:-}" \
     "${LOCALAPPDATA:-}/cursor-agent/agent.cmd" \
     "${LOCALAPPDATA:-}/Programs/cursor-agent/agent.cmd"
   do
     [ -n "$candidate" ] || continue
     [ -f "$candidate" ] || continue
-    direxio_normalize_local_path "$candidate"
+    dirextalk_normalize_local_path "$candidate"
     return 0
   done
   command -v agent.cmd 2>/dev/null || command -v agent 2>/dev/null || true
@@ -125,13 +125,13 @@ _cursor_agent_prepare_windows() {
 
 _connect_agent_options_toml() {
   local runtime=${1:-} agent=${2:-} args_toml q_display
-  if [ -n "${DIREXIO_CONNECT_AGENT_OPTIONS_TOML:-}" ]; then
-    printf '%s\n' "$DIREXIO_CONNECT_AGENT_OPTIONS_TOML"
+  if [ -n "${DIREXTALK_CONNECT_AGENT_OPTIONS_TOML:-}" ]; then
+    printf '%s\n' "$DIREXTALK_CONNECT_AGENT_OPTIONS_TOML"
     return 0
   fi
   case "$runtime:$agent" in
     cursor:cursor)
-      printf 'mode = "%s"\n' "$(_toml_escape "${DIREXIO_CURSOR_MODE:-yolo}")"
+      printf 'mode = "%s"\n' "$(_toml_escape "${DIREXTALK_CURSOR_MODE:-yolo}")"
       ;;
     openclaw:acp)
       args_toml=$(_openclaw_acp_args_toml) || return 1
@@ -150,23 +150,23 @@ _connect_agent_options_toml() {
 
 _openclaw_acp_args_toml() {
   local url token_file session missing=
-  if [ -n "${DIREXIO_OPENCLAW_ACP_ARGS_TOML:-}" ]; then
-    printf '%s\n' "$DIREXIO_OPENCLAW_ACP_ARGS_TOML"
+  if [ -n "${DIREXTALK_OPENCLAW_ACP_ARGS_TOML:-}" ]; then
+    printf '%s\n' "$DIREXTALK_OPENCLAW_ACP_ARGS_TOML"
     return 0
   fi
-  url=${DIREXIO_OPENCLAW_ACP_URL:-}
-  token_file=${DIREXIO_OPENCLAW_ACP_TOKEN_FILE:-}
-  session=${DIREXIO_OPENCLAW_ACP_SESSION:-}
+  url=${DIREXTALK_OPENCLAW_ACP_URL:-}
+  token_file=${DIREXTALK_OPENCLAW_ACP_TOKEN_FILE:-}
+  session=${DIREXTALK_OPENCLAW_ACP_SESSION:-}
   if [ -n "$url" ] && [ -n "$token_file" ] && [ -n "$session" ]; then
-    token_file=$(direxio_normalize_local_path "$token_file")
+    token_file=$(dirextalk_normalize_local_path "$token_file")
     _toml_array acp --url "$url" --token-file "$token_file" --session "$session"
     return 0
   fi
   if [ -n "$url" ] || [ -n "$token_file" ]; then
-    [ -n "$url" ] || missing="${missing} DIREXIO_OPENCLAW_ACP_URL"
-    [ -n "$token_file" ] || missing="${missing} DIREXIO_OPENCLAW_ACP_TOKEN_FILE"
-    [ -n "$session" ] || missing="${missing} DIREXIO_OPENCLAW_ACP_SESSION"
-    fail "OpenClaw ACP explicit Gateway settings are incomplete:${missing}. Set all of DIREXIO_OPENCLAW_ACP_URL, DIREXIO_OPENCLAW_ACP_TOKEN_FILE, and DIREXIO_OPENCLAW_ACP_SESSION; otherwise leave URL/token-file unset so openclaw acp can auto-detect from its config."
+    [ -n "$url" ] || missing="${missing} DIREXTALK_OPENCLAW_ACP_URL"
+    [ -n "$token_file" ] || missing="${missing} DIREXTALK_OPENCLAW_ACP_TOKEN_FILE"
+    [ -n "$session" ] || missing="${missing} DIREXTALK_OPENCLAW_ACP_SESSION"
+    fail "OpenClaw ACP explicit Gateway settings are incomplete:${missing}. Set all of DIREXTALK_OPENCLAW_ACP_URL, DIREXTALK_OPENCLAW_ACP_TOKEN_FILE, and DIREXTALK_OPENCLAW_ACP_SESSION; otherwise leave URL/token-file unset so openclaw acp can auto-detect from its config."
     return 1
   fi
   # Fallback: OpenClaw acp auto-discovers gateway from ~/.openclaw/openclaw.json.
@@ -176,10 +176,10 @@ _openclaw_acp_args_toml() {
 
 _hermes_acp_args_toml() {
   local hermes_cmd
-  hermes_cmd=${DIREXIO_HERMES_COMMAND:-hermes}
-  hermes_cmd=$(direxio_normalize_local_path "$hermes_cmd")
-  if [ -n "${DIREXIO_HERMES_ACP_ARGS_TOML:-}" ]; then
-    _toml_array_prepend "$DIREXIO_HERMES_ACP_ARGS_TOML" hermes-acp-adapter -- "$hermes_cmd"
+  hermes_cmd=${DIREXTALK_HERMES_COMMAND:-hermes}
+  hermes_cmd=$(dirextalk_normalize_local_path "$hermes_cmd")
+  if [ -n "${DIREXTALK_HERMES_ACP_ARGS_TOML:-}" ]; then
+    _toml_array_prepend "$DIREXTALK_HERMES_ACP_ARGS_TOML" hermes-acp-adapter -- "$hermes_cmd"
     return 0
   fi
   _toml_array hermes-acp-adapter -- "$hermes_cmd" acp

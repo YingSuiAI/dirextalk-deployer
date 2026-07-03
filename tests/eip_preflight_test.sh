@@ -8,8 +8,8 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
-export DIREXIO_WORKDIR="$tmp/work"
-mkdir -p "$HOME" "$DIREXIO_WORKDIR"
+export DIREXTALK_WORKDIR="$tmp/work"
+mkdir -p "$HOME" "$DIREXTALK_WORKDIR"
 
 fakebin="$tmp/bin"
 mkdir -p "$fakebin"
@@ -46,7 +46,7 @@ EOF
 chmod 700 "$fakebin/aws"
 export PATH="$fakebin:$PATH"
 export AWS_DEFAULT_REGION=ap-northeast-1
-export DIREXIO_CLOUD_PROVIDER=ec2
+export DIREXTALK_CLOUD_PROVIDER=ec2
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"

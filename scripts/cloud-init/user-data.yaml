@@ -8,7 +8,7 @@ package_update: false
 package_upgrade: false
 
 write_files:
-  - path: /var/direxio-message-server/.env
+  - path: /var/dirextalk-message-server/.env
     permissions: '0600'
     content: |
       DOMAIN=__DOMAIN__
@@ -22,23 +22,23 @@ runcmd:
     IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOK" \
            http://169.254.169.254/latest/meta-data/public-ipv4)
     [ -n "$IP" ] || IP=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
-    grep -q '^PUBLIC_IP=' /var/direxio-message-server/.env || echo "PUBLIC_IP=$IP" >> /var/direxio-message-server/.env
-    grep -q '^TURN_SECRET=' /var/direxio-message-server/.env || \
-      echo "TURN_SECRET=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)" >> /var/direxio-message-server/.env
-    grep -q '^P2P_PORTAL_PASSWORD=' /var/direxio-message-server/.env || \
-      echo "P2P_PORTAL_PASSWORD=$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", $1 % 100000000}')" >> /var/direxio-message-server/.env
-  - export DOMAIN=$(grep '^DOMAIN=' /var/direxio-message-server/.env | cut -d= -f2)
+    grep -q '^PUBLIC_IP=' /var/dirextalk-message-server/.env || echo "PUBLIC_IP=$IP" >> /var/dirextalk-message-server/.env
+    grep -q '^TURN_SECRET=' /var/dirextalk-message-server/.env || \
+      echo "TURN_SECRET=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)" >> /var/dirextalk-message-server/.env
+    grep -q '^P2P_PORTAL_PASSWORD=' /var/dirextalk-message-server/.env || \
+      echo "P2P_PORTAL_PASSWORD=$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", $1 % 100000000}')" >> /var/dirextalk-message-server/.env
+  - export DOMAIN=$(grep '^DOMAIN=' /var/dirextalk-message-server/.env | cut -d= -f2)
   - |
     if ! command -v docker >/dev/null 2>&1; then
       curl -fsSL https://get.docker.com | sh
     fi
   - systemctl enable --now docker
-  - mkdir -p /var/direxio-message-server/p2p
-  - chmod 700 /var/direxio-message-server
+  - mkdir -p /var/dirextalk-message-server/p2p
+  - chmod 700 /var/dirextalk-message-server
   - |
     set -e
-    cd /var/direxio-message-server
+    cd /var/dirextalk-message-server
     docker compose --env-file .env pull
     docker compose --env-file .env up -d
     DOMAIN=$(grep '^DOMAIN=' .env | cut -d= -f2) bash init-tokens.sh
-    touch /var/direxio-message-server/.deploy-done
+    touch /var/dirextalk-message-server/.deploy-done

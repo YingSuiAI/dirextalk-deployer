@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# S6 WIRE_LOCAL_CLIENT - write service-scoped credentials and direxio-connect env.
+# S6 WIRE_LOCAL_CLIENT - write service-scoped credentials and dirextalk-connect env.
 #
-#   ① ~/.direxio/nodes/<service_id>/credentials.json
-#   ② ~/.direxio/nodes/<service_id>/env
-#   ③ direxio-connect Matrix config and install guidance for the detected agent runtime
+#   ① ~/.dirextalk/nodes/<service_id>/credentials.json
+#   ② ~/.dirextalk/nodes/<service_id>/env
+#   ③ dirextalk-connect Matrix config and install guidance for the detected agent runtime
 #   ④ MCP client snippets for Codex/OpenClaw/Hermes under the service directory
 #
-# Tokens change on every rebuild, so local credentials and direxio-connect env must be refreshed.
+# Tokens change on every rebuild, so local credentials and dirextalk-connect env must be refreshed.
 
 S6_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
@@ -15,18 +15,18 @@ source "$S6_DIR/../lib/paths.sh"
 source "$S6_DIR/../lib/json.sh"
 # shellcheck disable=SC1090
 source "$S6_DIR/../lib/local-paths.sh"
-# S6 local bridge paths honor DIREXIO_LOCAL_PATH_STYLE through local-paths.sh.
+# S6 local bridge paths honor DIREXTALK_LOCAL_PATH_STYLE through local-paths.sh.
 
-_direxio_home() {
-  direxio_home
+_dirextalk_home() {
+  dirextalk_home
 }
 
-_direxio_service_id() {
-  direxio_service_id "$1"
+_dirextalk_service_id() {
+  dirextalk_service_id "$1"
 }
 
-_direxio_service_dir() {
-  direxio_service_dir "$1"
+_dirextalk_service_dir() {
+  dirextalk_service_dir "$1"
 }
 
 _connect_supported_agents() {
@@ -51,7 +51,7 @@ _connect_agent_alias() {
 _validate_connect_agent() {
   local agent
   agent=$(_connect_agent_alias "$1" 2>/dev/null) || {
-    fail "direxio-connect agent must be one of: $(_connect_supported_agents_csv)."
+    fail "dirextalk-connect agent must be one of: $(_connect_supported_agents_csv)."
     return 1
   }
   printf '%s\n' "$agent"
@@ -66,13 +66,13 @@ source "$S6_DIR/../lib/mcp-client-adapters.sh"
 
 _detect_agent_runtime() {
   local active_runtime explicit_agent home_runtime
-  if [ -n "${DIREXIO_AGENT_PLATFORM:-}" ] && [ "${DIREXIO_AGENT_PLATFORM:-}" != "auto" ]; then
-    _validate_agent_platform "$DIREXIO_AGENT_PLATFORM"
-    printf '%s\n' "$DIREXIO_AGENT_PLATFORM"
+  if [ -n "${DIREXTALK_AGENT_PLATFORM:-}" ] && [ "${DIREXTALK_AGENT_PLATFORM:-}" != "auto" ]; then
+    _validate_agent_platform "$DIREXTALK_AGENT_PLATFORM"
+    printf '%s\n' "$DIREXTALK_AGENT_PLATFORM"
     return 0
   fi
-  if [ -n "${DIREXIO_CONNECT_AGENT:-}" ]; then
-    explicit_agent=$(_validate_connect_agent "$DIREXIO_CONNECT_AGENT")
+  if [ -n "${DIREXTALK_CONNECT_AGENT:-}" ]; then
+    explicit_agent=$(_validate_connect_agent "$DIREXTALK_CONNECT_AGENT")
     printf '%s\n' "$explicit_agent"
     return 0
   fi
@@ -348,7 +348,7 @@ _active_text_contains() {
 
 _process_name_matches() {
   local needle=$1
-  [ "${DIREXIO_AGENT_DETECT_PROCESS:-1}" != "0" ] || return 1
+  [ "${DIREXTALK_AGENT_DETECT_PROCESS:-1}" != "0" ] || return 1
   _process_tree_names | tr '[:upper:]' '[:lower:]' | grep -Eq "(^|[^a-z0-9])${needle}([^a-z0-9]|$)"
 }
 
@@ -368,27 +368,27 @@ _validate_agent_platform() {
     auto|generic|unknown|openclaw|hermes) return 0 ;;
     *)
       _connect_agent_alias "$1" >/dev/null 2>&1 && return 0
-      fail "DIREXIO_AGENT_PLATFORM must be auto, a direxio-connect agent ($(_connect_supported_agents_csv)), openclaw, hermes, generic, or unknown."
+      fail "DIREXTALK_AGENT_PLATFORM must be auto, a dirextalk-connect agent ($(_connect_supported_agents_csv)), openclaw, hermes, generic, or unknown."
       ;;
   esac
 }
 
 _connect_install_policy() {
-  local policy=${DIREXIO_AGENT_INSTALL:-auto}
+  local policy=${DIREXTALK_AGENT_INSTALL:-auto}
   case "$policy" in
     skip|recommend|auto) printf '%s\n' "$policy" ;;
-    *) fail "DIREXIO_AGENT_INSTALL must be skip, recommend, or auto." ;;
+    *) fail "DIREXTALK_AGENT_INSTALL must be skip, recommend, or auto." ;;
   esac
 }
 
 _connect_install_mode() {
-  local runtime=$1 mode=${DIREXIO_AGENT_INSTALL_MODE:-recommended}
+  local runtime=$1 mode=${DIREXTALK_AGENT_INSTALL_MODE:-recommended}
   case "$mode" in
     recommended)
-      printf 'direxio-connect\n'
+      printf 'dirextalk-connect\n'
       ;;
-    direxio-connect) printf '%s\n' "$mode" ;;
-    *) fail "DIREXIO_AGENT_INSTALL_MODE must be recommended or direxio-connect." ;;
+    dirextalk-connect) printf '%s\n' "$mode" ;;
+    *) fail "DIREXTALK_AGENT_INSTALL_MODE must be recommended or dirextalk-connect." ;;
   esac
 }
 
@@ -403,25 +403,25 @@ _validate_real_agent_room_id() {
 }
 
 _connect_repo() {
-  printf '%s\n' "${DIREXIO_CONNECT_REPO:-https://github.com/YingSuiAI/direxio-connect.git}"
+  printf '%s\n' "${DIREXTALK_CONNECT_REPO:-https://github.com/YingSuiAI/dirextalk-connect.git}"
 }
 
 _connect_npm_package() {
-  printf '%s\n' "${DIREXIO_CONNECT_NPM_PACKAGE:-direxio-connent@latest}"
+  printf '%s\n' "${DIREXTALK_CONNECT_NPM_PACKAGE:-dirextalk-connect@latest}"
 }
 
 _connect_ref() {
-  printf '%s\n' "${DIREXIO_CONNECT_REF:-main}"
+  printf '%s\n' "${DIREXTALK_CONNECT_REF:-main}"
 }
 
 _connect_source_dir() {
   local service_dir=$1
-  printf '%s\n' "${DIREXIO_CONNECT_DIR:-$service_dir/direxio-connect-src}"
+  printf '%s\n' "${DIREXTALK_CONNECT_DIR:-$service_dir/dirextalk-connect-src}"
 }
 
 _connect_runtime_dir() {
   local service_dir=$1
-  printf '%s/direxio-connect\n' "$service_dir"
+  printf '%s/dirextalk-connect\n' "$service_dir"
 }
 
 _connect_package_dir() {
@@ -431,17 +431,17 @@ _connect_package_dir() {
 
 _agent_workspace() {
   local service_dir=$1 pwd_local
-  if [ -n "${DIREXIO_AGENT_WORKSPACE:-}" ]; then
-    printf '%s\n' "$DIREXIO_AGENT_WORKSPACE"
+  if [ -n "${DIREXTALK_AGENT_WORKSPACE:-}" ]; then
+    printf '%s\n' "$DIREXTALK_AGENT_WORKSPACE"
     return 0
   fi
-  if [ -n "${DIREXIO_AGENT_WORKSPACE_WINDOWS:-}" ]; then
-    printf '%s\n' "$DIREXIO_AGENT_WORKSPACE_WINDOWS"
+  if [ -n "${DIREXTALK_AGENT_WORKSPACE_WINDOWS:-}" ]; then
+    printf '%s\n' "$DIREXTALK_AGENT_WORKSPACE_WINDOWS"
     return 0
   fi
   pwd_local=$(pwd -P 2>/dev/null || pwd)
   case "$pwd_local" in
-    */.codex/skills/direxio-deployer|*/.cursor/skills/direxio-deployer|*/.claude/skills/direxio-deployer|*/.gemini/skills/direxio-deployer) ;;
+    */.codex/skills/dirextalk-deployer|*/.cursor/skills/dirextalk-deployer|*/.claude/skills/dirextalk-deployer|*/.gemini/skills/dirextalk-deployer) ;;
     *) printf '%s\n' "$pwd_local"; return 0 ;;
   esac
   printf '%s/workspace\n' "$service_dir"
@@ -454,43 +454,43 @@ _connect_config_path() {
 
 _connect_binary_path() {
   local service_dir=$1
-  if [ -n "${DIREXIO_CONNECT_BIN:-}" ]; then
-    printf '%s\n' "$DIREXIO_CONNECT_BIN"
+  if [ -n "${DIREXTALK_CONNECT_BIN:-}" ]; then
+    printf '%s\n' "$DIREXTALK_CONNECT_BIN"
     return 0
   fi
-  if [ "$(direxio_local_path_style)" = "windows" ]; then
-    printf '%s/direxio-connect.cmd\n' "$(_connect_package_dir "$service_dir")"
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    printf '%s/dirextalk-connect.cmd\n' "$(_connect_package_dir "$service_dir")"
   else
-    printf '%s/direxio-connect\n' "$(_connect_package_dir "$service_dir")"
+    printf '%s/dirextalk-connect\n' "$(_connect_package_dir "$service_dir")"
   fi
 }
 
 _connect_package_bin_path() {
   local service_dir=$1
-  if [ "$(direxio_local_path_style)" = "windows" ]; then
-    printf '%s/node_modules/.bin/direxio-connect.cmd\n' "$(_connect_package_dir "$service_dir")"
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    printf '%s/node_modules/.bin/dirextalk-connect.cmd\n' "$(_connect_package_dir "$service_dir")"
   else
-    printf '%s/node_modules/.bin/direxio-connect\n' "$(_connect_package_dir "$service_dir")"
+    printf '%s/node_modules/.bin/dirextalk-connect\n' "$(_connect_package_dir "$service_dir")"
   fi
 }
 
 _ensure_connect_wrapper() {
   local service_dir=$1 wrapper target
-  [ -z "${DIREXIO_CONNECT_BIN:-}" ] || return 0
+  [ -z "${DIREXTALK_CONNECT_BIN:-}" ] || return 0
   wrapper=$(_connect_binary_path "$service_dir")
   target=$(_connect_package_bin_path "$service_dir")
   mkdir -p "$(dirname "$wrapper")"
-  if [ "$(direxio_local_path_style)" = "windows" ]; then
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
     cat > "$wrapper" <<'EOF'
 @echo off
-"%~dp0node_modules\.bin\direxio-connect.cmd" %*
+"%~dp0node_modules\.bin\dirextalk-connect.cmd" %*
 EOF
   else
     cat > "$wrapper" <<'EOF'
 #!/usr/bin/env bash
 set -e
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$DIR/node_modules/.bin/direxio-connect" "$@"
+exec "$DIR/node_modules/.bin/dirextalk-connect" "$@"
 EOF
   fi
   chmod 700 "$wrapper" 2>/dev/null || true
@@ -516,35 +516,35 @@ _lower() {
 _connect_speech_config_toml() {
   local enabled provider language api_key base_url model
   local q_provider q_language q_api_key q_base_url q_model
-  enabled=$(_lower "${DIREXIO_SPEECH_ENABLED:-auto}")
+  enabled=$(_lower "${DIREXTALK_SPEECH_ENABLED:-auto}")
   case "$enabled" in
     0|false|off|no|disabled) return 0 ;;
     ""|1|true|on|yes|auto|enabled) ;;
-    *) fail "DIREXIO_SPEECH_ENABLED must be auto, true, or false." ;;
+    *) fail "DIREXTALK_SPEECH_ENABLED must be auto, true, or false." ;;
   esac
 
-  provider=$(_lower "${DIREXIO_SPEECH_PROVIDER:-openai}")
-  language=${DIREXIO_SPEECH_LANGUAGE:-zh}
+  provider=$(_lower "${DIREXTALK_SPEECH_PROVIDER:-openai}")
+  language=${DIREXTALK_SPEECH_LANGUAGE:-zh}
   case "$provider" in
     openai)
-      api_key=$(_env_first DIREXIO_SPEECH_OPENAI_API_KEY DIREXIO_SPEECH_API_KEY OPENAI_API_KEY)
-      base_url=$(_env_first DIREXIO_SPEECH_OPENAI_BASE_URL DIREXIO_SPEECH_BASE_URL OPENAI_BASE_URL)
-      model=$(_env_first DIREXIO_SPEECH_OPENAI_MODEL DIREXIO_SPEECH_MODEL)
+      api_key=$(_env_first DIREXTALK_SPEECH_OPENAI_API_KEY DIREXTALK_SPEECH_API_KEY OPENAI_API_KEY)
+      base_url=$(_env_first DIREXTALK_SPEECH_OPENAI_BASE_URL DIREXTALK_SPEECH_BASE_URL OPENAI_BASE_URL)
+      model=$(_env_first DIREXTALK_SPEECH_OPENAI_MODEL DIREXTALK_SPEECH_MODEL)
       ;;
     groq)
-      api_key=$(_env_first DIREXIO_SPEECH_GROQ_API_KEY DIREXIO_SPEECH_API_KEY GROQ_API_KEY)
-      model=$(_env_first DIREXIO_SPEECH_GROQ_MODEL DIREXIO_SPEECH_MODEL)
+      api_key=$(_env_first DIREXTALK_SPEECH_GROQ_API_KEY DIREXTALK_SPEECH_API_KEY GROQ_API_KEY)
+      model=$(_env_first DIREXTALK_SPEECH_GROQ_MODEL DIREXTALK_SPEECH_MODEL)
       ;;
     qwen)
-      api_key=$(_env_first DIREXIO_SPEECH_QWEN_API_KEY DIREXIO_SPEECH_API_KEY DASHSCOPE_API_KEY DASH_SCOPE_API_KEY)
-      base_url=$(_env_first DIREXIO_SPEECH_QWEN_BASE_URL DIREXIO_SPEECH_BASE_URL)
-      model=$(_env_first DIREXIO_SPEECH_QWEN_MODEL DIREXIO_SPEECH_MODEL)
+      api_key=$(_env_first DIREXTALK_SPEECH_QWEN_API_KEY DIREXTALK_SPEECH_API_KEY DASHSCOPE_API_KEY DASH_SCOPE_API_KEY)
+      base_url=$(_env_first DIREXTALK_SPEECH_QWEN_BASE_URL DIREXTALK_SPEECH_BASE_URL)
+      model=$(_env_first DIREXTALK_SPEECH_QWEN_MODEL DIREXTALK_SPEECH_MODEL)
       ;;
     gemini)
-      api_key=$(_env_first DIREXIO_SPEECH_GEMINI_API_KEY DIREXIO_SPEECH_API_KEY GEMINI_API_KEY GOOGLE_API_KEY)
-      model=$(_env_first DIREXIO_SPEECH_GEMINI_MODEL DIREXIO_SPEECH_MODEL)
+      api_key=$(_env_first DIREXTALK_SPEECH_GEMINI_API_KEY DIREXTALK_SPEECH_API_KEY GEMINI_API_KEY GOOGLE_API_KEY)
+      model=$(_env_first DIREXTALK_SPEECH_GEMINI_MODEL DIREXTALK_SPEECH_MODEL)
       ;;
-    *) fail "DIREXIO_SPEECH_PROVIDER must be openai, groq, qwen, or gemini." ;;
+    *) fail "DIREXTALK_SPEECH_PROVIDER must be openai, groq, qwen, or gemini." ;;
   esac
   if [ -z "$api_key" ]; then
     return 0
@@ -577,11 +577,11 @@ _upper_drive() {
 }
 
 _local_path_style() {
-  direxio_local_path_style
+  dirextalk_local_path_style
 }
 
 _local_connect_path() {
-  direxio_normalize_local_path "$1"
+  dirextalk_normalize_local_path "$1"
 }
 
 
@@ -589,16 +589,16 @@ _create_connect_matrix_session() {
   local asurl=$1 agent_auth_token=$2 device_id=$3 out=$4 body code http_body
   local max_attempts interval max_interval attempt preview sleep_for
   body=$(json_build matrix-session-create "$device_id")
-  max_attempts=${DIREXIO_MATRIX_SESSION_CREATE_MAX:-12}
-  interval=${DIREXIO_MATRIX_SESSION_RETRY_INTERVAL:-2}
-  max_interval=${DIREXIO_MATRIX_SESSION_RETRY_MAX_INTERVAL:-10}
+  max_attempts=${DIREXTALK_MATRIX_SESSION_CREATE_MAX:-12}
+  interval=${DIREXTALK_MATRIX_SESSION_RETRY_INTERVAL:-2}
+  max_interval=${DIREXTALK_MATRIX_SESSION_RETRY_MAX_INTERVAL:-10}
   attempt=1
   sleep_for=$interval
   while [ "$attempt" -le "$max_attempts" ]; do
     http_body=$(mktemp)
     code=$(curl -sk \
-      --connect-timeout "${DIREXIO_MATRIX_SESSION_CURL_CONNECT_TIMEOUT:-10}" \
-      --max-time "${DIREXIO_MATRIX_SESSION_CURL_MAX_TIME:-20}" \
+      --connect-timeout "${DIREXTALK_MATRIX_SESSION_CURL_CONNECT_TIMEOUT:-10}" \
+      --max-time "${DIREXTALK_MATRIX_SESSION_CURL_MAX_TIME:-20}" \
       -o "$http_body" -w '%{http_code}' -X POST "$asurl/_p2p/command" \
       -H 'Content-Type: application/json' \
       -H "Authorization: Bearer $agent_auth_token" \
@@ -648,9 +648,9 @@ _is_non_negative_integer() {
 
 _connect_display_config_toml() {
   local mode tool_messages thinking_messages
-  mode=${DIREXIO_CONNECT_DISPLAY_MODE:-compact}
-  tool_messages=${DIREXIO_CONNECT_DISPLAY_TOOL_MESSAGES:-false}
-  thinking_messages=${DIREXIO_CONNECT_DISPLAY_THINKING_MESSAGES:-false}
+  mode=${DIREXTALK_CONNECT_DISPLAY_MODE:-compact}
+  tool_messages=${DIREXTALK_CONNECT_DISPLAY_TOOL_MESSAGES:-false}
+  thinking_messages=${DIREXTALK_CONNECT_DISPLAY_THINKING_MESSAGES:-false}
   cat <<EOF
 [display]
 mode = "$(_toml_escape "$mode")"
@@ -732,7 +732,7 @@ EOF
 
 _connect_daemon_install_command() {
   local binary=$1 config=$2 service_name=$3 package_dir=${4:-}
-  [ -n "$service_name" ] || service_name=direxio-connect
+  [ -n "$service_name" ] || service_name=dirextalk-connect
   if [ -n "$package_dir" ]; then
     printf 'if [ -x %q ]; then %q daemon stop --service-name %q || true; fi; npm install --prefix %q %q && %q daemon install --config %q --service-name %q --force' "$binary" "$binary" "$service_name" "$package_dir" "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
   else
@@ -746,16 +746,16 @@ _connect_binary_available() {
 
 _connect_daemon_is_running() {
   local binary=$1 service_name=$2 status
-  [ -n "$service_name" ] || service_name=direxio-connect
+  [ -n "$service_name" ] || service_name=dirextalk-connect
   status=$("$binary" daemon status --service-name "$service_name" 2>/dev/null || true)
   printf '%s\n' "$status" | grep -Eq 'Status:[[:space:]]*Running'
 }
 
 _connect_daemon_wait_until_ready() {
   local binary=$1 service_name=$2 timeout interval elapsed logs agent_error ready
-  [ -n "$service_name" ] || service_name=direxio-connect
-  timeout=${DIREXIO_CONNECT_STARTUP_TIMEOUT_SECONDS:-30}
-  interval=${DIREXIO_CONNECT_STARTUP_POLL_SECONDS:-2}
+  [ -n "$service_name" ] || service_name=dirextalk-connect
+  timeout=${DIREXTALK_CONNECT_STARTUP_TIMEOUT_SECONDS:-30}
+  interval=${DIREXTALK_CONNECT_STARTUP_POLL_SECONDS:-2}
   case "$timeout" in *[!0-9]*|"") timeout=30 ;; esac
   case "$interval" in *[!0-9]*|"") interval=2 ;; esac
   [ "$interval" -gt 0 ] || interval=1
@@ -767,7 +767,7 @@ _connect_daemon_wait_until_ready() {
       return 1
     fi
 
-    logs=$("$binary" daemon logs --service-name "$service_name" -n "${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}" 2>/dev/null || true)
+    logs=$("$binary" daemon logs --service-name "$service_name" -n "${DIREXTALK_CONNECT_LOG_TAIL_LINES:-120}" 2>/dev/null || true)
     agent_error=$(connect_daemon_agent_error_from_text "$logs")
     if [ -n "$agent_error" ]; then
       printf '%s\n' "local agent backend failure: $agent_error"
@@ -780,7 +780,7 @@ _connect_daemon_wait_until_ready() {
     fi
 
     if [ "$elapsed" -ge "$timeout" ]; then
-      printf '%s\n' "startup logs did not show 'direxio-connect is running' within ${timeout}s"
+      printf '%s\n' "startup logs did not show 'dirextalk-connect is running' within ${timeout}s"
       return 1
     fi
     sleep "$interval"
@@ -798,7 +798,7 @@ _maybe_auto_install_connect() {
   fi
   config_arg=$(_local_connect_path "$config_path")
   package_dir=$(_connect_package_dir "$service_dir")
-  if [ "${DIREXIO_CONNECT_INSTALL_FROM:-npm}" != "source" ]; then
+  if [ "${DIREXTALK_CONNECT_INSTALL_FROM:-npm}" != "source" ]; then
     if command -v npm >/dev/null 2>&1; then
       if _connect_binary_available "$binary"; then
         "$binary" daemon stop --service-name "$service_name" >/dev/null 2>&1 || true
@@ -806,32 +806,32 @@ _maybe_auto_install_connect() {
       mkdir -p "$package_dir"
       if npm install --prefix "$package_dir" "$(_connect_npm_package)"; then
         _ensure_connect_wrapper "$service_dir"
-        ok "direxio-connect package refreshed for this service."
+        ok "dirextalk-connect package refreshed for this service."
       elif ! _connect_binary_available "$binary"; then
         state_set connect_install_status "install_failed" 2>/dev/null || true
-        warn "direxio-connect service-scoped npm install failed and no existing service binary is available."
+        warn "dirextalk-connect service-scoped npm install failed and no existing service binary is available."
         return 1
       else
-        warn "direxio-connect service-scoped npm update failed; continuing with the existing service binary."
+        warn "dirextalk-connect service-scoped npm update failed; continuing with the existing service binary."
       fi
     elif ! _connect_binary_available "$binary"; then
-        warn "DIREXIO_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js or set DIREXIO_CONNECT_INSTALL_FROM=source."
+        warn "DIREXTALK_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js or set DIREXTALK_CONNECT_INSTALL_FROM=source."
         state_set connect_install_status "npm_missing" 2>/dev/null || true
         return 1
     else
-      warn "npm is not on PATH; continuing with the existing service-scoped direxio-connect binary."
+      warn "npm is not on PATH; continuing with the existing service-scoped dirextalk-connect binary."
     fi
     if "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
       if ! ready_evidence=$(_connect_daemon_wait_until_ready "$binary" "$service_name"); then
         state_set connect_install_status "install_failed" 2>/dev/null || true
-        warn "direxio-connect daemon did not reach verified ready state after install ($ready_evidence). Check the local agent command and direxio-connect logs."
+        warn "dirextalk-connect daemon did not reach verified ready state after install ($ready_evidence). Check the local agent command and dirextalk-connect logs."
         return 1
       fi
       state_set connect_install_status "installed" 2>/dev/null || true
-      ok "direxio-connect daemon installed for $runtime using Matrix room bridge ($ready_evidence)."
+      ok "dirextalk-connect daemon installed for $runtime using Matrix room bridge ($ready_evidence)."
     else
       state_set connect_install_status "install_failed" 2>/dev/null || true
-      warn "direxio-connect daemon install failed. Config is available for manual start."
+      warn "dirextalk-connect daemon install failed. Config is available for manual start."
       return 1
     fi
     return 0
@@ -841,7 +841,7 @@ _maybe_auto_install_connect() {
   ref=$(_connect_ref)
   src=$(_connect_source_dir "$service_dir")
   if ! command -v git >/dev/null 2>&1 || ! command -v go >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1; then
-    warn "DIREXIO_CONNECT_INSTALL_FROM=source requested, but git, go, and make are required to build direxio-connect from source."
+    warn "DIREXTALK_CONNECT_INSTALL_FROM=source requested, but git, go, and make are required to build dirextalk-connect from source."
     state_set connect_install_status "build_tool_missing" 2>/dev/null || true
     return 1
   fi
@@ -849,46 +849,46 @@ _maybe_auto_install_connect() {
     mkdir -p "$(dirname "$src")"
     if ! git clone "$repo" "$src"; then
       state_set connect_install_status "clone_failed" 2>/dev/null || true
-      warn "direxio-connect clone failed from $repo"
+      warn "dirextalk-connect clone failed from $repo"
       return 1
     fi
   fi
   if ! git -C "$src" fetch --all --tags --prune; then
     state_set connect_install_status "fetch_failed" 2>/dev/null || true
-    warn "direxio-connect fetch failed in $src"
+    warn "dirextalk-connect fetch failed in $src"
     return 1
   fi
   if ! git -C "$src" checkout "$ref"; then
     state_set connect_install_status "checkout_failed" 2>/dev/null || true
-    warn "direxio-connect checkout failed for ref $ref"
+    warn "dirextalk-connect checkout failed for ref $ref"
     return 1
   fi
   commit=$(git -C "$src" rev-parse --short HEAD 2>/dev/null || true)
   state_set connect_commit "$commit" 2>/dev/null || true
   if ! (cd "$src" && AGENTS="$cc_agent" PLATFORMS_INCLUDE=matrix NO_WEB=1 make build-noweb); then
     state_set connect_install_status "build_failed" 2>/dev/null || true
-    warn "direxio-connect build failed for runtime=$runtime agent=$cc_agent"
+    warn "dirextalk-connect build failed for runtime=$runtime agent=$cc_agent"
     return 1
   fi
-  binary="$(_connect_runtime_dir "$service_dir")/bin/direxio-connect"
+  binary="$(_connect_runtime_dir "$service_dir")/bin/dirextalk-connect"
   mkdir -p "$(dirname "$binary")"
-  if ! cp "$src/direxio-connect" "$binary" 2>/dev/null && ! cp "$src/direxio-connect.exe" "$binary" 2>/dev/null; then
+  if ! cp "$src/dirextalk-connect" "$binary" 2>/dev/null && ! cp "$src/dirextalk-connect.exe" "$binary" 2>/dev/null; then
     state_set connect_install_status "binary_copy_failed" 2>/dev/null || true
-    warn "direxio-connect binary was not found after build in $src"
+    warn "dirextalk-connect binary was not found after build in $src"
     return 1
   fi
   chmod 700 "$binary" 2>/dev/null || true
   if "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
     if ! ready_evidence=$(_connect_daemon_wait_until_ready "$binary" "$service_name"); then
       state_set connect_install_status "install_failed" 2>/dev/null || true
-      warn "direxio-connect daemon did not reach verified ready state after install ($ready_evidence). Check the local agent command and direxio-connect logs."
+      warn "dirextalk-connect daemon did not reach verified ready state after install ($ready_evidence). Check the local agent command and dirextalk-connect logs."
       return 1
     fi
     state_set connect_install_status "installed" 2>/dev/null || true
-    ok "direxio-connect daemon installed for $runtime using Matrix room bridge ($ready_evidence)."
+    ok "dirextalk-connect daemon installed for $runtime using Matrix room bridge ($ready_evidence)."
   else
     state_set connect_install_status "install_failed" 2>/dev/null || true
-    warn "direxio-connect daemon install failed. Config and binary are available for manual start."
+    warn "dirextalk-connect daemon install failed. Config and binary are available for manual start."
     return 1
   fi
 }
@@ -896,48 +896,48 @@ _maybe_auto_install_connect() {
 _agent_skill_install_path() {
   local runtime=$1
   case "$runtime" in
-    acp) printf 'PROJECT_ROOT/.agents/skills/direxio-deployer\n' ;;
-    antigravity) printf 'PROJECT_ROOT/.antigravity/skills/direxio-deployer\n' ;;
-    codex) printf 'PROJECT_ROOT/.codex/skills/direxio-deployer\n' ;;
-    claude|claude-code|claudecode) printf 'PROJECT_ROOT/.claude/skills/direxio-deployer\n' ;;
-    devin) printf 'PROJECT_ROOT/.devin/skills/direxio-deployer\n' ;;
-    iflow) printf 'PROJECT_ROOT/.iflow/skills/direxio-deployer\n' ;;
-    kimi) printf 'PROJECT_ROOT/.kimi/skills/direxio-deployer\n' ;;
-    opencode) printf 'PROJECT_ROOT/.opencode/skills/direxio-deployer\n' ;;
-    pi) printf 'PROJECT_ROOT/.pi/agent/skills/direxio-deployer\n' ;;
-    qoder) printf 'PROJECT_ROOT/.qoder/skills/direxio-deployer\n' ;;
-    reasonix) printf 'PROJECT_ROOT/.reasonix/skills/direxio-deployer\n' ;;
-    tmux) printf 'PROJECT_ROOT/.agent/skills/direxio-deployer\n' ;;
-    gemini) printf 'PROJECT_ROOT/.gemini/skills/direxio-deployer\n' ;;
-    cursor) printf 'PROJECT_ROOT/.cursor/skills/direxio-deployer\n' ;;
-    copilot) printf 'PROJECT_ROOT/.github/copilot/skills/direxio-deployer\n' ;;
-    openclaw) printf 'PROJECT_ROOT/.openclaw/skills/direxio-deployer\n' ;;
-    hermes) printf 'PROJECT_ROOT/.hermes/skills/direxio-deployer\n' ;;
-    generic|unknown|*) printf 'PROJECT_ROOT/.agent/skills/direxio-deployer\n' ;;
+    acp) printf 'PROJECT_ROOT/.agents/skills/dirextalk-deployer\n' ;;
+    antigravity) printf 'PROJECT_ROOT/.antigravity/skills/dirextalk-deployer\n' ;;
+    codex) printf 'PROJECT_ROOT/.codex/skills/dirextalk-deployer\n' ;;
+    claude|claude-code|claudecode) printf 'PROJECT_ROOT/.claude/skills/dirextalk-deployer\n' ;;
+    devin) printf 'PROJECT_ROOT/.devin/skills/dirextalk-deployer\n' ;;
+    iflow) printf 'PROJECT_ROOT/.iflow/skills/dirextalk-deployer\n' ;;
+    kimi) printf 'PROJECT_ROOT/.kimi/skills/dirextalk-deployer\n' ;;
+    opencode) printf 'PROJECT_ROOT/.opencode/skills/dirextalk-deployer\n' ;;
+    pi) printf 'PROJECT_ROOT/.pi/agent/skills/dirextalk-deployer\n' ;;
+    qoder) printf 'PROJECT_ROOT/.qoder/skills/dirextalk-deployer\n' ;;
+    reasonix) printf 'PROJECT_ROOT/.reasonix/skills/dirextalk-deployer\n' ;;
+    tmux) printf 'PROJECT_ROOT/.agent/skills/dirextalk-deployer\n' ;;
+    gemini) printf 'PROJECT_ROOT/.gemini/skills/dirextalk-deployer\n' ;;
+    cursor) printf 'PROJECT_ROOT/.cursor/skills/dirextalk-deployer\n' ;;
+    copilot) printf 'PROJECT_ROOT/.github/copilot/skills/dirextalk-deployer\n' ;;
+    openclaw) printf 'PROJECT_ROOT/.openclaw/skills/dirextalk-deployer\n' ;;
+    hermes) printf 'PROJECT_ROOT/.hermes/skills/dirextalk-deployer\n' ;;
+    generic|unknown|*) printf 'PROJECT_ROOT/.agent/skills/dirextalk-deployer\n' ;;
   esac
 }
 
 _agent_global_skill_install_path() {
   local runtime=$1
   case "$runtime" in
-    acp) printf '$HOME/.agents/skills/direxio-deployer\n' ;;
-    antigravity) printf '${ANTIGRAVITY_HOME:-$HOME/.antigravity}/skills/direxio-deployer\n' ;;
-    codex) printf '${CODEX_HOME:-$HOME/.codex}/skills/direxio-deployer\n' ;;
-    claude|claude-code|claudecode) printf '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/direxio-deployer\n' ;;
-    devin) printf '${DEVIN_HOME:-$HOME/.devin}/skills/direxio-deployer\n' ;;
-    iflow) printf '${IFLOW_HOME:-$HOME/.iflow}/skills/direxio-deployer\n' ;;
-    kimi) printf '${KIMI_HOME:-$HOME/.kimi}/skills/direxio-deployer\n' ;;
-    opencode) printf '${OPENCODE_HOME:-$HOME/.opencode}/skills/direxio-deployer\n' ;;
-    pi) printf '${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/skills/direxio-deployer\n' ;;
-    qoder) printf '${QODER_HOME:-$HOME/.qoder}/skills/direxio-deployer\n' ;;
-    reasonix) printf '${REASONIX_HOME:-$HOME/.reasonix}/skills/direxio-deployer\n' ;;
-    tmux) printf '$HOME/.agent/skills/direxio-deployer\n' ;;
-    gemini) printf '${GEMINI_HOME:-$HOME/.gemini}/skills/direxio-deployer\n' ;;
-    cursor) printf '${CURSOR_HOME:-$HOME/.cursor}/skills/direxio-deployer\n' ;;
-    copilot) printf '$HOME/.github/copilot/skills/direxio-deployer\n' ;;
-    openclaw) printf '${OPENCLAW_HOME:-$HOME/.openclaw}/skills/direxio-deployer\n' ;;
-    hermes) printf '${HERMES_HOME:-$HOME/.hermes}/skills/direxio-deployer\n' ;;
-    generic|unknown|*) printf '$HOME/.agent/skills/direxio-deployer\n' ;;
+    acp) printf '$HOME/.agents/skills/dirextalk-deployer\n' ;;
+    antigravity) printf '${ANTIGRAVITY_HOME:-$HOME/.antigravity}/skills/dirextalk-deployer\n' ;;
+    codex) printf '${CODEX_HOME:-$HOME/.codex}/skills/dirextalk-deployer\n' ;;
+    claude|claude-code|claudecode) printf '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/dirextalk-deployer\n' ;;
+    devin) printf '${DEVIN_HOME:-$HOME/.devin}/skills/dirextalk-deployer\n' ;;
+    iflow) printf '${IFLOW_HOME:-$HOME/.iflow}/skills/dirextalk-deployer\n' ;;
+    kimi) printf '${KIMI_HOME:-$HOME/.kimi}/skills/dirextalk-deployer\n' ;;
+    opencode) printf '${OPENCODE_HOME:-$HOME/.opencode}/skills/dirextalk-deployer\n' ;;
+    pi) printf '${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/skills/dirextalk-deployer\n' ;;
+    qoder) printf '${QODER_HOME:-$HOME/.qoder}/skills/dirextalk-deployer\n' ;;
+    reasonix) printf '${REASONIX_HOME:-$HOME/.reasonix}/skills/dirextalk-deployer\n' ;;
+    tmux) printf '$HOME/.agent/skills/dirextalk-deployer\n' ;;
+    gemini) printf '${GEMINI_HOME:-$HOME/.gemini}/skills/dirextalk-deployer\n' ;;
+    cursor) printf '${CURSOR_HOME:-$HOME/.cursor}/skills/dirextalk-deployer\n' ;;
+    copilot) printf '$HOME/.github/copilot/skills/dirextalk-deployer\n' ;;
+    openclaw) printf '${OPENCLAW_HOME:-$HOME/.openclaw}/skills/dirextalk-deployer\n' ;;
+    hermes) printf '${HERMES_HOME:-$HOME/.hermes}/skills/dirextalk-deployer\n' ;;
+    generic|unknown|*) printf '$HOME/.agent/skills/dirextalk-deployer\n' ;;
   esac
 }
 
@@ -949,9 +949,9 @@ _connect_install_command() {
 _print_runtime_install_summary() {
   local runtime=$1 mode=$2 config_path=$3 binary=$4 cc_agent=$5 cc_agent_cmd=${6:-} service_name=${7:-}
   cat >&2 <<EOF
-Recommended direxio-connect install:
+Recommended dirextalk-connect install:
   runtime:        $runtime
-  direxio-connect agent: $cc_agent
+  dirextalk-connect agent: $cc_agent
   agent command:  ${cc_agent_cmd:-default PATH lookup}
   mode:           $mode
   service name:   $service_name
@@ -966,14 +966,14 @@ _maybe_auto_install_agent() {
 }
 
 _write_agent_env_file() {
-  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$(_direxio_home)/env"} node_id=${6:-}
+  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$(_dirextalk_home)/env"} node_id=${6:-}
   mkdir -p "$(dirname "$envfile")"
   umask 077
   {
-    [ -n "$node_id" ] && printf 'export DIREXIO_AGENT_NODE_ID=%q\n' "$node_id"
-    printf 'export DIREXIO_DOMAIN=%q\n' "$asurl"
-    printf 'export DIREXIO_AGENT_TOKEN=%q\n' "$token"
-    printf 'export DIREXIO_AGENT_ROOM_ID=%q\n' "$agent_room_id"
+    [ -n "$node_id" ] && printf 'export DIREXTALK_AGENT_NODE_ID=%q\n' "$node_id"
+    printf 'export DIREXTALK_DOMAIN=%q\n' "$asurl"
+    printf 'export DIREXTALK_AGENT_TOKEN=%q\n' "$token"
+    printf 'export DIREXTALK_AGENT_ROOM_ID=%q\n' "$agent_room_id"
   } > "$envfile"
   chmod 600 "$envfile"
   echo "$envfile"
@@ -981,12 +981,12 @@ _write_agent_env_file() {
 
 _agent_node_id() {
   local runtime=$1 domain=$2 room=$3 explicit host digest raw
-  explicit=${DIREXIO_AGENT_NODE_ID:-}
+  explicit=${DIREXTALK_AGENT_NODE_ID:-}
   host=${domain#http://}
   host=${host#https://}
   host=${host%%/*}
   host=${host%%:*}
-  if [ -n "$explicit" ] && { [ "${DIREXIO_AGENT_NODE_ID_FORCE:-}" = "1" ] || _agent_node_id_matches_host "$explicit" "$host"; }; then
+  if [ -n "$explicit" ] && { [ "${DIREXTALK_AGENT_NODE_ID_FORCE:-}" = "1" ] || _agent_node_id_matches_host "$explicit" "$host"; }; then
     raw=$explicit
   else
     if command -v sha256sum >/dev/null 2>&1; then
@@ -994,9 +994,9 @@ _agent_node_id() {
     else
       digest=$(printf '%s\n%s\n' "$domain" "$room" | shasum -a 256 | awk '{print substr($1,1,10)}')
     fi
-    raw="${runtime:-agent}-${host:-direxio}-$digest"
+    raw="${runtime:-agent}-${host:-dirextalk}-$digest"
   fi
-  printf '%s\n' "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/^$/direxio-agent/'
+  printf '%s\n' "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/^$/dirextalk-agent/'
 }
 
 _agent_node_id_matches_host() {
@@ -1014,13 +1014,13 @@ _write_credentials_file() {
 }
 
 _persist_agent_env() {
-  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$(_direxio_home)/env"} node_id=${6:-}
+  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$(_dirextalk_home)/env"} node_id=${6:-}
   envfile=$(_write_agent_env_file "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id")
-  [ -n "$node_id" ] && export DIREXIO_AGENT_NODE_ID="$node_id"
-  export DIREXIO_DOMAIN="$asurl"
-  export DIREXIO_AGENT_TOKEN="$token"
-  export DIREXIO_AGENT_ROOM_ID="$agent_room_id"
-  ok "Persisted Direxio direxio-connect env vars via $envfile."
+  [ -n "$node_id" ] && export DIREXTALK_AGENT_NODE_ID="$node_id"
+  export DIREXTALK_DOMAIN="$asurl"
+  export DIREXTALK_AGENT_TOKEN="$token"
+  export DIREXTALK_AGENT_ROOM_ID="$agent_room_id"
+  ok "Persisted Dirextalk dirextalk-connect env vars via $envfile."
   echo "$envfile"
 }
 
@@ -1030,26 +1030,26 @@ _print_connect_guidance() {
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
   if [ "$policy" = "skip" ]; then
-    warn "Direxio direxio-connect install guidance skipped by DIREXIO_AGENT_INSTALL=skip."
+    warn "Dirextalk dirextalk-connect install guidance skipped by DIREXTALK_AGENT_INSTALL=skip."
     return 0
   fi
-  warn "Direxio direxio-connect install policy: $policy; platform=$runtime; mode=$mode."
+  warn "Dirextalk dirextalk-connect install policy: $policy; platform=$runtime; mode=$mode."
   cat >&2 <<EOF
 Detected agent runtime: $runtime
-direxio-connect agent:       $cc_agent
+dirextalk-connect agent:       $cc_agent
 Local env file:         $envfile
 Credential file:        $cred
-direxio-connect config:      $cc_config
-direxio-connect binary:      $cc_binary
-direxio-connect agent cmd:   ${cc_agent_cmd:-default PATH lookup}
-direxio-connect service:     $service_name
+dirextalk-connect config:      $cc_config
+dirextalk-connect binary:      $cc_binary
+dirextalk-connect agent cmd:   ${cc_agent_cmd:-default PATH lookup}
+dirextalk-connect service:     $service_name
 Install command:        $install_command
 Project skill clone:    $skill_path
 Global skill fallback:  $global_skill_path
-Env keys:               DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID, DIREXIO_AGENT_NODE_ID
+Env keys:               DIREXTALK_DOMAIN, DIREXTALK_AGENT_TOKEN, DIREXTALK_AGENT_ROOM_ID, DIREXTALK_AGENT_NODE_ID
 
-direxio-connect will use Matrix Client-Server sync as @agent:<server> and is restricted to DIREXIO_AGENT_ROOM_ID.
-It talks directly to the Direxio homeserver for the agents room conversation.
+dirextalk-connect will use Matrix Client-Server sync as @agent:<server> and is restricted to DIREXTALK_AGENT_ROOM_ID.
+It talks directly to the Dirextalk homeserver for the agents room conversation.
 EOF
   _print_runtime_install_summary "$runtime" "$mode" "$cc_config" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_name"
 }
@@ -1069,7 +1069,7 @@ _clear_mcp_daemon_state() {
 }
 
 run_phase() {
-  phase_set S6_WIRE_LOCAL in_progress "writing credentials and direxio-connect Matrix bridge config"
+  phase_set S6_WIRE_LOCAL in_progress "writing credentials and dirextalk-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
   local node_id service_dir node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_config cc_config_local cc_data cc_data_local cc_binary cc_session cc_source cc_package_dir
   local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
@@ -1091,8 +1091,8 @@ run_phase() {
   cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime")
   cc_agent_options_toml=$(_connect_agent_options_toml "$runtime" "$cc_agent")
   node_id=$(_agent_node_id "$runtime" "$domain" "$agent_room_id")
-  service_id=$(_direxio_service_id "${asurl:-$domain}")
-  service_dir=$(_direxio_service_dir "${asurl:-$domain}")
+  service_id=$(_dirextalk_service_id "${asurl:-$domain}")
+  service_dir=$(_dirextalk_service_dir "${asurl:-$domain}")
   node_cred="$service_dir/credentials.json"
   envfile="$service_dir/env"
   workspace=$(_agent_workspace "$service_dir")
@@ -1146,14 +1146,14 @@ run_phase() {
 
   if ! envfile=$(_persist_agent_env "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id"); then
     phase_set S6_WIRE_LOCAL failed "persistent env write failed"
-    fail "failed to persist Direxio direxio-connect env vars."
+    fail "failed to persist Dirextalk dirextalk-connect env vars."
   fi
 
   mkdir -p "$workspace"
   mkdir -p "$cc_runtime_dir"
-  if ! _create_connect_matrix_session "$asurl" "$token" "DIREXIO_CONNECT_${node_id}" "$cc_session"; then
+  if ! _create_connect_matrix_session "$asurl" "$token" "DIREXTALK_CONNECT_${node_id}" "$cc_session"; then
     phase_set S6_WIRE_LOCAL failed "agent Matrix session creation failed"
-    fail "failed to create direxio-connect Matrix session via agent.matrix_session.create."
+    fail "failed to create dirextalk-connect Matrix session via agent.matrix_session.create."
   fi
   matrix_token=$(json_get "$cc_session" access_token)
   matrix_user=$(json_get "$cc_session" user_id)
@@ -1168,7 +1168,7 @@ run_phase() {
     *) warn "agent.matrix_session.create returned non-standard agent user_id: $matrix_user" ;;
   esac
   workspace_local=$(_local_connect_path "$workspace")
-  if [ "$runtime" = "cursor" ] && [ "$(direxio_local_path_style)" = "windows" ]; then
+  if [ "$runtime" = "cursor" ] && [ "$(dirextalk_local_path_style)" = "windows" ]; then
     if ! _cursor_agent_prepare_windows; then
       install_policy_preview=$(_connect_install_policy)
       if [ "$install_policy_preview" = "auto" ]; then
@@ -1181,7 +1181,7 @@ run_phase() {
     fi
   fi
   _write_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml"
-  ok "Wrote direxio-connect Matrix config $cc_config (0600)."
+  ok "Wrote dirextalk-connect Matrix config $cc_config (0600)."
 
   state_set agent_env_file "$envfile" 2>/dev/null || true
   state_set agent_node_id "$node_id" 2>/dev/null || true
@@ -1241,12 +1241,12 @@ run_phase() {
   state_set mcp_install_policy "$install_policy" 2>/dev/null || true
   state_set agent_skill_install_path "$skill_path" 2>/dev/null || true
   state_set agent_global_skill_install_path "$global_skill_path" 2>/dev/null || true
-  state_set direxio_agent_bridge "direxio-connect" 2>/dev/null || true
+  state_set dirextalk_agent_bridge "dirextalk-connect" 2>/dev/null || true
   _print_connect_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_id"
   _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_selected_config_type" "$mcp_selected_config_local" "$mcp_install_command" "$mcp_doctor_command" "$service_dir"
   if ! _maybe_auto_install_agent "$install_policy" "$runtime" "$cc_agent" "$service_dir" "$cc_config" "$cc_binary" "$service_id"; then
-    phase_set S6_WIRE_LOCAL failed "direxio-connect auto install/startup was not verified; check daemon logs"
-    warn "Run: $cc_binary daemon logs --service-name $service_id -n ${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}"
+    phase_set S6_WIRE_LOCAL failed "dirextalk-connect auto install/startup was not verified; check daemon logs"
+    warn "Run: $cc_binary daemon logs --service-name $service_id -n ${DIREXTALK_CONNECT_LOG_TAIL_LINES:-120}"
     return 1
   fi
   _maybe_auto_install_mcp "$install_policy" "$service_id" "$node_cred" "$node_id" "$service_dir"

@@ -1,14 +1,14 @@
 # AGENTS.md
 
-`direxio-deployer` is a cross-platform deployment product and agent skill, not a Linux-only script collection. Maintain it as a portable orchestration layer that can be driven from Windows PowerShell, Git Bash/MSYS2, Linux, and macOS while deploying a Linux-based Direxio server.
+`dirextalk-deployer` is a cross-platform deployment product and agent skill, not a Linux-only script collection. Maintain it as a portable orchestration layer that can be driven from Windows PowerShell, Git Bash/MSYS2, Linux, and macOS while deploying a Linux-based Dirextalk server.
 
 ## Product Scope
 
-- Deploy, resume, verify, destroy, and locally wire a production Direxio message server.
+- Deploy, resume, verify, destroy, and locally wire a production Dirextalk message server.
 - Treat `SKILL.md` as the compact agent-facing entrypoint. Detailed runbooks belong in `references/`; `scripts/` are the stable implementation entrypoints.
-- The supported local conversation bridge is `direxio-connect`, installed from `direxio-connent@latest` by default or built from `YingSuiAI/direxio-connect`.
-- The supported local MCP package is `direxio-mcp@latest`.
-- Supported local agent targets are the direxio-connect agent providers, treated as peers: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
+- The supported local conversation bridge is `dirextalk-connect`, installed from `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`.
+- The supported local MCP package is `dirextalk-mcp@latest`.
+- Supported local agent targets are the dirextalk-connect agent providers, treated as peers: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
 - Do not reintroduce legacy local gateway installation flows or third-party chat platform wiring.
 - Do not hard-code one developer's home directory, shell, agent executable path, AWS region, domain, node id, token, or password.
 
@@ -16,18 +16,18 @@
 
 Every deployer change must classify paths and commands by the platform that will consume them:
 
-- **Remote server paths** are Linux paths inside EC2/cloud-init/Docker, such as `/var/direxio-message-server`, `/var/direxio-message-server/p2p/bootstrap.json`, and `/etc/direxio-message-server`.
+- **Remote server paths** are Linux paths inside EC2/cloud-init/Docker, such as `/var/dirextalk-message-server`, `/var/dirextalk-message-server/p2p/bootstrap.json`, and `/etc/dirextalk-message-server`.
 - **Deployer execution paths** are used by the orchestration engine. Bash phase scripts can use POSIX paths, but PowerShell entrypoints must convert Windows paths before invoking Bash.
-- **Local bridge paths** are consumed by `direxio-connect` and the local agent process. On Windows they must be Windows-compatible paths, not `/mnt/c/...` or Git Bash-only `/c/...` paths.
+- **Local bridge paths** are consumed by `dirextalk-connect` and the local agent process. On Windows they must be Windows-compatible paths, not `/mnt/c/...` or Git Bash-only `/c/...` paths.
 - **Documentation paths** must be portable examples using `$HOME`, `%USERPROFILE%`, `$env:USERPROFILE`, `<service_id>`, or `<domain>`, not machine-specific absolute paths.
 
-If a change writes a path into `state.json`, `credentials.json`, `env`, `direxio-connect/config.toml`, docs, or printed commands, verify which process will read that path and format it for that process.
+If a change writes a path into `state.json`, `credentials.json`, `env`, `dirextalk-connect/config.toml`, docs, or printed commands, verify which process will read that path and format it for that process.
 Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `scripts/lib/windows-paths.ps1` for PowerShell wrapper conversion. These helpers must lexically recognize `C:\Users\alice`, `C:/Users/alice`, `/mnt/c/Users/alice`, `/cygdrive/c/Users/alice`, and `/c/Users/alice` before calling shell-specific conversion tools.
 
 ## Entrypoints
 
 - POSIX users run `bash scripts/orchestrate.sh`.
-- Windows users run `.\scripts\orchestrate.ps1` from PowerShell. The wrapper may use Git Bash internally for existing Bash phases, but it must set Windows-local wiring variables such as `DIREXIO_LOCAL_PATH_STYLE=windows`.
+- Windows users run `.\scripts\orchestrate.ps1` from PowerShell. The wrapper may use Git Bash internally for existing Bash phases, but it must set Windows-local wiring variables such as `DIREXTALK_LOCAL_PATH_STYLE=windows`.
 - POSIX users run `bash scripts/destroy.sh`; Windows users run `.\scripts\destroy.ps1`.
 - Do not tell Windows users to run WSL unless the user explicitly chooses WSL as the host runtime. WSL and Windows are different local runtimes with different home directories, PATH lookup, daemon process control, and agent executable paths.
 - Keep `scripts/orchestrate.sh` and `scripts/orchestrate.ps1` behaviorally aligned for status, deploy/resume, and local bridge wiring.
@@ -39,17 +39,17 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 - Prefer small helpers for platform conversion, command discovery, and output formatting. Do not scatter OS-specific path rewrites across phase bodies.
 - Use `scripts/json.mjs` through `scripts/lib/json.sh` for JSON reads/writes. Do not reintroduce legacy external JSON CLI dependencies.
 - Remote server commands may assume Linux because the EC2 host is Linux. Local commands must not assume Linux.
-- Use PowerShell for Windows-native process and path behavior when the consumer is Windows-local, especially `direxio-connect.exe`, local agent executables, Windows user profile paths, or npm global binaries.
-- When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXIO_CONNECT_AGENT`, `DIREXIO_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXIO_CODEX_COMMAND`, `DIREXIO_GEMINI_COMMAND`, or `DIREXIO_CLAUDE_CODE_COMMAND`.
-- Do not make Codex, Claude, Gemini, Cursor, or any other provider the semantic default for an unknown runtime. Unknown or ambiguous detection should require an explicit `DIREXIO_CONNECT_AGENT`.
+- Use PowerShell for Windows-native process and path behavior when the consumer is Windows-local, especially `dirextalk-connect.exe`, local agent executables, Windows user profile paths, or npm global binaries.
+- When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXTALK_CONNECT_AGENT`, `DIREXTALK_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, or `DIREXTALK_CLAUDE_CODE_COMMAND`.
+- Do not make Codex, Claude, Gemini, Cursor, or any other provider the semantic default for an unknown runtime. Unknown or ambiguous detection should require an explicit `DIREXTALK_CONNECT_AGENT`.
 
-## Direxio Connect Wiring
+## Dirextalk Connect Wiring
 
 - S5/S6 must fail closed when `agent_room_id` is missing or uses a legacy pseudo id such as `!agent:<domain>`.
 - S6 must create a Matrix session through `agent.matrix_session.create` using `agent_token`, not owner `access_token`, and require `@agent:<server>` for the bridge. Returning `@owner:<server>` is a server-side compatibility failure.
-- The generated direxio-connect config must contain one Matrix platform and must restrict sync/replies to the real `agent_room_id`.
+- The generated dirextalk-connect config must contain one Matrix platform and must restrict sync/replies to the real `agent_room_id`.
 - The generated agent config must preserve the selected connect agent type and optional agent-specific TOML. Some providers require more than `cmd`; for example `reasonix` needs `serve_url`, `tmux` needs `session`, and generic `acp` may need command/args.
-- `DIREXIO_AGENT_INSTALL=auto` is the default and installs `direxio-connent@latest` and `direxio-mcp@latest` into the current service directory, not into the npm global prefix, unless an explicit binary/command override is set. It installs the service-scoped `direxio-connect` daemon and refreshes the service-scoped `direxio-mcp` stdio command. Generated MCP client snippets for all MCP-capable supported runtimes must launch the current service's `direxio-mcp` binary directly over stdio with the service credentials; do not require a local MCP daemon, HTTP proxy, or listening port.
+- `DIREXTALK_AGENT_INSTALL=auto` is the default and installs `dirextalk-connect@latest` and `dirextalk-mcp@latest` into the current service directory, not into the npm global prefix, unless an explicit binary/command override is set. It installs the service-scoped `dirextalk-connect` daemon and refreshes the service-scoped `dirextalk-mcp` stdio command. Generated MCP client snippets for all MCP-capable supported runtimes must launch the current service's `dirextalk-mcp` binary directly over stdio with the service credentials; do not require a local MCP daemon, HTTP proxy, or listening port.
 - `recommend` must only write files and print commands; `skip` writes credentials/env/config artifacts only.
 - Do not pin old package versions in runtime defaults. Keep `@latest` defaults and preserve env overrides only for explicit debugging or rollback.
 
@@ -58,7 +58,7 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 - Never print, commit, or paste AWS secrets, the eight-digit app initialization code, Matrix access tokens, `agent_token`, private keys, or full credential files.
 - When verifying credentials, print booleans or identities only, such as `has_access_token=true`, `user_id`, `device_id`, and `homeserver`.
 - `credentials.json`, Matrix session files, SSH keys, and generated env files must stay outside the repository and should be written with restrictive permissions when the platform supports it.
-- Do not silently reuse stale `DIREXIO_AGENT_NODE_ID` across domains. Node ids must be scoped to the current deployment unless the operator explicitly forces an override.
+- Do not silently reuse stale `DIREXTALK_AGENT_NODE_ID` across domains. Node ids must be scoped to the current deployment unless the operator explicitly forces an override.
 
 ## Documentation Rules
 

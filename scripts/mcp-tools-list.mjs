@@ -4,15 +4,15 @@ import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const command = process.argv[2] || "direxio-mcp";
-const timeoutMs = Number.parseInt(process.env.DIREXIO_MCP_TOOLS_TIMEOUT_MS || "8000", 10);
+const command = process.argv[2] || "dirextalk-mcp";
+const timeoutMs = Number.parseInt(process.env.DIREXTALK_MCP_TOOLS_TIMEOUT_MS || "8000", 10);
 
 const timer = setTimeout(() => {
   finishWithError(`timed out waiting for MCP tools/list after ${timeoutMs}ms`);
 }, timeoutMs);
 
 try {
-  const packageRoot = resolveDirexioMcpPackageRoot(command);
+  const packageRoot = resolveDirextalkMcpPackageRoot(command);
   const sdkRoot = path.join(packageRoot, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
   const { Client } = await import(pathToFileURL(path.join(sdkRoot, "client", "index.js")).href);
   const { StdioClientTransport } = await import(pathToFileURL(path.join(sdkRoot, "client", "stdio.js")).href);
@@ -22,7 +22,7 @@ try {
     args: [path.join(packageRoot, "dist", "index.js")],
     env: process.env
   });
-  const client = new Client({ name: "direxio-deployer", version: "0.0.0" }, { capabilities: {} });
+  const client = new Client({ name: "dirextalk-deployer", version: "0.0.0" }, { capabilities: {} });
   await client.connect(transport);
   const response = await client.listTools();
   await client.close();
@@ -35,12 +35,12 @@ try {
   finishWithError(error instanceof Error ? error.message : String(error));
 }
 
-function resolveDirexioMcpPackageRoot(commandName) {
+function resolveDirextalkMcpPackageRoot(commandName) {
   const executable = resolveExecutable(commandName);
   const basedir = path.dirname(realpathSync(executable));
   const candidates = [
-    path.join(basedir, "node_modules", "direxio-mcp"),
-    path.join(basedir, "..", "node_modules", "direxio-mcp"),
+    path.join(basedir, "node_modules", "dirextalk-mcp"),
+    path.join(basedir, "..", "node_modules", "dirextalk-mcp"),
     path.join(basedir, "..")
   ];
   for (const candidate of candidates) {
@@ -48,7 +48,7 @@ function resolveDirexioMcpPackageRoot(commandName) {
       return realpathSync(candidate);
     }
   }
-  throw new Error(`unable to locate direxio-mcp package root from ${executable}`);
+  throw new Error(`unable to locate dirextalk-mcp package root from ${executable}`);
 }
 
 function resolveExecutable(commandName) {

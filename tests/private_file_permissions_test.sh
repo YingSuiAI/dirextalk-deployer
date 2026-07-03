@@ -17,7 +17,7 @@ chmod 700 "$tmp/bin/uname"
 cat > "$tmp/bin/cygpath" <<'EOF'
 #!/usr/bin/env bash
 [ "${1:-}" = "-w" ] || exit 2
-printf 'C:\\Users\\test\\.direxio\\nodes\\svc\\key.pem\n'
+printf 'C:\\Users\\test\\.dirextalk\\nodes\\svc\\key.pem\n'
 EOF
 chmod 700 "$tmp/bin/cygpath"
 

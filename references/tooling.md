@@ -83,24 +83,24 @@ If distro packages are too old or missing, ask before using the official AWS CLI
 ## Credentials
 
 For first-time setup, offer a root access key as the fastest path and a
-temporary `DirexioDeployer` IAM user or role as the safer path. Root keys are
+temporary `DirextalkDeployer` IAM user or role as the safer path. Root keys are
 highly privileged; the operator must save the CSV securely, never paste or
 commit it, and rotate or delete it after deployment. If the user provides an
 AWS access-key CSV, import it through the repository helper so command output
 stays redacted and the identity is marked as `root=true|false`:
 
 ```bash
-bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv direxio-deployer <region>
-export AWS_PROFILE=direxio-deployer
-bash scripts/aws-credentials.sh verify direxio-deployer
+bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv dirextalk-deployer <region>
+export AWS_PROFILE=dirextalk-deployer
+bash scripts/aws-credentials.sh verify dirextalk-deployer
 ```
 
 Existing profiles can still be used, including root profiles when the operator
 explicitly chooses root credentials:
 
 ```bash
-aws configure --profile direxio-deployer
-export AWS_PROFILE=direxio-deployer
+aws configure --profile dirextalk-deployer
+export AWS_PROFILE=dirextalk-deployer
 export AWS_DEFAULT_REGION=us-east-1
 aws sts get-caller-identity
 ```

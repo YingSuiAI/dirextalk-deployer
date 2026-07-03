@@ -22,7 +22,7 @@ printf '\n' >> "$CALLS"
 
 case "${1:-} ${2:-}" in
   "sts get-caller-identity")
-    printf 'arn:aws:iam::123456789012:user/DirexioDeployer\n'
+    printf 'arn:aws:iam::123456789012:user/DirextalkDeployer\n'
     ;;
   "lightsail detach-static-ip"|"lightsail release-static-ip"|"lightsail delete-instance"|"lightsail delete-key-pair")
     ;;
@@ -39,12 +39,12 @@ chmod 700 "$fakebin/aws"
 export PATH="$fakebin:$PATH"
 export CALLS="$tmp/aws.calls"
 export AWS_DEFAULT_REGION=us-east-1
-export DIREXIO_KEEP_WORKDIR=1
+export DIREXTALK_KEEP_WORKDIR=1
 
-service_dir="$HOME/.direxio/nodes/lightsail.example.test"
+service_dir="$HOME/.dirextalk/nodes/lightsail.example.test"
 mkdir -p "$service_dir"
 state="$service_dir/state.json"
-key_file="$service_dir/direxio-key.pem"
+key_file="$service_dir/dirextalk-key.pem"
 printf 'PRIVATE_KEY' > "$key_file"
 json_build object \
   domain=lightsail.example.test \
@@ -53,7 +53,7 @@ json_build object \
   region=us-east-1 \
   agent_service_id=lightsail.example.test \
   "agent_service_dir=$service_dir" \
-  "resources={\"lightsail_instance_name\":\"direxio-lightsail-example-test\",\"lightsail_static_ip_name\":\"direxio-ip-lightsail-example-test\",\"public_ip\":\"203.0.113.144\",\"key_name\":\"direxio-key-lightsail-example-test\",\"key_file\":\"$key_file\"}" > "$state"
+  "resources={\"lightsail_instance_name\":\"dirextalk-lightsail-example-test\",\"lightsail_static_ip_name\":\"dirextalk-ip-lightsail-example-test\",\"public_ip\":\"203.0.113.144\",\"key_name\":\"dirextalk-key-lightsail-example-test\",\"key_file\":\"$key_file\"}" > "$state"
 
 bash "$ROOT/scripts/destroy.sh" "$state" > "$tmp/destroy.out" 2>&1
 
@@ -66,7 +66,7 @@ if grep -q '^aws ec2 ' "$CALLS"; then
   cat "$CALLS" >&2
   exit 1
 fi
-report=$(find "$HOME/.direxio/reports" -name operation-report.json -print | head -n 1)
+report=$(find "$HOME/.dirextalk/reports" -name operation-report.json -print | head -n 1)
 [ -s "$report" ] || {
   echo "destroy report not found" >&2
   cat "$tmp/destroy.out" >&2

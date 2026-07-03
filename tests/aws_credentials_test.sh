@@ -29,7 +29,7 @@ case "${1:-} ${2:-}" in
       arn="arn:aws:iam::123456789012:root"
       account="123456789012"
     else
-      arn="arn:aws:iam::123456789012:user/DirexioDeployer-20260628"
+      arn="arn:aws:iam::123456789012:user/DirextalkDeployer-20260628"
       account="123456789012"
     fi
     case "$*" in
@@ -60,25 +60,25 @@ file_mode() {
   fi
 }
 
-cat > "$tmp/direxio.csv" <<'CSV'
+cat > "$tmp/dirextalk.csv" <<'CSV'
 User name,Access key ID,Secret access key
-DirexioDeployer-20260628,AKIADIREXIOTEST,SECRET_DIREXIO_VALUE
+DirextalkDeployer-20260628,AKIADIREXTALKTEST,SECRET_DIREXTALK_VALUE
 CSV
 
-out=$(bash "$ROOT/scripts/aws-credentials.sh" import-csv "$tmp/direxio.csv" direxio-deployer ap-southeast-1)
+out=$(bash "$ROOT/scripts/aws-credentials.sh" import-csv "$tmp/dirextalk.csv" dirextalk-deployer ap-southeast-1)
 
-[[ "$out" == *"profile=direxio-deployer"* ]]
-[[ "$out" == *"arn:aws:iam::<account>:user/DirexioDeployer-20260628"* ]]
-if [[ "$out" == *"AKIADIREXIOTEST"* || "$out" == *"SECRET_DIREXIO_VALUE"* ]]; then
+[[ "$out" == *"profile=dirextalk-deployer"* ]]
+[[ "$out" == *"arn:aws:iam::<account>:user/DirextalkDeployer-20260628"* ]]
+if [[ "$out" == *"AKIADIREXTALKTEST"* || "$out" == *"SECRET_DIREXTALK_VALUE"* ]]; then
   echo "aws-credentials output leaked credential values" >&2
   printf '%s\n' "$out" >&2
   exit 1
 fi
 
-grep -q '^\[direxio-deployer\]$' "$AWS_SHARED_CREDENTIALS_FILE"
-grep -q '^aws_access_key_id = AKIADIREXIOTEST$' "$AWS_SHARED_CREDENTIALS_FILE"
-grep -q '^aws_secret_access_key = SECRET_DIREXIO_VALUE$' "$AWS_SHARED_CREDENTIALS_FILE"
-grep -q '^\[profile direxio-deployer\]$' "$AWS_CONFIG_FILE"
+grep -q '^\[dirextalk-deployer\]$' "$AWS_SHARED_CREDENTIALS_FILE"
+grep -q '^aws_access_key_id = AKIADIREXTALKTEST$' "$AWS_SHARED_CREDENTIALS_FILE"
+grep -q '^aws_secret_access_key = SECRET_DIREXTALK_VALUE$' "$AWS_SHARED_CREDENTIALS_FILE"
+grep -q '^\[profile dirextalk-deployer\]$' "$AWS_CONFIG_FILE"
 grep -q '^region = ap-southeast-1$' "$AWS_CONFIG_FILE"
 
 credential_perm=$(file_mode "$AWS_SHARED_CREDENTIALS_FILE")
@@ -94,8 +94,8 @@ case "$(uname -s)" in
     ;;
 esac
 
-verify_out=$(AWS_PROFILE=direxio-deployer bash "$ROOT/scripts/aws-credentials.sh" verify direxio-deployer)
-[[ "$verify_out" == *"profile=direxio-deployer"* ]]
+verify_out=$(AWS_PROFILE=dirextalk-deployer bash "$ROOT/scripts/aws-credentials.sh" verify dirextalk-deployer)
+[[ "$verify_out" == *"profile=dirextalk-deployer"* ]]
 [[ "$verify_out" == *"root=false"* ]]
 
 cat > "$tmp/root.csv" <<'CSV'
@@ -133,7 +133,7 @@ grep -q '^aws_secret_access_key = SECRET_BOM_VALUE$' "$AWS_SHARED_CREDENTIALS_FI
 
 set +e
 s0_output=$(
-  DIREXIO_WORKDIR="$tmp/state-root" AWS_PROFILE=root-profile bash -c '
+  DIREXTALK_WORKDIR="$tmp/state-root" AWS_PROFILE=root-profile bash -c '
     set -uo pipefail
     cd "$1"
     source scripts/lib/state.sh

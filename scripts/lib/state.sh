@@ -4,8 +4,8 @@
 # Sourced by orchestrate.sh and phases/*.sh. All state.json reads/writes go
 # through this file to keep structure and fields consistent. Requires Node.js.
 #
-# state.json path: $DIREXIO_WORKDIR/state.json.
-# By default, DOMAIN=__DOMAIN__ maps to ~/.direxio/nodes/<service_id>/state.json.
+# state.json path: $DIREXTALK_WORKDIR/state.json.
+# By default, DOMAIN=__DOMAIN__ maps to ~/.dirextalk/nodes/<service_id>/state.json.
 #
 # PHASES order is the state-machine execution order.
 
@@ -28,17 +28,17 @@ PHASES=(
 )
 
 # Paths.
-DIREXIO_WORKDIR=$(direxio_default_workdir)
-STATE_JSON="$DIREXIO_WORKDIR/state.json"
+DIREXTALK_WORKDIR=$(dirextalk_default_workdir)
+STATE_JSON="$DIREXTALK_WORKDIR/state.json"
 
 # Timestamp helper.
 _now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # Shared logging helpers.
-log()  { echo -e "\033[36m[direxio]\033[0m $*" >&2; }
-ok()   { echo -e "\033[32m[direxio]\033[0m $*" >&2; }
-warn() { echo -e "\033[33m[direxio]\033[0m $*" >&2; }
-fail() { echo -e "\033[31m[direxio][FATAL]\033[0m $*" >&2; exit 1; }
+log()  { echo -e "\033[36m[dirextalk]\033[0m $*" >&2; }
+ok()   { echo -e "\033[32m[dirextalk]\033[0m $*" >&2; }
+warn() { echo -e "\033[33m[dirextalk]\033[0m $*" >&2; }
+fail() { echo -e "\033[31m[dirextalk][FATAL]\033[0m $*" >&2; exit 1; }
 is_yes() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
     y|yes|true|1) return 0 ;;
@@ -88,8 +88,8 @@ _windows_current_user() {
 
 # Initialize state.json for a new deployment.
 state_init() {
-  mkdir -p "$DIREXIO_WORKDIR"
-  local run_id=${RUN_ID:-direxio-$(date -u +%Y%m%d-%H%M%S)}
+  mkdir -p "$DIREXTALK_WORKDIR"
+  local run_id=${RUN_ID:-dirextalk-$(date -u +%Y%m%d-%H%M%S)}
   : > "$STATE_JSON"
   json_mutate "$STATE_JSON" state-init "$run_id" "${AWS_DEFAULT_REGION:-${AWS_REGION:-}}" "$(_now)" "${PHASES[@]}"
   log "Initialized state.json -> $STATE_JSON (run_id=$run_id)"

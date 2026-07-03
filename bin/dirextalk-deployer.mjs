@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8"));
-const packageName = packageJson.name || "direxio-deployer";
+const packageName = packageJson.name || "dirextalk-deployer";
 const packageVersion = packageJson.version || "0.0.0";
 
 const skillFiles = [
@@ -24,47 +24,47 @@ const skillFiles = [
 ];
 
 const projectTargets = {
-  acp: [".agents", "skills", "direxio-deployer"],
-  antigravity: [".antigravity", "skills", "direxio-deployer"],
-  claudecode: [".claude", "skills", "direxio-deployer"],
-  codex: [".codex", "skills", "direxio-deployer"],
-  copilot: [".github", "copilot", "skills", "direxio-deployer"],
-  cursor: [".cursor", "skills", "direxio-deployer"],
-  devin: [".devin", "skills", "direxio-deployer"],
-  gemini: [".gemini", "skills", "direxio-deployer"],
-  hermes: [".hermes", "skills", "direxio-deployer"],
-  iflow: [".iflow", "skills", "direxio-deployer"],
-  kimi: [".kimi", "skills", "direxio-deployer"],
-  opencode: [".opencode", "skills", "direxio-deployer"],
-  openclaw: [".openclaw", "skills", "direxio-deployer"],
-  pi: [".pi", "agent", "skills", "direxio-deployer"],
-  qoder: [".qoder", "skills", "direxio-deployer"],
-  reasonix: [".reasonix", "skills", "direxio-deployer"],
-  tmux: [".agent", "skills", "direxio-deployer"],
-  generic: [".agent", "skills", "direxio-deployer"],
-  unknown: [".agent", "skills", "direxio-deployer"]
+  acp: [".agents", "skills", "dirextalk-deployer"],
+  antigravity: [".antigravity", "skills", "dirextalk-deployer"],
+  claudecode: [".claude", "skills", "dirextalk-deployer"],
+  codex: [".codex", "skills", "dirextalk-deployer"],
+  copilot: [".github", "copilot", "skills", "dirextalk-deployer"],
+  cursor: [".cursor", "skills", "dirextalk-deployer"],
+  devin: [".devin", "skills", "dirextalk-deployer"],
+  gemini: [".gemini", "skills", "dirextalk-deployer"],
+  hermes: [".hermes", "skills", "dirextalk-deployer"],
+  iflow: [".iflow", "skills", "dirextalk-deployer"],
+  kimi: [".kimi", "skills", "dirextalk-deployer"],
+  opencode: [".opencode", "skills", "dirextalk-deployer"],
+  openclaw: [".openclaw", "skills", "dirextalk-deployer"],
+  pi: [".pi", "agent", "skills", "dirextalk-deployer"],
+  qoder: [".qoder", "skills", "dirextalk-deployer"],
+  reasonix: [".reasonix", "skills", "dirextalk-deployer"],
+  tmux: [".agent", "skills", "dirextalk-deployer"],
+  generic: [".agent", "skills", "dirextalk-deployer"],
+  unknown: [".agent", "skills", "dirextalk-deployer"]
 };
 
 const globalTargets = {
-  acp: { env: null, defaultSegments: [".agents", "skills", "direxio-deployer"] },
-  antigravity: { env: "ANTIGRAVITY_HOME", defaultSegments: [".antigravity", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  claudecode: { env: "CLAUDE_HOME", defaultSegments: [".claude", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  codex: { env: "CODEX_HOME", defaultSegments: [".codex", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  copilot: { env: null, defaultSegments: [".github", "copilot", "skills", "direxio-deployer"] },
-  cursor: { env: "CURSOR_HOME", defaultSegments: [".cursor", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  devin: { env: "DEVIN_HOME", defaultSegments: [".devin", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  gemini: { env: "GEMINI_HOME", defaultSegments: [".gemini", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  hermes: { env: "HERMES_HOME", defaultSegments: [".hermes", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  iflow: { env: "IFLOW_HOME", defaultSegments: [".iflow", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  kimi: { env: "KIMI_HOME", defaultSegments: [".kimi", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  opencode: { env: "OPENCODE_HOME", defaultSegments: [".opencode", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  openclaw: { env: "OPENCLAW_HOME", defaultSegments: [".openclaw", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  pi: { env: "PI_CODING_AGENT_DIR", defaultSegments: [".pi", "agent", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  qoder: { env: "QODER_HOME", defaultSegments: [".qoder", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  reasonix: { env: "REASONIX_HOME", defaultSegments: [".reasonix", "skills", "direxio-deployer"], envSuffix: ["skills", "direxio-deployer"] },
-  tmux: { env: null, defaultSegments: [".agent", "skills", "direxio-deployer"] },
-  generic: { env: null, defaultSegments: [".agent", "skills", "direxio-deployer"] },
-  unknown: { env: null, defaultSegments: [".agent", "skills", "direxio-deployer"] }
+  acp: { env: null, defaultSegments: [".agents", "skills", "dirextalk-deployer"] },
+  antigravity: { env: "ANTIGRAVITY_HOME", defaultSegments: [".antigravity", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  claudecode: { env: "CLAUDE_HOME", defaultSegments: [".claude", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  codex: { env: "CODEX_HOME", defaultSegments: [".codex", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  copilot: { env: null, defaultSegments: [".github", "copilot", "skills", "dirextalk-deployer"] },
+  cursor: { env: "CURSOR_HOME", defaultSegments: [".cursor", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  devin: { env: "DEVIN_HOME", defaultSegments: [".devin", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  gemini: { env: "GEMINI_HOME", defaultSegments: [".gemini", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  hermes: { env: "HERMES_HOME", defaultSegments: [".hermes", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  iflow: { env: "IFLOW_HOME", defaultSegments: [".iflow", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  kimi: { env: "KIMI_HOME", defaultSegments: [".kimi", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  opencode: { env: "OPENCODE_HOME", defaultSegments: [".opencode", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  openclaw: { env: "OPENCLAW_HOME", defaultSegments: [".openclaw", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  pi: { env: "PI_CODING_AGENT_DIR", defaultSegments: [".pi", "agent", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  qoder: { env: "QODER_HOME", defaultSegments: [".qoder", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  reasonix: { env: "REASONIX_HOME", defaultSegments: [".reasonix", "skills", "dirextalk-deployer"], envSuffix: ["skills", "dirextalk-deployer"] },
+  tmux: { env: null, defaultSegments: [".agent", "skills", "dirextalk-deployer"] },
+  generic: { env: null, defaultSegments: [".agent", "skills", "dirextalk-deployer"] },
+  unknown: { env: null, defaultSegments: [".agent", "skills", "dirextalk-deployer"] }
 };
 
 const aliases = {
@@ -94,9 +94,9 @@ function main() {
 
 function usage(exitCode) {
   const output = `Usage:
-  direxio-deployer skill install --agent <runtime> [--scope global|project] [--project <path>]
-  direxio-deployer skill update --agent <runtime> [--scope global|project] [--project <path>]
-  direxio-deployer skill refresh --agent <runtime> [--scope global|project] [--project <path>]
+  dirextalk-deployer skill install --agent <runtime> [--scope global|project] [--project <path>]
+  dirextalk-deployer skill update --agent <runtime> [--scope global|project] [--project <path>]
+  dirextalk-deployer skill refresh --agent <runtime> [--scope global|project] [--project <path>]
 
 Options:
   --agent <runtime>   Target agent runtime. Default: codex
@@ -121,7 +121,7 @@ function parseArgs(args) {
     target: null,
     dryRun: false,
     force: false,
-    skipNpmCheck: process.env.DIREXIO_DEPLOYER_REFRESH_CHILD === "1"
+    skipNpmCheck: process.env.DIREXTALK_DEPLOYER_REFRESH_CHILD === "1"
   };
 
   for (let i = 0; i < args.length; i += 1) {
@@ -245,13 +245,13 @@ function installSkill({ agent, scope, target, dryRun, force }) {
     source: packageRoot,
     installedAt: new Date().toISOString()
   };
-  writeFileSync(path.join(target, ".direxio-skill-install.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  return { action, manifest: path.join(target, ".direxio-skill-install.json") };
+  writeFileSync(path.join(target, ".dirextalk-skill-install.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  return { action, manifest: path.join(target, ".dirextalk-skill-install.json") };
 }
 
 function removeInstallTarget(target) {
   try {
-    if (process.env.DIREXIO_DEPLOYER_TEST_RM_EBUSY === "1") {
+    if (process.env.DIREXTALK_DEPLOYER_TEST_RM_EBUSY === "1") {
       const error = new Error(`simulated busy target: ${target}`);
       error.code = "EBUSY";
       throw error;
@@ -272,13 +272,13 @@ function clearTargetContents(target) {
 }
 
 function isBusyRemovalError(error) {
-  return process.platform === "win32" || process.env.DIREXIO_DEPLOYER_TEST_RM_EBUSY === "1"
+  return process.platform === "win32" || process.env.DIREXTALK_DEPLOYER_TEST_RM_EBUSY === "1"
     ? ["EBUSY", "EPERM", "ENOTEMPTY"].includes(error?.code)
     : false;
 }
 
 function isManagedTarget(target) {
-  const manifestPath = path.join(target, ".direxio-skill-install.json");
+  const manifestPath = path.join(target, ".dirextalk-skill-install.json");
   if (!existsSync(manifestPath)) return false;
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -304,9 +304,9 @@ function copyRecursive(source, destination) {
 
 function shouldSkip(entry) {
   return new Set([
-    ".direxio-connect",
+    ".dirextalk-connect",
     ".codegraph",
-    ".direxio-skill-install.json",
+    ".dirextalk-skill-install.json",
     ".git",
     ".idea",
     "node_modules"
@@ -368,8 +368,8 @@ function runNpmUpdateAndChildInstall({ agent, scope, target, options, freshness 
     "--skip-npm-check"
   ];
   if (options.force) childArgs.push("--force");
-  const child = spawnSync("direxio-deployer", childArgs, {
-    env: { ...process.env, DIREXIO_DEPLOYER_REFRESH_CHILD: "1" },
+  const child = spawnSync("dirextalk-deployer", childArgs, {
+    env: { ...process.env, DIREXTALK_DEPLOYER_REFRESH_CHILD: "1" },
     stdio: "inherit",
     shell: process.platform === "win32"
   });

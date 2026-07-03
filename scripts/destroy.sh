@@ -2,8 +2,8 @@
 # destroy.sh - remove AWS resources recorded by deployment state.
 #
 # Source:
-#   1. $DIREXIO_WORKDIR/state.json written by orchestrate.sh; by default
-#      DOMAIN=__DOMAIN__ maps to ~/.direxio/nodes/<service_id>/state.json.
+#   1. $DIREXTALK_WORKDIR/state.json written by orchestrate.sh; by default
+#      DOMAIN=__DOMAIN__ maps to ~/.dirextalk/nodes/<service_id>/state.json.
 #   2. explicit argument: bash destroy.sh /path/to/state.json
 #
 # Order: terminate instance -> release EIP -> delete security group -> delete key pair
@@ -20,7 +20,7 @@ source "$HERE/lib/aws.sh"
 source "$HERE/lib/operation_report.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/local-paths.sh"
-DIREXIO_WORKDIR=$(direxio_default_workdir)
+DIREXTALK_WORKDIR=$(dirextalk_default_workdir)
 
 log() { echo -e "\033[33m[destroy]\033[0m $*"; }
 
@@ -212,12 +212,12 @@ verify_lightsail_key_pair_deleted() {
 # Resolve source and load INSTANCE_ID/EIP_ID/SG_ID/KEY_NAME/KEY_FILE/REGION.
 SRC=${1:-}
 if [ -z "$SRC" ]; then
-  if   [ -f "$DIREXIO_WORKDIR/state.json" ]; then SRC="$DIREXIO_WORKDIR/state.json"
-  else echo "state.json not found; set DOMAIN=<service domain> or DIREXIO_WORKDIR=<service dir> to destroy a specific deployment."; exit 1
+  if   [ -f "$DIREXTALK_WORKDIR/state.json" ]; then SRC="$DIREXTALK_WORKDIR/state.json"
+  else echo "state.json not found; set DOMAIN=<service domain> or DIREXTALK_WORKDIR=<service dir> to destroy a specific deployment."; exit 1
   fi
 fi
 [ -f "$SRC" ] || { echo "$SRC not found."; exit 1; }
-DIREXIO_ROOT=$(cd "${DIREXIO_HOME:-$HOME/.direxio}" 2>/dev/null && pwd -P || printf '%s' "${DIREXIO_HOME:-$HOME/.direxio}")
+DIREXTALK_ROOT=$(cd "${DIREXTALK_HOME:-$HOME/.dirextalk}" 2>/dev/null && pwd -P || printf '%s' "${DIREXTALK_HOME:-$HOME/.dirextalk}")
 
 REGION=$(json_get "$SRC" region)
 CLOUD_PROVIDER=$(json_get "$SRC" cloud_provider)
@@ -300,7 +300,7 @@ delete_route53_record() {
   change_file=$(mktemp)
   cat > "$change_file" <<EOF
 {
-  "Comment": "Direxio destroy",
+  "Comment": "Dirextalk destroy",
   "Changes": [
     {
       "Action": "DELETE",
@@ -346,7 +346,7 @@ delete_route53_hosted_zone_if_owned() {
 }
 
 normalize_local_path() {
-  direxio_normalize_local_path "$1"
+  dirextalk_normalize_local_path "$1"
 }
 
 local_dirname() {
@@ -359,7 +359,7 @@ local_dirname() {
 }
 
 paths_equal() {
-  direxio_paths_equal "$1" "$2"
+  dirextalk_paths_equal "$1" "$2"
 }
 
 current_service_dir() {
@@ -369,7 +369,7 @@ current_service_dir() {
     return 0
   fi
   if [ -n "$asurl" ] || [ -n "$domain" ]; then
-    direxio_service_dir "${asurl:-$domain}"
+    dirextalk_service_dir "${asurl:-$domain}"
     return 0
   fi
   if [ -n "$config" ]; then
@@ -380,12 +380,12 @@ current_service_dir() {
 connect_stop_binary() {
   local binary=$1 runtime_dir=$2 candidate
   if [ -n "$runtime_dir" ]; then
-    candidate="$runtime_dir/bin/direxio-connect"
+    candidate="$runtime_dir/bin/dirextalk-connect"
     if [ -x "$candidate" ]; then
       printf '%s\n' "$candidate"
       return 0
     fi
-    candidate="$runtime_dir/bin/direxio-connect.exe"
+    candidate="$runtime_dir/bin/dirextalk-connect.exe"
     if [ -x "$candidate" ]; then
       printf '%s\n' "$candidate"
       return 0
@@ -395,7 +395,7 @@ connect_stop_binary() {
     printf '%s\n' "$binary"
     return 0
   fi
-  printf 'direxio-connect\n'
+  printf 'dirextalk-connect\n'
 }
 
 connect_target_work_dir() {
@@ -409,7 +409,7 @@ connect_target_work_dir() {
     return 0
   fi
   if [ -n "$service_dir" ]; then
-    normalize_local_path "$service_dir/direxio-connect"
+    normalize_local_path "$service_dir/dirextalk-connect"
   fi
 }
 
@@ -424,10 +424,10 @@ connect_service_name() {
     return 0
   fi
   if [ -n "$asurl" ] || [ -n "$domain" ]; then
-    direxio_service_id "${asurl:-$domain}"
+    dirextalk_service_id "${asurl:-$domain}"
     return 0
   fi
-  printf 'direxio-connect\n'
+  printf 'dirextalk-connect\n'
 }
 
 connect_status_work_dir() {
@@ -440,7 +440,7 @@ stop_current_connect_daemon() {
   local config=$1 binary=$2 runtime_dir=$3 service_dir=$4 service_name=$5 target_work_dir running_work_dir stop_binary
   target_work_dir=$(connect_target_work_dir "$config" "$runtime_dir" "$service_dir")
   if [ -z "$target_work_dir" ]; then
-    log "direxio-connect service directory not recorded; skipping local daemon stop"
+    log "dirextalk-connect service directory not recorded; skipping local daemon stop"
     return 0
   fi
 
@@ -449,7 +449,7 @@ stop_current_connect_daemon() {
     */*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
     *)
       if ! command -v "$stop_binary" >/dev/null 2>&1; then
-        log "direxio-connect binary not found on PATH; skipping local daemon stop"
+        log "dirextalk-connect binary not found on PATH; skipping local daemon stop"
         return 0
       fi
       ;;
@@ -457,34 +457,34 @@ stop_current_connect_daemon() {
 
   running_work_dir=$(connect_status_work_dir "$stop_binary" "$service_name")
   if [ -z "$running_work_dir" ]; then
-    log "direxio-connect daemon status has no WorkDir; skipping local daemon stop"
+    log "dirextalk-connect daemon status has no WorkDir; skipping local daemon stop"
     return 0
   fi
 
   if ! paths_equal "$target_work_dir" "$running_work_dir"; then
-    log "direxio-connect daemon belongs to another service; leaving daemon running"
+    log "dirextalk-connect daemon belongs to another service; leaving daemon running"
     return 0
   fi
 
-  log "stopping direxio-connect daemon for current service ..."
+  log "stopping dirextalk-connect daemon for current service ..."
   if "$stop_binary" daemon stop --service-name "$service_name" >/dev/null 2>&1; then
-    log "direxio-connect daemon stopped"
+    log "dirextalk-connect daemon stopped"
   else
-    log "direxio-connect daemon stop failed or service was not installed; continuing destroy"
+    log "dirextalk-connect daemon stop failed or service was not installed; continuing destroy"
   fi
-  log "uninstalling direxio-connect daemon for current service ..."
+  log "uninstalling dirextalk-connect daemon for current service ..."
   if "$stop_binary" daemon uninstall --service-name "$service_name" >/dev/null 2>&1; then
-    log "direxio-connect daemon uninstalled"
+    log "dirextalk-connect daemon uninstalled"
   else
-    log "direxio-connect daemon uninstall failed or service was not installed; continuing destroy"
+    log "dirextalk-connect daemon uninstall failed or service was not installed; continuing destroy"
   fi
 }
 
 cleanup_local_service_dir() {
   local service_dir=$1 root=$2 nodes_root src_real nodes_real src_norm nodes_norm name
 
-  if [ "${DIREXIO_KEEP_WORKDIR:-0}" = "1" ]; then
-    log "keeping local service dir because DIREXIO_KEEP_WORKDIR=1: $service_dir"
+  if [ "${DIREXTALK_KEEP_WORKDIR:-0}" = "1" ]; then
+    log "keeping local service dir because DIREXTALK_KEEP_WORKDIR=1: $service_dir"
     return 0
   fi
 
@@ -510,7 +510,7 @@ cleanup_local_service_dir() {
 
   name=$(basename "$src_norm")
   case "$name" in
-    ""|"."|".."|"nodes"|"direxio-connect")
+    ""|"."|".."|"nodes"|"dirextalk-connect")
       log "refusing to remove unexpected local service dir: $service_dir"
       return 0
       ;;
@@ -611,4 +611,4 @@ if REPORT_PATH=$(operation_report_write destroy destroy_processed "$SRC" 2>/dev/
 else
   log "operation report was not written; keep destroy logs for audit"
 fi
-cleanup_local_service_dir "$CURRENT_SERVICE_DIR" "$DIREXIO_ROOT"
+cleanup_local_service_dir "$CURRENT_SERVICE_DIR" "$DIREXTALK_ROOT"

@@ -18,5 +18,5 @@ ops_ssh "$STATE_JSON" "$remote_command"
 report=$(ops_write_report update update_remote_restart_complete "$STATE_JSON")
 
 echo "Update remote restart complete."
-echo "Local credentials, direxio-connect daemon state, MCP artifacts, confirmations, and runtime checks were left unchanged."
+echo "Local credentials, dirextalk-connect daemon state, MCP artifacts, confirmations, and runtime checks were left unchanged."
 echo "operation report: $report"

@@ -1,7 +1,7 @@
 # Deployment Optimization Audit
 
 This file maps the 2026-06-26 deployment discussion checklist to the current
-`direxio-deployer` branch. It is intentionally a deployer-side audit, not a
+`dirextalk-deployer` branch. It is intentionally a deployer-side audit, not a
 claim that every App or host-agent runtime has been proven in a real session.
 
 ## Status Legend
@@ -19,9 +19,9 @@ Current best plan is the stricter plan now encoded in this branch:
 
 1. Use Lightsail as the default AWS path with the $12/month Linux bundle,
    dynamic cost estimate, Route53 automation, temporary IAM user guidance, and
-   destroy evidence. Keep EC2 as an explicit `DIREXIO_CLOUD_PROVIDER=ec2`
+   destroy evidence. Keep EC2 as an explicit `DIREXTALK_CLOUD_PROVIDER=ec2`
    option with the existing 50 GiB gp3 root volume default.
-2. Keep all node-local deployment state under `~/.direxio/nodes/<service_id>/`.
+2. Keep all node-local deployment state under `~/.dirextalk/nodes/<service_id>/`.
    Do not mutate global host MCP configs or assume one computer has only one
    agent or one backend node.
 3. Treat S7 as automated foundation checks only. `verify runtime is an internal
@@ -74,12 +74,12 @@ Remaining evidence:
 Status: Deployer-side implemented, with Runtime evidence still required.
 
 Current evidence:
-- Runtime snippets are written under `~/.direxio/nodes/<service_id>/mcp/`.
+- Runtime snippets are written under `~/.dirextalk/nodes/<service_id>/mcp/`.
 - `verify mcp_doctor`, `verify mcp_tools`, `verify mcp_smoke`, and
   `verify runtime` are available.
 - `mcp_smoke` uses a read-only backend action by default.
 - `agent_mcp_runtime` confirmation requires both a passed runtime summary and
-  `DIREXIO_CONFIRM_RUNTIME_PROBE=1`.
+  `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`.
 
 Difference from the checklist:
 - The deployer does not auto-send a test chat message. That is deliberate:
@@ -118,7 +118,7 @@ Status: Deployer-side implemented, with external-provider limits.
 Current evidence:
 - Route53 hosted zone reuse/create is automated.
 - Existing A record overwrite is blocked unless
-  `DIREXIO_CONFIRM_DNS_OVERWRITE=1`.
+  `DIREXTALK_CONFIRM_DNS_OVERWRITE=1`.
 - Authoritative DNS checks and tests cover hosted-zone and overwrite behavior.
 
 Difference from the checklist:
@@ -139,7 +139,7 @@ Current evidence:
   tightens file permissions, allows root identity only with explicit operator
   choice, and redacts identity output.
 - `SKILL.md` documents both the fast root access-key path with security
-  warnings and the safer temporary `DirexioDeployer` IAM user path with
+  warnings and the safer temporary `DirextalkDeployer` IAM user path with
   temporary `AdministratorAccess`, then cleanup.
 - Reports and tests assert secrets are redacted and not written to reports.
 
@@ -157,7 +157,7 @@ Status: Deployer-side implemented.
 
 Current evidence:
 - `SKILL.md` keeps Lightsail as the default path and documents
-  `DIREXIO_CLOUD_PROVIDER=ec2` for EC2.
+  `DIREXTALK_CLOUD_PROVIDER=ec2` for EC2.
 - Pricing is region-aware where AWS Pricing lookup succeeds, otherwise marked
   fallback.
 - Docs steer ordinary users away from `t2.micro`/`t3.micro` as default
@@ -231,10 +231,10 @@ Status: Deployer-side implemented.
 
 Current evidence:
 - S5 refreshes bootstrap credentials from the server.
-- S6 rewrites service-scoped `credentials.json`, `env`, direxio-connect config, and
+- S6 rewrites service-scoped `credentials.json`, `env`, dirextalk-connect config, and
   MCP snippets.
 - Reset/redeploy mark S4-S7 pending and report refresh-pending status.
-- Reset/redeploy stops only the matching service-scoped direxio-connect daemon
+- Reset/redeploy stops only the matching service-scoped dirextalk-connect daemon
   when its `WorkDir` matches the current service, so stale local bridge
   processes do not keep using old credentials.
 - `status` reports Local refresh when reset/redeploy cleared old credentials, user confirmations, runtime checks, bridge install proof, and MCP install proof.

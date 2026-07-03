@@ -2,7 +2,7 @@
 
 ## Problem
 
-Direxio deployer currently defaults region selection too weakly and handles an
+Dirextalk deployer currently defaults region selection too weakly and handles an
 unavailable Lightsail region too aggressively. If the selected region has no
 usable Lightsail bundle or availability zone, S1 automatically changes the
 deployment to EC2 when the operator did not explicitly force Lightsail.
@@ -21,7 +21,7 @@ different Lightsail-capable region or zone.
 - Stop automatic Lightsail-to-EC2 fallback before provisioning.
 - When Lightsail is unavailable in the selected region, record availability
   details, record an EC2 cost estimate, and wait for user choice.
-- Keep EC2 supported as an explicit path through `DIREXIO_CLOUD_PROVIDER=ec2`.
+- Keep EC2 supported as an explicit path through `DIREXTALK_CLOUD_PROVIDER=ec2`.
 - Keep docs, tests, and agent-facing instructions aligned.
 
 ## Non-Goals
@@ -42,7 +42,7 @@ follow this order:
 1. Existing `state.region`.
 2. `AWS_DEFAULT_REGION` or `AWS_REGION`.
 3. AWS profile configured region.
-4. `DIREXIO_DEFAULT_REGION`, for explicit local preference.
+4. `DIREXTALK_DEFAULT_REGION`, for explicit local preference.
 5. Timezone-derived recommendation.
 
 The timezone-derived recommendation should inspect `TZ`, `/etc/timezone`,
@@ -77,7 +77,7 @@ selected region, S1 must:
 - Set `S1_PREFLIGHT` to `waiting_user`.
 - Print clear continuation commands:
   - choose another AWS region for Lightsail;
-  - or set `DIREXIO_CLOUD_PROVIDER=ec2` after reviewing the EC2 estimate.
+  - or set `DIREXTALK_CLOUD_PROVIDER=ec2` after reviewing the EC2 estimate.
 
 S1 should not call EC2 preflight checks merely because Lightsail is unavailable.
 EC2 VPC, quota, EIP, and AMI checks should run only when EC2 is explicitly
@@ -119,7 +119,7 @@ Update `README.md`, `README_zh.md`, `SKILL.md`, and
 ## Open Assumptions
 
 - For China/UTC+8 hosts, a nearby AWS Asia Pacific region is better than a US
-  default. The exact region can be adjusted by `DIREXIO_DEFAULT_REGION`,
+  default. The exact region can be adjusted by `DIREXTALK_DEFAULT_REGION`,
   `AWS_DEFAULT_REGION`, or AWS profile region.
 - Lightsail zone selection inside the same region is not considered a provider
   fallback and may remain automatic.

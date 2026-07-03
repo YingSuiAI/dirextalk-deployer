@@ -41,14 +41,14 @@ clear_runtime_env() {
   done < <(env)
   unset ACP_HOME ANTIGRAVITY_HOME AGY_HOME HERMES_HOME CODEX_HOME CLAUDE_HOME CLAUDECODE_HOME GEMINI_HOME CURSOR_HOME COPILOT_HOME DEVIN_HOME IFLOW_HOME KIMI_HOME OPENCODE_HOME OPEN_CODE_HOME PI_CODING_AGENT_DIR PI_HOME QODER_HOME REASONIX_HOME TMUX_HOME OPENCLAW_HOME
   unset HERMES_SESSION CODEX_SANDBOX CLAUDECODE GEMINI_CLI CURSOR_TRACE_ID GITHUB_COPILOT_TOKEN DEVIN_SESSION IFLOW_SESSION KIMI_SESSION OPENCODE_SESSION QODER_SESSION PI_AGENT_SESSION ANTIGRAVITY_SESSION OPENCLAW_SESSION
-  unset DIREXIO_CONNECT_AGENT DIREXIO_CONNECT_AGENT_CMD
+  unset DIREXTALK_CONNECT_AGENT DIREXTALK_CONNECT_AGENT_CMD
 }
 
 clear_speech_env() {
   local env_name
   while IFS='=' read -r env_name _; do
     case "$env_name" in
-      DIREXIO_SPEECH_*|OPENAI_API_KEY|OPENAI_BASE_URL|GROQ_API_KEY|DASHSCOPE_API_KEY|DASH_SCOPE_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY)
+      DIREXTALK_SPEECH_*|OPENAI_API_KEY|OPENAI_BASE_URL|GROQ_API_KEY|DASHSCOPE_API_KEY|DASH_SCOPE_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY)
         unset "$env_name"
         ;;
     esac
@@ -57,28 +57,28 @@ clear_speech_env() {
 
 clear_runtime_env
 clear_speech_env
-export DIREXIO_AGENT_DETECT_PROCESS=0
-export DIREXIO_LOCAL_PATH_STYLE=posix
+export DIREXTALK_AGENT_DETECT_PROCESS=0
+export DIREXTALK_LOCAL_PATH_STYLE=posix
 
-unset DIREXIO_HOME
-[ "$(_direxio_home)" = "$HOME/.direxio" ]
-[ "$(DIREXIO_HOME="$tmp/custom-direxio" _direxio_home)" = "$tmp/custom-direxio" ]
-[ "$(_direxio_service_id "https://Service.Example.test:8443/_p2p")" = "service.example.test-8443" ]
-[ "$(_direxio_service_dir "https://Service.Example.test:8443/_p2p")" = "$HOME/.direxio/nodes/service.example.test-8443" ]
+unset DIREXTALK_HOME
+[ "$(_dirextalk_home)" = "$HOME/.dirextalk" ]
+[ "$(DIREXTALK_HOME="$tmp/custom-dirextalk" _dirextalk_home)" = "$tmp/custom-dirextalk" ]
+[ "$(_dirextalk_service_id "https://Service.Example.test:8443/_p2p")" = "service.example.test-8443" ]
+[ "$(_dirextalk_service_dir "https://Service.Example.test:8443/_p2p")" = "$HOME/.dirextalk/nodes/service.example.test-8443" ]
 
 envfile=$(_write_agent_env_file "https://service.example.test" "agent-token" "access-token" "!agents-real:service.example.test")
 
-[ "$envfile" = "$HOME/.direxio/env" ]
-grep -q 'DIREXIO_DOMAIN=https://service.example.test' "$envfile"
-grep -q 'DIREXIO_AGENT_TOKEN=agent-token' "$envfile"
-grep -q 'DIREXIO_AGENT_ROOM_ID=\\!agents-real:service.example.test' "$envfile"
+[ "$envfile" = "$HOME/.dirextalk/env" ]
+grep -q 'DIREXTALK_DOMAIN=https://service.example.test' "$envfile"
+grep -q 'DIREXTALK_AGENT_TOKEN=agent-token' "$envfile"
+grep -q 'DIREXTALK_AGENT_ROOM_ID=\\!agents-real:service.example.test' "$envfile"
 ! grep -q '^export P2P_' "$envfile"
 ! grep -q 'P2P_ADMIN_ACCESS_TOKEN' "$envfile"
 ! grep -q 'P2P_MATRIX_ACCESS_TOKEN' "$envfile"
 
 # shellcheck disable=SC1090
 source "$envfile"
-[ "$DIREXIO_AGENT_ROOM_ID" = "!agents-real:service.example.test" ]
+[ "$DIREXTALK_AGENT_ROOM_ID" = "!agents-real:service.example.test" ]
 
 legacy_p2p_agent_pattern='P2P_MATRIX_AS_URL\|P2P_MATRIX_AGENT_TOKEN\|P2P_AGENT_RUNTIME\|p2p-agent-skill\|p2p-''matrix-agent'
 if grep -R "$legacy_p2p_agent_pattern" "$ROOT/scripts" "$ROOT/SKILL.md" "$ROOT/references/runtime-wiring.md"; then
@@ -86,12 +86,12 @@ if grep -R "$legacy_p2p_agent_pattern" "$ROOT/scripts" "$ROOT/SKILL.md" "$ROOT/r
   exit 1
 fi
 
-[ "$(DIREXIO_AGENT_PLATFORM=hermes _detect_agent_runtime)" = "hermes" ]
-[ "$(DIREXIO_AGENT_PLATFORM=openclaw _detect_agent_runtime)" = "openclaw" ]
-[ "$(DIREXIO_AGENT_PLATFORM=claude-code _detect_agent_runtime)" = "claude-code" ]
-[ "$(DIREXIO_AGENT_PLATFORM=opencode _detect_agent_runtime)" = "opencode" ]
-[ "$(DIREXIO_CONNECT_AGENT=qodercli _detect_agent_runtime)" = "qoder" ]
-[ "$(DIREXIO_AGENT_PLATFORM=hermes DIREXIO_CONNECT_AGENT=codex _detect_agent_runtime)" = "hermes" ]
+[ "$(DIREXTALK_AGENT_PLATFORM=hermes _detect_agent_runtime)" = "hermes" ]
+[ "$(DIREXTALK_AGENT_PLATFORM=openclaw _detect_agent_runtime)" = "openclaw" ]
+[ "$(DIREXTALK_AGENT_PLATFORM=claude-code _detect_agent_runtime)" = "claude-code" ]
+[ "$(DIREXTALK_AGENT_PLATFORM=opencode _detect_agent_runtime)" = "opencode" ]
+[ "$(DIREXTALK_CONNECT_AGENT=qodercli _detect_agent_runtime)" = "qoder" ]
+[ "$(DIREXTALK_AGENT_PLATFORM=hermes DIREXTALK_CONNECT_AGENT=codex _detect_agent_runtime)" = "hermes" ]
 assert_active_runtime() {
   local expected=$1 signal=$2
   shift 2
@@ -135,17 +135,17 @@ assert_active_runtime codex .codex/tmp PATH="/tmp/.codex/tmp/codex-arg123:/usr/b
   export CLAUDE_API_KEY=test GEMINI_API_KEY=test
   [ "$(_detect_agent_runtime)" = "unknown" ]
 )
-[ "$(DIREXIO_AGENT_INSTALL=skip _connect_install_policy)" = "skip" ]
-[ "$(DIREXIO_AGENT_INSTALL=recommend _connect_install_policy)" = "recommend" ]
-[ "$(DIREXIO_AGENT_INSTALL=auto _connect_install_policy)" = "auto" ]
+[ "$(DIREXTALK_AGENT_INSTALL=skip _connect_install_policy)" = "skip" ]
+[ "$(DIREXTALK_AGENT_INSTALL=recommend _connect_install_policy)" = "recommend" ]
+[ "$(DIREXTALK_AGENT_INSTALL=auto _connect_install_policy)" = "auto" ]
 [ "$(_connect_install_policy)" = "auto" ]
-[ "$(_connect_install_mode hermes)" = "direxio-connect" ]
-[ "$(_connect_install_mode openclaw)" = "direxio-connect" ]
-[ "$(_connect_install_mode codex)" = "direxio-connect" ]
-[ "$(_connect_install_mode cursor)" = "direxio-connect" ]
-[ "$(_connect_install_mode opencode)" = "direxio-connect" ]
-[ "$(DIREXIO_AGENT_INSTALL_MODE=direxio-connect _connect_install_mode hermes)" = "direxio-connect" ]
-if DIREXIO_AGENT_INSTALL_MODE=gateway _connect_install_mode hermes >/dev/null 2>&1; then
+[ "$(_connect_install_mode hermes)" = "dirextalk-connect" ]
+[ "$(_connect_install_mode openclaw)" = "dirextalk-connect" ]
+[ "$(_connect_install_mode codex)" = "dirextalk-connect" ]
+[ "$(_connect_install_mode cursor)" = "dirextalk-connect" ]
+[ "$(_connect_install_mode opencode)" = "dirextalk-connect" ]
+[ "$(DIREXTALK_AGENT_INSTALL_MODE=dirextalk-connect _connect_install_mode hermes)" = "dirextalk-connect" ]
+if DIREXTALK_AGENT_INSTALL_MODE=gateway _connect_install_mode hermes >/dev/null 2>&1; then
   echo "legacy install mode should be rejected" >&2
   exit 1
 fi
@@ -185,8 +185,8 @@ fi
 EOF
 chmod 700 "$matrix_retry_dir/bin/curl"
 MATRIX_RETRY_COUNT="$matrix_retry_dir/count" \
-DIREXIO_MATRIX_SESSION_CREATE_MAX=2 \
-DIREXIO_MATRIX_SESSION_RETRY_INTERVAL=0 \
+DIREXTALK_MATRIX_SESSION_CREATE_MAX=2 \
+DIREXTALK_MATRIX_SESSION_RETRY_INTERVAL=0 \
 PATH="$matrix_retry_dir/bin:$PATH" \
   _create_connect_matrix_session "https://service.example.test" "agent-token" "DEVICE" "$matrix_retry_dir/session.json"
 [ "$(cat "$matrix_retry_dir/count")" = "2" ]
@@ -195,63 +195,63 @@ json_test_check "$matrix_retry_dir/session.json" "data.user_id === '@agent:servi
 rm -f "$matrix_retry_dir/count" "$matrix_retry_dir/session.json"
 MATRIX_RETRY_COUNT="$matrix_retry_dir/count" \
 MATRIX_SUCCESS_AFTER=6 \
-DIREXIO_MATRIX_SESSION_RETRY_INTERVAL=0 \
+DIREXTALK_MATRIX_SESSION_RETRY_INTERVAL=0 \
 PATH="$matrix_retry_dir/bin:$PATH" \
   _create_connect_matrix_session "https://service.example.test" "agent-token" "DEVICE" "$matrix_retry_dir/session.json"
 [ "$(cat "$matrix_retry_dir/count")" = "6" ]
 json_test_check "$matrix_retry_dir/session.json" "data.user_id === '@agent:service.example.test' && data.access_token === 'matrix-token'"
 
-[ "$(_agent_skill_install_path codex)" = "PROJECT_ROOT/.codex/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path claude-code)" = "PROJECT_ROOT/.claude/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path claudecode)" = "PROJECT_ROOT/.claude/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path gemini)" = "PROJECT_ROOT/.gemini/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path cursor)" = "PROJECT_ROOT/.cursor/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path copilot)" = "PROJECT_ROOT/.github/copilot/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path devin)" = "PROJECT_ROOT/.devin/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path opencode)" = "PROJECT_ROOT/.opencode/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path qoder)" = "PROJECT_ROOT/.qoder/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path pi)" = "PROJECT_ROOT/.pi/agent/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path openclaw)" = "PROJECT_ROOT/.openclaw/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path hermes)" = "PROJECT_ROOT/.hermes/skills/direxio-deployer" ]
-[ "$(_agent_skill_install_path unknown)" = "PROJECT_ROOT/.agent/skills/direxio-deployer" ]
+[ "$(_agent_skill_install_path codex)" = "PROJECT_ROOT/.codex/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path claude-code)" = "PROJECT_ROOT/.claude/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path claudecode)" = "PROJECT_ROOT/.claude/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path gemini)" = "PROJECT_ROOT/.gemini/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path cursor)" = "PROJECT_ROOT/.cursor/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path copilot)" = "PROJECT_ROOT/.github/copilot/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path devin)" = "PROJECT_ROOT/.devin/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path opencode)" = "PROJECT_ROOT/.opencode/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path qoder)" = "PROJECT_ROOT/.qoder/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path pi)" = "PROJECT_ROOT/.pi/agent/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path openclaw)" = "PROJECT_ROOT/.openclaw/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path hermes)" = "PROJECT_ROOT/.hermes/skills/dirextalk-deployer" ]
+[ "$(_agent_skill_install_path unknown)" = "PROJECT_ROOT/.agent/skills/dirextalk-deployer" ]
 
-[ "$(_agent_global_skill_install_path codex)" = '${CODEX_HOME:-$HOME/.codex}/skills/direxio-deployer' ]
-[ "$(_agent_global_skill_install_path claude-code)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/direxio-deployer' ]
-[ "$(_agent_global_skill_install_path claudecode)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/direxio-deployer' ]
-[ "$(_agent_global_skill_install_path generic)" = '$HOME/.agent/skills/direxio-deployer' ]
+[ "$(_agent_global_skill_install_path codex)" = '${CODEX_HOME:-$HOME/.codex}/skills/dirextalk-deployer' ]
+[ "$(_agent_global_skill_install_path claude-code)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/dirextalk-deployer' ]
+[ "$(_agent_global_skill_install_path claudecode)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/dirextalk-deployer' ]
+[ "$(_agent_global_skill_install_path generic)" = '$HOME/.agent/skills/dirextalk-deployer' ]
 [ "$(_agent_workspace "$tmp/service")" = "$(pwd -P)" ]
-[ "$(DIREXIO_AGENT_WORKSPACE="$tmp/custom-workspace" _agent_workspace "$tmp/service")" = "$tmp/custom-workspace" ]
-mkdir -p "$tmp/.codex/skills/direxio-deployer"
-[ "$(cd "$tmp/.codex/skills/direxio-deployer" && _agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
+[ "$(DIREXTALK_AGENT_WORKSPACE="$tmp/custom-workspace" _agent_workspace "$tmp/service")" = "$tmp/custom-workspace" ]
+mkdir -p "$tmp/.codex/skills/dirextalk-deployer"
+[ "$(cd "$tmp/.codex/skills/dirextalk-deployer" && _agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
 
-connect_service_dir="$HOME/.direxio/nodes/service.example.test"
-connect_service_binary="$connect_service_dir/direxio-connect/direxio-connect"
+connect_service_dir="$HOME/.dirextalk/nodes/service.example.test"
+connect_service_binary="$connect_service_dir/dirextalk-connect/dirextalk-connect"
 [ "$(_connect_binary_path "$connect_service_dir")" = "$connect_service_binary" ]
-install_command=$(_connect_install_command "$connect_service_binary" "$connect_service_dir/direxio-connect/config.toml" "service.example.test" "$connect_service_dir")
+install_command=$(_connect_install_command "$connect_service_binary" "$connect_service_dir/dirextalk-connect/config.toml" "service.example.test" "$connect_service_dir")
 case "$install_command" in
-  *"npm install --prefix"*"service.example.test/direxio-connect"*"direxio-connent@latest"*"direxio-connect/direxio-connect"*"daemon install"*"--config"*"service.example.test/direxio-connect/config.toml"*"--service-name"*"service.example.test"*"--force"*) ;;
+  *"npm install --prefix"*"service.example.test/dirextalk-connect"*"dirextalk-connect@latest"*"dirextalk-connect/dirextalk-connect"*"daemon install"*"--config"*"service.example.test/dirextalk-connect/config.toml"*"--service-name"*"service.example.test"*"--force"*) ;;
   *)
-    echo "install command did not include expected direxio-connect daemon flags: $install_command" >&2
+    echo "install command did not include expected dirextalk-connect daemon flags: $install_command" >&2
     exit 1
     ;;
 esac
-custom_install_command=$(DIREXIO_CONNECT_NPM_PACKAGE='direxio-connent@override-test' _connect_install_command "$connect_service_binary" "$connect_service_dir/direxio-connect/config.toml" "service.example.test" "$connect_service_dir")
-[[ "$custom_install_command" == *"direxio-connent@override-test"* ]]
+custom_install_command=$(DIREXTALK_CONNECT_NPM_PACKAGE='dirextalk-connect@override-test' _connect_install_command "$connect_service_binary" "$connect_service_dir/dirextalk-connect/config.toml" "service.example.test" "$connect_service_dir")
+[[ "$custom_install_command" == *"dirextalk-connect@override-test"* ]]
 
-[ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" ]
-[ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" ]
-windows_connect_binary="/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/direxio-connect.cmd"
-windows_install_command=$(DIREXIO_LOCAL_PATH_STYLE=windows _connect_install_command "$windows_connect_binary" "/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" "im" "/mnt/c/Users/alice/.direxio/nodes/im")
-[[ "$windows_install_command" == *"C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml"* ]]
-[[ "$windows_install_command" == *"/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect"* ]]
+[ "$(DIREXTALK_LOCAL_PATH_STYLE=windows _local_connect_path '/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml')" = "C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" ]
+[ "$(DIREXTALK_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml')" = "C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" ]
+windows_connect_binary="/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd"
+windows_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _connect_install_command "$windows_connect_binary" "/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" "im" "/mnt/c/Users/alice/.dirextalk/nodes/im")
+[[ "$windows_install_command" == *"C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml"* ]]
+[[ "$windows_install_command" == *"/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect"* ]]
 [[ "$windows_install_command" == *"--service-name im"* ]]
 
-[ "$(_mcp_server_name "service.example.test")" = "direxio-service_example_test" ]
-[ "$(_mcp_server_name "T1.Direxio.AI")" = "direxio-t1_direxio_ai" ]
+[ "$(_mcp_server_name "service.example.test")" = "dirextalk-service_example_test" ]
+[ "$(_mcp_server_name "T1.Dirextalk.AI")" = "dirextalk-t1_dirextalk_ai" ]
 
 mcp_service_dir="$tmp/mcp-service"
 mcp_credentials="$mcp_service_dir/credentials.json"
-expected_mcp_command="$mcp_service_dir/mcp/direxio-mcp"
+expected_mcp_command="$mcp_service_dir/mcp/dirextalk-mcp"
 mkdir -p "$mcp_service_dir"
 : > "$mcp_credentials"
 mkdir -p "$mcp_service_dir/mcp"
@@ -270,12 +270,12 @@ _write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "$mcp_cred
 [ ! -e "$mcp_service_dir/mcp/mcp-servers.json" ]
 [ -s "$mcp_service_dir/mcp/env" ]
 [ -s "$mcp_service_dir/mcp/README.md" ]
-grep -q '\[mcp_servers."direxio-service_example_test"\]' "$mcp_service_dir/mcp/codex.toml"
+grep -q '\[mcp_servers."dirextalk-service_example_test"\]' "$mcp_service_dir/mcp/codex.toml"
 grep -Fq "command = \"$expected_mcp_command\"" "$mcp_service_dir/mcp/codex.toml"
 ! grep -q '^args = ' "$mcp_service_dir/mcp/codex.toml"
-grep -q 'DIREXIO_CREDENTIALS_FILE' "$mcp_service_dir/mcp/codex.toml"
+grep -q 'DIREXTALK_CREDENTIALS_FILE' "$mcp_service_dir/mcp/codex.toml"
 grep -q "$(_local_connect_path "$mcp_credentials")" "$mcp_service_dir/mcp/codex.toml"
-grep -q 'DIREXIO_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
+grep -q 'DIREXTALK_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
 grep -q 'Selected MCP type: codex' "$mcp_service_dir/mcp/README.md"
 grep -q 'same MCP server name' "$mcp_service_dir/mcp/README.md"
 ! grep -R '19757\|proxy --url\|"proxy"' "$mcp_service_dir/mcp"
@@ -294,8 +294,8 @@ _write_mcp_config_artifacts "generic.example.test" "$generic_service_dir" "$gene
 [ -s "$generic_service_dir/mcp/mcp-servers.json" ]
 [ ! -e "$generic_service_dir/mcp/codex.toml" ]
 [ ! -e "$generic_service_dir/mcp/cursor.mcp.json" ]
-json_test_check "$generic_service_dir/mcp/mcp-servers.json" "data.mcpServers['direxio-generic_example_test'].command === '$generic_service_dir/mcp/direxio-mcp'"
-json_test_check "$generic_service_dir/mcp/mcp-servers.json" "!('args' in data.mcpServers['direxio-generic_example_test'])"
+json_test_check "$generic_service_dir/mcp/mcp-servers.json" "data.mcpServers['dirextalk-generic_example_test'].command === '$generic_service_dir/mcp/dirextalk-mcp'"
+json_test_check "$generic_service_dir/mcp/mcp-servers.json" "!('args' in data.mcpServers['dirextalk-generic_example_test'])"
 grep -q 'Selected MCP type: generic' "$generic_service_dir/mcp/README.md"
 
 openclaw_service_dir="$tmp/openclaw-mcp-service"
@@ -306,31 +306,31 @@ _write_mcp_config_artifacts "openclaw.example.test" "$openclaw_service_dir" "$op
 [ -s "$openclaw_service_dir/mcp/openclaw.md" ]
 [ -s "$openclaw_service_dir/mcp/openclaw-server.json" ]
 [ ! -e "$openclaw_service_dir/mcp/mcp-servers.json" ]
-json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.command === '$openclaw_service_dir/mcp/direxio-mcp'"
+json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.command === '$openclaw_service_dir/mcp/dirextalk-mcp'"
 json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "!('args' in data)"
 if json_check "$openclaw_service_dir/mcp/openclaw-server.json" "'mcp' in data || 'mcpServers' in data" >/dev/null; then
   echo "OpenClaw server object must not be a root openclaw.json or mcpServers snippet" >&2
   exit 1
 fi
-grep -q 'openclaw mcp set direxio-openclaw_example_test' "$openclaw_service_dir/mcp/openclaw.md"
+grep -q 'openclaw mcp set dirextalk-openclaw_example_test' "$openclaw_service_dir/mcp/openclaw.md"
 grep -q 'Do not paste' "$openclaw_service_dir/mcp/openclaw.md"
 grep -q 'openclaw.json' "$openclaw_service_dir/mcp/openclaw.md"
 mcp_install_command=$(_mcp_install_command "$mcp_service_dir")
-[[ "$mcp_install_command" == *"npm install --prefix"*"mcp-service/mcp"*"direxio-mcp@latest"* ]]
-custom_mcp_install_command=$(DIREXIO_MCP_NPM_PACKAGE='direxio-mcp@override-test' _mcp_install_command "$mcp_service_dir")
-[[ "$custom_mcp_install_command" == *"direxio-mcp@override-test"* ]]
+[[ "$mcp_install_command" == *"npm install --prefix"*"mcp-service/mcp"*"dirextalk-mcp@latest"* ]]
+custom_mcp_install_command=$(DIREXTALK_MCP_NPM_PACKAGE='dirextalk-mcp@override-test' _mcp_install_command "$mcp_service_dir")
+[[ "$custom_mcp_install_command" == *"dirextalk-mcp@override-test"* ]]
 mcp_doctor_command=$(_mcp_doctor_command "$mcp_credentials" "codex-service-example" "$mcp_service_dir")
-[[ "$mcp_doctor_command" == *"DIREXIO_CREDENTIALS_FILE="* ]]
-[[ "$mcp_doctor_command" == *"mcp/direxio-mcp doctor --json"* ]]
+[[ "$mcp_doctor_command" == *"DIREXTALK_CREDENTIALS_FILE="* ]]
+[[ "$mcp_doctor_command" == *"mcp/dirextalk-mcp doctor --json"* ]]
 
-stale_node_id=$(DIREXIO_AGENT_NODE_ID=codex-old.example.test _agent_node_id codex new.example.test '!agents-real:new.example.test')
+stale_node_id=$(DIREXTALK_AGENT_NODE_ID=codex-old.example.test _agent_node_id codex new.example.test '!agents-real:new.example.test')
 [[ "$stale_node_id" == codex-new.example.test-* ]]
 
-matching_node_id=$(DIREXIO_AGENT_NODE_ID=codex-new.example.test-123 _agent_node_id codex new.example.test '!agents-real:new.example.test')
+matching_node_id=$(DIREXTALK_AGENT_NODE_ID=codex-new.example.test-123 _agent_node_id codex new.example.test '!agents-real:new.example.test')
 [ "$matching_node_id" = "codex-new.example.test-123" ]
 
-config_path="$tmp/direxio-connect/config.toml"
-_write_connect_config "$config_path" "$tmp/direxio-connect/data" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
+config_path="$tmp/dirextalk-connect/config.toml"
+_write_connect_config "$config_path" "$tmp/dirextalk-connect/data" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
 grep -q 'type = "matrix"' "$config_path"
 grep -q 'type = "codex"' "$config_path"
 grep -q 'admin_from = "@owner:service.example.test"' "$config_path"
@@ -344,17 +344,17 @@ grep -q 'share_session_in_channel = true' "$config_path"
 grep -q 'group_reply_all = true' "$config_path"
 grep -q 'auto_join = false' "$config_path"
 ! grep -q '^\[speech\]' "$config_path"
-! grep -q 'DIREXIO_CREDENTIALS_FILE' "$config_path"
+! grep -q 'DIREXTALK_CREDENTIALS_FILE' "$config_path"
 grep -q '^\[display\]$' "$config_path"
 grep -q 'mode = "compact"' "$config_path"
 grep -q 'tool_messages = false' "$config_path"
 grep -q 'thinking_messages = false' "$config_path"
 
-speech_config_path="$tmp/direxio-connect/config-with-speech.toml"
-DIREXIO_SPEECH_API_KEY=speech-key \
-DIREXIO_SPEECH_BASE_URL=https://stt.example.test/v1 \
-DIREXIO_SPEECH_MODEL=whisper-test \
-  _write_connect_config "$speech_config_path" "$tmp/direxio-connect/data-speech" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
+speech_config_path="$tmp/dirextalk-connect/config-with-speech.toml"
+DIREXTALK_SPEECH_API_KEY=speech-key \
+DIREXTALK_SPEECH_BASE_URL=https://stt.example.test/v1 \
+DIREXTALK_SPEECH_MODEL=whisper-test \
+  _write_connect_config "$speech_config_path" "$tmp/dirextalk-connect/data-speech" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
 grep -q '^\[speech\]$' "$speech_config_path"
 grep -q 'enabled = true' "$speech_config_path"
 grep -q 'provider = "openai"' "$speech_config_path"
@@ -372,17 +372,17 @@ grep -q 'model = "whisper-test"' "$speech_config_path"
 [ "$(_connect_agent_type antigravity)" = "antigravity" ]
 [ "$(_connect_agent_type openclaw)" = "acp" ]
 [ "$(_connect_agent_type hermes)" = "acp" ]
-[ "$(DIREXIO_CONNECT_AGENT=gemini _connect_agent_type unknown)" = "gemini" ]
-[ "$(DIREXIO_CONNECT_AGENT=codex _connect_agent_type hermes)" = "codex" ]
-[ "$(DIREXIO_CODEX_COMMAND=/opt/codex/bin/codex _connect_agent_command codex)" = "/opt/codex/bin/codex" ]
-[ "$(DIREXIO_GEMINI_COMMAND=/opt/gemini/bin/gemini _connect_agent_command gemini)" = "/opt/gemini/bin/gemini" ]
-[ "$(DIREXIO_CLAUDE_CODE_COMMAND=/opt/claude/bin/claude _connect_agent_command claudecode)" = "/opt/claude/bin/claude" ]
-[ "$(DIREXIO_QODERCLI_COMMAND=/opt/qoder/qodercli _connect_agent_command qoder)" = "/opt/qoder/qodercli" ]
-[ "$(DIREXIO_CONNECT_AGENT_CMD=/custom/agent _connect_agent_command codex)" = "/custom/agent" ]
+[ "$(DIREXTALK_CONNECT_AGENT=gemini _connect_agent_type unknown)" = "gemini" ]
+[ "$(DIREXTALK_CONNECT_AGENT=codex _connect_agent_type hermes)" = "codex" ]
+[ "$(DIREXTALK_CODEX_COMMAND=/opt/codex/bin/codex _connect_agent_command codex)" = "/opt/codex/bin/codex" ]
+[ "$(DIREXTALK_GEMINI_COMMAND=/opt/gemini/bin/gemini _connect_agent_command gemini)" = "/opt/gemini/bin/gemini" ]
+[ "$(DIREXTALK_CLAUDE_CODE_COMMAND=/opt/claude/bin/claude _connect_agent_command claudecode)" = "/opt/claude/bin/claude" ]
+[ "$(DIREXTALK_QODERCLI_COMMAND=/opt/qoder/qodercli _connect_agent_command qoder)" = "/opt/qoder/qodercli" ]
+[ "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/agent _connect_agent_command codex)" = "/custom/agent" ]
 [ "$(_connect_agent_command acp openclaw)" = "openclaw" ]
-[ "$(_connect_agent_command acp hermes)" = "direxio-connect" ]
-[ "$(DIREXIO_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _connect_agent_command acp openclaw)" = "/opt/openclaw/bin/openclaw" ]
-[ "$(DIREXIO_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_command acp hermes)" = "direxio-connect" ]
+[ "$(_connect_agent_command acp hermes)" = "dirextalk-connect" ]
+[ "$(DIREXTALK_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _connect_agent_command acp openclaw)" = "/opt/openclaw/bin/openclaw" ]
+[ "$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_command acp hermes)" = "dirextalk-connect" ]
 
 fake_cursor_agent="$tmp/localapp/cursor-agent"
 mkdir -p "$fake_cursor_agent"
@@ -392,7 +392,7 @@ EOF
 chmod 700 "$fake_cursor_agent/agent.cmd"
 (
   export LOCALAPPDATA="$tmp/localapp"
-  export DIREXIO_LOCAL_PATH_STYLE=windows
+  export DIREXTALK_LOCAL_PATH_STYLE=windows
   cursor_windows_cmd=$(_connect_agent_command cursor)
   case "$cursor_windows_cmd" in
     *cursor-agent/agent.cmd) ;;
@@ -402,31 +402,31 @@ chmod 700 "$fake_cursor_agent/agent.cmd"
   [[ "$cursor_options" == *'mode = "yolo"'* ]]
   [[ "$cursor_options" != *'cli.js'* ]]
 )
-[ "$(DIREXIO_CURSOR_MODE=ask _connect_agent_options_toml cursor cursor)" = 'mode = "ask"' ]
+[ "$(DIREXTALK_CURSOR_MODE=ask _connect_agent_options_toml cursor cursor)" = 'mode = "ask"' ]
 
 fake_version_dir="$fake_cursor_agent/versions/2026.07.01-abc123"
 mkdir -p "$fake_version_dir"
 echo stub > "$fake_version_dir/node.exe"
 (
   export LOCALAPPDATA="$tmp/localapp"
-  export DIREXIO_LOCAL_PATH_STYLE=windows
+  export DIREXTALK_LOCAL_PATH_STYLE=windows
   _cursor_agent_prepare_windows
   [ -f "$fake_cursor_agent/versions/dist-package/node.exe" ]
 )
 
-cmd_config_path="$tmp/direxio-connect/config-with-cmd.toml"
-_write_connect_config "$cmd_config_path" "$tmp/direxio-connect/data-cmd" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "/opt/codex/bin/codex"
+cmd_config_path="$tmp/dirextalk-connect/config-with-cmd.toml"
+_write_connect_config "$cmd_config_path" "$tmp/dirextalk-connect/data-cmd" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "/opt/codex/bin/codex"
 grep -q 'cmd = "/opt/codex/bin/codex"' "$cmd_config_path"
 
-options_config_path="$tmp/direxio-connect/config-with-extra-options.toml"
-_write_connect_config "$options_config_path" "$tmp/direxio-connect/data-options" "reasonix-node" "reasonix" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" 'serve_url = "http://127.0.0.1:8080"'
+options_config_path="$tmp/dirextalk-connect/config-with-extra-options.toml"
+_write_connect_config "$options_config_path" "$tmp/dirextalk-connect/data-options" "reasonix-node" "reasonix" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" 'serve_url = "http://127.0.0.1:8080"'
 grep -q 'type = "reasonix"' "$options_config_path"
 grep -q 'serve_url = "http://127.0.0.1:8080"' "$options_config_path"
 grep -q 'mode = "yolo"' "$options_config_path"
 ! grep -q 'backend = "app_server"' "$options_config_path"
 
-codex_options_config_path="$tmp/direxio-connect/config-with-codex-extra-options.toml"
-_write_connect_config "$codex_options_config_path" "$tmp/direxio-connect/data-codex-options" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" $'mode = "full-auto"\nmodel = "gpt-5.5"'
+codex_options_config_path="$tmp/dirextalk-connect/config-with-codex-extra-options.toml"
+_write_connect_config "$codex_options_config_path" "$tmp/dirextalk-connect/data-codex-options" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" $'mode = "full-auto"\nmodel = "gpt-5.5"'
 grep -q 'backend = "app_server"' "$codex_options_config_path"
 grep -q 'app_server_url = "stdio"' "$codex_options_config_path"
 grep -q 'mode = "full-auto"' "$codex_options_config_path"
@@ -441,12 +441,12 @@ cat > "$fakebin/npm" <<'EOF'
 [ "${NPM_FAIL:-0}" != "1" ] || exit 1
 exit 0
 EOF
-cat > "$fakebin/direxio-mcp" <<'EOF'
+cat > "$fakebin/dirextalk-mcp" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 exit 0
 EOF
-cat > "$fakebin/direxio-connect" <<'EOF'
+cat > "$fakebin/dirextalk-connect" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "install" ]; then
@@ -458,11 +458,11 @@ if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "status" ]; then
   [ "${3:-}" = "--service-name" ]
   [ "${4:-}" = "service.example.test" ]
   cat <<STATUS
-direxio-connect daemon status
+dirextalk-connect daemon status
 
   Status:    ${CONNECT_STATUS:-Stopped}
   Platform:  launchd
-  WorkDir:   /tmp/direxio-test/direxio-connect
+  WorkDir:   /tmp/dirextalk-test/dirextalk-connect
 STATUS
   exit 0
 fi
@@ -474,14 +474,14 @@ if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "logs" ]; then
 fi
 exit 1
 EOF
-chmod 700 "$fakebin/npm" "$fakebin/direxio-connect" "$fakebin/direxio-mcp"
+chmod 700 "$fakebin/npm" "$fakebin/dirextalk-connect" "$fakebin/dirextalk-mcp"
 mkdir -p "$(dirname "$expected_mcp_command")"
-cp "$fakebin/direxio-mcp" "$expected_mcp_command"
+cp "$fakebin/dirextalk-mcp" "$expected_mcp_command"
 chmod 700 "$expected_mcp_command"
 STATE_CALLS="$tmp/state.calls"
 : > "$STATE_CALLS"
 set +e
-PATH="$fakebin:$PATH" _maybe_auto_install_connect auto codex codex "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+PATH="$fakebin:$PATH" _maybe_auto_install_connect auto codex codex "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
 connect_stopped_rc=$?
 set -e
 [ "$connect_stopped_rc" -ne 0 ]
@@ -490,7 +490,7 @@ grep -q '^connect_install_status=install_failed$' "$STATE_CALLS"
 STATE_CALLS="$tmp/state-agent-log.calls"
 : > "$STATE_CALLS"
 set +e
-PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:00:18 level=ERROR msg="cursorSession: process failed" stderr="Error: Authentication required. Please run '\''agent login'\'' first, or set CURSOR_API_KEY environment variable."' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:00:18 level=ERROR msg="cursorSession: process failed" stderr="Error: Authentication required. Please run '\''agent login'\'' first, or set CURSOR_API_KEY environment variable."' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
 connect_agent_log_rc=$?
 set -e
 [ "$connect_agent_log_rc" -ne 0 ]
@@ -499,7 +499,7 @@ grep -q '^connect_install_status=install_failed$' "$STATE_CALLS"
 STATE_CALLS="$tmp/state-agent-offline.calls"
 : > "$STATE_CALLS"
 set +e
-PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:05 level=ERROR msg="agent backend offline" project=cursor error="agent is offline"' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:05 level=ERROR msg="agent backend offline" project=cursor error="agent is offline"' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
 connect_agent_offline_rc=$?
 set -e
 [ "$connect_agent_offline_rc" -ne 0 ]
@@ -507,23 +507,23 @@ grep -q '^connect_install_status=install_failed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/state-agent-ready.calls"
 : > "$STATE_CALLS"
-PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="direxio-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="dirextalk-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
 grep -q '^connect_install_status=installed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/state-connect-update-fallback.calls"
 NPM_CALLS="$tmp/npm-connect-update.calls"
 : > "$STATE_CALLS"
 : > "$NPM_CALLS"
-PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="direxio-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="dirextalk-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
 grep -q '^connect_install_status=installed$' "$STATE_CALLS"
 [ -s "$NPM_CALLS" ]
 grep -q -- '--prefix' "$NPM_CALLS"
-grep -q 'direxio-connent@latest' "$NPM_CALLS"
+grep -q 'dirextalk-connect@latest' "$NPM_CALLS"
 
 STATE_CALLS="$tmp/state-no-ready-log.calls"
 : > "$STATE_CALLS"
 set +e
-PATH="$fakebin:$PATH" CONNECT_STATUS=Running DIREXIO_CONNECT_STARTUP_TIMEOUT_SECONDS=0 CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:07 level=INFO msg="config loaded" path=config.toml' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+PATH="$fakebin:$PATH" CONNECT_STATUS=Running DIREXTALK_CONNECT_STARTUP_TIMEOUT_SECONDS=0 CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:07 level=INFO msg="config loaded" path=config.toml' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
 connect_no_ready_log_rc=$?
 set -e
 [ "$connect_no_ready_log_rc" -ne 0 ]
@@ -538,7 +538,7 @@ grep -q '^mcp_install_status=installed$' "$STATE_CALLS"
 ! grep -q '^mcp_daemon_' "$STATE_CALLS"
 [ -s "$NPM_CALLS" ]
 grep -q -- '--prefix' "$NPM_CALLS"
-grep -q 'direxio-mcp@latest' "$NPM_CALLS"
+grep -q 'dirextalk-mcp@latest' "$NPM_CALLS"
 
 STATE_CALLS="$tmp/mcp-recommend-state.calls"
 : > "$STATE_CALLS"
@@ -552,92 +552,92 @@ openclaw_fallback_options=$(_connect_agent_options_toml openclaw acp 2> "$tmp/op
 [[ "$openclaw_fallback_options" == *'args = ["acp", "--session", "agent:main:main"]'* ]]
 grep -q 'auto-detect the Gateway' "$tmp/openclaw-fallback.err"
 
-openclaw_session_fallback_options=$(DIREXIO_OPENCLAW_ACP_SESSION=agent:direxio:main _connect_agent_options_toml openclaw acp 2> "$tmp/openclaw-session-fallback.err")
-[[ "$openclaw_session_fallback_options" == *'args = ["acp", "--session", "agent:direxio:main"]'* ]]
+openclaw_session_fallback_options=$(DIREXTALK_OPENCLAW_ACP_SESSION=agent:dirextalk:main _connect_agent_options_toml openclaw acp 2> "$tmp/openclaw-session-fallback.err")
+[[ "$openclaw_session_fallback_options" == *'args = ["acp", "--session", "agent:dirextalk:main"]'* ]]
 
-if DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 _connect_agent_options_toml openclaw acp > "$tmp/openclaw-partial.out" 2> "$tmp/openclaw-partial.err"; then
+if DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 _connect_agent_options_toml openclaw acp > "$tmp/openclaw-partial.out" 2> "$tmp/openclaw-partial.err"; then
   echo "OpenClaw ACP explicit Gateway options must require URL, token file, and session together" >&2
   exit 1
 fi
-grep -q 'DIREXIO_OPENCLAW_ACP_TOKEN_FILE' "$tmp/openclaw-partial.err"
-grep -q 'DIREXIO_OPENCLAW_ACP_SESSION' "$tmp/openclaw-partial.err"
+grep -q 'DIREXTALK_OPENCLAW_ACP_TOKEN_FILE' "$tmp/openclaw-partial.err"
+grep -q 'DIREXTALK_OPENCLAW_ACP_SESSION' "$tmp/openclaw-partial.err"
 
 openclaw_options=$(
-  DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 \
-  DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/gateway.token \
-  DIREXIO_OPENCLAW_ACP_SESSION=agent:main:main \
+  DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 \
+  DIREXTALK_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/gateway.token \
+  DIREXTALK_OPENCLAW_ACP_SESSION=agent:main:main \
   _connect_agent_options_toml openclaw acp
 )
 [[ "$openclaw_options" == *'args = ["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "/mnt/c/Users/alice/.openclaw/gateway.token", "--session", "agent:main:main"]'* ]]
 [[ "$openclaw_options" == *'display_name = "OpenClaw ACP"'* ]]
 
 openclaw_session_options=$(
-  DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 \
-  DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/gateway.token \
-  DIREXIO_OPENCLAW_ACP_SESSION=agent:direxio:main \
+  DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 \
+  DIREXTALK_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/gateway.token \
+  DIREXTALK_OPENCLAW_ACP_SESSION=agent:dirextalk:main \
   _connect_agent_options_toml openclaw acp
 )
-[[ "$openclaw_session_options" == *'--session", "agent:direxio:main"'* ]]
+[[ "$openclaw_session_options" == *'--session", "agent:dirextalk:main"'* ]]
 
-openclaw_url_options=$(DIREXIO_OPENCLAW_ACP_ARGS_TOML='["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]' _connect_agent_options_toml openclaw acp)
+openclaw_url_options=$(DIREXTALK_OPENCLAW_ACP_ARGS_TOML='["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]' _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_url_options" == *'args = ["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]'* ]]
 
-openclaw_posix_token_options=$(DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXIO_LOCAL_PATH_STYLE=posix DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXIO_OPENCLAW_ACP_SESSION=agent:main:main _connect_agent_options_toml openclaw acp)
+openclaw_posix_token_options=$(DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXTALK_LOCAL_PATH_STYLE=posix DIREXTALK_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXTALK_OPENCLAW_ACP_SESSION=agent:main:main _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_posix_token_options" == *'args = ["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "/mnt/c/Users/alice/.openclaw/token.json", "--session", "agent:main:main"]'* ]]
 
-openclaw_token_options=$(DIREXIO_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXIO_LOCAL_PATH_STYLE=windows DIREXIO_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXIO_OPENCLAW_ACP_SESSION=agent:main:main _connect_agent_options_toml openclaw acp)
+openclaw_token_options=$(DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXTALK_OPENCLAW_ACP_SESSION=agent:main:main _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_token_options" == *'args = ["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "C:/Users/alice/.openclaw/token.json", "--session", "agent:main:main"]'* ]]
 
 hermes_options=$(_connect_agent_options_toml hermes acp)
 [[ "$hermes_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "acp"]'* ]]
 [[ "$hermes_options" == *'display_name = "Hermes ACP"'* ]]
 
-hermes_custom_command_options=$(DIREXIO_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_options_toml hermes acp)
+hermes_custom_command_options=$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_options_toml hermes acp)
 [[ "$hermes_custom_command_options" == *'args = ["hermes-acp-adapter", "--", "/opt/hermes/bin/hermes", "acp"]'* ]]
 
-hermes_custom_args_options=$(DIREXIO_HERMES_ACP_ARGS_TOML='["acp", "--profile", "direxio"]' _connect_agent_options_toml hermes acp)
-[[ "$hermes_custom_args_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "acp", "--profile", "direxio"]'* ]]
+hermes_custom_args_options=$(DIREXTALK_HERMES_ACP_ARGS_TOML='["acp", "--profile", "dirextalk"]' _connect_agent_options_toml hermes acp)
+[[ "$hermes_custom_args_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "acp", "--profile", "dirextalk"]'* ]]
 
-openclaw_config_path="$tmp/direxio-connect/config-openclaw.toml"
-_write_connect_config "$openclaw_config_path" "$tmp/direxio-connect/data-openclaw" "openclaw-node" "$(_connect_agent_type openclaw)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp openclaw)" "$openclaw_options"
+openclaw_config_path="$tmp/dirextalk-connect/config-openclaw.toml"
+_write_connect_config "$openclaw_config_path" "$tmp/dirextalk-connect/data-openclaw" "openclaw-node" "$(_connect_agent_type openclaw)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp openclaw)" "$openclaw_options"
 grep -q 'type = "acp"' "$openclaw_config_path"
 grep -q 'cmd = "openclaw"' "$openclaw_config_path"
 grep -q 'args = \["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "/mnt/c/Users/alice/.openclaw/gateway.token", "--session", "agent:main:main"\]' "$openclaw_config_path"
 grep -q 'display_name = "OpenClaw ACP"' "$openclaw_config_path"
 
-hermes_config_path="$tmp/direxio-connect/config-hermes.toml"
-_write_connect_config "$hermes_config_path" "$tmp/direxio-connect/data-hermes" "hermes-node" "$(_connect_agent_type hermes)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp hermes)" "$(_connect_agent_options_toml hermes acp)"
+hermes_config_path="$tmp/dirextalk-connect/config-hermes.toml"
+_write_connect_config "$hermes_config_path" "$tmp/dirextalk-connect/data-hermes" "hermes-node" "$(_connect_agent_type hermes)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp hermes)" "$(_connect_agent_options_toml hermes acp)"
 grep -q 'type = "acp"' "$hermes_config_path"
-grep -q 'cmd = "direxio-connect"' "$hermes_config_path"
+grep -q 'cmd = "dirextalk-connect"' "$hermes_config_path"
 grep -q 'args = \["hermes-acp-adapter", "--", "hermes", "acp"\]' "$hermes_config_path"
 grep -q 'display_name = "Hermes ACP"' "$hermes_config_path"
 
 guidance=$(
-  _print_connect_guidance codex https://service.example.test "$HOME/.direxio/nodes/service.example.test/credentials.json" "$HOME/.direxio/nodes/service.example.test/env" recommend direxio-connect "install command" codex-service "$config_path" "$HOME/.direxio/nodes/service.example.test/direxio-connect/bin/direxio-connect" codex "/opt/codex/bin/codex" service.example.test 2>&1 >/dev/null
+  _print_connect_guidance codex https://service.example.test "$HOME/.dirextalk/nodes/service.example.test/credentials.json" "$HOME/.dirextalk/nodes/service.example.test/env" recommend dirextalk-connect "install command" codex-service "$config_path" "$HOME/.dirextalk/nodes/service.example.test/dirextalk-connect/bin/dirextalk-connect" codex "/opt/codex/bin/codex" service.example.test 2>&1 >/dev/null
 )
-[[ "$guidance" == *"DIREXIO_DOMAIN"* ]]
-[[ "$guidance" == *"DIREXIO_AGENT_TOKEN"* ]]
-[[ "$guidance" == *"direxio-connect service"* ]]
-[[ "$guidance" == *"DIREXIO_AGENT_ROOM_ID"* ]]
-[[ "$guidance" == *"DIREXIO_AGENT_NODE_ID"* ]]
-[[ "$guidance" == *"direxio-connect config"* ]]
+[[ "$guidance" == *"DIREXTALK_DOMAIN"* ]]
+[[ "$guidance" == *"DIREXTALK_AGENT_TOKEN"* ]]
+[[ "$guidance" == *"dirextalk-connect service"* ]]
+[[ "$guidance" == *"DIREXTALK_AGENT_ROOM_ID"* ]]
+[[ "$guidance" == *"DIREXTALK_AGENT_NODE_ID"* ]]
+[[ "$guidance" == *"dirextalk-connect config"* ]]
 [[ "$guidance" == *"/opt/codex/bin/codex"* ]]
 [[ "$guidance" == *"daemon install"* ]]
-[[ "$guidance" == *"direxio-connent@latest"* || "$install_command" == *"direxio-connent@latest"* ]]
-[[ "$guidance" == *"type = \"matrix\""* || "$guidance" == *"direxio-connect will use Matrix"* ]]
-bad_credentials_env_name="DIREXIO_CREDENTIALS""_FILE"
+[[ "$guidance" == *"dirextalk-connect@latest"* || "$install_command" == *"dirextalk-connect@latest"* ]]
+[[ "$guidance" == *"type = \"matrix\""* || "$guidance" == *"dirextalk-connect will use Matrix"* ]]
+bad_credentials_env_name="DIREXTALK_CREDENTIALS""_FILE"
 if [[ "$guidance" == *"$bad_credentials_env_name"* ]]; then
-  echo "direxio-connect guidance must not use $bad_credentials_env_name; it writes direct Matrix config" >&2
+  echo "dirextalk-connect guidance must not use $bad_credentials_env_name; it writes direct Matrix config" >&2
   exit 1
 fi
 
 stale_mcp_config="$tmp/stale-mcp.json"
 cat > "$stale_mcp_config" <<'EOF'
-{"mcpServers":{"direxio-service_example_test":{"command":"direxio-mcp","env":{"DIREXIO_CREDENTIALS_FILE":"/old/credentials.json"},"args":["proxy","--url","http://127.0.0.1:19999/mcp"]}}}
+{"mcpServers":{"dirextalk-service_example_test":{"command":"dirextalk-mcp","env":{"DIREXTALK_CREDENTIALS_FILE":"/old/credentials.json"},"args":["proxy","--url","http://127.0.0.1:19999/mcp"]}}}
 EOF
 mcp_guidance=$(
-  DIREXIO_MCP_CONFIG_CONFLICT_PATHS="$stale_mcp_config" \
-    _print_mcp_guidance codex service.example.test direxio-service_example_test "$mcp_credentials" "$mcp_service_dir/mcp" codex "$mcp_service_dir/mcp/codex.toml" "$mcp_install_command" "$mcp_doctor_command" "$mcp_service_dir" 2>&1 >/dev/null
+  DIREXTALK_MCP_CONFIG_CONFLICT_PATHS="$stale_mcp_config" \
+    _print_mcp_guidance codex service.example.test dirextalk-service_example_test "$mcp_credentials" "$mcp_service_dir/mcp" codex "$mcp_service_dir/mcp/codex.toml" "$mcp_install_command" "$mcp_doctor_command" "$mcp_service_dir" 2>&1 >/dev/null
 )
 [[ "$mcp_guidance" == *"Existing MCP config may shadow this deployment"* ]]
 [[ "$mcp_guidance" == *"$stale_mcp_config"* ]]

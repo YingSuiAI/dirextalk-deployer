@@ -66,37 +66,37 @@ function Set-AgentCommandIfMissing([string[]] $EnvNames, [string[]] $CommandName
 
 $bash = Find-GitBash
 
-$windowsDirexioHome = Resolve-WindowsDirexioHome
-$env:DIREXIO_WINDOWS_HOME = $windowsDirexioHome
-$env:DIREXIO_HOME = ConvertTo-GitBashPath $windowsDirexioHome
-$env:DIREXIO_LOCAL_PATH_STYLE = 'windows'
+$windowsDirextalkHome = Resolve-WindowsDirextalkHome
+$env:DIREXTALK_WINDOWS_HOME = $windowsDirextalkHome
+$env:DIREXTALK_HOME = ConvertTo-GitBashPath $windowsDirextalkHome
+$env:DIREXTALK_LOCAL_PATH_STYLE = 'windows'
 
-if (-not $env:DIREXIO_AGENT_WORKSPACE) {
-  $env:DIREXIO_AGENT_WORKSPACE_WINDOWS = (Get-Location).ProviderPath
+if (-not $env:DIREXTALK_AGENT_WORKSPACE) {
+  $env:DIREXTALK_AGENT_WORKSPACE_WINDOWS = (Get-Location).ProviderPath
 }
 
-if ($env:DIREXIO_WORKDIR) {
-  $env:DIREXIO_WORKDIR_WINDOWS = $env:DIREXIO_WORKDIR
-  $env:DIREXIO_WORKDIR = ConvertTo-GitBashPath $env:DIREXIO_WORKDIR
+if ($env:DIREXTALK_WORKDIR) {
+  $env:DIREXTALK_WORKDIR_WINDOWS = $env:DIREXTALK_WORKDIR
+  $env:DIREXTALK_WORKDIR = ConvertTo-GitBashPath $env:DIREXTALK_WORKDIR
 }
 
-if (-not $env:DIREXIO_CODEX_COMMAND) {
+if (-not $env:DIREXTALK_CODEX_COMMAND) {
   $codex = Find-CodexBinary
-  if ($codex) { $env:DIREXIO_CODEX_COMMAND = $codex }
+  if ($codex) { $env:DIREXTALK_CODEX_COMMAND = $codex }
 }
 
-Set-AgentCommandIfMissing @('DIREXIO_CLAUDECODE_COMMAND', 'DIREXIO_CLAUDE_CODE_COMMAND', 'DIREXIO_CLAUDE_COMMAND') @('claude.exe', 'claude.cmd', 'claude', 'claude-code.exe', 'claude-code.cmd', 'claude-code')
-Set-AgentCommandIfMissing @('DIREXIO_GEMINI_COMMAND') @('gemini.exe', 'gemini.cmd', 'gemini')
-Set-AgentCommandIfMissing @('DIREXIO_COPILOT_COMMAND') @('copilot.exe', 'copilot.cmd', 'copilot')
-Set-AgentCommandIfMissing @('DIREXIO_DEVIN_COMMAND') @('devin.exe', 'devin.cmd', 'devin')
-Set-AgentCommandIfMissing @('DIREXIO_KIMI_COMMAND') @('kimi.exe', 'kimi.cmd', 'kimi')
-Set-AgentCommandIfMissing @('DIREXIO_OPENCODE_COMMAND', 'DIREXIO_OPEN_CODE_COMMAND') @('opencode.exe', 'opencode.cmd', 'opencode')
-Set-AgentCommandIfMissing @('DIREXIO_IFLOW_COMMAND') @('iflow.exe', 'iflow.cmd', 'iflow')
-Set-AgentCommandIfMissing @('DIREXIO_QODER_COMMAND', 'DIREXIO_QODERCLI_COMMAND') @('qodercli.exe', 'qodercli.cmd', 'qodercli', 'qoder.exe', 'qoder.cmd', 'qoder')
-Set-AgentCommandIfMissing @('DIREXIO_PI_COMMAND') @('pi.exe', 'pi.cmd', 'pi')
-Set-AgentCommandIfMissing @('DIREXIO_ANTIGRAVITY_COMMAND', 'DIREXIO_AGY_COMMAND') @('agy.exe', 'agy.cmd', 'agy')
-Set-AgentCommandIfMissing @('DIREXIO_OPENCLAW_COMMAND') @('openclaw.exe', 'openclaw.cmd', 'openclaw')
-Set-AgentCommandIfMissing @('DIREXIO_HERMES_COMMAND') @('hermes.exe', 'hermes.cmd', 'hermes')
+Set-AgentCommandIfMissing @('DIREXTALK_CLAUDECODE_COMMAND', 'DIREXTALK_CLAUDE_CODE_COMMAND', 'DIREXTALK_CLAUDE_COMMAND') @('claude.exe', 'claude.cmd', 'claude', 'claude-code.exe', 'claude-code.cmd', 'claude-code')
+Set-AgentCommandIfMissing @('DIREXTALK_GEMINI_COMMAND') @('gemini.exe', 'gemini.cmd', 'gemini')
+Set-AgentCommandIfMissing @('DIREXTALK_COPILOT_COMMAND') @('copilot.exe', 'copilot.cmd', 'copilot')
+Set-AgentCommandIfMissing @('DIREXTALK_DEVIN_COMMAND') @('devin.exe', 'devin.cmd', 'devin')
+Set-AgentCommandIfMissing @('DIREXTALK_KIMI_COMMAND') @('kimi.exe', 'kimi.cmd', 'kimi')
+Set-AgentCommandIfMissing @('DIREXTALK_OPENCODE_COMMAND', 'DIREXTALK_OPEN_CODE_COMMAND') @('opencode.exe', 'opencode.cmd', 'opencode')
+Set-AgentCommandIfMissing @('DIREXTALK_IFLOW_COMMAND') @('iflow.exe', 'iflow.cmd', 'iflow')
+Set-AgentCommandIfMissing @('DIREXTALK_QODER_COMMAND', 'DIREXTALK_QODERCLI_COMMAND') @('qodercli.exe', 'qodercli.cmd', 'qodercli', 'qoder.exe', 'qoder.cmd', 'qoder')
+Set-AgentCommandIfMissing @('DIREXTALK_PI_COMMAND') @('pi.exe', 'pi.cmd', 'pi')
+Set-AgentCommandIfMissing @('DIREXTALK_ANTIGRAVITY_COMMAND', 'DIREXTALK_AGY_COMMAND') @('agy.exe', 'agy.cmd', 'agy')
+Set-AgentCommandIfMissing @('DIREXTALK_OPENCLAW_COMMAND') @('openclaw.exe', 'openclaw.cmd', 'openclaw')
+Set-AgentCommandIfMissing @('DIREXTALK_HERMES_COMMAND') @('hermes.exe', 'hermes.cmd', 'hermes')
 
 $repoRootForBash = ConvertTo-GitBashPath $RepoRoot
 $quotedArgs = ($OrchestrateArgs | ForEach-Object { Quote-BashArg $_ }) -join ' '

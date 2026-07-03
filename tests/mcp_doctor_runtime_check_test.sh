@@ -12,13 +12,13 @@ mkdir -p "$HOME"
 
 fakebin="$tmp/bin"
 mkdir -p "$fakebin"
-cat > "$fakebin/direxio-mcp" <<'EOF'
+cat > "$fakebin/dirextalk-mcp" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
 [ "${1:-}" = "doctor" ]
 [ "${2:-}" = "--json" ]
-[ "${DIREXIO_CREDENTIALS_FILE:-}" = "${EXPECTED_CREDENTIALS_FILE:-}" ]
+[ "${DIREXTALK_CREDENTIALS_FILE:-}" = "${EXPECTED_CREDENTIALS_FILE:-}" ]
 
 cat <<JSON
 {
@@ -29,9 +29,9 @@ cat <<JSON
 }
 JSON
 EOF
-chmod 700 "$fakebin/direxio-mcp"
+chmod 700 "$fakebin/dirextalk-mcp"
 
-service_dir="$HOME/.direxio/nodes/mcp-check.example.test"
+service_dir="$HOME/.dirextalk/nodes/mcp-check.example.test"
 mkdir -p "$service_dir"
 credentials="$service_dir/credentials.json"
 : > "$credentials"
@@ -49,17 +49,17 @@ json_build object \
   "agent_service_dir=$service_dir" \
   "agent_credentials_file=$credentials" \
   "mcp_credentials_file=$credentials" \
-  mcp_command=direxio-mcp \
+  mcp_command=dirextalk-mcp \
   phase=S7_VERIFY_E2E \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
   'resources={}' > "$state"
 
-verify_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" bash "$ROOT/scripts/orchestrate.sh" verify mcp_doctor)
+verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" bash "$ROOT/scripts/orchestrate.sh" verify mcp_doctor)
 printf '%s\n' "$verify_output" | grep -q 'verified runtime check: mcp_doctor'
 
 json_test_check "$state" "data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_doctor.domain === 'mcp-check.example.test' && data.runtime_checks.mcp_doctor.agent_room_id === '!agent:mcp-check.example.test' && data.runtime_checks.mcp_doctor.token === 'redacted' && !data.user_confirmations?.agent_mcp_runtime"
 
-report_output=$(DIREXIO_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
+report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)
 json_test_check "$report_path" "data.runtime_checks.mcp_doctor.status === 'passed' && data.gates.user_confirmation.agent_mcp_runtime === 'pending_runtime_confirmation'"
 

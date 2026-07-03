@@ -22,7 +22,7 @@ run_phase() {
 
   phase_set S4_BOOTSTRAP_STACK failed "healthz did not return 200 before timeout"
   warn "Health check timed out. Inspect cloud-init logs over SSH:"
-  warn "  ssh -i $keyfile ubuntu@$pubip 'sudo tail -n 80 /var/log/cloud-init-output.log; cd /var/direxio-message-server && sudo docker compose ps && sudo docker compose logs message-server --tail=80'"
+  warn "  ssh -i $keyfile ubuntu@$pubip 'sudo tail -n 80 /var/log/cloud-init-output.log; cd /var/dirextalk-message-server && sudo docker compose ps && sudo docker compose logs message-server --tail=80'"
   warn "See references/troubleshooting.md for targeted troubleshooting."
   return 1
 }

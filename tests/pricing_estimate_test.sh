@@ -31,7 +31,7 @@ case "${1:-} ${2:-}" in
     ;;
   "sts get-caller-identity")
     if [ "${AWS_STS_OK:-0}" = "1" ]; then
-      printf '{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/DirexioDeployer","UserId":"AIDAEXAMPLE"}\n'
+      printf '{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/DirextalkDeployer","UserId":"AIDAEXAMPLE"}\n'
       exit 0
     fi
     exit 255
@@ -80,7 +80,7 @@ CALLS="$tmp/aws.calls"
 export CALLS
 export PATH="$fakebin:$PATH"
 
-service_dir="$HOME/.direxio/nodes/pricing.example.test"
+service_dir="$HOME/.dirextalk/nodes/pricing.example.test"
 mkdir -p "$service_dir"
 state="$service_dir/state.json"
 json_build object \
@@ -103,13 +103,13 @@ lightsail=$(bash "$ROOT/scripts/pricing-estimate.sh" --region ap-northeast-1 --c
 printf '%s\n' "$lightsail" > "$tmp/lightsail.json"
 json_test_check "$tmp/lightsail.json" "data.provider === 'lightsail' && data.pricing_status === 'bundle_price_recorded' && data.components.lightsail_bundle.bundle_id === 'small_3_1' && data.components.lightsail_bundle.monthly_usd === 12 && data.components.lightsail_bundle.ram_gb === 2 && data.components.lightsail_bundle.disk_gb === 60 && data.total_monthly_usd === 12"
 
-auto_workdir="$HOME/.direxio/nodes/auto-pricing.example.test"
+auto_workdir="$HOME/.dirextalk/nodes/auto-pricing.example.test"
 set +e
 AWS_DEFAULT_REGION=ap-northeast-1 \
 DOMAIN=auto-pricing.example.test \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
-DIREXIO_WORKDIR="$auto_workdir" \
+DIREXTALK_WORKDIR="$auto_workdir" \
 bash "$ROOT/scripts/orchestrate.sh" > "$tmp/orchestrate.out" 2> "$tmp/orchestrate.err"
 auto_rc=$?
 set -e
@@ -119,7 +119,7 @@ set -e
 }
 json_test_check "$auto_workdir/state.json" "data.cloud_provider === 'lightsail' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.pricing_status === 'bundle_price_recorded' && data.cost_estimate.region === 'ap-northeast-1'"
 
-report_output=$(DIREXIO_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
+report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)
 assert_file_exists "$report_path"
 json_test_check "$report_path" "data.billing.cost_estimate.pricing_status === 'queried' && data.billing.cost_estimate.components.public_ipv4.billed_even_when_attached === true"

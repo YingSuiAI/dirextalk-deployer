@@ -7,8 +7,8 @@
 S3_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 source "$S3_PHASE_DIR/lib/domain.sh"
 
-DIREXIO_ROOT_VOLUME_GB=${DIREXIO_ROOT_VOLUME_GB:-50}
-DIREXIO_ROOT_DEVICE_NAME=${DIREXIO_ROOT_DEVICE_NAME:-/dev/sda1}
+DIREXTALK_ROOT_VOLUME_GB=${DIREXTALK_ROOT_VOLUME_GB:-50}
+DIREXTALK_ROOT_DEVICE_NAME=${DIREXTALK_ROOT_DEVICE_NAME:-/dev/sda1}
 DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
 DEFAULT_LIGHTSAIL_BLUEPRINT_ID=${DEFAULT_LIGHTSAIL_BLUEPRINT_ID:-ubuntu_22_04}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
@@ -41,7 +41,7 @@ _run_phase_ec2() {
   if [ -z "$instance_type" ]; then
     instance_type=${INSTANCE_TYPE:-}
     if [ -z "$instance_type" ]; then
-      if [ "${DIREXIO_ASSUME_DEFAULTS:-0}" = "1" ]; then
+      if [ "${DIREXTALK_ASSUME_DEFAULTS:-0}" = "1" ]; then
         instance_type=t3.small
       elif [ -t 0 ]; then
         warn "Default EC2 instance type is t3.small (2 vCPU / 2GB). Do you need a larger instance?"
@@ -72,11 +72,11 @@ _run_phase_ec2() {
   ami=$(res_get ami_id)
   vpc=$(res_get vpc_id)
   local message_server_image
-  message_server_image=${MESSAGE_SERVER_IMAGE:-direxio/message-server:latest}
-  local scripts_dir=${DIREXIO_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
+  message_server_image=${MESSAGE_SERVER_IMAGE:-dirextalk/message-server:latest}
+  local scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
 
   # 1) Key pair (idempotent).
-  local keyfile="$DIREXIO_WORKDIR/${name}.pem"
+  local keyfile="$DIREXTALK_WORKDIR/${name}.pem"
   if [ -z "$(res_get key_name)" ]; then
     log "Creating key pair $name ..."
     aws ec2 create-key-pair --key-name "$name" --query KeyMaterial --output text > "$keyfile"
@@ -92,7 +92,7 @@ _run_phase_ec2() {
     warn "Security group opens 22/80/443, TURN 3478 tcp/udp, and 49160-49200/udp to 0.0.0.0/0."
     warn "Keep the SSH private key, AWS credentials, and password secure."
     sg=$(aws ec2 create-security-group --group-name "$name" \
-         --description "direxio $name" --vpc-id "$vpc" --query GroupId --output text)
+         --description "dirextalk $name" --vpc-id "$vpc" --query GroupId --output text)
     res_set sg_id "$sg"
     local p
     for p in 22 80 443; do
@@ -118,7 +118,7 @@ _run_phase_ec2() {
     warn "S3 requires a production DOMAIN. Complete S2_DOMAIN first."
     return 2
   fi
-  local userdata="$DIREXIO_WORKDIR/user-data.yaml"
+  local userdata="$DIREXTALK_WORKDIR/user-data.yaml"
   log "Rendering cloud-init (domain_mode=$domain_mode)..."
   bash "$scripts_dir/render/render-userdata.sh" \
     --domain "$domain" \
@@ -139,7 +139,7 @@ _run_phase_ec2() {
     log "Instance $iid already exists; skipping creation."
   else
     log "Launching EC2 instance (x86 $instance_type, $ami)..."
-    res_set root_volume_gb "$DIREXIO_ROOT_VOLUME_GB"
+    res_set root_volume_gb "$DIREXTALK_ROOT_VOLUME_GB"
     iid=$(aws ec2 run-instances --image-id "$ami" --instance-type "$instance_type" \
       --key-name "$name" --security-group-ids "$sg" \
       --user-data "file://$userdata_aws" \
@@ -222,15 +222,15 @@ _run_phase_lightsail() {
     bundle=$(_select_lightsail_bundle) || {
       phase_set S3_PROVISION failed "Lightsail $DEFAULT_LIGHTSAIL_MONTHLY_USD bundle unavailable"
       warn "Could not select a Lightsail Linux/Unix bundle near $DEFAULT_LIGHTSAIL_MONTHLY_USD USD/month."
-      warn "Set DIREXIO_LIGHTSAIL_BUNDLE_ID to override, or DIREXIO_CLOUD_PROVIDER=ec2 to use EC2."
+      warn "Set DIREXTALK_LIGHTSAIL_BUNDLE_ID to override, or DIREXTALK_CLOUD_PROVIDER=ec2 to use EC2."
       return 1
     }
   fi
   blueprint=$(res_get lightsail_blueprint_id)
-  blueprint=${DIREXIO_LIGHTSAIL_BLUEPRINT_ID:-${blueprint:-$DEFAULT_LIGHTSAIL_BLUEPRINT_ID}}
+  blueprint=${DIREXTALK_LIGHTSAIL_BLUEPRINT_ID:-${blueprint:-$DEFAULT_LIGHTSAIL_BLUEPRINT_ID}}
   res_set lightsail_blueprint_id "$blueprint"
   zone=$(res_get lightsail_availability_zone)
-  zone=${DIREXIO_LIGHTSAIL_AVAILABILITY_ZONE:-${zone:-}}
+  zone=${DIREXTALK_LIGHTSAIL_AVAILABILITY_ZONE:-${zone:-}}
   if [ -z "$zone" ]; then
     zone=$(_lightsail_default_zone "$region") || {
       phase_set S3_PROVISION failed "no available Lightsail availability zone"
@@ -240,9 +240,9 @@ _run_phase_lightsail() {
   fi
   res_set lightsail_availability_zone "$zone"
   instance_name=$(res_get lightsail_instance_name)
-  instance_name=${instance_name:-$(_aws_resource_name direxio "$(state_get domain)")}
+  instance_name=${instance_name:-$(_aws_resource_name dirextalk "$(state_get domain)")}
   static_ip_name=$(res_get lightsail_static_ip_name)
-  static_ip_name=${static_ip_name:-$(_aws_resource_name direxio-ip "$(state_get domain)")}
+  static_ip_name=${static_ip_name:-$(_aws_resource_name dirextalk-ip "$(state_get domain)")}
   res_set lightsail_instance_name "$instance_name"
   res_set lightsail_static_ip_name "$static_ip_name"
 
@@ -254,10 +254,10 @@ _run_phase_lightsail() {
     warn "S3 requires a production DOMAIN. Complete S2_DOMAIN first."
     return 2
   fi
-  message_server_image=${MESSAGE_SERVER_IMAGE:-direxio/message-server:latest}
-  scripts_dir=${DIREXIO_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
+  message_server_image=${MESSAGE_SERVER_IMAGE:-dirextalk/message-server:latest}
+  scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
 
-  keyfile="$DIREXIO_WORKDIR/${name}.pem"
+  keyfile="$DIREXTALK_WORKDIR/${name}.pem"
   if [ -z "$(res_get key_name)" ]; then
     log "Creating Lightsail key pair $name ..."
     if ! aws lightsail create-key-pair --key-pair-name "$name" --query privateKeyBase64 --output text \
@@ -273,7 +273,7 @@ _run_phase_lightsail() {
     log "Lightsail key pair already exists; skipping."; keyfile=$(res_get key_file)
   fi
 
-  userdata="$DIREXIO_WORKDIR/user-data.sh"
+  userdata="$DIREXTALK_WORKDIR/user-data.sh"
   log "Rendering Lightsail launch script (domain_mode=$domain_mode, provider=lightsail)..."
   bash "$scripts_dir/render/render-userdata.sh" \
     --format shell \
@@ -351,7 +351,7 @@ _run_phase_lightsail() {
   fi
 
   if [ "$domain_mode" = "user" ] || [ "$domain_mode" = "route53" ]; then
-    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "DIREXIO_CLOUD_PROVIDER=lightsail" || return 2
+    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "DIREXTALK_CLOUD_PROVIDER=lightsail" || return 2
   fi
 
   _record_lightsail_cost_estimate "$bundle"
@@ -362,7 +362,7 @@ _run_phase_lightsail() {
 _resolve_cloud_provider() {
   local provider
   provider=$(state_get cloud_provider)
-  provider=${DIREXIO_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXIO_DEPLOY_PROVIDER:-$provider}}}
+  provider=${DIREXTALK_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXTALK_DEPLOY_PROVIDER:-$provider}}}
   provider=${provider:-lightsail}
   provider=$(printf '%s' "$provider" | tr '[:upper:]' '[:lower:]')
   case "$provider" in
@@ -403,7 +403,7 @@ process.stdin.on("end", () => {
 }
 
 _wait_lightsail_instance_running() {
-  local instance_name=$1 attempts=${DIREXIO_LIGHTSAIL_READY_ATTEMPTS:-60} interval=${DIREXIO_LIGHTSAIL_READY_INTERVAL_SECONDS:-5}
+  local instance_name=$1 attempts=${DIREXTALK_LIGHTSAIL_READY_ATTEMPTS:-60} interval=${DIREXTALK_LIGHTSAIL_READY_INTERVAL_SECONDS:-5}
   local i state
   log "Waiting for Lightsail instance $instance_name to become running ..."
   for ((i=1; i<=attempts; i++)); do
@@ -474,7 +474,7 @@ EOF
 
 _select_lightsail_bundle() {
   local override tmp selected price ram disk transfer cpu
-  override=${DIREXIO_LIGHTSAIL_BUNDLE_ID:-}
+  override=${DIREXTALK_LIGHTSAIL_BUNDLE_ID:-}
   if [ -n "$override" ]; then
     res_set lightsail_bundle_id "$override"
     res_set lightsail_bundle_price_usd "$DEFAULT_LIGHTSAIL_MONTHLY_USD"
@@ -555,7 +555,7 @@ _record_lightsail_cost_estimate() {
   transfer=$(res_get lightsail_bundle_transfer_gb)
   cpu=$(res_get lightsail_bundle_cpu_count)
   route53_monthly=0
-  [ "$(state_get domain_mode)" = "route53" ] && route53_monthly=${DIREXIO_ROUTE53_HOSTED_ZONE_MONTHLY_USD:-0.50}
+  [ "$(state_get domain_mode)" = "route53" ] && route53_monthly=${DIREXTALK_ROUTE53_HOSTED_ZONE_MONTHLY_USD:-0.50}
   total=$(awk -v p="${price:-$DEFAULT_LIGHTSAIL_MONTHLY_USD}" -v r="$route53_monthly" 'BEGIN { printf "%.2f", p + r }')
   estimate=$(json_build object \
     provider=lightsail \
@@ -569,8 +569,8 @@ _record_lightsail_cost_estimate() {
 
 _root_block_device_mappings() {
   printf '[{"DeviceName":"%s","Ebs":{"VolumeSize":%s,"VolumeType":"gp3","DeleteOnTermination":true}}]\n' \
-    "$DIREXIO_ROOT_DEVICE_NAME" \
-    "$DIREXIO_ROOT_VOLUME_GB"
+    "$DIREXTALK_ROOT_DEVICE_NAME" \
+    "$DIREXTALK_ROOT_VOLUME_GB"
 }
 
 _record_root_volume_id() {
@@ -603,7 +603,7 @@ _upsert_route53_record() {
   change_file=$(mktemp)
   cat > "$change_file" <<EOF
 {
-  "Comment": "Direxio deployment",
+  "Comment": "Dirextalk deployment",
   "Changes": [
     {
       "Action": "UPSERT",
@@ -652,7 +652,7 @@ _guard_route53_a_overwrite() {
 
   res_set route53_existing_a_value "$existing"
   res_set route53_pending_a_value "$pubip"
-  confirmed=${DIREXIO_CONFIRM_DNS_OVERWRITE:-${CONFIRM_DNS_OVERWRITE:-0}}
+  confirmed=${DIREXTALK_CONFIRM_DNS_OVERWRITE:-${CONFIRM_DNS_OVERWRITE:-0}}
   if [ "$confirmed" = "1" ]; then
     res_set route53_overwrite_confirmed "true"
     warn "Route53 A record overwrite confirmed: $domain $existing -> $pubip."
@@ -663,7 +663,7 @@ _guard_route53_a_overwrite() {
   warn "Route53 A record overwrite requires confirmation for $domain."
   warn "Current A record: $existing"
   warn "New deployment IP: $pubip"
-  warn "If this is intentional, rerun with DIREXIO_CONFIRM_DNS_OVERWRITE=1."
+  warn "If this is intentional, rerun with DIREXTALK_CONFIRM_DNS_OVERWRITE=1."
   return 2
 }
 
@@ -732,8 +732,8 @@ _find_route53_zone() {
 
 _create_route53_zone() {
   local domain=$1 zone_name caller created zone_id returned_name name_servers
-  zone_name=${DIREXIO_ROUTE53_ZONE_NAME:-$domain}
-  caller="direxio-$(state_get run_id)-$(date -u +%Y%m%d%H%M%S)"
+  zone_name=${DIREXTALK_ROUTE53_ZONE_NAME:-$domain}
+  caller="dirextalk-$(state_get run_id)-$(date -u +%Y%m%d%H%M%S)"
   created=$(aws route53 create-hosted-zone \
     --name "$zone_name" \
     --caller-reference "$caller" \
@@ -799,10 +799,10 @@ _require_user_dns_ready() {
 
   phase_set S3_PROVISION waiting_user "waiting for DNS A record $domain -> $pubip"
   warn "After DNS is ready, rerun:"
-  if [ "$instance_type" = "DIREXIO_CLOUD_PROVIDER=lightsail" ]; then
-    warn "  DOMAIN=$domain DOMAIN_MODE=$domain_mode CONFIRM_DOMAIN_BINDING=1 DIREXIO_CLOUD_PROVIDER=lightsail bash scripts/orchestrate.sh"
+  if [ "$instance_type" = "DIREXTALK_CLOUD_PROVIDER=lightsail" ]; then
+    warn "  DOMAIN=$domain DOMAIN_MODE=$domain_mode CONFIRM_DOMAIN_BINDING=1 DIREXTALK_CLOUD_PROVIDER=lightsail bash scripts/orchestrate.sh"
   else
-    warn "  DOMAIN=$domain DOMAIN_MODE=$domain_mode CONFIRM_DOMAIN_BINDING=1 DIREXIO_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=$instance_type bash scripts/orchestrate.sh"
+    warn "  DOMAIN=$domain DOMAIN_MODE=$domain_mode CONFIRM_DOMAIN_BINDING=1 DIREXTALK_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=$instance_type bash scripts/orchestrate.sh"
   fi
   return 2
 }

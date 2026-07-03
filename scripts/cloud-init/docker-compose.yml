@@ -1,11 +1,11 @@
-# docker-compose.yml - cloud-side Direxio message-server stack.
+# docker-compose.yml - cloud-side Dirextalk message-server stack.
 #
-# Layers: Caddy (public 443/TLS) -> Direxio message-server (Matrix + Direxio API).
-# PostgreSQL 18 persists Matrix and Direxio business tables. The local agent bridge
+# Layers: Caddy (public 443/TLS) -> Dirextalk message-server (Matrix + Dirextalk API).
+# PostgreSQL 18 persists Matrix and Dirextalk business tables. The local agent bridge
 # process is not started in the cloud by default.
 
 networks:
-  direxio-net:
+  dirextalk-net:
 
 volumes:
   postgres-data:
@@ -17,15 +17,15 @@ volumes:
 services:
   postgres:
     image: postgres:18-alpine
-    networks: [direxio-net]
+    networks: [dirextalk-net]
     environment:
-      POSTGRES_USER: direxio_message_server
-      POSTGRES_PASSWORD: direxio_message_server
-      POSTGRES_DB: direxio_message_server
+      POSTGRES_USER: dirextalk_message_server
+      POSTGRES_PASSWORD: dirextalk_message_server
+      POSTGRES_DB: dirextalk_message_server
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U direxio_message_server -d direxio_message_server"]
+      test: ["CMD-SHELL", "pg_isready -U dirextalk_message_server -d dirextalk_message_server"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -33,7 +33,7 @@ services:
 
   message-init:
     image: ${MESSAGE_SERVER_IMAGE}
-    networks: [direxio-net]
+    networks: [dirextalk-net]
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,39 +43,39 @@ services:
     command:
       - |
         set -eu
-        mkdir -p /etc/direxio-message-server /var/direxio-message-server /var/direxio-message-server/p2p
-        if [ ! -f /etc/direxio-message-server/matrix_key.pem ]; then
-          /usr/bin/generate-keys -private-key /etc/direxio-message-server/matrix_key.pem
+        mkdir -p /etc/dirextalk-message-server /var/dirextalk-message-server /var/dirextalk-message-server/p2p
+        if [ ! -f /etc/dirextalk-message-server/matrix_key.pem ]; then
+          /usr/bin/generate-keys -private-key /etc/dirextalk-message-server/matrix_key.pem
         fi
-        CFG=/etc/direxio-message-server/message-server.yaml
-        DB="postgres://direxio_message_server:direxio_message_server@postgres/direxio_message_server?sslmode=disable"
-        /usr/bin/generate-config -dir /var/direxio-message-server -db "$$DB" -server "${DOMAIN}" > "$$CFG"
+        CFG=/etc/dirextalk-message-server/message-server.yaml
+        DB="postgres://dirextalk_message_server:dirextalk_message_server@postgres/dirextalk_message_server?sslmode=disable"
+        /usr/bin/generate-config -dir /var/dirextalk-message-server -db "$$DB" -server "${DOMAIN}" > "$$CFG"
         printf '\nclient_api:\n  turn:\n    turn_shared_secret: "%s"\n    turn_user_lifetime: "24h"\n    turn_uris:\n      - "turn:%s:3478?transport=udp"\n      - "turn:%s:3478?transport=tcp"\n' "$$TURN_SECRET" "${DOMAIN}" "${DOMAIN}" >> "$$CFG"
     volumes:
-      - message-config:/etc/direxio-message-server
-      - message-data:/var/direxio-message-server
+      - message-config:/etc/dirextalk-message-server
+      - message-data:/var/dirextalk-message-server
     restart: "no"
 
   message-server:
     image: ${MESSAGE_SERVER_IMAGE}
-    networks: [direxio-net]
+    networks: [dirextalk-net]
     depends_on:
       postgres:
         condition: service_healthy
       message-init:
         condition: service_completed_successfully
     environment:
-      P2P_PORTAL_CREDENTIALS_FILE: /var/direxio-message-server/p2p/bootstrap.json
+      P2P_PORTAL_CREDENTIALS_FILE: /var/dirextalk-message-server/p2p/bootstrap.json
       P2P_PORTAL_PASSWORD: ${P2P_PORTAL_PASSWORD}
     command:
       - --config
-      - /etc/direxio-message-server/message-server.yaml
+      - /etc/dirextalk-message-server/message-server.yaml
       - --http-bind-address
       - :8008
     volumes:
-      - message-config:/etc/direxio-message-server
-      - message-data:/var/direxio-message-server
-      - /var/direxio-message-server/p2p:/var/direxio-message-server/p2p
+      - message-config:/etc/dirextalk-message-server
+      - message-data:/var/dirextalk-message-server
+      - /var/dirextalk-message-server/p2p:/var/dirextalk-message-server/p2p
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8008/_p2p/health >/dev/null"]
       interval: 10s
@@ -86,7 +86,7 @@ services:
 
   caddy:
     image: caddy:2
-    networks: [direxio-net]
+    networks: [dirextalk-net]
     depends_on:
       message-server:
         condition: service_healthy

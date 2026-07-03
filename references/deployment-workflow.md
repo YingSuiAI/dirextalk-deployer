@@ -6,7 +6,7 @@
 2. Confirm AWS region, credentials, billing, cloud provider, and costs. If no
    region is configured in state, `AWS_DEFAULT_REGION`/`AWS_REGION`, or the AWS
    profile, `scripts/orchestrate.sh` recommends a default region from the local
-   timezone and uses it in non-interactive runs. Use `DIREXIO_DEFAULT_REGION`
+   timezone and uses it in non-interactive runs. Use `DIREXTALK_DEFAULT_REGION`
    for an explicit deployer default, or the standard AWS region settings for a
    run-specific choice.
 3. Default cloud provider is Lightsail. S1 queries Lightsail bundles and
@@ -21,7 +21,7 @@
    region has no usable Lightsail bundle or availability zone, S1 records an EC2
    cost estimate but does not automatically switch to EC2. Ask the operator to
    choose another Lightsail-capable region/zone, or explicitly rerun with
-   `DIREXIO_CLOUD_PROVIDER=ec2` after reviewing the EC2 estimate. For explicit
+   `DIREXTALK_CLOUD_PROVIDER=ec2` after reviewing the EC2 estimate. For explicit
    EC2, check regional hard blockers before mutating resources: default VPC, EC2
    vCPU quota, Elastic IP quota/current allocation, and Ubuntu AMI availability.
    For a manual EIP check, compare:
@@ -48,8 +48,8 @@ DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh status
 If state has resources, require one:
 
 ```bash
-DIREXIO_EXISTING_STATE_ACTION=continue
-DIREXIO_EXISTING_STATE_ACTION=destroy
+DIREXTALK_EXISTING_STATE_ACTION=continue
+DIREXTALK_EXISTING_STATE_ACTION=destroy
 DOMAIN=<different-domain>
 ```
 
@@ -58,14 +58,14 @@ root access key or dedicated IAM deployment user. The root path is the fastest
 because it uses the account owner identity directly, but it is highly
 privileged; tell the operator to save the CSV securely, never paste or commit
 it, and rotate or delete the root key after deployment. The dedicated
-`DirexioDeployer` IAM user path is safer because it avoids root keys, but it
+`DirextalkDeployer` IAM user path is safer because it avoids root keys, but it
 requires more AWS console steps. Import the selected AWS access-key CSV and
 verify the identity before provisioning:
 
 ```bash
-bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv direxio-deployer <region>
-export AWS_PROFILE=direxio-deployer
-bash scripts/aws-credentials.sh verify direxio-deployer
+bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv dirextalk-deployer <region>
+export AWS_PROFILE=dirextalk-deployer
+bash scripts/aws-credentials.sh verify dirextalk-deployer
 ```
 
 Before the first mutating AWS phase, produce a monthly estimate for the selected
@@ -81,7 +81,7 @@ bash scripts/pricing-estimate.sh \
 When `state.json` already exists, refresh and persist the same estimate:
 
 ```bash
-bash scripts/pricing-estimate.sh --state ~/.direxio/nodes/<service_id>/state.json --write-state
+bash scripts/pricing-estimate.sh --state ~/.dirextalk/nodes/<service_id>/state.json --write-state
 ```
 
 For EC2 estimates, pass `--cloud-provider ec2 --instance-type t3.small --disk-gb 50`.
@@ -116,30 +116,30 @@ $env:DOMAIN = "__DOMAIN__"
 .\scripts\destroy.ps1
 ```
 
-Destroy stops and uninstalls the local `direxio-connect` daemon only when `direxio-connect daemon status --service-name <service_id>` reports a `WorkDir` matching the current service directory, `~/.direxio/nodes/<service_id>/direxio-connect`. It then removes resources based on `cloud_provider`: Lightsail destroy releases the recorded static IP, deletes the Lightsail instance and key pair; EC2 destroy terminates the recorded EC2 instance, verifies the recorded EBS root volume, releases the Elastic IP, deletes the security group and key pair. Both paths remove Route53 records/zones created by the deployer, record AWS read-back results under `destroy.evidence`, and remove the corresponding local service directory under `~/.direxio/nodes/<service_id>`.
+Destroy stops and uninstalls the local `dirextalk-connect` daemon only when `dirextalk-connect daemon status --service-name <service_id>` reports a `WorkDir` matching the current service directory, `~/.dirextalk/nodes/<service_id>/dirextalk-connect`. It then removes resources based on `cloud_provider`: Lightsail destroy releases the recorded static IP, deletes the Lightsail instance and key pair; EC2 destroy terminates the recorded EC2 instance, verifies the recorded EBS root volume, releases the Elastic IP, deletes the security group and key pair. Both paths remove Route53 records/zones created by the deployer, record AWS read-back results under `destroy.evidence`, and remove the corresponding local service directory under `~/.dirextalk/nodes/<service_id>`.
 
 Destroy allows root AWS access-key identity when the operator explicitly chose
 root credentials. Use the same deployment profile for teardown that was used
 for provisioning.
 
-Use `DIREXIO_KEEP_WORKDIR=1 DOMAIN=__DOMAIN__ bash scripts/destroy.sh` on POSIX, or set `$env:DIREXIO_KEEP_WORKDIR = "1"` before `.\scripts\destroy.ps1` on Windows, only when preserving local state files for debugging; if used, report that the service directory still exists.
+Use `DIREXTALK_KEEP_WORKDIR=1 DOMAIN=__DOMAIN__ bash scripts/destroy.sh` on POSIX, or set `$env:DIREXTALK_KEEP_WORKDIR = "1"` before `.\scripts\destroy.ps1` on Windows, only when preserving local state files for debugging; if used, report that the service directory still exists.
 
 ## Run
 
 From the repository root:
 
 ```bash
-AWS_PROFILE=direxio-deployer \
+AWS_PROFILE=dirextalk-deployer \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
-DIREXIO_CLOUD_PROVIDER=lightsail \
-MESSAGE_SERVER_IMAGE=direxio/message-server:latest \
+DIREXTALK_CLOUD_PROVIDER=lightsail \
+MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 bash scripts/orchestrate.sh
 ```
 
-For EC2, replace `DIREXIO_CLOUD_PROVIDER=lightsail` with `DIREXIO_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
+For EC2, replace `DIREXTALK_CLOUD_PROVIDER=lightsail` with `DIREXTALK_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
 
 Exit codes:
 
@@ -152,7 +152,7 @@ Exit codes:
 New deploys write a redacted machine-readable report to:
 
 ```text
-~/.direxio/nodes/<service_id>/operation-report.json
+~/.dirextalk/nodes/<service_id>/operation-report.json
 ```
 
 Regenerate it from current state with:
@@ -165,11 +165,11 @@ Destroy writes its audit report outside the service directory because the
 service directory is removed:
 
 ```text
-~/.direxio/reports/<service_id>/operation-report.json
+~/.dirextalk/reports/<service_id>/operation-report.json
 ```
 
 Reports include operation type, S0-S7 gate status, user-confirmation gates,
-credential/config paths, direxio-connect/MCP metadata, AWS resource IDs, billing
+credential/config paths, dirextalk-connect/MCP metadata, AWS resource IDs, billing
 reminders, `billing.cost_estimate`, destroy read-back evidence under
 `destroy.evidence` when applicable, AWS credit/Lightsail trial reminder,
 AWS official policy reminder, AWS Billing Console verification reminder, and
@@ -181,17 +181,17 @@ codes into confirmation notes. After reset/redeploy, the report must show
 `credentials.status=refresh_pending`, `connect.install_status=refresh_pending`,
 and `mcp.status=refresh_pending` until S5/S6/S7 and runtime checks refresh
 local evidence. Image-only update does not clear local credentials,
-confirmations, runtime checks, direxio-connect state, or MCP artifacts.
+confirmations, runtime checks, dirextalk-connect state, or MCP artifacts.
 
 When the user or runtime evidence confirms a manual product gate, write it back
 to state before regenerating the report. Connect daemon status is a
 service-scoped local bridge check, MCP doctor is a non-polluting runtime check,
 MCP tools is stdio `tools/list` discovery, and MCP smoke is a read-only backend
-call. In the `DIREXIO_AGENT_INSTALL=recommend` path, `verify runtime` records
+call. In the `DIREXTALK_AGENT_INSTALL=recommend` path, `verify runtime` records
 `connect_daemon=manual_pending` instead of failing the aggregate, because
 daemon installation is an explicit operator action. The default
-`DIREXIO_AGENT_INSTALL=auto` path expects direxio-connect and direxio-mcp to be
-installed automatically during S6. S6 waits for `direxio-connect is running`
+`DIREXTALK_AGENT_INSTALL=auto` path expects dirextalk-connect and dirextalk-mcp to be
+installed automatically during S6. S6 waits for `dirextalk-connect is running`
 in daemon logs and fails on local Agent startup errors before moving on. These
 checks are not the full runtime product gate:
 
@@ -203,25 +203,25 @@ DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_doctor
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_tools
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_smoke
 
-DIREXIO_CONFIRM_EVIDENCE="user completed app initialization" \
+DIREXTALK_CONFIRM_EVIDENCE="user completed app initialization" \
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh confirm app_initialization
 
-DIREXIO_CONFIRM_EVIDENCE="user sent a message and saw the agent reply" \
+DIREXTALK_CONFIRM_EVIDENCE="user sent a message and saw the agent reply" \
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh confirm real_chat
 
-DIREXIO_CONFIRM_RUNTIME_PROBE=1 \
-DIREXIO_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" \
+DIREXTALK_CONFIRM_RUNTIME_PROBE=1 \
+DIREXTALK_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" \
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh confirm agent_mcp_runtime
 
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh report new_deploy
 ```
 
 `confirm agent_mcp_runtime` refuses to write the gate until
-`runtime_checks.summary.status=passed` and `DIREXIO_CONFIRM_RUNTIME_PROBE=1`
+`runtime_checks.summary.status=passed` and `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`
 are both present. Use the flag only after the selected runtime/channel probe has
 actually loaded the service-scoped MCP tools; `verify runtime` alone is an
 internal non-polluting check, not the full product gate.
-All `confirm` commands require `DIREXIO_CONFIRM_EVIDENCE` with a concrete
+All `confirm` commands require `DIREXTALK_CONFIRM_EVIDENCE` with a concrete
 user/runtime evidence note; do not write user-confirmation gates with generic
 default evidence. The evidence note must be at least 12 characters; avoid
 placeholders such as `ok`, `yes`, or `done`.
@@ -232,13 +232,13 @@ Update the running service image without recreating infrastructure or deleting
 data:
 
 ```bash
-DOMAIN=__DOMAIN__ MESSAGE_SERVER_IMAGE=direxio/message-server:latest bash scripts/update.sh
-DIREXIO_EXISTING_STATE_ACTION=continue DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
+DOMAIN=__DOMAIN__ MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest bash scripts/update.sh
+DIREXTALK_EXISTING_STATE_ACTION=continue DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
 ```
 
 `update.sh` SSHes to the recorded cloud instance, runs Docker Compose pull/up,
-reruns `/var/direxio-message-server/init-tokens.sh`, clears stale local secret fields, stops only
-the matching service-scoped direxio-connect daemon when its `WorkDir` matches
+reruns `/var/dirextalk-message-server/init-tokens.sh`, clears stale local secret fields, stops only
+the matching service-scoped dirextalk-connect daemon when its `WorkDir` matches
 this service, and marks S4-S7 pending so health, credential sync, local
 MCP/agent wiring, and final verification run again. It does not remove Docker
 volumes.
@@ -249,14 +249,14 @@ Reset application data while preserving the cloud instance, fixed public
 IP/static IP or Elastic IP, DNS, and Caddy TLS volumes:
 
 ```bash
-DIREXIO_RESET_APP_DATA_CONFIRM=1 DOMAIN=__DOMAIN__ bash scripts/reset-app-data.sh
-DIREXIO_EXISTING_STATE_ACTION=continue DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
+DIREXTALK_RESET_APP_DATA_CONFIRM=1 DOMAIN=__DOMAIN__ bash scripts/reset-app-data.sh
+DIREXTALK_EXISTING_STATE_ACTION=continue DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
 ```
 
 `reset-app-data.sh` removes only `postgres-data`, `message-config`, and
 `message-data`. It must not remove `caddy-data` or `caddy-config`; losing those
 volumes can trigger certificate reissuance and Let's Encrypt rate limits. It
-stops only the matching service-scoped direxio-connect daemon when its `WorkDir`
+stops only the matching service-scoped dirextalk-connect daemon when its `WorkDir`
 matches this service. After reset, treat old app users, rooms, messages,
 initialization code, access token, agent token, and agent room as stale until
 S5-S7 complete again.
@@ -286,14 +286,14 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
    ```
    Once the endpoint returns 200, re-run orchestrate.sh to complete:
    ```bash
-   DIREXIO_EXISTING_STATE_ACTION=continue \
+   DIREXTALK_EXISTING_STATE_ACTION=continue \
    DNS_READY=1 \
-   AWS_PROFILE=direxio-deployer \
+   AWS_PROFILE=dirextalk-deployer \
    AWS_DEFAULT_REGION=us-east-1 \
    DOMAIN=<DOMAIN> \
    DOMAIN_MODE=route53 \
    CONFIRM_DOMAIN_BINDING=1 \
-   DIREXIO_CLOUD_PROVIDER=lightsail \
+   DIREXTALK_CLOUD_PROVIDER=lightsail \
    bash scripts/orchestrate.sh
    ```
 
@@ -322,8 +322,8 @@ before changing DNS and records `route53_existing_a_value` plus
 that the old IP is safe to replace:
 
 ```bash
-DIREXIO_CONFIRM_DNS_OVERWRITE=1 \
-DIREXIO_EXISTING_STATE_ACTION=continue \
+DIREXTALK_CONFIRM_DNS_OVERWRITE=1 \
+DIREXTALK_EXISTING_STATE_ACTION=continue \
 DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=route53 \
 CONFIRM_DOMAIN_BINDING=1 \
@@ -334,13 +334,13 @@ If the domain is registered outside Route53, delegate the recorded nameservers
 at the current registrar or through a provider API:
 
 ```bash
-node scripts/json.mjs get ~/.direxio/nodes/<service_id>/state.json resources
+node scripts/json.mjs get ~/.dirextalk/nodes/<service_id>/state.json resources
 ```
 
 After authoritative DNS returns the new IP, continue with the same state:
 
 ```bash
-DIREXIO_EXISTING_STATE_ACTION=continue \
+DIREXTALK_EXISTING_STATE_ACTION=continue \
 DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=route53 \
 CONFIRM_DOMAIN_BINDING=1 \
@@ -366,14 +366,14 @@ After authoritative DNS returns the new IP:
 
 ```bash
 DNS_READY=1 \
-AWS_PROFILE=direxio-deployer \
+AWS_PROFILE=dirextalk-deployer \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
-DIREXIO_CLOUD_PROVIDER=lightsail \
-MESSAGE_SERVER_IMAGE=direxio/message-server:latest \
-DIREXIO_EXISTING_STATE_ACTION=continue \
+DIREXTALK_CLOUD_PROVIDER=lightsail \
+MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
+DIREXTALK_EXISTING_STATE_ACTION=continue \
 bash scripts/orchestrate.sh
 ```
 
@@ -390,4 +390,4 @@ access_token
 as_url
 ```
 
-All fields are written to `~/.direxio/nodes/<service_id>/credentials.json` with mode `0600`.
+All fields are written to `~/.dirextalk/nodes/<service_id>/credentials.json` with mode `0600`.

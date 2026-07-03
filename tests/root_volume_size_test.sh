@@ -9,8 +9,8 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
-export DIREXIO_WORKDIR="$tmp/work"
-mkdir -p "$HOME" "$DIREXIO_WORKDIR"
+export DIREXTALK_WORKDIR="$tmp/work"
+mkdir -p "$HOME" "$DIREXTALK_WORKDIR"
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"

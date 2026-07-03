@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lib/region.sh - local AWS region recommendation helpers.
 
-direxio_timezone_name() {
+dirextalk_timezone_name() {
   if [ -n "${TZ:-}" ]; then
     printf '%s\n' "$TZ"
     return 0
@@ -19,7 +19,7 @@ direxio_timezone_name() {
   return 0
 }
 
-direxio_utc_offset_hours() {
+dirextalk_utc_offset_hours() {
   date +%z 2>/dev/null | awk '
     /^[+-][0-9][0-9][0-9][0-9]$/ {
       sign=substr($0,1,1)
@@ -31,10 +31,10 @@ direxio_utc_offset_hours() {
     }'
 }
 
-direxio_recommend_region() {
+dirextalk_recommend_region() {
   local tz offset region reason
-  tz=$(direxio_timezone_name)
-  offset=$(direxio_utc_offset_hours)
+  tz=$(dirextalk_timezone_name)
+  offset=$(dirextalk_utc_offset_hours)
   case "$tz" in
     Asia/Shanghai|Asia/Chongqing|Asia/Harbin|Asia/Urumqi|Asia/Hong_Kong|Asia/Macau|Asia/Taipei)
       region=ap-east-1

@@ -9,46 +9,46 @@ trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
 mkdir -p "$HOME"
-unset DIREXIO_WORKDIR
+unset DIREXTALK_WORKDIR
 export DOMAIN="Service.Example.test"
 
 # shellcheck disable=SC1090
 source "$ROOT/scripts/lib/state.sh"
 
-[ "$DIREXIO_WORKDIR" = "$HOME/.direxio/nodes/service.example.test" ]
-[ "$STATE_JSON" = "$HOME/.direxio/nodes/service.example.test/state.json" ]
+[ "$DIREXTALK_WORKDIR" = "$HOME/.dirextalk/nodes/service.example.test" ]
+[ "$STATE_JSON" = "$HOME/.dirextalk/nodes/service.example.test/state.json" ]
 
 (
-  unset DIREXIO_WORKDIR
-  export DIREXIO_WORKDIR="$HOME/.direxio/custom-workdir"
+  unset DIREXTALK_WORKDIR
+  export DIREXTALK_WORKDIR="$HOME/.dirextalk/custom-workdir"
   # shellcheck disable=SC1090
   source "$ROOT/scripts/lib/state.sh"
-  [ "$DIREXIO_WORKDIR" = "$HOME/.direxio/custom-workdir" ]
-  [ "$STATE_JSON" = "$HOME/.direxio/custom-workdir/state.json" ]
+  [ "$DIREXTALK_WORKDIR" = "$HOME/.dirextalk/custom-workdir" ]
+  [ "$STATE_JSON" = "$HOME/.dirextalk/custom-workdir/state.json" ]
 )
 
-rm -rf "$HOME/.direxio"
+rm -rf "$HOME/.dirextalk"
 (
-  unset DOMAIN DIREXIO_WORKDIR
+  unset DOMAIN DIREXTALK_WORKDIR
   HOME="$HOME" bash "$ROOT/scripts/orchestrate.sh" status >/dev/null 2>&1
 )
-[ ! -e "$HOME/.direxio/deploy" ]
-[ ! -e "$HOME/.direxio/nodes/state.json" ]
+[ ! -e "$HOME/.dirextalk/deploy" ]
+[ ! -e "$HOME/.dirextalk/nodes/state.json" ]
 
-mkdir -p "$HOME/.direxio/nodes/solo.example.test"
-json_build object domain=solo.example.test phase=S3_PROVISION 'resources={"instance_id":"i-solo"}' > "$HOME/.direxio/nodes/solo.example.test/state.json"
+mkdir -p "$HOME/.dirextalk/nodes/solo.example.test"
+json_build object domain=solo.example.test phase=S3_PROVISION 'resources={"instance_id":"i-solo"}' > "$HOME/.dirextalk/nodes/solo.example.test/state.json"
 (
-  unset DOMAIN DIREXIO_WORKDIR
+  unset DOMAIN DIREXTALK_WORKDIR
   # shellcheck disable=SC1090
   source "$ROOT/scripts/lib/state.sh"
-  [ "$DIREXIO_WORKDIR" = "$HOME/.direxio/nodes" ]
-  [ "$STATE_JSON" = "$HOME/.direxio/nodes/state.json" ]
+  [ "$DIREXTALK_WORKDIR" = "$HOME/.dirextalk/nodes" ]
+  [ "$STATE_JSON" = "$HOME/.dirextalk/nodes/state.json" ]
 )
 
-mkdir -p "$HOME/.direxio/nodes/second.example.test"
-json_build object domain=second.example.test phase=S6_WIRE_LOCAL 'resources={"instance_id":"i-second"}' > "$HOME/.direxio/nodes/second.example.test/state.json"
+mkdir -p "$HOME/.dirextalk/nodes/second.example.test"
+json_build object domain=second.example.test phase=S6_WIRE_LOCAL 'resources={"instance_id":"i-second"}' > "$HOME/.dirextalk/nodes/second.example.test/state.json"
 status_output=$(
-  unset DOMAIN DIREXIO_WORKDIR
+  unset DOMAIN DIREXTALK_WORKDIR
   HOME="$HOME" bash "$ROOT/scripts/orchestrate.sh" status
 )
 [[ "$status_output" == *"solo.example.test"* ]]

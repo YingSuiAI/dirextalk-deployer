@@ -48,7 +48,7 @@ write_state() {
 
 pre_resource_workdir="$tmp/pre-resource"
 write_state "$pre_resource_workdir" "S2_DOMAIN" "waiting_user" '{}'
-pre_resource_output=$(DIREXIO_WORKDIR="$pre_resource_workdir" bash "$ROOT/scripts/orchestrate.sh" status)
+pre_resource_output=$(DIREXTALK_WORKDIR="$pre_resource_workdir" bash "$ROOT/scripts/orchestrate.sh" status)
 
 assert_contains "$pre_resource_output" "Recovery summary"
 assert_contains "$pre_resource_output" "Where it is blocked: S2_DOMAIN"
@@ -59,12 +59,12 @@ assert_contains "$pre_resource_output" "Stop-loss: no recorded cloud resources n
 
 billable_workdir="$tmp/billable"
 write_state "$billable_workdir" "S4_BOOTSTRAP_STACK" "failed" '{"instance_id":"i-status","root_volume_id":"vol-status-root","public_ip":"203.0.113.10","eip_id":"eipalloc-status","route53_zone_id":"ZSTATUS"}'
-billable_output=$(DIREXIO_WORKDIR="$billable_workdir" bash "$ROOT/scripts/orchestrate.sh" status)
+billable_output=$(DIREXTALK_WORKDIR="$billable_workdir" bash "$ROOT/scripts/orchestrate.sh" status)
 
 assert_contains "$billable_output" "Recovery summary"
 assert_contains "$billable_output" "Where it is blocked: S4_BOOTSTRAP_STACK"
 assert_contains "$billable_output" "Billing impact: recorded AWS resources may keep billing: EC2 i-status, EBS root volume vol-status-root, public IPv4 203.0.113.10, Elastic IP eipalloc-status, Route53 hosted zone ZSTATUS"
-assert_contains "$billable_output" "Resume safety: do not reset state; fix the issue and rerun with DIREXIO_EXISTING_STATE_ACTION=continue"
+assert_contains "$billable_output" "Resume safety: do not reset state; fix the issue and rerun with DIREXTALK_EXISTING_STATE_ACTION=continue"
 assert_contains "$billable_output" "Next action: inspect cloud-init, Docker, Caddy/TLS, and message-server logs over SSH"
 assert_contains "$billable_output" "Stop-loss: ask the agent to run destroy, or run:"
 assert_contains "$billable_output" "destroy.sh"
@@ -75,7 +75,7 @@ json_mutate "$refresh_workdir/state.json" set-string connect_install_status refr
 json_mutate "$refresh_workdir/state.json" set-string agent_service_id status.example.test
 json_mutate "$refresh_workdir/state.json" set-json user_confirmations.app_initialization '{"status":"confirmed","evidence":"old app proof"}'
 json_mutate "$refresh_workdir/state.json" set-json runtime_checks.summary '{"status":"passed"}'
-refresh_output=$(DIREXIO_WORKDIR="$refresh_workdir" bash "$ROOT/scripts/orchestrate.sh" status)
+refresh_output=$(DIREXTALK_WORKDIR="$refresh_workdir" bash "$ROOT/scripts/orchestrate.sh" status)
 
 assert_contains "$refresh_output" "Recovery summary"
 assert_contains "$refresh_output" "Local refresh: reset/redeploy cleared old credentials, user confirmations, runtime checks, bridge install proof, and MCP install proof"

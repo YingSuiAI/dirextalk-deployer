@@ -8,14 +8,14 @@ trap 'rm -rf "$tmp"' EXIT
 bash "$ROOT/scripts/render/render-userdata.sh" \
   --domain service.example.test \
   --acme ops@example.test \
-  --message-server-image direxio/message-server:test \
+  --message-server-image dirextalk/message-server:test \
   > "$tmp/user-data.yaml"
 
 bash "$ROOT/scripts/render/render-userdata.sh" \
   --format shell \
   --domain service.example.test \
   --acme ops@example.test \
-  --message-server-image direxio/message-server:test \
+  --message-server-image dirextalk/message-server:test \
   > "$tmp/user-data.sh"
 
 grep -q '^#cloud-config' "$tmp/user-data.yaml"
@@ -33,7 +33,7 @@ if grep -q '^#cloud-config' "$tmp/user-data.sh"; then
   echo "Lightsail shell user-data must not be rendered as cloud-config" >&2
   exit 1
 fi
-grep -q 'base64 --decode > /var/direxio-message-server/bundle.tar.gz' "$tmp/user-data.sh"
+grep -q 'base64 --decode > /var/dirextalk-message-server/bundle.tar.gz' "$tmp/user-data.sh"
 grep -q 'docker compose --env-file .env up -d' "$tmp/user-data.sh"
 
 awk '/encoding: b64/ { getline; sub(/^    content: /, ""); print; exit }' "$tmp/user-data.yaml" \
@@ -46,21 +46,21 @@ if grep -q 'P2P_REMOTE_NODE_' "$tmp/user-data.yaml"; then
   exit 1
 fi
 
-grep -q '/var/direxio-message-server/bundle.tar.gz' "$tmp/user-data.yaml"
-grep -q 'cd /var/direxio-message-server' "$tmp/user-data.yaml"
-grep -q '/etc/direxio-message-server/message-server.yaml' "$tmp/bundle/docker-compose.yml"
-grep -q '/var/direxio-message-server/p2p/bootstrap.json' "$tmp/bundle/docker-compose.yml"
-grep -q 'P2P_PORTAL_CREDENTIALS_FILE: /var/direxio-message-server/p2p/bootstrap.json' "$tmp/bundle/docker-compose.yml"
+grep -q '/var/dirextalk-message-server/bundle.tar.gz' "$tmp/user-data.yaml"
+grep -q 'cd /var/dirextalk-message-server' "$tmp/user-data.yaml"
+grep -q '/etc/dirextalk-message-server/message-server.yaml' "$tmp/bundle/docker-compose.yml"
+grep -q '/var/dirextalk-message-server/p2p/bootstrap.json' "$tmp/bundle/docker-compose.yml"
+grep -q 'P2P_PORTAL_CREDENTIALS_FILE: /var/dirextalk-message-server/p2p/bootstrap.json' "$tmp/bundle/docker-compose.yml"
 grep -q 'P2P_PORTAL_PASSWORD: ${P2P_PORTAL_PASSWORD}' "$tmp/bundle/docker-compose.yml"
 awk '
   /^  message-server:/ { in_service=1; next }
   /^  [^[:space:]].*:/ { in_service=0 }
-  in_service && /\/var\/direxio-message-server\/p2p:\/var\/direxio-message-server\/p2p/ { found=1 }
+  in_service && /\/var\/dirextalk-message-server\/p2p:\/var\/dirextalk-message-server\/p2p/ { found=1 }
   END { exit found ? 0 : 1 }
 ' "$tmp/bundle/docker-compose.yml"
 grep -F -q 'handle /.well-known/portal/*' "$tmp/bundle/Caddyfile"
 grep -F -q 'reverse_proxy message-server:8008' "$tmp/bundle/Caddyfile"
-deprecated_wellknown_dir="/var/direxio-message-server/""wellknown"
+deprecated_wellknown_dir="/var/dirextalk-message-server/""wellknown"
 deprecated_caddy_mount="/srv/""p2p"
 deprecated_static_server="file_""server"
 if grep -R -q "$deprecated_wellknown_dir\\|$deprecated_caddy_mount\\|$deprecated_static_server" "$tmp/bundle/docker-compose.yml" "$tmp/bundle/Caddyfile" "$tmp/user-data.yaml"; then
@@ -68,8 +68,8 @@ if grep -R -q "$deprecated_wellknown_dir\\|$deprecated_caddy_mount\\|$deprecated
   exit 1
 fi
 grep -q '^    grep -q .*P2P_PORTAL_PASSWORD=' "$tmp/user-data.yaml"
-grep -q '/var/direxio-message-server/p2p/bootstrap.json' "$tmp/bundle/init-tokens.sh"
-grep -q 'BOOTSTRAP_FILE=${BOOTSTRAP_FILE:-/var/direxio-message-server/p2p/bootstrap.json}' "$tmp/bundle/init-tokens.sh"
+grep -q '/var/dirextalk-message-server/p2p/bootstrap.json' "$tmp/bundle/init-tokens.sh"
+grep -q 'BOOTSTRAP_FILE=${BOOTSTRAP_FILE:-/var/dirextalk-message-server/p2p/bootstrap.json}' "$tmp/bundle/init-tokens.sh"
 grep -q 'if \[ -s "$BOOTSTRAP_FILE" \]' "$tmp/bundle/init-tokens.sh"
 if grep -q 'exec -T message-server sh -c .*bootstrap.json' "$tmp/bundle/init-tokens.sh"; then
   echo "init-tokens.sh must not copy bootstrap credentials out of the container" >&2
@@ -96,7 +96,7 @@ grep -q '/_matrix/client/v3/createRoom' "$tmp/bundle/init-tokens.sh"
 grep -q '/_matrix/client/v3/rooms/${room_path}/join' "$tmp/bundle/init-tokens.sh"
 
 if grep -R -q '/etc/dendrite\|/var/dendrite\|dendrite.yaml' "$tmp/bundle"; then
-  echo "rendered bundle must use direxio-message-server paths, not legacy dendrite paths" >&2
+  echo "rendered bundle must use dirextalk-message-server paths, not legacy dendrite paths" >&2
   exit 1
 fi
 

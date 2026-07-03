@@ -3,7 +3,7 @@
 #
 # Bundle cloud-init deployment files (docker-compose.yml / Caddyfile /
 # init-tokens.sh) into a tar.gz, inline it as one write_files entry, and unpack
-# it to /var/direxio-message-server in runcmd. Comment-only lines are stripped at the end to keep
+# it to /var/dirextalk-message-server in runcmd. Comment-only lines are stripped at the end to keep
 # AWS user-data below the 16384-byte limit. Replaces __DOMAIN__ /
 # __ACME_EMAIL__ / __MESSAGE_SERVER_IMAGE__; the EC2 instance does not need to
 # clone repos.
@@ -60,43 +60,43 @@ if [ "$FORMAT" = "shell" ]; then
 #!/usr/bin/env bash
 set -eux
 
-mkdir -p /var/direxio-message-server
-cat > /var/direxio-message-server/.env <<'DIREXIO_ENV'
+mkdir -p /var/dirextalk-message-server
+cat > /var/dirextalk-message-server/.env <<'DIREXTALK_ENV'
 DOMAIN=$DOMAIN
 ACME_EMAIL=$ACME
 MESSAGE_SERVER_IMAGE=$MESSAGE_SERVER_IMAGE
-DIREXIO_ENV
+DIREXTALK_ENV
 
-base64 --decode > /var/direxio-message-server/bundle.tar.gz <<'DIREXIO_BUNDLE'
+base64 --decode > /var/dirextalk-message-server/bundle.tar.gz <<'DIREXTALK_BUNDLE'
 $BUNDLE_B64
-DIREXIO_BUNDLE
+DIREXTALK_BUNDLE
 
-tar -xzf /var/direxio-message-server/bundle.tar.gz -C /var/direxio-message-server
-chmod 0755 /var/direxio-message-server/init-tokens.sh
+tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server
+chmod 0755 /var/dirextalk-message-server/init-tokens.sh
 
 TOK=\$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \\
       -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)
 IP=\$(curl -s -H "X-aws-ec2-metadata-token: \$TOK" \\
        http://169.254.169.254/latest/meta-data/public-ipv4 || true)
 [ -n "\$IP" ] || IP=\$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
-grep -q '^PUBLIC_IP=' /var/direxio-message-server/.env || echo "PUBLIC_IP=\$IP" >> /var/direxio-message-server/.env
-grep -q '^TURN_SECRET=' /var/direxio-message-server/.env || \\
-  echo "TURN_SECRET=\$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)" >> /var/direxio-message-server/.env
-grep -q '^P2P_PORTAL_PASSWORD=' /var/direxio-message-server/.env || \\
-  echo "P2P_PORTAL_PASSWORD=\$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", \$1 % 100000000}')" >> /var/direxio-message-server/.env
+grep -q '^PUBLIC_IP=' /var/dirextalk-message-server/.env || echo "PUBLIC_IP=\$IP" >> /var/dirextalk-message-server/.env
+grep -q '^TURN_SECRET=' /var/dirextalk-message-server/.env || \\
+  echo "TURN_SECRET=\$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)" >> /var/dirextalk-message-server/.env
+grep -q '^P2P_PORTAL_PASSWORD=' /var/dirextalk-message-server/.env || \\
+  echo "P2P_PORTAL_PASSWORD=\$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", \$1 % 100000000}')" >> /var/dirextalk-message-server/.env
 
-export DOMAIN=\$(grep '^DOMAIN=' /var/direxio-message-server/.env | cut -d= -f2)
+export DOMAIN=\$(grep '^DOMAIN=' /var/dirextalk-message-server/.env | cut -d= -f2)
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
 fi
 systemctl enable --now docker
-mkdir -p /var/direxio-message-server/p2p
-chmod 700 /var/direxio-message-server
-cd /var/direxio-message-server
+mkdir -p /var/dirextalk-message-server/p2p
+chmod 700 /var/dirextalk-message-server
+cd /var/dirextalk-message-server
 docker compose --env-file .env pull
 docker compose --env-file .env up -d
 DOMAIN="\$DOMAIN" bash init-tokens.sh
-touch /var/direxio-message-server/.deploy-done
+touch /var/dirextalk-message-server/.deploy-done
 EOF
   exit 0
 fi
@@ -105,14 +105,14 @@ fi
 # Avoid passing multiline strings via awk -v; macOS awk rejects newline in string.
 EXTRA_WF=$(mktemp); trap 'rm -rf "$WORK" "$EXTRA_WF"' EXIT
 cat > "$EXTRA_WF" <<EOF
-  - path: /var/direxio-message-server/bundle.tar.gz
+  - path: /var/dirextalk-message-server/bundle.tar.gz
     permissions: '0644'
     encoding: b64
     content: $BUNDLE_B64
 EOF
 
 # Insert unpack as the first runcmd step before Docker install / compose up.
-UNPACK='  - mkdir -p /var/direxio-message-server && tar -xzf /var/direxio-message-server/bundle.tar.gz -C /var/direxio-message-server && chmod 0755 /var/direxio-message-server/init-tokens.sh'
+UNPACK='  - mkdir -p /var/dirextalk-message-server && tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server && chmod 0755 /var/dirextalk-message-server/init-tokens.sh'
 
 strip_userdata_comments() {
   awk '

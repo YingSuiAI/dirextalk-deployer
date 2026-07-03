@@ -1,8 +1,8 @@
-# connect-daemon-logs.sh - shared direxio-connect daemon log classification.
+# connect-daemon-logs.sh - shared dirextalk-connect daemon log classification.
 
 connect_recent_daemon_logs() {
   awk '
-    /config loaded|direxio-connect is running|acquired instance lock/ {
+    /config loaded|dirextalk-connect is running|acquired instance lock/ {
       buffer = ""
     }
     {
@@ -24,18 +24,18 @@ connect_daemon_agent_error_from_text() {
 
 connect_daemon_ready_from_text() {
   connect_recent_daemon_logs "$1" \
-    | grep -Eio 'direxio-connect is running' \
+    | grep -Eio 'dirextalk-connect is running' \
     | head -n 1 || true
 }
 
 connect_daemon_agent_error_from_logs() {
   local binary=$1 service_name=$2 logs
-  logs=$("$binary" daemon logs --service-name "$service_name" -n "${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}" 2>/dev/null || true)
+  logs=$("$binary" daemon logs --service-name "$service_name" -n "${DIREXTALK_CONNECT_LOG_TAIL_LINES:-120}" 2>/dev/null || true)
   connect_daemon_agent_error_from_text "$logs"
 }
 
 connect_daemon_ready_from_logs() {
   local binary=$1 service_name=$2 logs
-  logs=$("$binary" daemon logs --service-name "$service_name" -n "${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}" 2>/dev/null || true)
+  logs=$("$binary" daemon logs --service-name "$service_name" -n "${DIREXTALK_CONNECT_LOG_TAIL_LINES:-120}" 2>/dev/null || true)
   connect_daemon_ready_from_text "$logs"
 }

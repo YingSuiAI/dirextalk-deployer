@@ -38,7 +38,7 @@ esac
 EOF
 chmod 700 "$fakebin/aws"
 
-service_dir="$HOME/.direxio/nodes/root-destroy.example.test"
+service_dir="$HOME/.dirextalk/nodes/root-destroy.example.test"
 mkdir -p "$service_dir"
 state="$service_dir/state.json"
 json_build object \
@@ -47,7 +47,7 @@ json_build object \
   domain=root-destroy.example.test \
   "agent_service_dir=$service_dir" \
   agent_service_id=root-destroy.example.test \
-  'resources={"instance_id":"i-root-destroy","eip_id":"eipalloc-root-destroy","sg_id":"sg-root-destroy","key_name":"direxio-root-destroy"}' > "$state"
+  'resources={"instance_id":"i-root-destroy","eip_id":"eipalloc-root-destroy","sg_id":"sg-root-destroy","key_name":"dirextalk-root-destroy"}' > "$state"
 
 calls="$tmp/aws.calls"
 : > "$calls"

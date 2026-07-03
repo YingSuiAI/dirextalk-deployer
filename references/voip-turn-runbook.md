@@ -58,7 +58,7 @@ skill 不部署 coturn,只把服务商给的 `uris + username/password` 写进 D
   # DOMAIN/PUBLIC_IP/TURN_SECRET 由 .env 注入(user-data 写)。
   coturn:
     image: coturn/coturn:latest
-    network_mode: host          # relay 必须;不要放进 direxio-net 桥接网络
+    network_mode: host          # relay 必须;不要放进 dirextalk-net 桥接网络
     restart: unless-stopped
     command:
       - -n
@@ -74,7 +74,7 @@ skill 不部署 coturn,只把服务商给的 `uris + username/password` 写进 D
       - --no-tls
       - --no-dtls
 ```
-> 注:`network_mode: host` 与现有 `networks: [direxio-net]` 不兼容,coturn 单独用 host 网络。
+> 注:`network_mode: host` 与现有 `networks: [dirextalk-net]` 不兼容,coturn 单独用 host 网络。
 > 其余服务不变。
 
 ### 2. `phases/s3_provision.sh` — 安全组加 TURN 端口
@@ -96,9 +96,9 @@ aws ec2 authorize-security-group-ingress --group-id "$sg" --protocol udp --port 
 在 cloud-init 的 IMDS 取公网 IP 那步顺便落 `PUBLIC_IP`;再生成一个随机 `TURN_SECRET`:
 ```bash
 # 已有:IP=$(curl ... public-ipv4)
-echo "PUBLIC_IP=$IP" >> /var/direxio-message-server/.env
+echo "PUBLIC_IP=$IP" >> /var/dirextalk-message-server/.env
 # TURN 共享密钥(随机,homeserver 与 coturn 共用)
-echo "TURN_SECRET=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 40)" >> /var/direxio-message-server/.env
+echo "TURN_SECRET=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 40)" >> /var/dirextalk-message-server/.env
 ```
 > 注:custom 域名模式下 PUBLIC_IP 取不到 IMDS 也能用 `curl ifconfig.me` 兜底;或由 deploy 端注入。
 

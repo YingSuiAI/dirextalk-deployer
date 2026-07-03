@@ -10,25 +10,25 @@ Symptom:
 
 ```text
 S5_INIT_TOKENS failed: read bootstrap.json timed out
-/var/direxio-message-server/p2p/bootstrap.json was missing or incomplete
+/var/dirextalk-message-server/p2p/bootstrap.json was missing or incomplete
 ```
 
 Cause:
 
-Current Direxio message-server builds honor
-`P2P_PORTAL_CREDENTIALS_FILE=/var/direxio-message-server/p2p/bootstrap.json`.
+Current Dirextalk message-server builds honor
+`P2P_PORTAL_CREDENTIALS_FILE=/var/dirextalk-message-server/p2p/bootstrap.json`.
 They write the login `password`, `agent_token`, owner metadata, and
 `agent_room_id` there on startup and after portal session changes.
 
 Fix now in ops:
 
 - `docker-compose.yml` bind-mounts only the container
-  `/var/direxio-message-server/p2p` subtree to the same host path, so the
+  `/var/dirextalk-message-server/p2p` subtree to the same host path, so the
   bootstrap file is directly readable from EC2 without exposing the whole data
   volume to Caddy.
 - Cloud-side `scripts/cloud-init/init-tokens.sh` waits for message-server
   `/_p2p/health` and calls `portal.bootstrap`.
-- Local S5 reads the file with `ssh ... sudo cat /var/direxio-message-server/p2p/bootstrap.json`,
+- Local S5 reads the file with `ssh ... sudo cat /var/dirextalk-message-server/p2p/bootstrap.json`,
   normalizes it into local `outputs.json`, and stores `password`/`agent_token`
   in state.
 
@@ -86,9 +86,9 @@ Fix now in ops:
   the local `timeout` command is available.
 - If a deployment was interrupted, inspect `scripts/orchestrate.sh status`,
   stop only leftover local `orchestrate.sh`/`curl`/`ssh` children for that run,
-  and resume with `DIREXIO_EXISTING_STATE_ACTION=continue`.
+  and resume with `DIREXTALK_EXISTING_STATE_ACTION=continue`.
 - If SSH to the instance is blocked but AWS access still works, attach a
-  temporary SSM role and use SSM Run Command to read `/var/direxio-message-server/p2p/bootstrap.json`
+  temporary SSM role and use SSM Run Command to read `/var/dirextalk-message-server/p2p/bootstrap.json`
   without printing secrets. Remove or audit the temporary role after recovery.
 
 ## DNS And State Handling
@@ -100,7 +100,7 @@ resolves correctly. This avoids Caddy and Let's Encrypt racing DNS propagation.
 When rerunning after a resource was created, set:
 
 ```bash
-DIREXIO_EXISTING_STATE_ACTION=continue
+DIREXTALK_EXISTING_STATE_ACTION=continue
 ```
 
 This is deliberate. It prevents accidental duplicate EC2/EIP creation or unsafe
@@ -111,11 +111,11 @@ reuse of an old deployment state.
 Offer two credential paths for first-time deployment. Root access keys are the
 fastest path but are highly privileged; report that the identity is root,
 remind the operator to save the CSV securely, and rotate or remove the key when
-it is no longer needed. A temporary `DirexioDeployer` IAM user or dedicated IAM
+it is no longer needed. A temporary `DirextalkDeployer` IAM user or dedicated IAM
 role is safer but requires more AWS console steps.
 
 Do not store AWS AK/SK in skill files, docs, or committed repo files. Treat
-`state.json`, `outputs.json`, and `~/.direxio/nodes/<service_id>/credentials.json` as local
+`state.json`, `outputs.json`, and `~/.dirextalk/nodes/<service_id>/credentials.json` as local
 secrets because they contain the portal/agent token after S5.
 
 ## Route53 Delegation From Third-Party Registrar
@@ -137,12 +137,12 @@ Fix procedure:
 
 1. Read the created or reused zone details from `state.json`:
    ```bash
-   node scripts/json.mjs get ~/.direxio/nodes/<service_id>/state.json resources
+   node scripts/json.mjs get ~/.dirextalk/nodes/<service_id>/state.json resources
    ```
 2. Delegate those NS servers at the current registrar, or use the provider API
    if credentials are available.
 3. Wait for authoritative NS and A-record propagation.
-4. Re-run `scripts/orchestrate.sh` with `DIREXIO_EXISTING_STATE_ACTION=continue`.
+4. Re-run `scripts/orchestrate.sh` with `DIREXTALK_EXISTING_STATE_ACTION=continue`.
 
 DNS propagation of new NS records can take minutes to hours. After the user
 confirms the change, verify with `nslookup -type=NS <DOMAIN>` or
@@ -153,7 +153,7 @@ Always report:
 
 - App domain and eight-digit app initialization code, with the code sourced from the backend `password` field.
 - Portal token or where it was written.
-- `~/.direxio/nodes/<service_id>/credentials.json` status and profile shape.
+- `~/.dirextalk/nodes/<service_id>/credentials.json` status and profile shape.
 - AWS region, EC2 instance ID, public IP, security group, state path, SSH command.
 - Stop-billing guidance: ask the agent to destroy this node when finished; AWS resources keep billing until teardown completes.
 - Any manual DNS record the user owns outside Route53.
@@ -180,8 +180,8 @@ Workaround (use when the health check is the only blocker and the rate limit is 
 
 2. Write the modified Caddyfile to the remote host. Use base64+SSH to avoid shell escaping issues:
    ```bash
-   echo '<base64-encoded-caddyfile>' | base64 -d | sudo tee /var/direxio-message-server/Caddyfile
-   sudo docker compose -f /var/direxio-message-server/docker-compose.yml restart caddy
+   echo '<base64-encoded-caddyfile>' | base64 -d | sudo tee /var/dirextalk-message-server/Caddyfile
+   sudo docker compose -f /var/dirextalk-message-server/docker-compose.yml restart caddy
    ```
 
 3. Wait 5 seconds, then verify HTTPS works:
@@ -192,7 +192,7 @@ Workaround (use when the health check is the only blocker and the rate limit is 
 
 4. Resume orchestrate.sh with:
    ```bash
-   DIREXIO_EXISTING_STATE_ACTION=continue bash scripts/orchestrate.sh
+   DIREXTALK_EXISTING_STATE_ACTION=continue bash scripts/orchestrate.sh
    ```
 
 5. **After deployment completes**, restore the original Caddyfile (remove `tls internal`) and restart Caddy. Caddy will retry the production Let's Encrypt cert when the rate limit resets. The self-signed cert is a temporary bridge; HTTPS will show a browser warning until the production cert is obtained.

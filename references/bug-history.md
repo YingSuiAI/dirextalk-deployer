@@ -3,16 +3,16 @@
 部署链路上所有真实踩过的坑。**已全部修进 `scripts/` 下的部署文件**,新部署不会再撞;
 列在这里是为了:① 理解每个设计决策的来由;② 若有人改坏了哪处,能快速定位回退点。
 
-## Legacy pre-Direxio message-server 仓库
+## Legacy pre-Dirextalk message-server 仓库
 
 ### AS PR #4 — 镜像多架构
 - **症状**:ARM 架构 EC2(t4g 系列)`docker pull` 后 `exec format error`。
 - **根因**:镜像只 build 了 amd64。
-- **修复**:CI 用 buildx 出 `amd64+arm64` 多架构镜像。legacy pre-Direxio AS 镜像已是多架构。
+- **修复**:CI 用 buildx 出 `amd64+arm64` 多架构镜像。legacy pre-Dirextalk AS 镜像已是多架构。
 
 ### AS PR #5 — 容器化体验
 - **卷权限**:命名卷默认 root:700,AS 降权到 asd(UID 10001)后打不开 sqlite → `SQLITE_CANTOPEN`。
-  修复:entrypoint chown `/var/direxio-message-server` `/data` 后再 `su-exec asd`。
+  修复:entrypoint chown `/var/dirextalk-message-server` `/data` 后再 `su-exec asd`。
 - **无健康检查**:compose 无法判断 AS 就绪。修复:Dockerfile 加 `HEALTHCHECK` 探 `:9090/healthz`。
 - **registration 路径写死**:registration.yaml 落在 cwd 不可配。修复:加 `RegistrationPath` 配置项。
 
@@ -30,7 +30,7 @@
 3. **Dendrite SQLite broken**(element-hq/dendrite#3435,`near "SEQUENCE" syntax error`)→ 加 `postgres:16-alpine`,Dendrite 连 PG。
 4. **Caddyfile `email {$ACME_EMAIL}` 为空** → `wrong argument count`。修复:删掉默认 email 块,Caddy 自动签不需要 email。
 5. **Dendrite 启动早于 AS 写 registration** → 竞态。修复:compose `depends_on: asd service_healthy` + `postgres service_healthy`。
-6. **旧 init-tokens.sh 经 Caddy 308 跳转** → HTTP 初始化失败。当前流程改为在 message-server 健康后等待 bind-mounted `/var/direxio-message-server/p2p/bootstrap.json`。
+6. **旧 init-tokens.sh 经 Caddy 308 跳转** → HTTP 初始化失败。当前流程改为在 message-server 健康后等待 bind-mounted `/var/dirextalk-message-server/p2p/bootstrap.json`。
 7. **init-tokens.sh CRLF** → `pipefail: invalid option name`。修复:文件存为 LF(`sed -i 's/\r$//'`)。
 
 ### ops PR #3 — owner.json 发现
@@ -60,10 +60,10 @@
 这批来自一次真实"干净 macOS + 全新 AWS 账号"跑 skill 的实测,是之前没做过的端到端验证:
 - **macOS 默认 bash 3.2 不支持 `declare -A`**:`orchestrate.sh` 一启动就崩。修:阶段→脚本映射改用 `case`(`phase_file()`),不再用关联数组。
 - **S0 只认 AK/SK,本机有 `AWS_PROFILE` 也误判"没凭证"**:修:直接 `aws sts get-caller-identity` 判断凭证有效性(支持 profile/AK/SK/角色),仅在 sts 失败且既无 AK/SK 也无 AWS_PROFILE 时才算等用户。
-- **user-data 超 16384 字节硬上限**:三份部署文件各自 base64 内联会超限,AWS 报 `User data is limited to 16384 bytes`。修:打成一个 `bundle.tar.gz` 单条内联,开机 runcmd 第一步解包到 `/var/direxio-message-server`。实测降到 ~11KB。
-- **AS 读不到 `asd.yaml`(`permission denied`)**:把只读配置叠挂进 `/var/direxio-message-server` 与降权用户 cwd 冲突。修:`asd.yaml` 改挂 `/etc/p2p/asd.yaml`,`--config` 指向新路径;`/var/direxio-message-server` 只作共享运行输出目录。
+- **user-data 超 16384 字节硬上限**:三份部署文件各自 base64 内联会超限,AWS 报 `User data is limited to 16384 bytes`。修:打成一个 `bundle.tar.gz` 单条内联,开机 runcmd 第一步解包到 `/var/dirextalk-message-server`。实测降到 ~11KB。
+- **AS 读不到 `asd.yaml`(`permission denied`)**:把只读配置叠挂进 `/var/dirextalk-message-server` 与降权用户 cwd 冲突。修:`asd.yaml` 改挂 `/etc/p2p/asd.yaml`,`--config` 指向新路径;`/var/dirextalk-message-server` 只作共享运行输出目录。
 - **EC2 自带 `*.compute.amazonaws.com` 签不了 Let's Encrypt**(`rejectedIdentifier`)。历史修复曾给验收/试用流程加过 `<公网IP>.sslip.io` 临时域名,用于绕过 EC2 默认域名不能签证书的问题。当前正式部署接口已经移除该路径:没有最终域名时 S2 直接阻断,不创建 EC2;Matrix `server_name` 必须使用用户长期持有并能管理 DNS 的正式域名。
-- **宿主机读不到凭据文件**:message-server 在容器内写 `/var/direxio-message-server/p2p/bootstrap.json`,宿主机 S5 无法直接读取 Docker named volume。修:compose 把容器 `/var/direxio-message-server/p2p` bind 到宿主同路径,S5 用 `ssh ... sudo cat /var/direxio-message-server/p2p/bootstrap.json`。
+- **宿主机读不到凭据文件**:message-server 在容器内写 `/var/dirextalk-message-server/p2p/bootstrap.json`,宿主机 S5 无法直接读取 Docker named volume。修:compose 把容器 `/var/dirextalk-message-server/p2p` bind 到宿主同路径,S5 用 `ssh ... sudo cat /var/dirextalk-message-server/p2p/bootstrap.json`。
 - **旧 HTTP 初始化抢跑 Dendrite**:早期脚本主动发初始化请求,Dendrite 没 ready 时会返回 500,但脚本可能误判成功。当前流程已移除主动初始化请求,由 AS 启动成功后自行写 `bootstrap.json`;`init-tokens.sh` 只等待文件完整,失败即不写 `.deploy-done`,状态机如实反映失败。
 - **(client 侧,不在本仓库)** `/_as/auth` 返回容器内网 `http://dendrite:8008`,App 在用户机访问不到 → 前端遇到 `dendrite` 这类内部 host 时回退到用户输入的公网 Portal 地址。
 

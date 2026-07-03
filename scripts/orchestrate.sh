@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# orchestrate.sh - Direxio deployment state-machine engine.
+# orchestrate.sh - Dirextalk deployment state-machine engine.
 #
-# Turns "one AWS credential -> working Direxio server -> local direxio-connect bridge" into 8 phases
-# (S0..S7). State is persisted to $DIREXIO_WORKDIR/state.json and supports:
+# Turns "one AWS credential -> working Dirextalk server -> local dirextalk-connect bridge" into 8 phases
+# (S0..S7). State is persisted to $DIREXTALK_WORKDIR/state.json and supports:
 #   - resume: continue from the first unfinished phase
 #   - checkpoints: wait for user/AWS actions without losing progress
 #   - destroy: every AWS resource is recorded for destroy.sh
 #
 # Usage:
 #   export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-east-1
-#   export MESSAGE_SERVER_IMAGE=direxio/message-server:latest
+#   export MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
 #   # First run asks for region, production domain, instance size, and existing-state handling.
 #   # Non-interactive:
 #   #   DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=t3.small
@@ -21,7 +21,7 @@
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-DIREXIO_INSTALL_SCRIPTS_DIR="$HERE"
+DIREXTALK_INSTALL_SCRIPTS_DIR="$HERE"
 
 # Prefer workspace-local tools when present.
 REPO_ROOT=$(cd "$HERE/.." && pwd)
@@ -30,7 +30,7 @@ if [ -d "$REPO_ROOT/.tools/bin" ]; then
   export PATH
 fi
 
-DIREXIO_WORKDIR_WAS_SET=${DIREXIO_WORKDIR+x}
+DIREXTALK_WORKDIR_WAS_SET=${DIREXTALK_WORKDIR+x}
 
 source "$HERE/lib/state.sh"
 source "$HERE/lib/aws.sh"
@@ -69,8 +69,8 @@ check_deps() {
       warn "Install AWS CLI v2 and configure credentials first:"
       warn "  macOS: curl 'https://awscli.amazonaws.com/AWSCLIV2.pkg' -o AWSCLIV2.pkg && sudo installer -pkg ./AWSCLIV2.pkg -target /"
       warn "  Linux x86_64: curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o awscliv2.zip && unzip awscliv2.zip && sudo ./aws/install"
-      warn "  Configure: aws configure --profile direxio-deployer"
-      warn "  Use: export AWS_PROFILE=direxio-deployer AWS_DEFAULT_REGION=<region>"
+      warn "  Configure: aws configure --profile dirextalk-deployer"
+      warn "  Use: export AWS_PROFILE=dirextalk-deployer AWS_DEFAULT_REGION=<region>"
       warn "See references/user-journey.md for the AWS CLI setup guide."
       ;;
   esac
@@ -91,7 +91,7 @@ run_one_phase() {
 # Print current state summary.
 cmd_status_inventory() {
   local nodes state found=0 domain phase current instance service_dir
-  nodes="${DIREXIO_HOME:-$HOME/.direxio}/nodes"
+  nodes="${DIREXTALK_HOME:-$HOME/.dirextalk}/nodes"
   if [ ! -d "$nodes" ]; then
     warn "No local service directory found: $nodes"
     warn "Set DOMAIN=<service domain> when running or inspecting a specific deployment."
@@ -128,8 +128,8 @@ phase_user_meaning() {
     S2_DOMAIN)          echo "The long-lived domain, DNS authority, or irreversible Matrix server_name binding is not confirmed." ;;
     S3_PROVISION)       echo "AWS infrastructure provisioning, fixed public IP, security group, or DNS record setup is not complete." ;;
     S4_BOOTSTRAP_STACK) echo "The cloud instance exists, but cloud-init, Docker, Caddy/TLS, or message-server has not reached healthy state." ;;
-    S5_INIT_TOKENS)     echo "The server is not yet returning fresh bootstrap credentials from /var/direxio-message-server/p2p/bootstrap.json." ;;
-    S6_WIRE_LOCAL)      echo "The cloud service is likely up, but local direxio-connect, service credentials, or MCP snippets are not wired." ;;
+    S5_INIT_TOKENS)     echo "The server is not yet returning fresh bootstrap credentials from /var/dirextalk-message-server/p2p/bootstrap.json." ;;
+    S6_WIRE_LOCAL)      echo "The cloud service is likely up, but local dirextalk-connect, service credentials, or MCP snippets are not wired." ;;
     S7_VERIFY_E2E)      echo "The deployed service failed one or more final automated health, Matrix, CORS, TURN, or API checks." ;;
     DONE)               echo "Automated S0-S7 checks are complete." ;;
     *)                  echo "The deployment state is incomplete or unknown." ;;
@@ -197,7 +197,7 @@ status_resume_safety() {
   local current=$1 billable
   billable=$(recorded_billable_resources)
   if [ -n "$billable" ] || phase_at_or_after_s3 "$current"; then
-    echo "do not reset state; fix the issue and rerun with DIREXIO_EXISTING_STATE_ACTION=continue"
+    echo "do not reset state; fix the issue and rerun with DIREXTALK_EXISTING_STATE_ACTION=continue"
   else
     echo "safe to rerun the same command after the next action is complete"
   fi
@@ -229,8 +229,8 @@ status_next_action() {
     S2_DOMAIN)          echo "confirm the long-lived domain, DNS authority, and irreversible Matrix server_name binding" ;;
     S3_PROVISION)       echo "inspect Lightsail/EC2 provisioning, fixed public IP allocation, firewall/security group creation, and DNS record setup" ;;
     S4_BOOTSTRAP_STACK) echo "inspect cloud-init, Docker, Caddy/TLS, and message-server logs over SSH" ;;
-    S5_INIT_TOKENS)     echo "inspect /var/direxio-message-server/p2p/bootstrap.json, init-tokens.sh, and message-server bootstrap logs" ;;
-    S6_WIRE_LOCAL)      echo "refresh local credentials, direxio-connect config, MCP snippets, and agent runtime settings without destroying cloud resources" ;;
+    S5_INIT_TOKENS)     echo "inspect /var/dirextalk-message-server/p2p/bootstrap.json, init-tokens.sh, and message-server bootstrap logs" ;;
+    S6_WIRE_LOCAL)      echo "refresh local credentials, dirextalk-connect config, MCP snippets, and agent runtime settings without destroying cloud resources" ;;
     S7_VERIFY_E2E)      echo "inspect the failed health, Matrix, well-known, owner.json/CORS, TURN, MCP, or runtime gate before declaring delivery" ;;
     DONE)               echo "give the user the App domain and eight-digit initialization code, then record App initialization and agent/MCP confirmation separately" ;;
     *)                  echo "inspect state.json and the current phase evidence before taking action" ;;
@@ -245,7 +245,7 @@ status_stop_loss() {
     echo "no recorded cloud resources need destroy from this state"
   else
     echo "ask the agent to run destroy, or run:"
-    if [ "${DIREXIO_LOCAL_PATH_STYLE:-}" = "windows" ] || [ -n "${DIREXIO_WINDOWS_HOME:-}" ]; then
+    if [ "${DIREXTALK_LOCAL_PATH_STYLE:-}" = "windows" ] || [ -n "${DIREXTALK_WINDOWS_HOME:-}" ]; then
       echo "  \$env:DOMAIN = \"${domain:-__DOMAIN__}\"; .\\scripts\\destroy.ps1"
     else
       echo "  DOMAIN=${domain:-__DOMAIN__} bash $HERE/destroy.sh"
@@ -270,12 +270,12 @@ print_recovery_summary() {
 
 cmd_status() {
   if [ ! -f "$STATE_JSON" ]; then
-    if [ -z "${DOMAIN:-}" ] && [ -z "$DIREXIO_WORKDIR_WAS_SET" ]; then
+    if [ -z "${DOMAIN:-}" ] && [ -z "$DIREXTALK_WORKDIR_WAS_SET" ]; then
       cmd_status_inventory
       return 0
     fi
     warn "state.json not found: $STATE_JSON"
-    warn "Set DOMAIN=<service domain> or explicit DIREXIO_WORKDIR=<service dir> to inspect a specific deployment."
+    warn "Set DOMAIN=<service domain> or explicit DIREXTALK_WORKDIR=<service dir> to inspect a specific deployment."
     return 0
   fi
   echo "run_id     : $(state_get run_id)"
@@ -348,15 +348,15 @@ print_delivery() {
   echo "  agent node   : ${agent_node_id:-default}"
   echo "  service id   : ${agent_service_id:-not recorded}"
   echo "  service dir  : ${agent_service_dir:-not recorded}"
-  echo "  credentials  : init code/password field, access_token, and agent_token written to ${agent_cred:-~/.direxio/nodes/<service_id>/credentials.json}"
+  echo "  credentials  : init code/password field, access_token, and agent_token written to ${agent_cred:-~/.dirextalk/nodes/<service_id>/credentials.json}"
   echo "  agent room   : ${agent_room_id:-written to credentials.json}"
-  echo "  direxio-connect   : package=${cc_pkg:-direxio-connent@latest} config=${cc_config:-not recorded} command=${cc_binary:-direxio-connect}"
+  echo "  dirextalk-connect   : package=${cc_pkg:-dirextalk-connect@latest} config=${cc_config:-not recorded} command=${cc_binary:-dirextalk-connect}"
   echo "  matrix user  : ${cc_user:-created during S6}"
   echo "  agent runtime: ${runtime:-unknown}"
-  echo "  install mode : policy=${install_policy:-recommend} mode=${install_mode:-direxio-connect} agent=${cc_agent:-codex} status=${install_status:-recommend}"
+  echo "  install mode : policy=${install_policy:-recommend} mode=${install_mode:-dirextalk-connect} agent=${cc_agent:-codex} status=${install_status:-recommend}"
   [ -n "$install_command" ] && echo "  install cmd  : $install_command"
-  echo "  daemon       : ${cc_binary:-direxio-connect} daemon status --service-name ${agent_service_id:-direxio-connect}"
-  echo "  env vars     : DIREXIO_DOMAIN, DIREXIO_AGENT_TOKEN, DIREXIO_AGENT_ROOM_ID persisted${envfile:+ via $envfile}"
+  echo "  daemon       : ${cc_binary:-dirextalk-connect} daemon status --service-name ${agent_service_id:-dirextalk-connect}"
+  echo "  env vars     : DIREXTALK_DOMAIN, DIREXTALK_AGENT_TOKEN, DIREXTALK_AGENT_ROOM_ID persisted${envfile:+ via $envfile}"
   echo "  AWS region   : $region"
   echo "  cloud        : ${cloud_provider:-ec2}"
   echo "  $cloud_label          : $iid ($pubip)"
@@ -399,13 +399,13 @@ ensure_region_selected() {
         reason="region selected from AWS CLI profile configuration"
       fi
     fi
-    if [ -z "$region" ] && [ -n "${DIREXIO_DEFAULT_REGION:-}" ]; then
-      region=$DIREXIO_DEFAULT_REGION
+    if [ -z "$region" ] && [ -n "${DIREXTALK_DEFAULT_REGION:-}" ]; then
+      region=$DIREXTALK_DEFAULT_REGION
       source=env
-      reason="region selected from DIREXIO_DEFAULT_REGION"
+      reason="region selected from DIREXTALK_DEFAULT_REGION"
     fi
     if [ -z "$region" ] && [ -t 0 ]; then
-      row=$(direxio_recommend_region)
+      row=$(dirextalk_recommend_region)
       IFS=$'\t' read -r region timezone offset reason <<EOF
 $row
 EOF
@@ -422,13 +422,13 @@ EOF
       fi
     fi
     if [ -z "$region" ]; then
-      row=$(direxio_recommend_region)
+      row=$(dirextalk_recommend_region)
       IFS=$'\t' read -r region timezone offset reason <<EOF
 $row
 EOF
       source=timezone
       warn "No AWS region was configured; using recommended default $region ($reason)."
-      warn "Override with AWS_DEFAULT_REGION, AWS_REGION, AWS profile region, or DIREXIO_DEFAULT_REGION."
+      warn "Override with AWS_DEFAULT_REGION, AWS_REGION, AWS profile region, or DIREXTALK_DEFAULT_REGION."
     fi
     state_set region "$region"
     record_region_recommendation "$source" "$region" "$timezone" "$offset" "$reason"
@@ -440,7 +440,7 @@ EOF
 ensure_cost_estimate() {
   local output status total region instance_type cloud_provider bundle args
   cloud_provider=$(state_get cloud_provider)
-  cloud_provider=${DIREXIO_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXIO_DEPLOY_PROVIDER:-$cloud_provider}}}
+  cloud_provider=${DIREXTALK_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXTALK_DEPLOY_PROVIDER:-$cloud_provider}}}
   cloud_provider=${cloud_provider:-lightsail}
   cloud_provider=$(printf '%s' "$cloud_provider" | tr '[:upper:]' '[:lower:]')
   state_set cloud_provider "$cloud_provider"
@@ -486,7 +486,7 @@ precheck_new_deploy_domain_env() {
     return 2
   fi
   if [ -z "$domain" ]; then
-    warn "Deployment blocked: DOMAIN is missing. Direxio requires a confirmed production Matrix server_name."
+    warn "Deployment blocked: DOMAIN is missing. Dirextalk requires a confirmed production Matrix server_name."
     warn "Use this skill to prepare domain/DNS, then rerun:"
     warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
@@ -533,7 +533,7 @@ ensure_production_domain_selected() {
     return 2
   fi
   if [ -z "$domain" ]; then
-    warn "Deployment blocked: DOMAIN is missing. Direxio requires a confirmed production Matrix server_name."
+    warn "Deployment blocked: DOMAIN is missing. Dirextalk requires a confirmed production Matrix server_name."
     warn "Use this skill to prepare domain/DNS, then rerun:"
     warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
@@ -561,14 +561,14 @@ guard_existing_state() {
   if [ "$(json_get "$STATE_JSON" domain_mode)" = "ec2" ]; then
     warn "Found legacy temporary-domain deployment state (domain_mode=ec2). Production deployment no longer supports resuming this mode."
     warn "Destroy and rebuild, or use a new service directory:"
-    warn "  DIREXIO_EXISTING_STATE_ACTION=destroy bash $0"
+    warn "  DIREXTALK_EXISTING_STATE_ACTION=destroy bash $0"
     warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   confirmed=$(json_get "$STATE_JSON" existing_state_confirmed false)
   [ "$confirmed" = "true" ] && return 0
 
-  action=${DIREXIO_EXISTING_STATE_ACTION:-}
+  action=${DIREXTALK_EXISTING_STATE_ACTION:-}
   if [ -z "$action" ] && [ -t 0 ]; then
     warn "Found existing deployment state with recorded AWS resources:"
     json_entries "$STATE_JSON" resources | sed 's/^/  /' >&2
@@ -589,12 +589,12 @@ guard_existing_state() {
       return 0 ;;
     ""|abort)
       warn "Existing service state must be handled explicitly to avoid accidental reuse or duplicate EC2 creation."
-      warn "Resume:  DIREXIO_EXISTING_STATE_ACTION=continue bash $0"
-      warn "Rebuild: DIREXIO_EXISTING_STATE_ACTION=destroy bash $0"
+      warn "Resume:  DIREXTALK_EXISTING_STATE_ACTION=continue bash $0"
+      warn "Rebuild: DIREXTALK_EXISTING_STATE_ACTION=destroy bash $0"
       warn "New service: DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
       return 2 ;;
     *)
-      warn "Unknown DIREXIO_EXISTING_STATE_ACTION=$action (expected continue|destroy|abort)."
+      warn "Unknown DIREXTALK_EXISTING_STATE_ACTION=$action (expected continue|destroy|abort)."
       return 2 ;;
   esac
 }
@@ -652,7 +652,7 @@ cmd_report() {
 }
 
 cmd_confirm() {
-  local gate=${1:-} evidence=${DIREXIO_CONFIRM_EVIDENCE:-}
+  local gate=${1:-} evidence=${DIREXTALK_CONFIRM_EVIDENCE:-}
   local runtime_summary_status runtime_probe_confirmed
   [ -f "$STATE_JSON" ] || {
     warn "state.json not found: $STATE_JSON"
@@ -666,11 +666,11 @@ cmd_confirm() {
       ;;
   esac
   if [ -z "$evidence" ]; then
-    warn "confirm $gate requires DIREXIO_CONFIRM_EVIDENCE with a concrete user/runtime evidence note."
+    warn "confirm $gate requires DIREXTALK_CONFIRM_EVIDENCE with a concrete user/runtime evidence note."
     return 1
   fi
   if [ "${#evidence}" -lt 12 ]; then
-    warn "DIREXIO_CONFIRM_EVIDENCE is too short; provide a concrete user/runtime evidence note."
+    warn "DIREXTALK_CONFIRM_EVIDENCE is too short; provide a concrete user/runtime evidence note."
     return 1
   fi
   runtime_summary_status=$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")
@@ -680,8 +680,8 @@ cmd_confirm() {
       warn "agent_mcp_runtime confirmation requires runtime_checks.summary.status=passed. Run: DOMAIN=<DOMAIN> bash $0 verify runtime"
       return 1
     fi
-    if [ "${DIREXIO_CONFIRM_RUNTIME_PROBE:-0}" != "1" ]; then
-      warn "agent_mcp_runtime confirmation requires DIREXIO_CONFIRM_RUNTIME_PROBE=1 after the selected runtime/channel probe is actually confirmed."
+    if [ "${DIREXTALK_CONFIRM_RUNTIME_PROBE:-0}" != "1" ]; then
+      warn "agent_mcp_runtime confirmation requires DIREXTALK_CONFIRM_RUNTIME_PROBE=1 after the selected runtime/channel probe is actually confirmed."
       return 1
     fi
     runtime_probe_confirmed=true
@@ -711,24 +711,24 @@ cmd_verify_mcp_doctor() {
   local credentials mcp_cmd node_id out err report token_status report_domain report_room
   credentials=$(json_get "$STATE_JSON" agent_credentials_file)
   [ -n "$credentials" ] || credentials=$(json_get "$STATE_JSON" mcp_credentials_file)
-  mcp_cmd=$(json_get "$STATE_JSON" mcp_command "direxio-mcp")
+  mcp_cmd=$(json_get "$STATE_JSON" mcp_command "dirextalk-mcp")
   node_id=$(json_get "$STATE_JSON" agent_node_id)
   [ -n "$credentials" ] || {
     warn "mcp doctor check requires agent_credentials_file or mcp_credentials_file in state.json"
     return 1
   }
-  [ -n "$mcp_cmd" ] || mcp_cmd=direxio-mcp
+  [ -n "$mcp_cmd" ] || mcp_cmd=dirextalk-mcp
 
   out=$(mktemp)
   err=$(mktemp)
-  if ! DIREXIO_CREDENTIALS_FILE="$credentials" DIREXIO_AGENT_NODE_ID="$node_id" bash -c "$mcp_cmd doctor --json" > "$out" 2> "$err"; then
-    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "evidence=direxio-mcp doctor failed"
+  if ! DIREXTALK_CREDENTIALS_FILE="$credentials" DIREXTALK_AGENT_NODE_ID="$node_id" bash -c "$mcp_cmd doctor --json" > "$out" 2> "$err"; then
+    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "evidence=dirextalk-mcp doctor failed"
     cat "$err" >&2
     rm -f "$out" "$err"
     return 1
   fi
   if ! json_valid "$out" >/dev/null 2>&1; then
-    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "evidence=direxio-mcp doctor returned non-json output"
+    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "evidence=dirextalk-mcp doctor returned non-json output"
     rm -f "$out" "$err"
     return 1
   fi
@@ -746,7 +746,7 @@ cmd_verify_mcp_doctor() {
   state_set_object runtime_checks.mcp_doctor \
     status=passed \
     "ts=$(_now)" \
-    "evidence=direxio-mcp doctor --json succeeded" \
+    "evidence=dirextalk-mcp doctor --json succeeded" \
     "domain=$report_domain" \
     "agent_room_id=$report_room" \
     "token=$token_status"
@@ -815,13 +815,13 @@ cmd_verify_mcp_tools() {
   local credentials mcp_cmd node_id node_cmd node_script out err report
   credentials=$(json_get "$STATE_JSON" agent_credentials_file)
   [ -n "$credentials" ] || credentials=$(json_get "$STATE_JSON" mcp_credentials_file)
-  mcp_cmd=$(json_get "$STATE_JSON" mcp_command "direxio-mcp")
+  mcp_cmd=$(json_get "$STATE_JSON" mcp_command "dirextalk-mcp")
   node_id=$(json_get "$STATE_JSON" agent_node_id)
   [ -n "$credentials" ] || {
     warn "mcp tools check requires agent_credentials_file or mcp_credentials_file in state.json"
     return 1
   }
-  [ -n "$mcp_cmd" ] || mcp_cmd=direxio-mcp
+  [ -n "$mcp_cmd" ] || mcp_cmd=dirextalk-mcp
   node_cmd=$(_node_command)
   [ -n "$node_cmd" ] || {
     warn "mcp tools check requires node or node.exe to run scripts/mcp-tools-list.mjs"
@@ -831,7 +831,7 @@ cmd_verify_mcp_tools() {
 
   out=$(mktemp)
   err=$(mktemp)
-  if ! DIREXIO_CREDENTIALS_FILE="$credentials" DIREXIO_AGENT_NODE_ID="$node_id" "$node_cmd" "$node_script" "$mcp_cmd" > "$out" 2> "$err"; then
+  if ! DIREXTALK_CREDENTIALS_FILE="$credentials" DIREXTALK_AGENT_NODE_ID="$node_id" "$node_cmd" "$node_script" "$mcp_cmd" > "$out" 2> "$err"; then
     state_set_object runtime_checks.mcp_tools status=failed "ts=$(_now)" "evidence=MCP tools/list failed"
     cat "$err" >&2
     rm -f "$out" "$err"
@@ -898,11 +898,11 @@ path_dirname() {
 }
 
 normalize_check_path() {
-  direxio_normalize_local_path "$1"
+  dirextalk_normalize_local_path "$1"
 }
 
 paths_match_for_check() {
-  direxio_paths_equal "$1" "$2"
+  dirextalk_paths_equal "$1" "$2"
 }
 
 cmd_verify_connect_daemon() {
@@ -917,16 +917,16 @@ cmd_verify_connect_daemon() {
   service_dir=$(json_get "$STATE_JSON" agent_service_dir)
   config=$(json_get "$STATE_JSON" connect_config)
   runtime_dir=$(json_get "$STATE_JSON" connect_runtime_dir)
-  binary=$(json_get "$STATE_JSON" connect_binary "direxio-connect")
-  [ -n "$service_name" ] || service_name=direxio-connect
-  [ -n "$binary" ] || binary=direxio-connect
+  binary=$(json_get "$STATE_JSON" connect_binary "dirextalk-connect")
+  [ -n "$service_name" ] || service_name=dirextalk-connect
+  [ -n "$binary" ] || binary=dirextalk-connect
 
   if [ -n "$config" ]; then
     target_work_dir=$(path_dirname "$config")
   elif [ -n "$runtime_dir" ]; then
     target_work_dir="$runtime_dir"
   elif [ -n "$service_dir" ]; then
-    target_work_dir="$service_dir/direxio-connect"
+    target_work_dir="$service_dir/dirextalk-connect"
   else
     warn "connect daemon check requires connect_config, connect_runtime_dir, or agent_service_dir in state.json"
     return 1
@@ -936,7 +936,7 @@ cmd_verify_connect_daemon() {
     */*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
     *)
       command -v "$binary" >/dev/null 2>&1 || {
-        state_set_object runtime_checks.connect_daemon status=failed "ts=$(_now)" "evidence=direxio-connect binary not found"
+        state_set_object runtime_checks.connect_daemon status=failed "ts=$(_now)" "evidence=dirextalk-connect binary not found"
         warn "connect daemon check could not find binary: $binary"
         return 1
       }
@@ -944,37 +944,37 @@ cmd_verify_connect_daemon() {
   esac
 
   status_out=$("$binary" daemon status --service-name "$service_name" 2>/dev/null) || {
-    state_set_object runtime_checks.connect_daemon status=failed "ts=$(_now)" "service_name=$service_name" "evidence=direxio-connect daemon status failed"
+    state_set_object runtime_checks.connect_daemon status=failed "ts=$(_now)" "service_name=$service_name" "evidence=dirextalk-connect daemon status failed"
     return 1
   }
   daemon_status=$(printf '%s\n' "$status_out" | sed -nE 's/^[[:space:]]*Status:[[:space:]]*//p' | head -n 1)
   work_dir=$(printf '%s\n' "$status_out" | sed -nE 's/^[[:space:]]*WorkDir:[[:space:]]*//p' | head -n 1)
 
   if [ "$daemon_status" != "Running" ]; then
-    evidence="direxio-connect daemon is not Running"
+    evidence="dirextalk-connect daemon is not Running"
   elif [ -z "$work_dir" ]; then
-    evidence="direxio-connect daemon status has no WorkDir"
+    evidence="dirextalk-connect daemon status has no WorkDir"
   elif ! paths_match_for_check "$target_work_dir" "$work_dir"; then
-    evidence="direxio-connect daemon belongs to a different service"
+    evidence="dirextalk-connect daemon belongs to a different service"
   else
     agent_error=$(connect_daemon_agent_error_from_logs "$binary" "$service_name")
     if [ -n "$agent_error" ]; then
       state_set_object runtime_checks.connect_daemon \
         status=failed \
         "ts=$(_now)" \
-        "evidence=direxio-connect daemon logs report local agent backend failure" \
+        "evidence=dirextalk-connect daemon logs report local agent backend failure" \
         "service_name=$service_name" \
         "daemon_status=$daemon_status" \
         "work_dir=$(normalize_check_path "$work_dir")" \
         "expected_work_dir=$(normalize_check_path "$target_work_dir")" \
         "agent_error=$agent_error"
-      warn "direxio-connect daemon logs report local agent backend failure"
+      warn "dirextalk-connect daemon logs report local agent backend failure"
       return 1
     fi
     state_set_object runtime_checks.connect_daemon \
       status=passed \
       "ts=$(_now)" \
-      "evidence=direxio-connect daemon is running for this service" \
+      "evidence=dirextalk-connect daemon is running for this service" \
       "service_name=$service_name" \
       "daemon_status=$daemon_status" \
       "work_dir=$(normalize_check_path "$work_dir")" \
@@ -1024,8 +1024,8 @@ cmd_verify_runtime() {
     state_set_object runtime_checks.connect_daemon \
       status=manual_pending \
       "ts=$(_now)" \
-      "evidence=direxio-connect daemon install is an explicit operator action for policy=$install_status" \
-      "service_name=${service_name:-direxio-connect}"
+      "evidence=dirextalk-connect daemon install is an explicit operator action for policy=$install_status" \
+      "service_name=${service_name:-dirextalk-connect}"
   else
     cmd_verify_connect_daemon >/dev/null || rc=1
   fi

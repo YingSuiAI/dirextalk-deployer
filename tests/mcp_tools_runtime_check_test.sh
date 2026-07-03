@@ -32,18 +32,18 @@ windows_path() {
   esac
 }
 
-cat > "$fakebin/direxio-mcp" <<'EOF'
+cat > "$fakebin/dirextalk-mcp" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-echo "fake direxio-mcp executable should be resolved but not directly executed" >&2
+echo "fake dirextalk-mcp executable should be resolved but not directly executed" >&2
 exit 1
 EOF
-chmod 700 "$fakebin/direxio-mcp"
+chmod 700 "$fakebin/dirextalk-mcp"
 
-fake_pkg="$fakebin/node_modules/direxio-mcp"
+fake_pkg="$fakebin/node_modules/dirextalk-mcp"
 mkdir -p "$fake_pkg/dist" "$fake_pkg/node_modules/@modelcontextprotocol/sdk/dist/esm/client"
 cat > "$fake_pkg/package.json" <<'EOF'
-{"name":"direxio-mcp","version":"0.0.0","type":"module"}
+{"name":"dirextalk-mcp","version":"0.0.0","type":"module"}
 EOF
 cat > "$fake_pkg/dist/index.js" <<'EOF'
 #!/usr/bin/env node
@@ -65,10 +65,10 @@ export class Client {
   async connect(transport) {
     const serverEntry = String(transport?.options?.args?.[0] || "").replace(/\\/g, "/");
     if (!serverEntry.endsWith("dist/index.js")) {
-      throw new Error("SDK transport did not receive direxio-mcp dist/index.js");
+      throw new Error("SDK transport did not receive dirextalk-mcp dist/index.js");
     }
-    if (transport.options.env.DIREXIO_CREDENTIALS_FILE !== process.env.EXPECTED_CREDENTIALS_FILE) {
-      throw new Error("wrong DIREXIO_CREDENTIALS_FILE");
+    if (transport.options.env.DIREXTALK_CREDENTIALS_FILE !== process.env.EXPECTED_CREDENTIALS_FILE) {
+      throw new Error("wrong DIREXTALK_CREDENTIALS_FILE");
     }
   }
   async listTools() {
@@ -84,18 +84,18 @@ export class Client {
 }
 EOF
 
-mcp_command=direxio-mcp
+mcp_command=dirextalk-mcp
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) use_windows_mcp=1 ;;
   *) use_windows_mcp=0 ;;
 esac
 if [ "$use_windows_mcp" = "1" ] && command -v cygpath >/dev/null 2>&1; then
-  mcp_command=$(cygpath -w "$fakebin/direxio-mcp")
+  mcp_command=$(cygpath -w "$fakebin/dirextalk-mcp")
 elif { [ "$use_windows_mcp" = "1" ] || ! command -v node >/dev/null 2>&1; } && command -v node.exe >/dev/null 2>&1; then
-  mcp_command="$fakebin/direxio-mcp"
+  mcp_command="$fakebin/dirextalk-mcp"
 fi
 
-service_dir="$HOME/.direxio/nodes/mcp-tools.example.test"
+service_dir="$HOME/.dirextalk/nodes/mcp-tools.example.test"
 mkdir -p "$service_dir"
 credentials="$service_dir/credentials.json"
 : > "$credentials"
@@ -118,12 +118,12 @@ json_build object \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
   'resources={}' > "$state"
 
-verify_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" bash "$ROOT/scripts/orchestrate.sh" verify mcp_tools)
+verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" bash "$ROOT/scripts/orchestrate.sh" verify mcp_tools)
 printf '%s\n' "$verify_output" | grep -q 'verified runtime check: mcp_tools'
 
 json_test_check "$state" "data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.tool_count === 3 && data.runtime_checks.mcp_tools.tools.includes('search_rooms') && data.runtime_checks.mcp_tools.tools.includes('send_message') && data.runtime_checks.mcp_tools.tools.includes('list_messages') && !data.user_confirmations?.agent_mcp_runtime"
 
-report_output=$(DIREXIO_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
+report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)
 json_test_check "$report_path" "data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.tool_count === 3 && data.gates.user_confirmation.agent_mcp_runtime === 'pending_runtime_confirmation'"
 

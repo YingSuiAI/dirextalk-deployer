@@ -12,7 +12,7 @@ Usage:
   scripts/aws-credentials.sh import-csv <aws-access-key.csv> [profile] [region]
   scripts/aws-credentials.sh verify [profile]
 
-Default profile: direxio-deployer
+Default profile: dirextalk-deployer
 Root identities are allowed when the operator explicitly chooses them.
 EOF
 }
@@ -165,7 +165,7 @@ verify_profile() {
 }
 
 cmd_import_csv() {
-  local csv=${1:-} profile=${2:-direxio-deployer} region=${3:-${AWS_DEFAULT_REGION:-${AWS_REGION:-us-east-1}}}
+  local csv=${1:-} profile=${2:-dirextalk-deployer} region=${3:-${AWS_DEFAULT_REGION:-${AWS_REGION:-us-east-1}}}
   local access_key secret_key session_token arn root_identity=false
   [ -n "$csv" ] || {
     usage
@@ -187,7 +187,7 @@ case "${1:-}" in
     ;;
   verify)
     shift
-    verify_profile "${1:-${AWS_PROFILE:-direxio-deployer}}"
+    verify_profile "${1:-${AWS_PROFILE:-dirextalk-deployer}}"
     ;;
   *)
     usage

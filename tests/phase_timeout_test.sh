@@ -66,7 +66,7 @@ grep -q 'ConnectTimeout=6' "$SSH_LOG"
 grep -q 'BatchMode=yes' "$SSH_LOG"
 grep -q 'ServerAliveInterval=4' "$SSH_LOG"
 grep -q 'ServerAliveCountMax=3' "$SSH_LOG"
-grep -q '/var/direxio-message-server/p2p/bootstrap.json' "$SSH_LOG"
+grep -q '/var/dirextalk-message-server/p2p/bootstrap.json' "$SSH_LOG"
 deprecated_bootstrap_path="/opt""/p2p/bootstrap.json"
 if grep -q "$deprecated_bootstrap_path" "$SSH_LOG" || grep -q 'elif sudo test -s' "$SSH_LOG"; then
   echo "S5 must use only the current bootstrap path" >&2

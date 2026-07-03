@@ -32,7 +32,7 @@ windows_path() {
   esac
 }
 
-cat > "$fakebin/direxio-connect" <<'EOF'
+cat > "$fakebin/dirextalk-connect" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 [ "${1:-}" = "daemon" ]
@@ -40,20 +40,20 @@ set -euo pipefail
 [ "${3:-}" = "--service-name" ]
 [ "${4:-}" = "runtime-summary.example.test" ]
 cat <<STATUS
-direxio-connect daemon status
+dirextalk-connect daemon status
 
   Status:    Running
   Platform:  test
   WorkDir:   ${CONNECT_WORK_DIR:-}
 STATUS
 EOF
-chmod 700 "$fakebin/direxio-connect"
+chmod 700 "$fakebin/dirextalk-connect"
 
-cat > "$fakebin/direxio-mcp" <<'EOF'
+cat > "$fakebin/dirextalk-mcp" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [ "${DIREXIO_CREDENTIALS_FILE:-}" != "${EXPECTED_CREDENTIALS_FILE:-}" ]; then
-  echo "wrong DIREXIO_CREDENTIALS_FILE" >&2
+if [ "${DIREXTALK_CREDENTIALS_FILE:-}" != "${EXPECTED_CREDENTIALS_FILE:-}" ]; then
+  echo "wrong DIREXTALK_CREDENTIALS_FILE" >&2
   exit 1
 fi
 
@@ -62,15 +62,15 @@ if [ "${1:-}" = "doctor" ] && [ "${2:-}" = "--json" ]; then
   exit 0
 fi
 
-echo "fake direxio-mcp executable should only be run directly for doctor" >&2
+echo "fake dirextalk-mcp executable should only be run directly for doctor" >&2
 exit 1
 EOF
-chmod 700 "$fakebin/direxio-mcp"
+chmod 700 "$fakebin/dirextalk-mcp"
 
-fake_pkg="$fakebin/node_modules/direxio-mcp"
+fake_pkg="$fakebin/node_modules/dirextalk-mcp"
 mkdir -p "$fake_pkg/dist" "$fake_pkg/node_modules/@modelcontextprotocol/sdk/dist/esm/client"
 cat > "$fake_pkg/package.json" <<'EOF'
-{"name":"direxio-mcp","version":"0.0.0","type":"module"}
+{"name":"dirextalk-mcp","version":"0.0.0","type":"module"}
 EOF
 cat > "$fake_pkg/dist/index.js" <<'EOF'
 #!/usr/bin/env node
@@ -88,10 +88,10 @@ export class Client {
   async connect(transport) {
     const serverEntry = String(transport?.options?.args?.[0] || "").replace(/\\/g, "/");
     if (!serverEntry.endsWith("dist/index.js")) {
-      throw new Error("SDK transport did not receive direxio-mcp dist/index.js");
+      throw new Error("SDK transport did not receive dirextalk-mcp dist/index.js");
     }
-    if (transport.options.env.DIREXIO_CREDENTIALS_FILE !== process.env.EXPECTED_CREDENTIALS_FILE) {
-      throw new Error("wrong DIREXIO_CREDENTIALS_FILE");
+    if (transport.options.env.DIREXTALK_CREDENTIALS_FILE !== process.env.EXPECTED_CREDENTIALS_FILE) {
+      throw new Error("wrong DIREXTALK_CREDENTIALS_FILE");
     }
   }
   async listTools() {
@@ -107,13 +107,13 @@ export class Client {
 }
 EOF
 
-mcp_command=direxio-mcp
+mcp_command=dirextalk-mcp
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) use_windows_mcp=1 ;;
   *) use_windows_mcp=0 ;;
 esac
 if [ "$use_windows_mcp" = "1" ] || ! command -v node >/dev/null 2>&1; then
-  mcp_command="$fakebin/direxio-mcp"
+  mcp_command="$fakebin/dirextalk-mcp"
 fi
 
 cat > "$fakebin/curl" <<'EOF'
@@ -138,10 +138,10 @@ fi
 EOF
 chmod 700 "$fakebin/curl"
 
-service_dir="$HOME/.direxio/nodes/runtime-summary.example.test"
-mkdir -p "$service_dir/direxio-connect"
+service_dir="$HOME/.dirextalk/nodes/runtime-summary.example.test"
+mkdir -p "$service_dir/dirextalk-connect"
 credentials="$service_dir/credentials.json"
-config="$service_dir/direxio-connect/config.toml"
+config="$service_dir/dirextalk-connect/config.toml"
 : > "$credentials"
 : > "$config"
 expected_credentials="$credentials"
@@ -163,22 +163,22 @@ json_build object \
   agent_token=AGENT_TOKEN_RUNTIME \
   'agent_room_id=!agent:runtime-summary.example.test' \
   "connect_config=$config" \
-  connect_binary=direxio-connect \
+  connect_binary=dirextalk-connect \
   phase=S7_VERIFY_E2E \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
   'resources={}' > "$state"
 
-verify_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$service_dir/direxio-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
+verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
 printf '%s\n' "$verify_output" | grep -q 'verified runtime checks: passed'
 
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'passed' && data.runtime_checks.summary.checks.mcp_doctor === 'passed' && data.runtime_checks.summary.checks.mcp_tools === 'passed' && data.runtime_checks.summary.checks.mcp_smoke === 'passed' && !data.user_confirmations?.agent_mcp_runtime"
 
-report_output=$(DIREXIO_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
+report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)
 json_test_check "$report_path" "data.runtime_checks.summary.status === 'passed'"
 
 set +e
-DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.direxio/nodes/other.example.test/direxio-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime > "$tmp/runtime-fail.out" 2>&1
+DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime > "$tmp/runtime-fail.out" 2>&1
 fail_rc=$?
 set -e
 [ "$fail_rc" -ne 0 ] || {
@@ -189,7 +189,7 @@ json_test_check "$state" "data.runtime_checks.summary.status === 'failed' && dat
 
 json_mutate "$state" set-string connect_install_policy recommend
 json_mutate "$state" set-string connect_install_status recommend
-verify_recommend_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.direxio/nodes/other.example.test/direxio-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
+verify_recommend_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
 printf '%s\n' "$verify_recommend_output" | grep -q 'verified runtime checks: passed'
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'manual_pending' && data.runtime_checks.connect_daemon.status === 'manual_pending' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"
 

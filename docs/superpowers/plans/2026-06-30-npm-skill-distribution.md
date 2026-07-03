@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add npm-based versioned distribution and updating for the Direxio deployer skill.
+**Goal:** Add npm-based versioned distribution and updating for the Dirextalk deployer skill.
 
 **Architecture:** A small Node CLI ships inside the npm package and copies the packaged skill bundle into runtime-specific target directories. Existing shell deployment scripts remain untouched; docs and `SKILL.md` switch skill installation guidance from GitHub-first to npm-first while preserving Git clone as a developer fallback.
 
@@ -13,7 +13,7 @@
 ## File Structure
 
 - Create `package.json`: npm metadata, binary mapping, publish file allowlist, script aliases for tests.
-- Create `bin/direxio-deployer.mjs`: CLI command parsing, target resolution, managed-copy installer, freshness check.
+- Create `bin/dirextalk-deployer.mjs`: CLI command parsing, target resolution, managed-copy installer, freshness check.
 - Create `tests/npm_skill_distribution_test.sh`: black-box CLI tests using temporary project/global directories.
 - Modify `SKILL.md`: npm-first freshness gate and skill install/update instructions.
 - Modify `README.md`: English user-facing npm install/update workflow.
@@ -29,27 +29,27 @@
 
 - [ ] **Step 1: Add a black-box test for package metadata and install target behavior**
 
-Create `tests/npm_skill_distribution_test.sh` with assertions that run `node bin/direxio-deployer.mjs skill install --agent codex --scope project --project "$tmp/project"` and check for copied `SKILL.md`, `references/agent-targets.md`, and `.direxio-skill-install.json`.
+Create `tests/npm_skill_distribution_test.sh` with assertions that run `node bin/dirextalk-deployer.mjs skill install --agent codex --scope project --project "$tmp/project"` and check for copied `SKILL.md`, `references/agent-targets.md`, and `.dirextalk-skill-install.json`.
 
 - [ ] **Step 2: Run test and verify it fails**
 
 Run: `bash tests/npm_skill_distribution_test.sh`
-Expected: FAIL because `bin/direxio-deployer.mjs` and `package.json` do not exist yet.
+Expected: FAIL because `bin/dirextalk-deployer.mjs` and `package.json` do not exist yet.
 
 ### Task 2: Minimal CLI And Package
 
 **Files:**
 - Create: `package.json`
-- Create: `bin/direxio-deployer.mjs`
+- Create: `bin/dirextalk-deployer.mjs`
 - Test: `tests/npm_skill_distribution_test.sh`
 
 - [ ] **Step 1: Implement the npm package metadata**
 
-Add `package.json` with package name `direxio-deployer`, binary `direxio-deployer`, package files allowlist, and test scripts that call the existing shell tests.
+Add `package.json` with package name `dirextalk-deployer`, binary `dirextalk-deployer`, package files allowlist, and test scripts that call the existing shell tests.
 
 - [ ] **Step 2: Implement the CLI installer**
 
-Implement `skill install`, `skill update`, and `skill refresh` commands. The CLI resolves runtime targets, copies the skill bundle recursively, writes `.direxio-skill-install.json`, protects unmanaged targets unless `--force` is present, and supports `--dry-run`.
+Implement `skill install`, `skill update`, and `skill refresh` commands. The CLI resolves runtime targets, copies the skill bundle recursively, writes `.dirextalk-skill-install.json`, protects unmanaged targets unless `--force` is present, and supports `--dry-run`.
 
 - [ ] **Step 3: Run the focused test**
 
@@ -67,7 +67,7 @@ Expected: PASS.
 
 - [ ] **Step 1: Update skill instructions**
 
-Replace GitHub-first install/update instructions with npm-first commands and add the automatic freshness check using `direxio-deployer skill refresh`.
+Replace GitHub-first install/update instructions with npm-first commands and add the automatic freshness check using `dirextalk-deployer skill refresh`.
 
 - [ ] **Step 2: Update user docs**
 
@@ -79,7 +79,7 @@ Document the npm CLI as the supported installer while keeping target paths visib
 
 - [ ] **Step 4: Update structure tests**
 
-Add checks that `package.json`, `bin/direxio-deployer.mjs`, and npm install guidance are present.
+Add checks that `package.json`, `bin/dirextalk-deployer.mjs`, and npm install guidance are present.
 
 ### Task 4: Verification And Commit
 
@@ -126,6 +126,6 @@ Expected: status output or a documented state-not-found result without script sy
 Run:
 
 ```bash
-git add package.json bin/direxio-deployer.mjs tests/npm_skill_distribution_test.sh tests/skill_structure_test.sh SKILL.md README.md README_zh.md references/agent-targets.md docs/superpowers/specs/2026-06-30-npm-skill-distribution-design.md docs/superpowers/plans/2026-06-30-npm-skill-distribution.md
+git add package.json bin/dirextalk-deployer.mjs tests/npm_skill_distribution_test.sh tests/skill_structure_test.sh SKILL.md README.md README_zh.md references/agent-targets.md docs/superpowers/specs/2026-06-30-npm-skill-distribution-design.md docs/superpowers/plans/2026-06-30-npm-skill-distribution.md
 git commit -m "Add npm skill distribution"
 ```

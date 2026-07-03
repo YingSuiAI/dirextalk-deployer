@@ -1,6 +1,6 @@
 {
   "Version": "2012-10-17",
-  "Comment": "Direxio 一键部署所需的最小 IAM 权限。用户建 IAM 用户时附加此策略,再为其生成 AK/SK 交给 agent。比给 AdministratorAccess 安全得多。",
+  "Comment": "Dirextalk 一键部署所需的最小 IAM 权限。用户建 IAM 用户时附加此策略,再为其生成 AK/SK 交给 agent。比给 AdministratorAccess 安全得多。",
   "Statement": [
     {
       "Sid": "Preflight",

@@ -12,7 +12,7 @@ required=(
   README_zh.md
   agents/README.md
   agents/openai.yaml
-  bin/direxio-deployer.mjs
+  bin/dirextalk-deployer.mjs
   scripts/orchestrate.sh
   scripts/orchestrate.ps1
   scripts/aws-credentials.sh
@@ -88,21 +88,21 @@ if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md README_zh.md
   exit 1
 fi
 
-grep -q 'direxio/message-server:latest' SKILL.md
-grep -q 'direxio-deployer' package.json
-grep -q 'bin/direxio-deployer.mjs' package.json
+grep -q 'dirextalk/message-server:latest' SKILL.md
+grep -q 'dirextalk-deployer' package.json
+grep -q 'bin/dirextalk-deployer.mjs' package.json
 grep -q 'compact agent-facing entrypoint' AGENTS.md
 grep -q 'scripts/lib/local-paths.sh' AGENTS.md
 grep -q 'scripts/lib/windows-paths.ps1' AGENTS.md
 grep -q 'scripts/json.mjs' AGENTS.md
-grep -q 'direxio-connent@latest' AGENTS.md
-grep -q 'direxio-mcp@latest' AGENTS.md
+grep -q 'dirextalk-connect@latest' AGENTS.md
+grep -q 'dirextalk-mcp@latest' AGENTS.md
 grep -q 'bash tests/local_paths_test.sh' AGENTS.md
 grep -q 'npm test' AGENTS.md
 grep -q 'scripts/json.mjs' agents/README.md
-grep -q 'direxio-connect' agents/README.md
-grep -q 'direxio-connect' agents/openai.yaml
-grep -q 'direxio-mcp' agents/openai.yaml
+grep -q 'dirextalk-connect' agents/README.md
+grep -q 'dirextalk-connect' agents/openai.yaml
+grep -q 'dirextalk-mcp' agents/openai.yaml
 grep -q 'connect_install_status' SKILL.md
 grep -q 'connect_install_status' scripts/phases/s6_wire_local.sh
 grep -q 'connect_install_status' scripts/orchestrate.sh
@@ -111,29 +111,29 @@ grep -q 'skill update --agent' README_zh.md
 grep -q 'skill refresh --agent' SKILL.md
 grep -q 'Windows PowerShell' README.md
 grep -q 'Windows PowerShell' README_zh.md
-grep -q '.direxio-skill-install.json' references/agent-targets.md
-grep -q 'DIREXIO_DOMAIN' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXIO_AGENT_TOKEN' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXIO_AGENT_ROOM_ID' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXIO_CONNECT_REPO' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXIO_LOCAL_PATH_STYLE' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXIO_CREDENTIALS_FILE' scripts/lib/mcp-client-adapters.sh
-grep -q 'direxio-mcp' scripts/lib/mcp-client-adapters.sh
+grep -q '.dirextalk-skill-install.json' references/agent-targets.md
+grep -q 'DIREXTALK_DOMAIN' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXTALK_AGENT_TOKEN' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXTALK_AGENT_ROOM_ID' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXTALK_CONNECT_REPO' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXTALK_LOCAL_PATH_STYLE' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXTALK_CREDENTIALS_FILE' scripts/lib/mcp-client-adapters.sh
+grep -q 'dirextalk-mcp' scripts/lib/mcp-client-adapters.sh
 grep -q 'mcp-client-adapters.sh' scripts/phases/s6_wire_local.sh
 grep -q 'PLATFORMS_INCLUDE=matrix' scripts/phases/s6_wire_local.sh
-grep -q 'YingSuiAI/direxio-connect.git' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXIO_CONNECT_AGENT' scripts/phases/s6_wire_local.sh
+grep -q 'YingSuiAI/dirextalk-connect.git' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXTALK_CONNECT_AGENT' scripts/phases/s6_wire_local.sh
 grep -q 'orchestrate.ps1' README.md
 grep -q 'destroy.ps1' README.md
 grep -q 'destroy.ps1' README_zh.md
 grep -q 'destroy.ps1' SKILL.md
 grep -q 'destroy.ps1' references/deployment-workflow.md
 grep -q 'destroy.ps1' references/windows-deployment-notes.md
-grep -q 'direxio-connect' SKILL.md
+grep -q 'dirextalk-connect' SKILL.md
 grep -q 'mcp_config_dir' SKILL.md
 grep -q 'mcp_codex_config' references/runtime-wiring.md
 grep -q 'mcp_cursor_config' references/runtime-wiring.md
-if grep -R '@direxio/agent-plugins' SKILL.md scripts README.md README_zh.md references >/dev/null; then
+if grep -R '@dirextalk/agent-plugins' SKILL.md scripts README.md README_zh.md references >/dev/null; then
   echo "current docs/scripts must not reference legacy agent plugin packages" >&2
   exit 1
 fi
@@ -144,7 +144,7 @@ if grep -R -n "${legacy_agent_install_prefix}_status\\|${legacy_agent_install_pr
   exit 1
 fi
 legacy_plugin_word=plugin
-legacy_mcp_plugin_pattern="MCP/${legacy_plugin_word}|agent ${legacy_plugin_word}s|${legacy_plugin_word} access|${legacy_plugin_word} configuration|wire Direxio MCP/${legacy_plugin_word}|runtime-specific ${legacy_plugin_word}"
+legacy_mcp_plugin_pattern="MCP/${legacy_plugin_word}|agent ${legacy_plugin_word}s|${legacy_plugin_word} access|${legacy_plugin_word} configuration|wire Dirextalk MCP/${legacy_plugin_word}|runtime-specific ${legacy_plugin_word}"
 if grep -R -n -E "$legacy_mcp_plugin_pattern" AGENTS.md agents SKILL.md README.md README_zh.md references >/dev/null; then
   echo "current docs and agent metadata must not use stale combined MCP and extension wording" >&2
   grep -R -n -E "$legacy_mcp_plugin_pattern" AGENTS.md agents SKILL.md README.md README_zh.md references >&2
@@ -152,15 +152,15 @@ if grep -R -n -E "$legacy_mcp_plugin_pattern" AGENTS.md agents SKILL.md README.m
 fi
 grep -q '简体中文](README_zh.md)' README.md
 grep -q '通用 Agent Skill' README_zh.md
-grep -q 'PROJECT_ROOT/.cursor/skills/direxio-deployer' references/agent-targets.md
-grep -q 'direxio-connent' references/agent-targets.md
-grep -q 'direxio-connect daemon install' references/agent-targets.md
+grep -q 'PROJECT_ROOT/.cursor/skills/dirextalk-deployer' references/agent-targets.md
+grep -q 'dirextalk-connect' references/agent-targets.md
+grep -q 'dirextalk-connect daemon install' references/agent-targets.md
 grep -q 'acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode pi qoder reasonix tmux' references/agent-targets.md
 
 legacy_cc_repo=$(printf 'cc-%s' 'connect')
-wrong_connect_repo=$(printf 'direxio-%s' 'connext')
+wrong_connect_repo=$(printf 'dirextalk-%s' 'connext')
 if grep -R "YingSuiAI/${legacy_cc_repo}\\|github.com/YingSuiAI/${legacy_cc_repo}\\|YingSuiAI/${wrong_connect_repo}\\|github.com/YingSuiAI/${wrong_connect_repo}" SKILL.md scripts README.md README_zh.md references AGENTS.md >/dev/null; then
-  echo "current docs/scripts must use YingSuiAI/direxio-connect, not stale bridge repository names" >&2
+  echo "current docs/scripts must use YingSuiAI/dirextalk-connect, not stale bridge repository names" >&2
   exit 1
 fi
 
@@ -169,8 +169,8 @@ if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*example\.com([^[:alnum:]_]|$)' SKIL
   exit 1
 fi
 
-if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*direxio\.ai([^[:alnum:]_]|$)' SKILL.md references scripts README.md README_zh.md >/dev/null; then
-  echo "published docs/scripts must use placeholders such as __DOMAIN__, not real Direxio-owned domains" >&2
+if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*dirextalk\.ai([^[:alnum:]_]|$)' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+  echo "published docs/scripts must use placeholders such as __DOMAIN__, not real Dirextalk-owned domains" >&2
   exit 1
 fi
 
@@ -179,13 +179,13 @@ if grep -RE 'agentp2p\.im|54\.161\.73\.211' SKILL.md references scripts README.m
   exit 1
 fi
 
-if awk '/_write_connect_config\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep -q 'DIREXIO_CREDENTIALS_FILE'; then
-  echo "direxio-connect config must not use DIREXIO_CREDENTIALS_FILE; it must use direct Matrix config" >&2
+if awk '/_write_connect_config\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep -q 'DIREXTALK_CREDENTIALS_FILE'; then
+  echo "dirextalk-connect config must not use DIREXTALK_CREDENTIALS_FILE; it must use direct Matrix config" >&2
   exit 1
 fi
 
-if awk '/_print_connect_guidance\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep -q 'DIREXIO_CREDENTIALS_FILE'; then
-  echo "direxio-connect guidance must not use DIREXIO_CREDENTIALS_FILE; MCP guidance owns that env var" >&2
+if awk '/_print_connect_guidance\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep -q 'DIREXTALK_CREDENTIALS_FILE'; then
+  echo "dirextalk-connect guidance must not use DIREXTALK_CREDENTIALS_FILE; MCP guidance owns that env var" >&2
   exit 1
 fi
 
@@ -194,13 +194,13 @@ if grep -RE 'fixed order.*\.codex.*\.hermes|\.codex.*checked before.*\.hermes' S
   exit 1
 fi
 
-if grep -R 'direxio-mcp@0\.1\.[0-9]' SKILL.md references scripts README.md README_zh.md >/dev/null; then
-  echo "published docs/scripts must not reference stale direxio-mcp versions" >&2
+if grep -R 'dirextalk-mcp@0\.1\.[0-9]' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+  echo "published docs/scripts must not reference stale dirextalk-mcp versions" >&2
   exit 1
 fi
 
-if grep -R 'direxio-connent@1\.' SKILL.md references scripts README.md README_zh.md >/dev/null; then
-  echo "published docs/scripts must not pin direxio-connent by default" >&2
+if grep -R 'dirextalk-connect@1\.' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+  echo "published docs/scripts must not pin dirextalk-connect by default" >&2
   exit 1
 fi
 
@@ -209,7 +209,7 @@ if grep -RE 'Elastic IP.*attached.*free|attached.*Elastic IP.*free' SKILL.md ref
   exit 1
 fi
 
-if grep -F 'Host runtimes such as Hermes or OpenClaw are not direxio-connect backends; when they are detected, set `DIREXIO_CONNECT_AGENT` explicitly' SKILL.md >/dev/null; then
+if grep -F 'Host runtimes such as Hermes or OpenClaw are not dirextalk-connect backends; when they are detected, set `DIREXTALK_CONNECT_AGENT` explicitly' SKILL.md >/dev/null; then
   echo "SKILL.md must not override ACP-backed OpenClaw/Hermes defaults with stale explicit-agent guidance" >&2
   exit 1
 fi
@@ -254,9 +254,9 @@ fi
 grep -q 'eight-digit app initialization code' SKILL.md
 grep -q 'S7 green is not the final product-complete state' SKILL.md
 grep -q 'non-polluting' SKILL.md
-grep -q 'direxio-mcp@latest' SKILL.md
-grep -q 'direxio-connent@latest' SKILL.md
-grep -q 'DirexioDeployer' SKILL.md
+grep -q 'dirextalk-mcp@latest' SKILL.md
+grep -q 'dirextalk-connect@latest' SKILL.md
+grep -q 'DirextalkDeployer' SKILL.md
 grep -q 'AdministratorAccess' SKILL.md
 grep -qi 'root access keys are allowed' SKILL.md
 grep -q 'Root access key (default fastest path)' SKILL.md
@@ -276,7 +276,7 @@ grep -q 'credentials.status' SKILL.md
 grep -q 'mcp.status' SKILL.md
 grep -q 'credentials.status=refresh_pending' references/deployment-workflow.md
 grep -q 'mcp.status=refresh_pending' references/deployment-workflow.md
-grep -q 'stops only the matching service-scoped direxio-connect daemon' references/deployment-workflow.md
+grep -q 'stops only the matching service-scoped dirextalk-connect daemon' references/deployment-workflow.md
 grep -q 'possible_remaining_billable_resources' SKILL.md
 grep -q 'EBS root volume' SKILL.md
 grep -q 'destroy.evidence' references/deployment-workflow.md
@@ -285,15 +285,15 @@ grep -q 'scripts/update.sh' SKILL.md
 grep -q 'scripts/reset-app-data.sh' SKILL.md
 grep -q 'clears old user-confirmation/runtime-check evidence' SKILL.md
 grep -q 'connect_install_status=refresh_pending' SKILL.md
-grep -q 'stops only the matching service-scoped direxio-connect daemon' SKILL.md
+grep -q 'stops only the matching service-scoped dirextalk-connect daemon' SKILL.md
 grep -q 'Local refresh:' SKILL.md
 grep -q 'rerun the deployment workflow to refresh S4-S7' SKILL.md
 grep -q 'refresh_pending' references/token-refresh.md
 grep -q 'user_confirmations.*runtime_checks' references/token-refresh.md
-grep -q 'stops only the matching service-scoped direxio-connect daemon' references/token-refresh.md
+grep -q 'stops only the matching service-scoped dirextalk-connect daemon' references/token-refresh.md
 grep -q '重新生成本地 credentials/MCP snippets' references/token-refresh.md
-grep -q '刷新 direxio-mcp stdio command' references/token-refresh.md
-grep -q 'DIREXIO_RESET_APP_DATA_CONFIRM=1' SKILL.md
+grep -q '刷新 dirextalk-mcp stdio command' references/token-refresh.md
+grep -q 'DIREXTALK_RESET_APP_DATA_CONFIRM=1' SKILL.md
 grep -q 'scripts/aws-credentials.sh import-csv' SKILL.md
 grep -q 'scripts/aws-credentials.sh verify' SKILL.md
 grep -q 'scripts/pricing-estimate.sh' SKILL.md
@@ -316,15 +316,15 @@ grep -q 'AWS official real-time policy prevails' SKILL.md
 grep -q 'AWS official real-time policy prevails' README.md
 grep -q 'AWS official real-time policy prevails' references/deployment-workflow.md
 grep -q '一切以 AWS 官方实时政策为准' README_zh.md
-grep -q 'Read https://github.com/YingSuiAI/direxio-deployer README and follow its npm install rule' README.md
-grep -q '请阅读 https://github.com/YingSuiAI/direxio-deployer 的 README，并按其中 npm 安装规则安装 skill' README_zh.md
+grep -q 'Read https://github.com/YingSuiAI/dirextalk-deployer README and follow its npm install rule' README.md
+grep -q '请阅读 https://github.com/YingSuiAI/dirextalk-deployer 的 README，并按其中 npm 安装规则安装 skill' README_zh.md
 grep -q 'should run the npm install commands below' README.md
 grep -q '应执行下方 npm 安装命令' README_zh.md
 grep -q 'do not use a generic GitHub skill installer' SKILL.md
-grep -q 'Read https://github.com/YingSuiAI/direxio-deployer README and follow its npm install rule' references/agent-targets.md
-grep -q 'DIREXIO_CLOUD_PROVIDER=lightsail' SKILL.md
-grep -q 'DIREXIO_CLOUD_PROVIDER=ec2' SKILL.md
-grep -q 'DIREXIO_DEFAULT_REGION' SKILL.md
+grep -q 'Read https://github.com/YingSuiAI/dirextalk-deployer README and follow its npm install rule' references/agent-targets.md
+grep -q 'DIREXTALK_CLOUD_PROVIDER=lightsail' SKILL.md
+grep -q 'DIREXTALK_CLOUD_PROVIDER=ec2' SKILL.md
+grep -q 'DIREXTALK_DEFAULT_REGION' SKILL.md
 grep -q 'timezone' references/deployment-workflow.md
 grep -q 'does not automatically switch to EC2' README.md
 grep -q '不会自动切换到 EC2' README_zh.md
@@ -332,9 +332,9 @@ grep -q 'EC2-VPC Elastic IP quota' SKILL.md
 grep -q 'EC2-VPC Elastic IP quota' references/deployment-workflow.md
 grep -q 'orchestrate.sh confirm app_initialization' SKILL.md
 grep -q 'orchestrate.sh confirm agent_mcp_runtime' SKILL.md
-grep -q 'DIREXIO_CONFIRM_RUNTIME_PROBE=1' SKILL.md
+grep -q 'DIREXTALK_CONFIRM_RUNTIME_PROBE=1' SKILL.md
 grep -q 'runtime_checks.summary.status' SKILL.md
-grep -q 'confirm` command requires `DIREXIO_CONFIRM_EVIDENCE`' SKILL.md
+grep -q 'confirm` command requires `DIREXTALK_CONFIRM_EVIDENCE`' SKILL.md
 grep -q 'at least 12 characters' SKILL.md
 grep -q 'orchestrate.sh verify connect_daemon' SKILL.md
 grep -q 'orchestrate.sh verify mcp_doctor' SKILL.md
@@ -342,16 +342,16 @@ grep -q 'orchestrate.sh verify mcp_smoke' SKILL.md
 grep -q 'orchestrate.sh verify mcp_tools' SKILL.md
 grep -q 'orchestrate.sh verify runtime' SKILL.md
 grep -q 'orchestrate.sh confirm app_initialization' references/deployment-workflow.md
-grep -q 'DIREXIO_CONFIRM_RUNTIME_PROBE=1' references/deployment-workflow.md
-grep -q 'All `confirm` commands require `DIREXIO_CONFIRM_EVIDENCE`' references/deployment-workflow.md
+grep -q 'DIREXTALK_CONFIRM_RUNTIME_PROBE=1' references/deployment-workflow.md
+grep -q 'All `confirm` commands require `DIREXTALK_CONFIRM_EVIDENCE`' references/deployment-workflow.md
 grep -q 'at least 12 characters' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify connect_daemon' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify mcp_doctor' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify mcp_smoke' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify mcp_tools' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify runtime' references/deployment-workflow.md
-grep -q 'DIREXIO_CONFIRM_DNS_OVERWRITE=1' SKILL.md
-grep -q 'DIREXIO_CONFIRM_DNS_OVERWRITE=1' references/deployment-workflow.md
+grep -q 'DIREXTALK_CONFIRM_DNS_OVERWRITE=1' SKILL.md
+grep -q 'DIREXTALK_CONFIRM_DNS_OVERWRITE=1' references/deployment-workflow.md
 grep -q 'authoritative DNS' SKILL.md
 grep -q 'AWS Budget' SKILL.md
 grep -q 'AWS Budget' references/deployment-workflow.md
@@ -388,13 +388,13 @@ done
 grep -q 'Deployer-side implemented' references/deployment-optimization-audit.md
 grep -q 'Runtime evidence still required' references/deployment-optimization-audit.md
 grep -q 'Current best plan' references/deployment-optimization-audit.md
-grep -q '~/.direxio/nodes/<service_id>/' references/deployment-optimization-audit.md
+grep -q '~/.dirextalk/nodes/<service_id>/' references/deployment-optimization-audit.md
 grep -q 'verify runtime is an internal non-polluting check' references/deployment-optimization-audit.md
 grep -q 'user App initialization and real chat evidence' references/deployment-optimization-audit.md
 grep -q 'update/reset are now first-class scripts' references/deployment-optimization-audit.md
 grep -q 'Local refresh' references/deployment-optimization-audit.md
 grep -q 'clears old credentials, user confirmations, runtime checks, bridge install' references/deployment-optimization-audit.md
-grep -q 'stops only the matching service-scoped direxio-connect daemon' references/deployment-optimization-audit.md
+grep -q 'stops only the matching service-scoped dirextalk-connect daemon' references/deployment-optimization-audit.md
 grep -q 'Lightsail default path is implemented' references/deployment-optimization-audit.md
 
 if grep -RE 'DOMAIN_MODE=lightsail' SKILL.md README.md README_zh.md references scripts >/dev/null; then

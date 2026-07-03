@@ -40,7 +40,7 @@ Expected: FAIL because `scripts/lib/region.sh` does not exist or `ensure_region_
 Create `scripts/lib/region.sh` with:
 
 ```bash
-direxio_timezone_name() {
+dirextalk_timezone_name() {
   if [ -n "${TZ:-}" ]; then printf '%s\n' "$TZ"; return 0; fi
   if [ -f /etc/timezone ]; then sed -n '1p' /etc/timezone; return 0; fi
   if command -v timedatectl >/dev/null 2>&1; then
@@ -48,7 +48,7 @@ direxio_timezone_name() {
   fi
 }
 
-direxio_utc_offset_hours() {
+dirextalk_utc_offset_hours() {
   date +%z 2>/dev/null | awk '
     /^[+-][0-9][0-9][0-9][0-9]$/ {
       sign=substr($0,1,1); h=substr($0,2,2)+0; m=substr($0,4,2)+0;
@@ -56,10 +56,10 @@ direxio_utc_offset_hours() {
     }'
 }
 
-direxio_recommend_region() {
+dirextalk_recommend_region() {
   local tz offset region reason
-  tz=$(direxio_timezone_name)
-  offset=$(direxio_utc_offset_hours)
+  tz=$(dirextalk_timezone_name)
+  offset=$(dirextalk_utc_offset_hours)
   case "$tz" in
     Asia/Shanghai|Asia/Chongqing|Asia/Harbin|Asia/Urumqi|Asia/Hong_Kong|Asia/Macau|Asia/Taipei)
       region=ap-east-1; reason="timezone $tz maps to Asia Pacific (Hong Kong)" ;;
@@ -87,7 +87,7 @@ direxio_recommend_region() {
 
 - [x] **Step 4: Wire region selection**
 
-Source `scripts/lib/region.sh` from `scripts/orchestrate.sh`. In `ensure_region_selected`, after state/env/profile checks and `DIREXIO_DEFAULT_REGION`, call `direxio_recommend_region`, set `region`, and write:
+Source `scripts/lib/region.sh` from `scripts/orchestrate.sh`. In `ensure_region_selected`, after state/env/profile checks and `DIREXTALK_DEFAULT_REGION`, call `dirextalk_recommend_region`, set `region`, and write:
 
 ```bash
 state_set_object region_recommendation \
@@ -98,7 +98,7 @@ state_set_object region_recommendation \
   "reason=$reason"
 ```
 
-For `DIREXIO_DEFAULT_REGION`, write `source=env`. For env/profile/state regions, avoid replacing an existing recommendation unless this run selected the region.
+For `DIREXTALK_DEFAULT_REGION`, write `source=env`. For env/profile/state regions, avoid replacing an existing recommendation unless this run selected the region.
 
 - [x] **Step 5: Run the test to verify it passes**
 
@@ -140,7 +140,7 @@ _wait_for_lightsail_or_ec2_choice() {
   domain_mode=$(state_get domain_mode)
   domain_mode=${domain_mode:-user}
   _record_cloud_recommendation lightsail "lightsail_unavailable"
-  if estimate=$(bash "$S1_PHASE_DIR/../pricing-estimate.sh" --region "$region" --cloud-provider ec2 --instance-type "$DEFAULT_EC2_INSTANCE_TYPE" --disk-gb "${DIREXIO_ROOT_VOLUME_GB:-50}" --domain-mode "$domain_mode" 2>/dev/null); then
+  if estimate=$(bash "$S1_PHASE_DIR/../pricing-estimate.sh" --region "$region" --cloud-provider ec2 --instance-type "$DEFAULT_EC2_INSTANCE_TYPE" --disk-gb "${DIREXTALK_ROOT_VOLUME_GB:-50}" --domain-mode "$domain_mode" 2>/dev/null); then
     state_set_raw cloud_recommendation.ec2_cost_estimate "$estimate"
   else
     rc=$?
@@ -150,7 +150,7 @@ _wait_for_lightsail_or_ec2_choice() {
   warn "Lightsail is unavailable in AWS region $region for this deployment."
   warn "Choose another Lightsail-capable region, or explicitly choose EC2 after reviewing the EC2 estimate."
   warn "Lightsail region option: AWS_DEFAULT_REGION=<region> bash scripts/orchestrate.sh"
-  warn "EC2 option: DIREXIO_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=$DEFAULT_EC2_INSTANCE_TYPE bash scripts/orchestrate.sh"
+  warn "EC2 option: DIREXTALK_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=$DEFAULT_EC2_INSTANCE_TYPE bash scripts/orchestrate.sh"
   return 2
 }
 ```
@@ -177,18 +177,18 @@ Expected: PASS and no EC2 calls in the fake AWS log.
 
 - [x] **Step 1: Update docs**
 
-Replace statements that say Lightsail unavailability switches the recommendation to EC2. New text must say S1 waits for user choice, records an EC2 estimate, and requires explicit `DIREXIO_CLOUD_PROVIDER=ec2` for EC2.
+Replace statements that say Lightsail unavailability switches the recommendation to EC2. New text must say S1 waits for user choice, records an EC2 estimate, and requires explicit `DIREXTALK_CLOUD_PROVIDER=ec2` for EC2.
 
 - [x] **Step 2: Update default-region docs**
 
-Document that if state/env/profile has no region, the deployer recommends a default from local timezone and uses it in non-interactive runs. Include `DIREXIO_DEFAULT_REGION` as an explicit override.
+Document that if state/env/profile has no region, the deployer recommends a default from local timezone and uses it in non-interactive runs. Include `DIREXTALK_DEFAULT_REGION` as an explicit override.
 
 - [x] **Step 3: Update structure test**
 
 Add `tests/region_recommendation_test.sh` to required test files and replace stale grep expectations for automatic EC2 fallback with checks for:
 
 ```bash
-grep -q 'DIREXIO_DEFAULT_REGION' SKILL.md
+grep -q 'DIREXTALK_DEFAULT_REGION' SKILL.md
 grep -q 'timezone' references/deployment-workflow.md
 grep -q 'does not automatically switch to EC2' README.md
 grep -q '不会自动切换到 EC2' README_zh.md

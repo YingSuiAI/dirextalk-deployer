@@ -13,11 +13,11 @@ source "$HERE/lib/ops.sh"
 STATE_JSON=$(ops_state_path "${1:-}")
 ops_require_state "$STATE_JSON"
 
-if [ "${DIREXIO_RESET_APP_DATA_CONFIRM:-0}" != "1" ]; then
+if [ "${DIREXTALK_RESET_APP_DATA_CONFIRM:-0}" != "1" ]; then
   cat >&2 <<'EOF'
 reset-app-data is destructive for application data.
 It preserves EC2, Elastic IP/public IPv4, DNS, and Caddy TLS volumes, but clears Matrix/message-server data.
-Set DIREXIO_RESET_APP_DATA_CONFIRM=1 to continue.
+Set DIREXTALK_RESET_APP_DATA_CONFIRM=1 to continue.
 EOF
   exit 2
 fi
@@ -36,5 +36,5 @@ echo "Application data reset complete on the existing node."
 echo "Caddy TLS storage was preserved."
 echo "Old user confirmations and runtime checks were cleared."
 echo "$bridge_stop_message"
-echo "Local S4-S7 gates were reset; rerun orchestrate with DIREXIO_EXISTING_STATE_ACTION=continue."
+echo "Local S4-S7 gates were reset; rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue."
 echo "operation report: $report"

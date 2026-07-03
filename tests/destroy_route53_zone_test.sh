@@ -22,9 +22,9 @@ printf '\n' >> "$CALLS"
 case "${1:-} ${2:-}" in
   "sts get-caller-identity")
     case "$*" in
-      *"--query Arn"*) printf 'arn:aws:iam::123456789012:user/DirexioDeployer-Test\n' ;;
+      *"--query Arn"*) printf 'arn:aws:iam::123456789012:user/DirextalkDeployer-Test\n' ;;
       *"--query Account"*) printf '123456789012\n' ;;
-      *) printf '{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/DirexioDeployer-Test"}\n' ;;
+      *) printf '{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/DirextalkDeployer-Test"}\n' ;;
     esac
     ;;
   "route53 list-hosted-zones")
@@ -46,7 +46,7 @@ esac
 EOF
 chmod 700 "$fakebin/aws"
 
-service_dir="$HOME/.direxio/nodes/route53-destroy.example.test"
+service_dir="$HOME/.dirextalk/nodes/route53-destroy.example.test"
 mkdir -p "$service_dir"
 state="$service_dir/state.json"
 json_build object \

@@ -1,52 +1,52 @@
 # mcp-client-adapters.sh - MCP client config artifacts and install guidance.
 
 _mcp_npm_package() {
-  printf '%s\n' "${DIREXIO_MCP_NPM_PACKAGE:-direxio-mcp@latest}"
+  printf '%s\n' "${DIREXTALK_MCP_NPM_PACKAGE:-dirextalk-mcp@latest}"
 }
 
 _mcp_command() {
   local service_dir=${1:-}
-  if [ -n "${DIREXIO_MCP_COMMAND:-}" ]; then
-    printf '%s\n' "$DIREXIO_MCP_COMMAND"
+  if [ -n "${DIREXTALK_MCP_COMMAND:-}" ]; then
+    printf '%s\n' "$DIREXTALK_MCP_COMMAND"
     return 0
   fi
   if [ -n "$service_dir" ]; then
-    if [ "$(direxio_local_path_style)" = "windows" ]; then
-      printf '%s/direxio-mcp.cmd\n' "$(_mcp_package_dir "$service_dir")"
+    if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+      printf '%s/dirextalk-mcp.cmd\n' "$(_mcp_package_dir "$service_dir")"
     else
-      printf '%s/direxio-mcp\n' "$(_mcp_package_dir "$service_dir")"
+      printf '%s/dirextalk-mcp\n' "$(_mcp_package_dir "$service_dir")"
     fi
     return 0
   fi
-  printf '%s\n' "direxio-mcp"
+  printf '%s\n' "dirextalk-mcp"
 }
 
 _mcp_package_bin_path() {
   local service_dir=$1
-  if [ "$(direxio_local_path_style)" = "windows" ]; then
-    printf '%s/node_modules/.bin/direxio-mcp.cmd\n' "$(_mcp_package_dir "$service_dir")"
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    printf '%s/node_modules/.bin/dirextalk-mcp.cmd\n' "$(_mcp_package_dir "$service_dir")"
   else
-    printf '%s/node_modules/.bin/direxio-mcp\n' "$(_mcp_package_dir "$service_dir")"
+    printf '%s/node_modules/.bin/dirextalk-mcp\n' "$(_mcp_package_dir "$service_dir")"
   fi
 }
 
 _ensure_mcp_wrapper() {
   local service_dir=$1 wrapper target
-  [ -z "${DIREXIO_MCP_COMMAND:-}" ] || return 0
+  [ -z "${DIREXTALK_MCP_COMMAND:-}" ] || return 0
   wrapper=$(_mcp_command "$service_dir")
   target=$(_mcp_package_bin_path "$service_dir")
   mkdir -p "$(dirname "$wrapper")"
-  if [ "$(direxio_local_path_style)" = "windows" ]; then
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
     cat > "$wrapper" <<'EOF'
 @echo off
-"%~dp0node_modules\.bin\direxio-mcp.cmd" %*
+"%~dp0node_modules\.bin\dirextalk-mcp.cmd" %*
 EOF
   else
     cat > "$wrapper" <<'EOF'
 #!/usr/bin/env bash
 set -e
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$DIR/node_modules/.bin/direxio-mcp" "$@"
+exec "$DIR/node_modules/.bin/dirextalk-mcp" "$@"
 EOF
   fi
   chmod 700 "$wrapper" 2>/dev/null || true
@@ -126,13 +126,13 @@ _mcp_selected_config_path() {
 
 _mcp_server_name() {
   local service_id=${1:-local}
-  printf 'direxio-%s\n' "$service_id" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/_/g; s/^_+//; s/_+$//; s/^$/direxio_local/'
+  printf 'dirextalk-%s\n' "$service_id" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/_/g; s/^_+//; s/_+$//; s/^$/dirextalk_local/'
 }
 
 _mcp_install_command() {
   local service_dir=${1:-} command package_dir
   command=$(_mcp_command "$service_dir")
-  if [ -n "$service_dir" ] && [ -z "${DIREXIO_MCP_COMMAND:-}" ]; then
+  if [ -n "$service_dir" ] && [ -z "${DIREXTALK_MCP_COMMAND:-}" ]; then
     package_dir=$(_mcp_package_dir "$service_dir")
     printf 'npm install --prefix %q %q' "$package_dir" "$(_mcp_npm_package)"
   else
@@ -142,9 +142,9 @@ _mcp_install_command() {
 
 _mcp_doctor_command() {
   local credentials_file=$1 node_id=${2:-} service_dir=${3:-}
-  printf 'DIREXIO_CREDENTIALS_FILE=%q' "$(direxio_normalize_local_path "$credentials_file")"
+  printf 'DIREXTALK_CREDENTIALS_FILE=%q' "$(dirextalk_normalize_local_path "$credentials_file")"
   if [ -n "$node_id" ]; then
-    printf ' DIREXIO_AGENT_NODE_ID=%q' "$node_id"
+    printf ' DIREXTALK_AGENT_NODE_ID=%q' "$node_id"
   fi
   printf ' %q doctor --json\n' "$(_mcp_command "$service_dir")"
 }
@@ -165,8 +165,8 @@ _mcp_expand_home_path() {
 }
 
 _mcp_config_conflict_paths() {
-  if [ -n "${DIREXIO_MCP_CONFIG_CONFLICT_PATHS:-}" ]; then
-    printf '%s\n' "$DIREXIO_MCP_CONFIG_CONFLICT_PATHS" | tr ';' '\n'
+  if [ -n "${DIREXTALK_MCP_CONFIG_CONFLICT_PATHS:-}" ]; then
+    printf '%s\n' "$DIREXTALK_MCP_CONFIG_CONFLICT_PATHS" | tr ';' '\n'
     return 0
   fi
   printf '%s\n' \
@@ -179,7 +179,7 @@ _mcp_config_conflict_paths() {
 _mcp_warn_existing_config_conflicts() {
   local server_name=$1 credentials_file=$2 service_id=$3
   local credentials_local raw_path path found=0
-  credentials_local=$(direxio_normalize_local_path "$credentials_file")
+  credentials_local=$(dirextalk_normalize_local_path "$credentials_file")
   while IFS= read -r raw_path; do
     [ -n "$raw_path" ] || continue
     path=$(_mcp_expand_home_path "$raw_path")
@@ -226,7 +226,7 @@ _write_mcp_config_artifacts() {
   mcp_dir=$(_mcp_runtime_dir "$service_dir")
   server_name=$(_mcp_server_name "$service_id")
   command=$(_mcp_command "$service_dir")
-  credentials_local=$(direxio_normalize_local_path "$credentials_file")
+  credentials_local=$(dirextalk_normalize_local_path "$credentials_file")
   q_server=$(_mcp_toml_escape "$server_name")
   q_command=$(_mcp_toml_escape "$command")
   q_credentials=$(_mcp_toml_escape "$credentials_local")
@@ -241,7 +241,7 @@ _write_mcp_config_artifacts() {
   readme=$(_mcp_readme_path "$service_dir")
   config_type=$(_mcp_config_type_for_runtime "$runtime")
   selected_config=$(_mcp_selected_config_path "$service_dir" "$runtime")
-  selected_config_local=$(direxio_normalize_local_path "$selected_config")
+  selected_config_local=$(dirextalk_normalize_local_path "$selected_config")
 
   mkdir -p "$mcp_dir"
   umask 077
@@ -254,7 +254,7 @@ _write_mcp_config_artifacts() {
       cat > "$codex_config" <<EOF
 [mcp_servers."$q_server"]
 command = "$q_command"
-env = { DIREXIO_CREDENTIALS_FILE = "$q_credentials", DIREXIO_AGENT_NODE_ID = "$q_node" }
+env = { DIREXTALK_CREDENTIALS_FILE = "$q_credentials", DIREXTALK_AGENT_NODE_ID = "$q_node" }
 EOF
       chmod 600 "$codex_config" 2>/dev/null || true
       ;;
@@ -265,7 +265,7 @@ EOF
     openclaw)
       selected_label="OpenClaw CLI setup"
       _write_mcp_openclaw_server_config "$openclaw_server_config" "$command" "$credentials_local" "$node_id"
-      openclaw_server_config_local=$(direxio_normalize_local_path "$openclaw_server_config")
+      openclaw_server_config_local=$(dirextalk_normalize_local_path "$openclaw_server_config")
       openclaw_server_config_bash=$(printf '%q' "$openclaw_server_config_local")
       openclaw_server_config_ps=$(_mcp_powershell_single_quote "$openclaw_server_config_local")
       cat > "$openclaw_config" <<EOF
@@ -308,18 +308,18 @@ EOF
   esac
 
   {
-    printf 'export DIREXIO_CREDENTIALS_FILE=%q\n' "$credentials_local"
-    [ -n "$node_id" ] && printf 'export DIREXIO_AGENT_NODE_ID=%q\n' "$node_id"
+    printf 'export DIREXTALK_CREDENTIALS_FILE=%q\n' "$credentials_local"
+    [ -n "$node_id" ] && printf 'export DIREXTALK_AGENT_NODE_ID=%q\n' "$node_id"
   } > "$env_file"
   chmod 600 "$env_file" 2>/dev/null || true
 
-  cursor_config_local=$(direxio_normalize_local_path "$cursor_config")
+  cursor_config_local=$(dirextalk_normalize_local_path "$cursor_config")
   cursor_project_config='.cursor/mcp.json'
   cursor_global_config='~/.cursor/mcp.json'
   cursor_project_config_ps=$(_mcp_powershell_single_quote "$cursor_project_config")
   cursor_global_config_ps=$(_mcp_powershell_single_quote "$cursor_global_config")
   cat > "$readme" <<EOF
-# Direxio MCP Config
+# Dirextalk MCP Config
 
 Install the local MCP package:
 
@@ -340,11 +340,11 @@ Config snippets:
 - Selected MCP config: $selected_config_local
 - Selected MCP label: $selected_label
 
-The deployer writes only the MCP config for the detected runtime. Runtime-specific snippets are used for Codex, Cursor, OpenClaw, and Hermes. Other MCP-capable supported runtimes receive the generic mcpServers JSON. The selected snippet launches this service's direxio-mcp binary directly over stdio with this service's credentials, so no local MCP daemon, HTTP proxy, or listening port is required.
+The deployer writes only the MCP config for the detected runtime. Runtime-specific snippets are used for Codex, Cursor, OpenClaw, and Hermes. Other MCP-capable supported runtimes receive the generic mcpServers JSON. The selected snippet launches this service's dirextalk-mcp binary directly over stdio with this service's credentials, so no local MCP daemon, HTTP proxy, or listening port is required.
 
 Cursor can read MCP servers from \`$cursor_project_config\` in a project or \`$cursor_global_config\` globally. The deployer writes the Cursor-ready JSON snippet here, but does not modify a project or global Cursor config by default because it contains machine-local credential paths. After installing or updating Cursor MCP config, fully restart Cursor or use Cursor's MCP settings to reload/enable the server.
 
-If a client already has the same MCP server name, replace or unset that old entry when its \`DIREXIO_CREDENTIALS_FILE\` differs from this deployment. Otherwise the client can keep talking to a stale node even after this deployer writes fresh snippets.
+If a client already has the same MCP server name, replace or unset that old entry when its \`DIREXTALK_CREDENTIALS_FILE\` differs from this deployment. Otherwise the client can keep talking to a stale node even after this deployer writes fresh snippets.
 
 PowerShell example for reviewing the generated Cursor config:
 
@@ -375,27 +375,27 @@ _maybe_auto_install_mcp() {
     mkdir -p "$package_dir"
     if npm install --prefix "$package_dir" "$(_mcp_npm_package)"; then
       _ensure_mcp_wrapper "$service_dir"
-      ok "direxio-mcp package refreshed for this service."
+      ok "dirextalk-mcp package refreshed for this service."
     elif ! _mcp_command_available "$service_dir"; then
       state_set mcp_install_status "install_failed" 2>/dev/null || true
-      warn "direxio-mcp service-scoped npm install failed and no existing service binary is available. MCP config artifacts and install command are available for manual recovery."
+      warn "dirextalk-mcp service-scoped npm install failed and no existing service binary is available. MCP config artifacts and install command are available for manual recovery."
       return 0
     else
-      warn "direxio-mcp service-scoped npm update failed; continuing with the existing service binary."
+      warn "dirextalk-mcp service-scoped npm update failed; continuing with the existing service binary."
     fi
   elif ! _mcp_command_available "$service_dir"; then
-      warn "DIREXIO_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js to install direxio-mcp automatically."
+      warn "DIREXTALK_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js to install dirextalk-mcp automatically."
       state_set mcp_install_status "npm_missing" 2>/dev/null || true
       return 0
   else
-    warn "npm is not on PATH; continuing with the existing service-scoped direxio-mcp binary."
+    warn "npm is not on PATH; continuing with the existing service-scoped dirextalk-mcp binary."
   fi
   state_set mcp_install_status "installed" 2>/dev/null || true
 }
 
 _print_mcp_guidance() {
   local runtime=$1 service_name=$2 server_name=$3 credentials_file=$4 config_dir=$5 selected_type=$6 selected_config=$7 install_command=$8 doctor_command=$9 service_dir=${10:-}
-  warn "Direxio MCP artifacts written for runtime=$runtime service=$service_name."
+  warn "Dirextalk MCP artifacts written for runtime=$runtime service=$service_name."
   cat >&2 <<EOF
 MCP server name:        $server_name
 MCP config directory:   $config_dir
@@ -405,7 +405,7 @@ MCP doctor command:     $doctor_command
 Selected MCP type:     $selected_type
 Selected MCP config:   $selected_config
 
-S6 writes only the MCP config selected for the detected runtime. Codex, Cursor, OpenClaw, and Hermes have dedicated snippets; other MCP-capable supported runtimes use the generic mcpServers JSON. The selected snippet launches this service's direxio-mcp directly over stdio with the generated service credentials. No MCP daemon, HTTP proxy, or listening port is required.
+S6 writes only the MCP config selected for the detected runtime. Codex, Cursor, OpenClaw, and Hermes have dedicated snippets; other MCP-capable supported runtimes use the generic mcpServers JSON. The selected snippet launches this service's dirextalk-mcp directly over stdio with the generated service credentials. No MCP daemon, HTTP proxy, or listening port is required.
 Cursor can load its selected JSON via .cursor/mcp.json or ~/.cursor/mcp.json, but Cursor may require a full restart or MCP settings reload before the server is enabled.
 For OpenClaw, use the selected CLI setup note so OpenClaw validates and writes mcp.servers itself; do not paste MCP JSON into openclaw.json.
 EOF

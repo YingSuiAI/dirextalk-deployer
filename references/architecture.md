@@ -1,6 +1,6 @@
 # 架构原理
 
-本部署器已经适配新版 Direxio message-server: AS 业务合并进 Dendrite 单体后端，不再部署独立 `asd` 服务。
+本部署器已经适配新版 Dirextalk message-server: AS 业务合并进 Dendrite 单体后端，不再部署独立 `asd` 服务。
 
 ## 服务拓扑
 
@@ -16,27 +16,27 @@ message-server -> PostgreSQL 18
 coturn         -> TURN 3478 + 49160-49200/udp
 ```
 
-- **message-server**: `direxio/message-server:latest`，同时承载 Matrix homeserver 和 `/_p2p/query`/`/_p2p/command`。
-- **PostgreSQL 18**: Matrix 与 Direxio 业务表共库持久化，compose 使用 `/var/lib/postgresql`。
+- **message-server**: `dirextalk/message-server:latest`，同时承载 Matrix homeserver 和 `/_p2p/query`/`/_p2p/command`。
+- **PostgreSQL 18**: Matrix 与 Dirextalk 业务表共库持久化，compose 使用 `/var/lib/postgresql`。
 - **Caddy**: 唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
-- **coturn**: WebRTC TURN relay，Direxio message-server 通过 shared-secret 动态签发 TURN 凭证。
+- **coturn**: WebRTC TURN relay，Dirextalk message-server 通过 shared-secret 动态签发 TURN 凭证。
 
 ## 启动顺序
 
 1. `postgres` healthy。
-2. `message-init` 生成 `/etc/direxio-message-server/message-server.yaml` 和 signing key，并写入 TURN 配置。
-3. `message-server` 启动，加载 Matrix + Direxio 业务，读取 `P2P_PORTAL_PASSWORD` 和 `P2P_PORTAL_CREDENTIALS_FILE`。
-4. `message-server` 通过 bind mount 直接写宿主 `/var/direxio-message-server/p2p/bootstrap.json`。`init-tokens.sh` 调用 `portal.bootstrap`；如果最新服务端没有写入 `agent_room_id`，脚本会通过 Matrix Client API 创建真实 agent room、邀请并加入 `@agent:<server>`，再把 `agent_room_id` 回写到凭据文件。
+2. `message-init` 生成 `/etc/dirextalk-message-server/message-server.yaml` 和 signing key，并写入 TURN 配置。
+3. `message-server` 启动，加载 Matrix + Dirextalk 业务，读取 `P2P_PORTAL_PASSWORD` 和 `P2P_PORTAL_CREDENTIALS_FILE`。
+4. `message-server` 通过 bind mount 直接写宿主 `/var/dirextalk-message-server/p2p/bootstrap.json`。`init-tokens.sh` 调用 `portal.bootstrap`；如果最新服务端没有写入 `agent_room_id`，脚本会通过 Matrix Client API 创建真实 agent room、邀请并加入 `@agent:<server>`，再把 `agent_room_id` 回写到凭据文件。
 5. `message-server` 的 `/.well-known/portal/owner.json` handler 动态返回 owner discovery。
-6. `caddy` 对外服务 Matrix、Direxio API 和 well-known。
+6. `caddy` 对外服务 Matrix、Dirextalk API 和 well-known。
 
 ## 凭据模型
 
-`/var/direxio-message-server/p2p/bootstrap.json` 会包含:
+`/var/dirextalk-message-server/p2p/bootstrap.json` 会包含:
 
 - `password`: 后端字段名；对用户展示时是八位 App 初始化码。
-- `access_token`: 当前用户的统一 bearer token，可用于 Matrix `/_matrix/client/*` 和需要用户身份的 Direxio 调用。
-- `agent_token`: 本地服务凭据中的 agent bearer token；`direxio-connect` 对话桥接使用 S6 创建的 `@agent:<server>` Matrix session。
+- `access_token`: 当前用户的统一 bearer token，可用于 Matrix `/_matrix/client/*` 和需要用户身份的 Dirextalk 调用。
+- `agent_token`: 本地服务凭据中的 agent bearer token；`dirextalk-connect` 对话桥接使用 S6 创建的 `@agent:<server>` Matrix session。
 - `agent_room_id`: 真实 Matrix 房间 ID。部署脚本拒绝旧式 `!agent:<domain>` 伪房间。
 
 ## 域名模型

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # S2 DOMAIN_DECISION — validate the production Matrix server_name.
 #
-# Direxio production deployments require a real, long-lived domain. Temporary
+# Dirextalk production deployments require a real, long-lived domain. Temporary
 # sslip.io/public-IP domains are intentionally not part of this interface.
 #
 # Supported modes:
@@ -9,7 +9,7 @@
 #   DOMAIN_MODE=route53 Route53 hosted zone; ops manages the A record
 #
 # If DOMAIN_MODE is omitted but DOMAIN is present, user mode is assumed.
-# DIREXIO_ASSUME_DEFAULTS never chooses a domain.
+# DIREXTALK_ASSUME_DEFAULTS never chooses a domain.
 
 S2_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 source "$S2_PHASE_DIR/lib/domain.sh"
@@ -24,7 +24,7 @@ run_phase() {
     if [ -n "$domain" ]; then
       mode=user
     elif [ -t 0 ]; then
-      warn "Direxio requires a production domain as the Matrix server_name."
+      warn "Dirextalk requires a production domain as the Matrix server_name."
       warn "Changing the domain is effectively a new homeserver identity; temporary sslip.io defaults are not supported."
       printf "Enter the final domain (for example __DOMAIN__): " >&2
       read -r domain
@@ -36,7 +36,7 @@ run_phase() {
       mode=user
     else
       phase_set S2_DOMAIN waiting_user "waiting for production domain"
-      warn "Deployment blocked: DOMAIN is missing. Direxio no longer supports temporary sslip.io defaults."
+      warn "Deployment blocked: DOMAIN is missing. Dirextalk no longer supports temporary sslip.io defaults."
       warn "Prepare a production domain such as __DOMAIN__. Matrix server_name binds to that domain; changing it later is effectively a new homeserver identity."
       warn "Example:"
       warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash scripts/orchestrate.sh"

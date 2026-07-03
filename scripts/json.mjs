@@ -271,8 +271,8 @@ function cmdBuild(args) {
           [serverName]: {
             command: required(args, 2, "command"),
             env: {
-              DIREXIO_CREDENTIALS_FILE: required(args, 3, "credentials_file"),
-              DIREXIO_AGENT_NODE_ID: args[4] || ""
+              DIREXTALK_CREDENTIALS_FILE: required(args, 3, "credentials_file"),
+              DIREXTALK_AGENT_NODE_ID: args[4] || ""
             }
           }
         }
@@ -286,8 +286,8 @@ function cmdBuild(args) {
       data = {
         command: required(args, 1, "command"),
         env: {
-          DIREXIO_CREDENTIALS_FILE: required(args, 2, "credentials_file"),
-          DIREXIO_AGENT_NODE_ID: args[3] || ""
+          DIREXTALK_CREDENTIALS_FILE: required(args, 2, "credentials_file"),
+          DIREXTALK_AGENT_NODE_ID: args[3] || ""
         }
       };
       if (args[4]) {
@@ -302,10 +302,10 @@ function cmdBuild(args) {
             password: required(args, 4, "password"),
             access_token: required(args, 5, "access_token"),
             agent_room_id: required(args, 6, "agent_room_id"),
-            direxio_domain: required(args, 2, "as_url"),
-            direxio_agent_token: required(args, 3, "agent_token"),
-            direxio_agent_room_id: required(args, 6, "agent_room_id"),
-            direxio_agent_node_id: required(args, 7, "node_id")
+            dirextalk_domain: required(args, 2, "as_url"),
+            dirextalk_agent_token: required(args, 3, "agent_token"),
+            dirextalk_agent_room_id: required(args, 6, "agent_room_id"),
+            dirextalk_agent_node_id: required(args, 7, "node_id")
           }
         }
       };
@@ -533,7 +533,7 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       values_redacted: true
     },
     connect: {
-      package: st.connect_npm_package || "direxio-connent@latest",
+      package: st.connect_npm_package || "dirextalk-connect@latest",
       agent: st.connect_agent || "",
       config: st.connect_config || "",
       install_status: st.connect_install_status || ""
@@ -541,7 +541,7 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
     mcp: {
       status: localRefreshStatus,
       install_status: st.mcp_install_status || "",
-      package: st.mcp_npm_package || "direxio-mcp@latest",
+      package: st.mcp_npm_package || "dirextalk-mcp@latest",
       server_name: st.mcp_server_name || "",
       config_dir: st.mcp_config_dir || "",
       codex: st.mcp_codex_config || "",
@@ -588,7 +588,7 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       values_redacted: true,
       root_access_key_allowed: true,
       temporary_iam_cleanup_required: true,
-      temporary_iam_cleanup_action: "if a temporary DirexioDeployer access key was used, delete or disable it after deployment, or reduce it to a maintenance-only policy"
+      temporary_iam_cleanup_action: "if a temporary DirextalkDeployer access key was used, delete or disable it after deployment, or reduce it to a maintenance-only policy"
     }
   };
 

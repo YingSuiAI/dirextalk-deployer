@@ -12,7 +12,7 @@ Use the PowerShell wrapper from the repository root:
 .\scripts\destroy.ps1
 ```
 
-The wrappers find Git for Windows Bash and use it for the Bash state machine, but set `DIREXIO_LOCAL_PATH_STYLE=windows` so S6 writes Windows-compatible `direxio-connect` config paths and daemon install commands. Use these PowerShell entrypoints on Windows instead of WSL Bash unless you intentionally deployed from WSL and want WSL-owned local paths.
+The wrappers find Git for Windows Bash and use it for the Bash state machine, but set `DIREXTALK_LOCAL_PATH_STYLE=windows` so S6 writes Windows-compatible `dirextalk-connect` config paths and daemon install commands. Use these PowerShell entrypoints on Windows instead of WSL Bash unless you intentionally deployed from WSL and want WSL-owned local paths.
 
 Destroy can use `DOMAIN` or an explicit Windows state path:
 
@@ -20,18 +20,18 @@ Destroy can use `DOMAIN` or an explicit Windows state path:
 $env:DOMAIN = "__DOMAIN__"
 .\scripts\destroy.ps1
 
-.\scripts\destroy.ps1 "$env:USERPROFILE\.direxio\nodes\<service_id>\state.json"
+.\scripts\destroy.ps1 "$env:USERPROFILE\.dirextalk\nodes\<service_id>\state.json"
 ```
 
 ## Background Process Output Buffering
 
-When running `orchestrate.sh` as a background process, bash may buffer stdout because it is not connected to a terminal. The process still writes state to `~/.direxio/nodes/<service_id>/state.json`.
+When running `orchestrate.sh` as a background process, bash may buffer stdout because it is not connected to a terminal. The process still writes state to `~/.dirextalk/nodes/<service_id>/state.json`.
 
 Poll progress with:
 
 ```bash
-node scripts/json.mjs get ~/.direxio/nodes/<service_id>/state.json phase
-node scripts/json.mjs get ~/.direxio/nodes/<service_id>/state.json phases
+node scripts/json.mjs get ~/.dirextalk/nodes/<service_id>/state.json phase
+node scripts/json.mjs get ~/.dirextalk/nodes/<service_id>/state.json phases
 ```
 
 For real-time tailing, use `stdbuf` when available:
@@ -69,38 +69,38 @@ Windows terminal output may redact AWS keys. If a CSV appears truncated in outpu
 S6 checks active runtime signals before historical config directories. If detection is ambiguous on Windows, set:
 
 ```bash
-DIREXIO_CONNECT_AGENT=claudecode
+DIREXTALK_CONNECT_AGENT=claudecode
 ```
 
-or another supported direxio-connect agent before running `scripts/orchestrate.sh`. Supported bridge agents are `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
+or another supported dirextalk-connect agent before running `scripts/orchestrate.sh`. Supported bridge agents are `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
 
-## direxio-connect
+## dirextalk-connect
 
 The npm path is service-scoped by default, so each domain has its own package copy and short wrapper:
 
 ```bash
-npm install --prefix "$HOME/.direxio/nodes/<service_id>/direxio-connect" direxio-connent@latest
-"$HOME/.direxio/nodes/<service_id>/direxio-connect/direxio-connect.cmd" daemon install --config "$HOME/.direxio/nodes/<service_id>/direxio-connect/config.toml" --service-name <service_id> --force
-"$HOME/.direxio/nodes/<service_id>/direxio-connect/direxio-connect.cmd" daemon status --service-name <service_id>
-"$HOME/.direxio/nodes/<service_id>/direxio-connect/direxio-connect.cmd" daemon logs --service-name <service_id> -n 120
+npm install --prefix "$HOME/.dirextalk/nodes/<service_id>/dirextalk-connect" dirextalk-connect@latest
+"$HOME/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect.cmd" daemon install --config "$HOME/.dirextalk/nodes/<service_id>/dirextalk-connect/config.toml" --service-name <service_id> --force
+"$HOME/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect.cmd" daemon status --service-name <service_id>
+"$HOME/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect.cmd" daemon logs --service-name <service_id> -n 120
 ```
 
-In `DIREXIO_AGENT_INSTALL=auto`, S6 waits for the daemon to report `Running`
-and for logs to show `direxio-connect is running`. Cursor Agent CLI missing,
+In `DIREXTALK_AGENT_INSTALL=auto`, S6 waits for the daemon to report `Running`
+and for logs to show `dirextalk-connect is running`. Cursor Agent CLI missing,
 not logged in, workspace trust, ACP startup, or agent offline errors in the logs
 make S6 fail instead of reporting deployment success.
 
 If the command is not found after install, check the service-scoped bin directory:
 
 ```bash
-ls "$HOME/.direxio/nodes/<service_id>/direxio-connect"
+ls "$HOME/.dirextalk/nodes/<service_id>/dirextalk-connect"
 ```
 
 If an agent executable cannot be spawned from PATH, set a generic or agent-specific command before running S6:
 
 ```powershell
-$env:DIREXIO_CONNECT_AGENT = "gemini"
-$env:DIREXIO_GEMINI_COMMAND = "C:\Tools\gemini.cmd"
+$env:DIREXTALK_CONNECT_AGENT = "gemini"
+$env:DIREXTALK_GEMINI_COMMAND = "C:\Tools\gemini.cmd"
 ```
 
 For Cursor on Windows, S6 uses Cursor Agent CLI, not Cursor Desktop CLI. The
@@ -119,8 +119,8 @@ irm 'https://cursor.com/install?win32=true' | iex
 If Cursor Agent CLI is installed in a non-standard location, set:
 
 ```powershell
-$env:DIREXIO_CONNECT_AGENT = "cursor"
-$env:DIREXIO_CURSOR_AGENT_COMMAND = "C:\Path\To\agent.cmd"
+$env:DIREXTALK_CONNECT_AGENT = "cursor"
+$env:DIREXTALK_CURSOR_AGENT_COMMAND = "C:\Path\To\agent.cmd"
 ```
 
 Cursor Agent authentication may still require one interactive login:
@@ -142,7 +142,7 @@ but S6 does not write those files by default because the snippet contains
 machine-local credential paths. After adding or merging the snippet, restart
 Cursor completely or reload/enable the server in Cursor MCP settings before
 expecting tools to appear. Do not merge that MCP snippet into the workspace used
-by direxio-connect unless you want IDE-only MCP tools; App chat uses the
+by dirextalk-connect unless you want IDE-only MCP tools; App chat uses the
 Cursor Agent CLI bridge and S6 defaults `[display]` to `compact` with
 `tool_messages = false` so tool progress is not forwarded into the Matrix room.
 
@@ -151,14 +151,14 @@ For Codex Desktop, the wrapper also tries to find the real bundled `codex.exe` b
 ```powershell
 $codex = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin') -Filter codex.exe -Recurse |
   Select-Object -First 1 -ExpandProperty FullName
-$env:DIREXIO_CODEX_COMMAND = $codex
+$env:DIREXTALK_CODEX_COMMAND = $codex
 ```
 
-Use the Git Bash `$HOME` path for files generated by the deployer. If running `direxio-connect` from PowerShell, translate the config path to the Windows user profile path.
+Use the Git Bash `$HOME` path for files generated by the deployer. If running `dirextalk-connect` from PowerShell, translate the config path to the Windows user profile path.
 
 ## EC2 SSH Key Paths
 
-SSH key files are written with Windows-compatible paths such as `C:/Users/.../.direxio/deploy/p2p-*.pem`. The deployer removes broad Windows ACL entries such as `Users`, `Authenticated Users`, `Everyone`, and Codex sandbox groups where possible, while keeping the current Windows user, `SYSTEM`, and `Administrators` on the file so OpenSSH does not reject the private key as too open. The SSH command printed in the delivery summary works in Git Bash. If using PowerShell or cmd, convert forward slashes to backslashes.
+SSH key files are written with Windows-compatible paths such as `C:/Users/.../.dirextalk/deploy/p2p-*.pem`. The deployer removes broad Windows ACL entries such as `Users`, `Authenticated Users`, `Everyone`, and Codex sandbox groups where possible, while keeping the current Windows user, `SYSTEM`, and `Administrators` on the file so OpenSSH does not reject the private key as too open. The SSH command printed in the delivery summary works in Git Bash. If using PowerShell or cmd, convert forward slashes to backslashes.
 
 ## Verifying Deployment
 

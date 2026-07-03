@@ -13,7 +13,7 @@ ops_state_path() {
     printf '%s\n' "$explicit"
     return 0
   fi
-  printf '%s/state.json\n' "$(direxio_default_workdir)"
+  printf '%s/state.json\n' "$(dirextalk_default_workdir)"
 }
 
 ops_require_state() {
@@ -44,11 +44,11 @@ ops_path_dirname() {
 }
 
 ops_normalize_path() {
-  direxio_normalize_local_path "$1"
+  dirextalk_normalize_local_path "$1"
 }
 
 ops_paths_match() {
-  direxio_paths_equal "$1" "$2"
+  dirextalk_paths_equal "$1" "$2"
 }
 
 ops_remote_base() {
@@ -76,7 +76,7 @@ ops_connect_service_name() {
     service_dir=$(ops_state_get "$state" '.agent_service_dir')
     [ -n "$service_dir" ] && service_name=$(basename "$service_dir")
   fi
-  printf '%s\n' "${service_name:-direxio-connect}"
+  printf '%s\n' "${service_name:-dirextalk-connect}"
 }
 
 ops_connect_target_work_dir() {
@@ -89,14 +89,14 @@ ops_connect_target_work_dir() {
   elif [ -n "$runtime_dir" ]; then
     printf '%s\n' "$runtime_dir"
   elif [ -n "$service_dir" ]; then
-    printf '%s/direxio-connect\n' "${service_dir%/}"
+    printf '%s/dirextalk-connect\n' "${service_dir%/}"
   fi
 }
 
 ops_stop_scoped_daemon() {
   local state=$1 binary service_name target_work_dir status_out daemon_status work_dir
   binary=$(ops_state_get "$state" '.connect_binary')
-  [ -n "$binary" ] || binary=direxio-connect
+  [ -n "$binary" ] || binary=dirextalk-connect
   service_name=$(ops_connect_service_name "$state")
   target_work_dir=$(ops_connect_target_work_dir "$state")
   [ -n "$target_work_dir" ] || return 1
@@ -124,7 +124,7 @@ ops_update_remote_command() {
   local image=${1:-} image_q remote_script
   remote_script=$(cat <<'EOF'
 set -eu
-cd /var/direxio-message-server
+cd /var/dirextalk-message-server
 if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
   IMAGE=$MESSAGE_SERVER_IMAGE
   escaped_image=$(printf '%s\n' "$IMAGE" | sed 's/[\/&]/\\&/g')
@@ -137,7 +137,7 @@ fi
 docker compose --env-file .env pull
 docker compose --env-file .env up -d
 DOMAIN=$(grep '^DOMAIN=' .env | cut -d= -f2)
-BOOTSTRAP_FILE=/var/direxio-message-server/p2p/bootstrap.json
+BOOTSTRAP_FILE=/var/dirextalk-message-server/p2p/bootstrap.json
 bootstrap_ready() {
   test -s "$BOOTSTRAP_FILE" \
     && grep -q '"password"[[:space:]]*:' "$BOOTSTRAP_FILE" \
@@ -148,7 +148,7 @@ bootstrap_ready() {
 if bootstrap_ready; then
   echo "[update] existing bootstrap credentials are present; skipping portal.bootstrap."
 else
-  DOMAIN="$DOMAIN" bash /var/direxio-message-server/init-tokens.sh
+  DOMAIN="$DOMAIN" bash /var/dirextalk-message-server/init-tokens.sh
 fi
 EOF
 )
@@ -163,7 +163,7 @@ EOF
 ops_reset_remote_command() {
   cat <<'EOF'
 set -eu
-cd /var/direxio-message-server
+cd /var/dirextalk-message-server
 sudo docker compose --env-file .env down
 project=$(basename "$PWD")
 for volume in postgres-data message-config message-data; do
@@ -173,13 +173,13 @@ for volume in postgres-data message-config message-data; do
   fi
   sudo docker volume rm "${project}_${volume}" >/dev/null 2>&1 || true
 done
-sudo rm -f /var/direxio-message-server/p2p/bootstrap.json
+sudo rm -f /var/dirextalk-message-server/p2p/bootstrap.json
 new_code=$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", $1 % 100000000}')
 sudo sed -i '/^P2P_PORTAL_PASSWORD=/d' .env
 printf 'P2P_PORTAL_PASSWORD=%s\n' "$new_code" | sudo tee -a .env >/dev/null
 sudo docker compose --env-file .env up -d
 DOMAIN=$(grep '^DOMAIN=' .env | cut -d= -f2)
-sudo DOMAIN="$DOMAIN" bash /var/direxio-message-server/init-tokens.sh
+sudo DOMAIN="$DOMAIN" bash /var/dirextalk-message-server/init-tokens.sh
 EOF
 }
 

@@ -2,7 +2,7 @@
 # S1 PREFLIGHT - cloud provider choice and provider checks.
 #
 # New deployments default to Lightsail's fixed $12/month Linux bundle. EC2
-# remains available through DIREXIO_CLOUD_PROVIDER=ec2 or DEPLOY_MODE=ec2.
+# remains available through DIREXTALK_CLOUD_PROVIDER=ec2 or DEPLOY_MODE=ec2.
 
 DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
@@ -89,7 +89,7 @@ _preflight_ec2() {
 _resolve_cloud_provider() {
   local provider
   provider=$(state_get cloud_provider)
-  provider=${DIREXIO_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXIO_DEPLOY_PROVIDER:-$provider}}}
+  provider=${DIREXTALK_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXTALK_DEPLOY_PROVIDER:-$provider}}}
   provider=${provider:-lightsail}
   provider=$(printf '%s' "$provider" | tr '[:upper:]' '[:lower:]')
   case "$provider" in
@@ -97,7 +97,7 @@ _resolve_cloud_provider() {
     *)
       phase_set S1_PREFLIGHT waiting_user "unknown cloud provider"
       warn "Unknown cloud provider: $provider. Expected lightsail or ec2."
-      warn "Use DIREXIO_CLOUD_PROVIDER=lightsail for the default $12 Lightsail bundle, or DIREXIO_CLOUD_PROVIDER=ec2 for the EC2 path."
+      warn "Use DIREXTALK_CLOUD_PROVIDER=lightsail for the default $12 Lightsail bundle, or DIREXTALK_CLOUD_PROVIDER=ec2 for the EC2 path."
       return 2
       ;;
   esac
@@ -138,7 +138,7 @@ _wait_for_lightsail_or_ec2_choice() {
       --region "$region" \
       --cloud-provider ec2 \
       --instance-type "$DEFAULT_EC2_INSTANCE_TYPE" \
-      --disk-gb "${DIREXIO_ROOT_VOLUME_GB:-50}" \
+      --disk-gb "${DIREXTALK_ROOT_VOLUME_GB:-50}" \
       --domain-mode "$domain_mode" 2>/dev/null); then
     state_set_raw cloud_recommendation.ec2_cost_estimate "$estimate"
   else
@@ -148,7 +148,7 @@ _wait_for_lightsail_or_ec2_choice() {
   warn "Lightsail is unavailable in AWS region $region for this deployment."
   warn "Choose another Lightsail-capable region, or explicitly choose EC2 after reviewing the EC2 estimate."
   warn "Lightsail region option: AWS_DEFAULT_REGION=<region> bash scripts/orchestrate.sh"
-  warn "EC2 option: DIREXIO_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=$DEFAULT_EC2_INSTANCE_TYPE bash scripts/orchestrate.sh"
+  warn "EC2 option: DIREXTALK_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=$DEFAULT_EC2_INSTANCE_TYPE bash scripts/orchestrate.sh"
   return 2
 }
 
@@ -160,24 +160,24 @@ _preflight_lightsail() {
     bundle=$(_select_lightsail_bundle) || {
       phase_set S1_PREFLIGHT failed "Lightsail $12 bundle unavailable"
       warn "Could not find a Lightsail Linux/Unix bundle near $12/month in this account/region."
-      warn "Set DIREXIO_LIGHTSAIL_BUNDLE_ID to override, or use DIREXIO_CLOUD_PROVIDER=ec2."
+      warn "Set DIREXTALK_LIGHTSAIL_BUNDLE_ID to override, or use DIREXTALK_CLOUD_PROVIDER=ec2."
       return 3
     }
   fi
   zone=$(res_get lightsail_availability_zone)
-  zone=${DIREXIO_LIGHTSAIL_AVAILABILITY_ZONE:-${zone:-}}
+  zone=${DIREXTALK_LIGHTSAIL_AVAILABILITY_ZONE:-${zone:-}}
   if [ -z "$zone" ]; then
     zone=$(_select_lightsail_availability_zone "$region") || {
       phase_set S1_PREFLIGHT failed "Lightsail availability zone unavailable"
       warn "No Lightsail availability zone is available in region $region."
-      warn "Use another AWS region, or choose EC2 with DIREXIO_CLOUD_PROVIDER=ec2."
+      warn "Use another AWS region, or choose EC2 with DIREXTALK_CLOUD_PROVIDER=ec2."
       return 3
     }
   fi
   res_set lightsail_availability_zone "$zone"
   log "Cloud provider = Lightsail; selected bundle = $bundle"
   log "Lightsail availability zone = $zone"
-  warn "Default deployment uses Lightsail $DEFAULT_LIGHTSAIL_MONTHLY_USD/month Linux bundle. Use DIREXIO_CLOUD_PROVIDER=ec2 to choose the EC2 path."
+  warn "Default deployment uses Lightsail $DEFAULT_LIGHTSAIL_MONTHLY_USD/month Linux bundle. Use DIREXTALK_CLOUD_PROVIDER=ec2 to choose the EC2 path."
   return 0
 }
 
@@ -229,7 +229,7 @@ EOF
 
 _select_lightsail_bundle() {
   local override tmp selected price ram disk transfer cpu
-  override=${DIREXIO_LIGHTSAIL_BUNDLE_ID:-}
+  override=${DIREXTALK_LIGHTSAIL_BUNDLE_ID:-}
   if [ -n "$override" ]; then
     res_set lightsail_bundle_id "$override"
     res_set lightsail_bundle_price_usd "$DEFAULT_LIGHTSAIL_MONTHLY_USD"

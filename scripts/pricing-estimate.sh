@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pricing-estimate.sh - estimate monthly AWS costs for a Direxio node.
+# pricing-estimate.sh - estimate monthly AWS costs for a Dirextalk node.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -110,7 +110,7 @@ build_estimate() {
     ec2_source=aws_pricing
   else
     status=fallback
-    ec2_hourly=${DIREXIO_FALLBACK_EC2_HOURLY_USD:-0.030}
+    ec2_hourly=${DIREXTALK_FALLBACK_EC2_HOURLY_USD:-0.030}
     ec2_source=fallback
   fi
 
@@ -118,7 +118,7 @@ build_estimate() {
     gp3_source=aws_pricing
   else
     status=fallback
-    gp3_rate=${DIREXIO_FALLBACK_GP3_GB_MONTH_USD:-0.10}
+    gp3_rate=${DIREXTALK_FALLBACK_GP3_GB_MONTH_USD:-0.10}
     gp3_source=fallback
   fi
 
@@ -126,7 +126,7 @@ build_estimate() {
     ipv4_source=aws_pricing
   else
     [ "$status" = "fallback" ] || status=fallback
-    public_ipv4_hourly=${DIREXIO_FALLBACK_PUBLIC_IPV4_HOURLY_USD:-0.005}
+    public_ipv4_hourly=${DIREXTALK_FALLBACK_PUBLIC_IPV4_HOURLY_USD:-0.005}
     ipv4_source=fallback
   fi
 
@@ -139,7 +139,7 @@ build_estimate() {
   fi
 
   if [ "$domain_mode" = "route53" ]; then
-    route53_monthly=${DIREXIO_ROUTE53_HOSTED_ZONE_MONTHLY_USD:-0.50}
+    route53_monthly=${DIREXTALK_ROUTE53_HOSTED_ZONE_MONTHLY_USD:-0.50}
   else
     route53_monthly=0
   fi
@@ -168,7 +168,7 @@ build_estimate() {
 build_lightsail_estimate() {
   local region=$1 domain_mode=$2 bundle_id=$3 price=$4 ram=$5 disk=$6 transfer=$7 cpu=$8 route53_monthly total
   if [ "$domain_mode" = "route53" ]; then
-    route53_monthly=${DIREXIO_ROUTE53_HOSTED_ZONE_MONTHLY_USD:-0.50}
+    route53_monthly=${DIREXTALK_ROUTE53_HOSTED_ZONE_MONTHLY_USD:-0.50}
   else
     route53_monthly=0
   fi
@@ -266,12 +266,12 @@ if [ -n "$state" ]; then
 fi
 
 region=${region:-${AWS_DEFAULT_REGION:-${AWS_REGION:-}}}
-cloud_provider=${cloud_provider:-${DIREXIO_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXIO_DEPLOY_PROVIDER:-lightsail}}}}
+cloud_provider=${cloud_provider:-${DIREXTALK_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DIREXTALK_DEPLOY_PROVIDER:-lightsail}}}}
 cloud_provider=$(printf '%s' "$cloud_provider" | tr '[:upper:]' '[:lower:]')
 instance_type=${instance_type:-t3.small}
 disk_gb=${disk_gb:-50}
 domain_mode=${domain_mode:-user}
-lightsail_bundle_id=${lightsail_bundle_id:-${DIREXIO_LIGHTSAIL_BUNDLE_ID:-$DEFAULT_LIGHTSAIL_BUNDLE_ID}}
+lightsail_bundle_id=${lightsail_bundle_id:-${DIREXTALK_LIGHTSAIL_BUNDLE_ID:-$DEFAULT_LIGHTSAIL_BUNDLE_ID}}
 lightsail_price=${lightsail_price:-$DEFAULT_LIGHTSAIL_MONTHLY_USD}
 lightsail_ram=${lightsail_ram:-$DEFAULT_LIGHTSAIL_RAM_GB}
 lightsail_disk=${lightsail_disk:-$DEFAULT_LIGHTSAIL_DISK_GB}
@@ -286,7 +286,7 @@ lightsail_cpu=${lightsail_cpu:-$DEFAULT_LIGHTSAIL_CPU_COUNT}
 case "$cloud_provider" in
   lightsail)
     if [ -z "${state:-}" ] || [ -z "${lightsail_price:-}" ] || [ "$lightsail_bundle_id" = "$DEFAULT_LIGHTSAIL_BUNDLE_ID" ]; then
-      if bundle_row=$(lookup_lightsail_bundle "${DIREXIO_LIGHTSAIL_BUNDLE_ID:-}"); then
+      if bundle_row=$(lookup_lightsail_bundle "${DIREXTALK_LIGHTSAIL_BUNDLE_ID:-}"); then
         IFS=$'\t' read -r lightsail_bundle_id lightsail_price lightsail_ram lightsail_disk lightsail_transfer lightsail_cpu <<EOF
 $bundle_row
 EOF

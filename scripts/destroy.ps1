@@ -30,14 +30,14 @@ function Quote-BashArg([string] $Value) {
 
 $bash = Find-GitBash
 
-$windowsDirexioHome = Resolve-WindowsDirexioHome
-$env:DIREXIO_WINDOWS_HOME = $windowsDirexioHome
-$env:DIREXIO_HOME = ConvertTo-GitBashPath $windowsDirexioHome
-$env:DIREXIO_LOCAL_PATH_STYLE = 'windows'
+$windowsDirextalkHome = Resolve-WindowsDirextalkHome
+$env:DIREXTALK_WINDOWS_HOME = $windowsDirextalkHome
+$env:DIREXTALK_HOME = ConvertTo-GitBashPath $windowsDirextalkHome
+$env:DIREXTALK_LOCAL_PATH_STYLE = 'windows'
 
-if ($env:DIREXIO_WORKDIR) {
-  $env:DIREXIO_WORKDIR_WINDOWS = $env:DIREXIO_WORKDIR
-  $env:DIREXIO_WORKDIR = ConvertTo-GitBashPath $env:DIREXIO_WORKDIR
+if ($env:DIREXTALK_WORKDIR) {
+  $env:DIREXTALK_WORKDIR_WINDOWS = $env:DIREXTALK_WORKDIR
+  $env:DIREXTALK_WORKDIR = ConvertTo-GitBashPath $env:DIREXTALK_WORKDIR
 }
 
 $repoRootForBash = ConvertTo-GitBashPath $RepoRoot

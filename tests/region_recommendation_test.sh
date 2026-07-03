@@ -6,7 +6,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/region.sh"
 
-row=$(TZ=Asia/Shanghai direxio_recommend_region)
+row=$(TZ=Asia/Shanghai dirextalk_recommend_region)
 IFS=$'\t' read -r region timezone offset reason <<EOF
 $row
 EOF

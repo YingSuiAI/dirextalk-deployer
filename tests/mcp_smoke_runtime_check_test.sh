@@ -72,7 +72,7 @@ fi
 EOF
 chmod 700 "$fakebin/curl"
 
-service_dir="$HOME/.direxio/nodes/mcp-smoke.example.test"
+service_dir="$HOME/.dirextalk/nodes/mcp-smoke.example.test"
 mkdir -p "$service_dir"
 state="$service_dir/state.json"
 json_build object \
@@ -90,12 +90,12 @@ json_build object \
   'resources={}' > "$state"
 
 calls="$tmp/curl.calls"
-verify_output=$(DIREXIO_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CURL_CALLS="$calls" bash "$ROOT/scripts/orchestrate.sh" verify mcp_smoke)
+verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CURL_CALLS="$calls" bash "$ROOT/scripts/orchestrate.sh" verify mcp_smoke)
 printf '%s\n' "$verify_output" | grep -q 'verified runtime check: mcp_smoke'
 
 json_test_check "$state" "data.runtime_checks.mcp_smoke.status === 'passed' && data.runtime_checks.mcp_smoke.action === 'mcp.messages.list' && data.runtime_checks.mcp_smoke.room_id === '!agent:mcp-smoke.example.test' && data.runtime_checks.mcp_smoke.response_messages_type === 'array' && !data.user_confirmations?.agent_mcp_runtime"
 
-report_output=$(DIREXIO_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
+report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)
 json_test_check "$report_path" "data.runtime_checks.mcp_smoke.status === 'passed' && data.gates.user_confirmation.agent_mcp_runtime === 'pending_runtime_confirmation'"
 

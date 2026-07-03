@@ -1,4 +1,4 @@
-# Caddyfile - automatic TLS reverse proxy for the Direxio message server.
+# Caddyfile - automatic TLS reverse proxy for the Dirextalk message server.
 #
 # Public exposure is limited to 443 and 80 for ACME redirects. The message
 # server listens only inside the compose network on port 8008.

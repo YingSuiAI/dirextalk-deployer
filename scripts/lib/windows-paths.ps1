@@ -29,14 +29,14 @@ function ConvertTo-GitBashPath([string] $Path) {
   return "/$drive$rest"
 }
 
-function Resolve-WindowsDirexioHome {
-  if ($env:DIREXIO_HOME) {
-    $normalized = $env:DIREXIO_HOME.Replace('\', '/')
+function Resolve-WindowsDirextalkHome {
+  if ($env:DIREXTALK_HOME) {
+    $normalized = $env:DIREXTALK_HOME.Replace('\', '/')
     if ($normalized -notmatch '^/[A-Za-z](/|$)' -and $normalized -notmatch '^/mnt/[A-Za-z](/|$)' -and $normalized -notmatch '^/cygdrive/[A-Za-z](/|$)') {
-      return $env:DIREXIO_HOME
+      return $env:DIREXTALK_HOME
     }
   }
-  return Join-Path $env:USERPROFILE '.direxio'
+  return Join-Path $env:USERPROFILE '.dirextalk'
 }
 
 function Convert-ArgumentForGitBash([string] $Value) {

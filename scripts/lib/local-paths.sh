@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # lib/local-paths.sh - local host path normalization helpers.
 
-direxio_local_path_style() {
-  local style="${DIREXIO_LOCAL_PATH_STYLE:-}"
+dirextalk_local_path_style() {
+  local style="${DIREXTALK_LOCAL_PATH_STYLE:-}"
   if [ -z "$style" ]; then
     case "$(uname -s 2>/dev/null || printf unknown)" in
       *MINGW*|*MSYS*|*CYGWIN*) style=windows ;;
@@ -12,7 +12,7 @@ direxio_local_path_style() {
   printf '%s\n' "$style"
 }
 
-direxio_to_windows_local_path() {
+dirextalk_to_windows_local_path() {
   local path=${1:-} drive rest
   path=$(printf '%s' "$path" | sed 's#\\#/#g')
   case "$path" in
@@ -20,7 +20,7 @@ direxio_to_windows_local_path() {
       drive=${path%%:*}
       rest=${path#?:}
       [ -n "$rest" ] || rest=/
-      printf '%s:%s\n' "$(_direxio_upper_drive "$drive")" "$rest"
+      printf '%s:%s\n' "$(_dirextalk_upper_drive "$drive")" "$rest"
       return 0
       ;;
     /mnt/[A-Za-z]/*|/mnt/[A-Za-z])
@@ -28,7 +28,7 @@ direxio_to_windows_local_path() {
       drive=${drive%%/*}
       rest=${path#/mnt/$drive}
       [ -n "$rest" ] || rest=/
-      printf '%s:%s\n' "$(_direxio_upper_drive "$drive")" "$rest"
+      printf '%s:%s\n' "$(_dirextalk_upper_drive "$drive")" "$rest"
       return 0
       ;;
     /cygdrive/[A-Za-z]/*|/cygdrive/[A-Za-z])
@@ -36,7 +36,7 @@ direxio_to_windows_local_path() {
       drive=${drive%%/*}
       rest=${path#/cygdrive/$drive}
       [ -n "$rest" ] || rest=/
-      printf '%s:%s\n' "$(_direxio_upper_drive "$drive")" "$rest"
+      printf '%s:%s\n' "$(_dirextalk_upper_drive "$drive")" "$rest"
       return 0
       ;;
     /[A-Za-z]/*|/[A-Za-z])
@@ -44,7 +44,7 @@ direxio_to_windows_local_path() {
       drive=${drive%%/*}
       rest=${path#/$drive}
       [ -n "$rest" ] || rest=/
-      printf '%s:%s\n' "$(_direxio_upper_drive "$drive")" "$rest"
+      printf '%s:%s\n' "$(_dirextalk_upper_drive "$drive")" "$rest"
       return 0
       ;;
   esac
@@ -54,19 +54,19 @@ direxio_to_windows_local_path() {
   printf '%s\n' "$path"
 }
 
-direxio_normalize_local_path() {
+dirextalk_normalize_local_path() {
   local path=${1:-}
-  case "$(direxio_local_path_style)" in
-    windows) path=$(direxio_to_windows_local_path "$path") ;;
+  case "$(dirextalk_local_path_style)" in
+    windows) path=$(dirextalk_to_windows_local_path "$path") ;;
     *) path=$(printf '%s' "$path" | sed 's#\\#/#g') ;;
   esac
-  _direxio_trim_trailing_slashes "$path"
+  _dirextalk_trim_trailing_slashes "$path"
 }
 
-direxio_paths_equal() {
+dirextalk_paths_equal() {
   local left right
-  left=$(direxio_normalize_local_path "$1")
-  right=$(direxio_normalize_local_path "$2")
+  left=$(dirextalk_normalize_local_path "$1")
+  right=$(dirextalk_normalize_local_path "$2")
   case "$left:$right" in
     [A-Za-z]:/*:[A-Za-z]:/*|[A-Za-z]:[A-Za-z]:)
       [ "$(printf '%s' "$left" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$right" | tr '[:upper:]' '[:lower:]')" ]
@@ -77,11 +77,11 @@ direxio_paths_equal() {
   esac
 }
 
-_direxio_upper_drive() {
+_dirextalk_upper_drive() {
   printf '%s' "$1" | tr '[:lower:]' '[:upper:]'
 }
 
-_direxio_trim_trailing_slashes() {
+_dirextalk_trim_trailing_slashes() {
   local path=${1:-}
   while [ "${#path}" -gt 1 ] && [ "${path%/}" != "$path" ]; do
     case "$path" in [A-Za-z]:/) break ;; esac

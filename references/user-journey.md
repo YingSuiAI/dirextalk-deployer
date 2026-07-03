@@ -63,7 +63,7 @@ When all phases complete, report:
 - persisted `DIREXIO_DOMAIN`, `DIREXIO_AGENT_TOKEN`, `DIREXIO_AGENT_ROOM_ID`, `DIREXIO_AGENT_NODE_ID`
 - `connect_config`, `connect_matrix_user`, `connect_matrix_device`, and `connect_matrix_homeserver`
 - connect install policy/mode/status from `connect_install_*` state fields; `DIREXIO_AGENT_INSTALL` and `DIREXIO_AGENT_INSTALL_MODE` are the operator selectors
-- manual command: `npm install -g direxio-connent@latest && direxio-connect daemon install --config <connect_config> --service-name <service_id> --force`
+- manual command: `npm install --prefix ~/.direxio/nodes/<service_id>/direxio-connect direxio-connent@latest && ~/.direxio/nodes/<service_id>/direxio-connect/direxio-connect daemon install --config <connect_config> --service-name <service_id> --force`
 - region, cloud provider, instance ID, public IP, and `state.json` path
 - SSH command
 - stop-billing guidance: ask the agent to destroy this node when finished

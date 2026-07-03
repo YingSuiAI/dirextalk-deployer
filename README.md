@@ -2,7 +2,7 @@
 
 [简体中文](README_zh.md)
 
-`direxio-deployer` deploys a production Direxio message server and wires the local agent room through Direxio's Matrix bridge. The supported local bridge is `direxio-connect`, installed from the npm package `direxio-connent@latest` by default or built from `YingSuiAI/direxio-connect`. S6 also writes service-scoped MCP snippets for MCP-capable hosts such as Codex, Cursor, OpenClaw, and Hermes.
+`direxio-deployer` deploys a production Direxio message server and wires the local agent room through Direxio's Matrix bridge. The supported local bridge is `direxio-connect`, installed per service from the npm package `direxio-connent@latest` by default or built from `YingSuiAI/direxio-connect`. S6 also writes service-scoped MCP snippets for MCP-capable supported runtimes.
 
 ## Contents
 
@@ -195,10 +195,10 @@ mcp/mcp-servers.json
 Manual install:
 
 ```bash
-npm install -g direxio-connent@latest
-direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force
-direxio-connect daemon status --service-name <service_id>
-direxio-connect daemon logs --service-name <service_id> -n 120
+npm install --prefix ~/.direxio/nodes/<service_id>/direxio-connect direxio-connent@latest
+~/.direxio/nodes/<service_id>/direxio-connect/direxio-connect daemon install --config ~/.direxio/nodes/<service_id>/direxio-connect/config.toml --service-name <service_id> --force
+~/.direxio/nodes/<service_id>/direxio-connect/direxio-connect daemon status --service-name <service_id>
+~/.direxio/nodes/<service_id>/direxio-connect/direxio-connect daemon logs --service-name <service_id> -n 120
 ```
 
 With the default `DIREXIO_AGENT_INSTALL=auto`, S6 waits for daemon status
@@ -207,19 +207,22 @@ wiring done. Agent startup errors in the logs, such as a missing Cursor Agent
 CLI, login/auth/trust failures, ACP startup failure, or agent offline state,
 fail S6 instead of reporting deployment success.
 
-MCP is installed automatically during S6 when `DIREXIO_AGENT_INSTALL=auto`.
-S6 also installs a service-scoped `direxio-mcp` daemon for Hermes-style stable
-local MCP access.
+MCP is installed into the current service directory during S6 when
+`DIREXIO_AGENT_INSTALL=auto`. Generated MCP client snippets launch that
+service-scoped `direxio-mcp` binary directly over stdio. S6 also attempts to
+install a service-scoped `direxio-mcp` daemon as an optional HTTP proxy
+endpoint; if Windows denies scheduled-task creation, the stdio snippets remain
+usable.
 Manual recovery command:
 
 ```bash
-npm install -g direxio-mcp@latest
-DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json direxio-mcp doctor --json
-direxio-mcp daemon install --service-name <service_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --host 127.0.0.1 --port 19757
-direxio-mcp daemon status --service-name <service_id> --json
+npm install --prefix ~/.direxio/nodes/<service_id>/mcp direxio-mcp@latest
+DIREXIO_CREDENTIALS_FILE=~/.direxio/nodes/<service_id>/credentials.json ~/.direxio/nodes/<service_id>/mcp/direxio-mcp doctor --json
+~/.direxio/nodes/<service_id>/mcp/direxio-mcp daemon install --service-name <service_id> --credentials-file ~/.direxio/nodes/<service_id>/credentials.json --host 127.0.0.1 --port 19757
+~/.direxio/nodes/<service_id>/mcp/direxio-mcp daemon status --service-name <service_id> --json
 ```
 
-Use `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, and `mcp/hermes.mcp.json` for Hermes. All generated MCP client snippets run `direxio-mcp proxy --url http://127.0.0.1:19757/mcp`, so stdio-only clients get a compatible entrypoint backed by the service-scoped local daemon. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain machine-local credential paths; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
+S6 writes only the MCP snippet for the detected runtime: `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, `mcp/openclaw.md` plus `mcp/openclaw-server.json` for OpenClaw, `mcp/hermes.mcp.json` for Hermes, or `mcp/mcp-servers.json` for other MCP-capable supported runtimes. Generated MCP client snippets run the service-scoped `direxio-mcp` over stdio with `DIREXIO_CREDENTIALS_FILE` set to the service credentials, so clients can start the MCP tool process without a daemon. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain machine-local credential paths; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
 
 Voice input is supported when an STT provider key is available. Set `DIREXIO_SPEECH_API_KEY` or provider-specific variables such as `DIREXIO_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `direxio-connect/config.toml`.
 

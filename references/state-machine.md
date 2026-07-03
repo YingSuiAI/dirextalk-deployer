@@ -32,9 +32,9 @@ S7 自动验收通过后应交付:
 - direxio-connect 配置: `~/.direxio/nodes/<service_id>/direxio-connect/config.toml`
 - MCP 配置目录: `~/.direxio/nodes/<service_id>/mcp/`
 - Matrix bridge 用户: `@agent:<server>`
-- 安装命令: `npm install -g direxio-connent@latest && direxio-connect daemon install --config <config> --service-name <service_id> --force`
-- 启动验证: `direxio-connect daemon status --service-name <service_id>` 和 `direxio-connect daemon logs --service-name <service_id> -n 120`
-- MCP 检查命令: `DIREXIO_CREDENTIALS_FILE=<credentials.json> direxio-mcp doctor --json`
+- 安装命令: `npm install --prefix ~/.direxio/nodes/<service_id>/direxio-connect direxio-connent@latest && ~/.direxio/nodes/<service_id>/direxio-connect/direxio-connect daemon install --config <config> --service-name <service_id> --force`
+- 启动验证: `~/.direxio/nodes/<service_id>/direxio-connect/direxio-connect daemon status --service-name <service_id>` 和同一 binary 的 `daemon logs --service-name <service_id> -n 120`
+- MCP 检查命令: `DIREXIO_CREDENTIALS_FILE=<credentials.json> ~/.direxio/nodes/<service_id>/mcp/direxio-mcp doctor --json`
 - AWS 信息: region、cloud provider、instance id、固定 public IP、Route53 hosted zone、SSH 命令、state.json、destroy 命令
 - 用户确认 gates: App 初始化、消息闭环、Agent/MCP runtime 验证仍需单独记录。
 

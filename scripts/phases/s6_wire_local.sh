@@ -424,6 +424,11 @@ _connect_runtime_dir() {
   printf '%s/direxio-connect\n' "$service_dir"
 }
 
+_connect_package_dir() {
+  local service_dir=$1
+  _connect_runtime_dir "$service_dir"
+}
+
 _agent_workspace() {
   local service_dir=$1 pwd_local
   if [ -n "${DIREXIO_AGENT_WORKSPACE:-}" ]; then
@@ -449,7 +454,47 @@ _connect_config_path() {
 
 _connect_binary_path() {
   local service_dir=$1
-  printf '%s\n' "${DIREXIO_CONNECT_BIN:-direxio-connect}"
+  if [ -n "${DIREXIO_CONNECT_BIN:-}" ]; then
+    printf '%s\n' "$DIREXIO_CONNECT_BIN"
+    return 0
+  fi
+  if [ "$(direxio_local_path_style)" = "windows" ]; then
+    printf '%s/direxio-connect.cmd\n' "$(_connect_package_dir "$service_dir")"
+  else
+    printf '%s/direxio-connect\n' "$(_connect_package_dir "$service_dir")"
+  fi
+}
+
+_connect_package_bin_path() {
+  local service_dir=$1
+  if [ "$(direxio_local_path_style)" = "windows" ]; then
+    printf '%s/node_modules/.bin/direxio-connect.cmd\n' "$(_connect_package_dir "$service_dir")"
+  else
+    printf '%s/node_modules/.bin/direxio-connect\n' "$(_connect_package_dir "$service_dir")"
+  fi
+}
+
+_ensure_connect_wrapper() {
+  local service_dir=$1 wrapper target
+  [ -z "${DIREXIO_CONNECT_BIN:-}" ] || return 0
+  wrapper=$(_connect_binary_path "$service_dir")
+  target=$(_connect_package_bin_path "$service_dir")
+  mkdir -p "$(dirname "$wrapper")"
+  if [ "$(direxio_local_path_style)" = "windows" ]; then
+    cat > "$wrapper" <<'EOF'
+@echo off
+"%~dp0node_modules\.bin\direxio-connect.cmd" %*
+EOF
+  else
+    cat > "$wrapper" <<'EOF'
+#!/usr/bin/env bash
+set -e
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$DIR/node_modules/.bin/direxio-connect" "$@"
+EOF
+  fi
+  chmod 700 "$wrapper" 2>/dev/null || true
+  [ -f "$target" ] || return 0
 }
 
 _env_first() {
@@ -686,9 +731,17 @@ EOF
 }
 
 _connect_daemon_install_command() {
-  local binary=$1 config=$2 service_name=$3
+  local binary=$1 config=$2 service_name=$3 package_dir=${4:-}
   [ -n "$service_name" ] || service_name=direxio-connect
-  printf 'npm install -g %q && %q daemon install --config %q --service-name %q --force' "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
+  if [ -n "$package_dir" ]; then
+    printf 'if [ -x %q ]; then %q daemon stop --service-name %q || true; fi; npm install --prefix %q %q && %q daemon install --config %q --service-name %q --force' "$binary" "$binary" "$service_name" "$package_dir" "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
+  else
+    printf 'if ! command -v %q >/dev/null 2>&1; then npm install -g %q; fi && %q daemon install --config %q --service-name %q --force' "$binary" "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
+  fi
+}
+
+_connect_binary_available() {
+  [ -x "$1" ] || command -v "$1" >/dev/null 2>&1
 }
 
 _connect_daemon_is_running() {
@@ -737,30 +790,48 @@ _connect_daemon_wait_until_ready() {
 
 _maybe_auto_install_connect() {
   local policy=$1 runtime=$2 cc_agent=$3 service_dir=$4 config_path=$5 binary=$6 service_name=$7
-  local repo ref src commit config_arg ready_evidence
+  local repo ref src commit config_arg ready_evidence package_dir
   [ -n "$service_name" ] || service_name=$(basename "$service_dir")
   if [ "$policy" != "auto" ]; then
     state_set connect_install_status "$policy" 2>/dev/null || true
     return 0
   fi
   config_arg=$(_local_connect_path "$config_path")
+  package_dir=$(_connect_package_dir "$service_dir")
   if [ "${DIREXIO_CONNECT_INSTALL_FROM:-npm}" != "source" ]; then
-    if ! command -v npm >/dev/null 2>&1; then
-      warn "DIREXIO_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js or set DIREXIO_CONNECT_INSTALL_FROM=source."
-      state_set connect_install_status "npm_missing" 2>/dev/null || true
-      return 1
+    if command -v npm >/dev/null 2>&1; then
+      if _connect_binary_available "$binary"; then
+        "$binary" daemon stop --service-name "$service_name" >/dev/null 2>&1 || true
+      fi
+      mkdir -p "$package_dir"
+      if npm install --prefix "$package_dir" "$(_connect_npm_package)"; then
+        _ensure_connect_wrapper "$service_dir"
+        ok "direxio-connect package refreshed for this service."
+      elif ! _connect_binary_available "$binary"; then
+        state_set connect_install_status "install_failed" 2>/dev/null || true
+        warn "direxio-connect service-scoped npm install failed and no existing service binary is available."
+        return 1
+      else
+        warn "direxio-connect service-scoped npm update failed; continuing with the existing service binary."
+      fi
+    elif ! _connect_binary_available "$binary"; then
+        warn "DIREXIO_AGENT_INSTALL=auto requested, but npm is not on PATH. Install Node.js or set DIREXIO_CONNECT_INSTALL_FROM=source."
+        state_set connect_install_status "npm_missing" 2>/dev/null || true
+        return 1
+    else
+      warn "npm is not on PATH; continuing with the existing service-scoped direxio-connect binary."
     fi
-    if npm install -g "$(_connect_npm_package)" && "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
+    if "$binary" daemon install --config "$config_arg" --service-name "$service_name" --force; then
       if ! ready_evidence=$(_connect_daemon_wait_until_ready "$binary" "$service_name"); then
         state_set connect_install_status "install_failed" 2>/dev/null || true
         warn "direxio-connect daemon did not reach verified ready state after install ($ready_evidence). Check the local agent command and direxio-connect logs."
         return 1
       fi
       state_set connect_install_status "installed" 2>/dev/null || true
-      ok "direxio-connect daemon installed from npm for $runtime using Matrix room bridge ($ready_evidence)."
+      ok "direxio-connect daemon installed for $runtime using Matrix room bridge ($ready_evidence)."
     else
       state_set connect_install_status "install_failed" 2>/dev/null || true
-      warn "direxio-connect npm install or daemon install failed. Config is available for manual start."
+      warn "direxio-connect daemon install failed. Config is available for manual start."
       return 1
     fi
     return 0
@@ -871,8 +942,8 @@ _agent_global_skill_install_path() {
 }
 
 _connect_install_command() {
-  local binary=$1 config=$2 service_name=$3
-  _connect_daemon_install_command "$binary" "$config" "$service_name"
+  local binary=$1 config=$2 service_name=$3 service_dir=${4:-}
+  _connect_daemon_install_command "$binary" "$config" "$service_name" "${service_dir:+$(_connect_package_dir "$service_dir")}"
 }
 
 _print_runtime_install_summary() {
@@ -986,9 +1057,9 @@ EOF
 run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and direxio-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
-  local node_id service_dir node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_config cc_config_local cc_data cc_data_local cc_binary cc_session cc_source
+  local node_id service_dir node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_config cc_config_local cc_data cc_data_local cc_binary cc_session cc_source cc_package_dir
   local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_daemon_install_command mcp_daemon_status_command mcp_daemon_url mcp_daemon_proxy_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
-  local mcp_codex_config_local mcp_cursor_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_json_config_local mcp_env_file_local mcp_readme_local node_cred_local
+  local mcp_selected_config_type mcp_selected_config mcp_selected_config_local mcp_codex_config_local mcp_cursor_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_json_config_local mcp_env_file_local mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
   local skill_path global_skill_path
   domain=$(state_get domain)
@@ -1018,6 +1089,8 @@ run_phase() {
   cc_data="$cc_runtime_dir/data"
   cc_data_local=$(_local_connect_path "$cc_data")
   cc_binary=$(_connect_binary_path "$service_dir")
+  cc_package_dir=$(_connect_package_dir "$service_dir")
+  _ensure_connect_wrapper "$service_dir"
   cc_session="$cc_runtime_dir/matrix-session.json"
   cc_source=$(_connect_source_dir "$service_dir")
 
@@ -1025,10 +1098,13 @@ run_phase() {
   ok "Wrote $node_cred (0600)."
   node_cred_local=$(_local_connect_path "$node_cred")
 
-  _write_mcp_config_artifacts "$service_id" "$service_dir" "$node_cred" "$node_id"
+  _write_mcp_config_artifacts "$service_id" "$service_dir" "$node_cred" "$node_id" "$runtime"
   mcp_dir=$(_mcp_runtime_dir "$service_dir")
   mcp_dir_local=$(_local_connect_path "$mcp_dir")
   mcp_server_name=$(_mcp_server_name "$service_id")
+  mcp_selected_config_type=$(_mcp_config_type_for_runtime "$runtime")
+  mcp_selected_config=$(_mcp_selected_config_path "$service_dir" "$runtime")
+  mcp_selected_config_local=$(_local_connect_path "$mcp_selected_config")
   mcp_codex_config=$(_mcp_codex_config_path "$service_dir")
   mcp_cursor_config=$(_mcp_cursor_config_path "$service_dir")
   mcp_openclaw_config=$(_mcp_openclaw_config_path "$service_dir")
@@ -1036,17 +1112,24 @@ run_phase() {
   mcp_json_config=$(_mcp_json_config_path "$service_dir")
   mcp_env_file=$(_mcp_env_file_path "$service_dir")
   mcp_readme=$(_mcp_readme_path "$service_dir")
-  mcp_codex_config_local=$(_local_connect_path "$mcp_codex_config")
-  mcp_cursor_config_local=$(_local_connect_path "$mcp_cursor_config")
-  mcp_openclaw_config_local=$(_local_connect_path "$mcp_openclaw_config")
-  mcp_hermes_config_local=$(_local_connect_path "$mcp_hermes_config")
-  mcp_json_config_local=$(_local_connect_path "$mcp_json_config")
+  mcp_codex_config_local=
+  mcp_cursor_config_local=
+  mcp_openclaw_config_local=
+  mcp_hermes_config_local=
+  mcp_json_config_local=
+  case "$mcp_selected_config_type" in
+    codex) mcp_codex_config_local=$mcp_selected_config_local ;;
+    cursor) mcp_cursor_config_local=$mcp_selected_config_local ;;
+    openclaw) mcp_openclaw_config_local=$mcp_selected_config_local ;;
+    hermes) mcp_hermes_config_local=$mcp_selected_config_local ;;
+    generic) mcp_json_config_local=$mcp_selected_config_local ;;
+  esac
   mcp_env_file_local=$(_local_connect_path "$mcp_env_file")
   mcp_readme_local=$(_local_connect_path "$mcp_readme")
-  mcp_install_command=$(_mcp_install_command)
-  mcp_doctor_command=$(_mcp_doctor_command "$node_cred" "$node_id")
-  mcp_daemon_install_command=$(_mcp_daemon_install_command "$service_id" "$node_cred" "$node_id")
-  mcp_daemon_status_command=$(_mcp_daemon_status_command "$service_id")
+  mcp_install_command=$(_mcp_install_command "$service_dir")
+  mcp_doctor_command=$(_mcp_doctor_command "$node_cred" "$node_id" "$service_dir")
+  mcp_daemon_install_command=$(_mcp_daemon_install_command "$service_id" "$node_cred" "$node_id" "$service_dir")
+  mcp_daemon_status_command=$(_mcp_daemon_status_command "$service_id" "$service_dir")
   mcp_daemon_url=$(_mcp_daemon_url "$service_id")
   mcp_daemon_proxy_command=$(_mcp_daemon_proxy_command "$service_id")
   ok "Wrote MCP config snippets under $mcp_dir."
@@ -1096,8 +1179,11 @@ run_phase() {
   state_set agent_service_dir "$service_dir" 2>/dev/null || true
   state_set agent_credentials_file "$node_cred" 2>/dev/null || true
   state_set mcp_npm_package "$(_mcp_npm_package)" 2>/dev/null || true
-  state_set mcp_command "$(_mcp_command)" 2>/dev/null || true
+  state_set mcp_command "$(_mcp_command "$service_dir")" 2>/dev/null || true
+  state_set mcp_package_dir "$(_local_connect_path "$(_mcp_package_dir "$service_dir")")" 2>/dev/null || true
   state_set mcp_server_name "$mcp_server_name" 2>/dev/null || true
+  state_set mcp_selected_config_type "$mcp_selected_config_type" 2>/dev/null || true
+  state_set mcp_selected_config "$mcp_selected_config_local" 2>/dev/null || true
   state_set mcp_config_dir "$mcp_dir_local" 2>/dev/null || true
   state_set mcp_credentials_file "$node_cred_local" 2>/dev/null || true
   state_set mcp_codex_config "$mcp_codex_config_local" 2>/dev/null || true
@@ -1125,6 +1211,7 @@ run_phase() {
   state_set connect_repo "$(_connect_repo)" 2>/dev/null || true
   state_set connect_ref "$(_connect_ref)" 2>/dev/null || true
   state_set connect_source_dir "$cc_source" 2>/dev/null || true
+  state_set connect_package_dir "$(_local_connect_path "$cc_package_dir")" 2>/dev/null || true
   state_set connect_runtime_dir "$cc_runtime_dir" 2>/dev/null || true
   state_set connect_config "$cc_config_local" 2>/dev/null || true
   state_set connect_binary "$cc_binary" 2>/dev/null || true
@@ -1137,7 +1224,7 @@ run_phase() {
 
   install_policy=$(_connect_install_policy)
   install_mode=$(_connect_install_mode "$runtime")
-  install_command=$(_connect_install_command "$cc_binary" "$cc_config" "$service_id")
+  install_command=$(_connect_install_command "$cc_binary" "$cc_config" "$service_id" "$service_dir")
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
   state_set agent_runtime "$runtime" 2>/dev/null || true
@@ -1149,13 +1236,13 @@ run_phase() {
   state_set agent_global_skill_install_path "$global_skill_path" 2>/dev/null || true
   state_set direxio_agent_bridge "direxio-connect" 2>/dev/null || true
   _print_connect_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_id"
-  _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_codex_config_local" "$mcp_openclaw_config_local" "$mcp_hermes_config_local" "$mcp_install_command" "$mcp_doctor_command" "$mcp_cursor_config_local"
+  _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_selected_config_type" "$mcp_selected_config_local" "$mcp_install_command" "$mcp_doctor_command" "$service_dir"
   if ! _maybe_auto_install_agent "$install_policy" "$runtime" "$cc_agent" "$service_dir" "$cc_config" "$cc_binary" "$service_id"; then
     phase_set S6_WIRE_LOCAL failed "direxio-connect auto install/startup was not verified; check daemon logs"
     warn "Run: $cc_binary daemon logs --service-name $service_id -n ${DIREXIO_CONNECT_LOG_TAIL_LINES:-120}"
     return 1
   fi
-  _maybe_auto_install_mcp "$install_policy" "$service_id" "$node_cred" "$node_id"
+  _maybe_auto_install_mcp "$install_policy" "$service_id" "$node_cred" "$node_id" "$service_dir"
 
   phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;env_file=$envfile;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;connect_config=$cc_config;mcp_config_dir=$mcp_dir;connect_agent=$cc_agent"
   return 0

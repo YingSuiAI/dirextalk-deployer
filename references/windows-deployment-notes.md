@@ -76,13 +76,13 @@ or another supported direxio-connect agent before running `scripts/orchestrate.s
 
 ## direxio-connect
 
-The npm path is the default local install:
+The npm path is service-scoped by default, so each domain has its own package copy and short wrapper:
 
 ```bash
-npm install -g direxio-connent@latest
-direxio-connect daemon install --config "$HOME/.direxio/nodes/<service_id>/direxio-connect/config.toml" --service-name <service_id> --force
-direxio-connect daemon status --service-name <service_id>
-direxio-connect daemon logs --service-name <service_id> -n 120
+npm install --prefix "$HOME/.direxio/nodes/<service_id>/direxio-connect" direxio-connent@latest
+"$HOME/.direxio/nodes/<service_id>/direxio-connect/direxio-connect.cmd" daemon install --config "$HOME/.direxio/nodes/<service_id>/direxio-connect/config.toml" --service-name <service_id> --force
+"$HOME/.direxio/nodes/<service_id>/direxio-connect/direxio-connect.cmd" daemon status --service-name <service_id>
+"$HOME/.direxio/nodes/<service_id>/direxio-connect/direxio-connect.cmd" daemon logs --service-name <service_id> -n 120
 ```
 
 In `DIREXIO_AGENT_INSTALL=auto`, S6 waits for the daemon to report `Running`
@@ -90,10 +90,10 @@ and for logs to show `direxio-connect is running`. Cursor Agent CLI missing,
 not logged in, workspace trust, ACP startup, or agent offline errors in the logs
 make S6 fail instead of reporting deployment success.
 
-If the command is not found after install, check the npm global bin directory:
+If the command is not found after install, check the service-scoped bin directory:
 
 ```bash
-npm bin -g
+ls "$HOME/.direxio/nodes/<service_id>/direxio-connect"
 ```
 
 If an agent executable cannot be spawned from PATH, set a generic or agent-specific command before running S6:

@@ -224,21 +224,26 @@ json_test_check "$matrix_retry_dir/session.json" "data.user_id === '@agent:servi
 mkdir -p "$tmp/.codex/skills/direxio-deployer"
 [ "$(cd "$tmp/.codex/skills/direxio-deployer" && _agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
 
-install_command=$(_connect_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/direxio-connect/config.toml" "service.example.test")
+connect_service_dir="$HOME/.direxio/nodes/service.example.test"
+connect_service_binary="$connect_service_dir/direxio-connect/direxio-connect"
+[ "$(_connect_binary_path "$connect_service_dir")" = "$connect_service_binary" ]
+install_command=$(_connect_install_command "$connect_service_binary" "$connect_service_dir/direxio-connect/config.toml" "service.example.test" "$connect_service_dir")
 case "$install_command" in
-  *"npm install -g"*"direxio-connent@latest"*"direxio-connect"*"daemon install"*"--config"*"service.example.test/direxio-connect/config.toml"*"--service-name"*"service.example.test"*"--force"*) ;;
+  *"npm install --prefix"*"service.example.test/direxio-connect"*"direxio-connent@latest"*"direxio-connect/direxio-connect"*"daemon install"*"--config"*"service.example.test/direxio-connect/config.toml"*"--service-name"*"service.example.test"*"--force"*) ;;
   *)
     echo "install command did not include expected direxio-connect daemon flags: $install_command" >&2
     exit 1
     ;;
 esac
-custom_install_command=$(DIREXIO_CONNECT_NPM_PACKAGE='direxio-connent@override-test' _connect_install_command "direxio-connect" "$HOME/.direxio/nodes/service.example.test/direxio-connect/config.toml" "service.example.test")
+custom_install_command=$(DIREXIO_CONNECT_NPM_PACKAGE='direxio-connent@override-test' _connect_install_command "$connect_service_binary" "$connect_service_dir/direxio-connect/config.toml" "service.example.test" "$connect_service_dir")
 [[ "$custom_install_command" == *"direxio-connent@override-test"* ]]
 
 [ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" ]
 [ "$(DIREXIO_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml')" = "C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" ]
-windows_install_command=$(DIREXIO_LOCAL_PATH_STYLE=windows _connect_install_command "direxio-connect" "/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" "im")
+windows_connect_binary="/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/direxio-connect.cmd"
+windows_install_command=$(DIREXIO_LOCAL_PATH_STYLE=windows _connect_install_command "$windows_connect_binary" "/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect/config.toml" "im" "/mnt/c/Users/alice/.direxio/nodes/im")
 [[ "$windows_install_command" == *"C:/Users/alice/.direxio/nodes/im/direxio-connect/config.toml"* ]]
+[[ "$windows_install_command" == *"/mnt/c/Users/alice/.direxio/nodes/im/direxio-connect"* ]]
 [[ "$windows_install_command" == *"--service-name im"* ]]
 
 [ "$(_mcp_server_name "service.example.test")" = "direxio-service_example_test" ]
@@ -246,6 +251,7 @@ windows_install_command=$(DIREXIO_LOCAL_PATH_STYLE=windows _connect_install_comm
 
 mcp_service_dir="$tmp/mcp-service"
 mcp_credentials="$mcp_service_dir/credentials.json"
+expected_mcp_command="$mcp_service_dir/mcp/direxio-mcp"
 mkdir -p "$mcp_service_dir"
 : > "$mcp_credentials"
 mkdir -p "$mcp_service_dir/mcp"
@@ -254,56 +260,76 @@ expected_mcp_credentials="$mcp_credentials"
 if command -v cygpath >/dev/null 2>&1; then
   expected_mcp_credentials=$(cygpath -m "$expected_mcp_credentials")
 fi
-_write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "$mcp_credentials" "codex-service-example"
+_write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "$mcp_credentials" "codex-service-example" codex
 [ -s "$mcp_service_dir/mcp/codex.toml" ]
-[ -s "$mcp_service_dir/mcp/cursor.mcp.json" ]
-[ -s "$mcp_service_dir/mcp/openclaw.md" ]
-[ -s "$mcp_service_dir/mcp/openclaw-server.json" ]
+[ ! -e "$mcp_service_dir/mcp/cursor.mcp.json" ]
+[ ! -e "$mcp_service_dir/mcp/openclaw.md" ]
+[ ! -e "$mcp_service_dir/mcp/openclaw-server.json" ]
 [ ! -e "$mcp_service_dir/mcp/openclaw.mcp.json" ]
-[ -s "$mcp_service_dir/mcp/hermes.mcp.json" ]
-[ -s "$mcp_service_dir/mcp/mcp-servers.json" ]
+[ ! -e "$mcp_service_dir/mcp/hermes.mcp.json" ]
+[ ! -e "$mcp_service_dir/mcp/mcp-servers.json" ]
 [ -s "$mcp_service_dir/mcp/env" ]
+[ -s "$mcp_service_dir/mcp/README.md" ]
 grep -q '\[mcp_servers."direxio-service_example_test"\]' "$mcp_service_dir/mcp/codex.toml"
-grep -q 'command = "direxio-mcp"' "$mcp_service_dir/mcp/codex.toml"
-grep -q 'args = \["proxy", "--url", "http://127.0.0.1:19757/mcp"\]' "$mcp_service_dir/mcp/codex.toml"
+grep -Fq "command = \"$expected_mcp_command\"" "$mcp_service_dir/mcp/codex.toml"
+! grep -q '^args = ' "$mcp_service_dir/mcp/codex.toml"
 grep -q 'DIREXIO_CREDENTIALS_FILE' "$mcp_service_dir/mcp/codex.toml"
 grep -q "$(_local_connect_path "$mcp_credentials")" "$mcp_service_dir/mcp/codex.toml"
-json_test_check "$mcp_service_dir/mcp/openclaw-server.json" "data.command === 'direxio-mcp'"
-json_test_check "$mcp_service_dir/mcp/openclaw-server.json" "data.args[0] === 'proxy' && data.args[1] === '--url' && data.args[2] === 'http://127.0.0.1:19757/mcp'"
-json_test_check "$mcp_service_dir/mcp/openclaw-server.json" "data.env.DIREXIO_CREDENTIALS_FILE === '$expected_mcp_credentials'"
-json_test_check "$mcp_service_dir/mcp/cursor.mcp.json" "data.mcpServers['direxio-service_example_test'].command === 'direxio-mcp'"
-json_test_check "$mcp_service_dir/mcp/cursor.mcp.json" "data.mcpServers['direxio-service_example_test'].args[0] === 'proxy' && data.mcpServers['direxio-service_example_test'].args[1] === '--url' && data.mcpServers['direxio-service_example_test'].args[2] === 'http://127.0.0.1:19757/mcp'"
-json_test_check "$mcp_service_dir/mcp/cursor.mcp.json" "data.mcpServers['direxio-service_example_test'].env.DIREXIO_CREDENTIALS_FILE === '$expected_mcp_credentials'"
-json_test_check "$mcp_service_dir/mcp/mcp-servers.json" "data.mcpServers['direxio-service_example_test'].args[0] === 'proxy' && data.mcpServers['direxio-service_example_test'].args[1] === '--url' && data.mcpServers['direxio-service_example_test'].args[2] === 'http://127.0.0.1:19757/mcp'"
-if json_check "$mcp_service_dir/mcp/openclaw-server.json" "'mcp' in data || 'mcpServers' in data" >/dev/null; then
+grep -q 'DIREXIO_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
+grep -q 'Selected MCP type: codex' "$mcp_service_dir/mcp/README.md"
+grep -q 'same MCP server name' "$mcp_service_dir/mcp/README.md"
+[ "$(_mcp_config_type_for_runtime codex)" = "codex" ]
+[ "$(_mcp_config_type_for_runtime cursor)" = "cursor" ]
+[ "$(_mcp_config_type_for_runtime openclaw)" = "openclaw" ]
+[ "$(_mcp_config_type_for_runtime hermes)" = "hermes" ]
+[ "$(_mcp_config_type_for_runtime gemini)" = "generic" ]
+[ "$(_mcp_selected_config_path "$mcp_service_dir" gemini)" = "$mcp_service_dir/mcp/mcp-servers.json" ]
+
+generic_service_dir="$tmp/generic-mcp-service"
+generic_credentials="$generic_service_dir/credentials.json"
+mkdir -p "$generic_service_dir"
+: > "$generic_credentials"
+_write_mcp_config_artifacts "generic.example.test" "$generic_service_dir" "$generic_credentials" "gemini-generic-example" gemini
+[ -s "$generic_service_dir/mcp/mcp-servers.json" ]
+[ ! -e "$generic_service_dir/mcp/codex.toml" ]
+[ ! -e "$generic_service_dir/mcp/cursor.mcp.json" ]
+json_test_check "$generic_service_dir/mcp/mcp-servers.json" "data.mcpServers['direxio-generic_example_test'].command === '$generic_service_dir/mcp/direxio-mcp'"
+json_test_check "$generic_service_dir/mcp/mcp-servers.json" "!('args' in data.mcpServers['direxio-generic_example_test'])"
+grep -q 'Selected MCP type: generic' "$generic_service_dir/mcp/README.md"
+
+openclaw_service_dir="$tmp/openclaw-mcp-service"
+openclaw_credentials="$openclaw_service_dir/credentials.json"
+mkdir -p "$openclaw_service_dir"
+: > "$openclaw_credentials"
+_write_mcp_config_artifacts "openclaw.example.test" "$openclaw_service_dir" "$openclaw_credentials" "openclaw-node" openclaw
+[ -s "$openclaw_service_dir/mcp/openclaw.md" ]
+[ -s "$openclaw_service_dir/mcp/openclaw-server.json" ]
+[ ! -e "$openclaw_service_dir/mcp/mcp-servers.json" ]
+json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.command === '$openclaw_service_dir/mcp/direxio-mcp'"
+json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "!('args' in data)"
+if json_check "$openclaw_service_dir/mcp/openclaw-server.json" "'mcp' in data || 'mcpServers' in data" >/dev/null; then
   echo "OpenClaw server object must not be a root openclaw.json or mcpServers snippet" >&2
   exit 1
 fi
-grep -q 'openclaw mcp set direxio-service_example_test' "$mcp_service_dir/mcp/openclaw.md"
-grep -q 'Do not paste' "$mcp_service_dir/mcp/openclaw.md"
-grep -q 'openclaw.json' "$mcp_service_dir/mcp/openclaw.md"
-json_test_check "$mcp_service_dir/mcp/hermes.mcp.json" "data.mcpServers['direxio-service_example_test'].env.DIREXIO_CREDENTIALS_FILE === '$expected_mcp_credentials'"
-json_test_check "$mcp_service_dir/mcp/hermes.mcp.json" "data.mcpServers['direxio-service_example_test'].args[0] === 'proxy' && data.mcpServers['direxio-service_example_test'].args[1] === '--url' && data.mcpServers['direxio-service_example_test'].args[2] === 'http://127.0.0.1:19757/mcp'"
-grep -q 'DIREXIO_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
-grep -q 'Cursor JSON:' "$mcp_service_dir/mcp/README.md"
-grep -q '.cursor/mcp.json' "$mcp_service_dir/mcp/README.md"
-grep -q 'same MCP server name' "$mcp_service_dir/mcp/README.md"
-mcp_install_command=$(_mcp_install_command)
-[[ "$mcp_install_command" == *"npm install -g"*"direxio-mcp@latest"* ]]
-custom_mcp_install_command=$(DIREXIO_MCP_NPM_PACKAGE='direxio-mcp@override-test' _mcp_install_command)
+grep -q 'openclaw mcp set direxio-openclaw_example_test' "$openclaw_service_dir/mcp/openclaw.md"
+grep -q 'Do not paste' "$openclaw_service_dir/mcp/openclaw.md"
+grep -q 'openclaw.json' "$openclaw_service_dir/mcp/openclaw.md"
+mcp_install_command=$(_mcp_install_command "$mcp_service_dir")
+[[ "$mcp_install_command" == *"npm install --prefix"*"mcp-service/mcp"*"direxio-mcp@latest"* ]]
+custom_mcp_install_command=$(DIREXIO_MCP_NPM_PACKAGE='direxio-mcp@override-test' _mcp_install_command "$mcp_service_dir")
 [[ "$custom_mcp_install_command" == *"direxio-mcp@override-test"* ]]
-mcp_doctor_command=$(_mcp_doctor_command "$mcp_credentials" "codex-service-example")
+mcp_doctor_command=$(_mcp_doctor_command "$mcp_credentials" "codex-service-example" "$mcp_service_dir")
 [[ "$mcp_doctor_command" == *"DIREXIO_CREDENTIALS_FILE="* ]]
-[[ "$mcp_doctor_command" == *"direxio-mcp doctor --json"* ]]
+[[ "$mcp_doctor_command" == *"mcp/direxio-mcp doctor --json"* ]]
 mcp_daemon_url=$(_mcp_daemon_url "service.example.test")
 [ "$mcp_daemon_url" = "http://127.0.0.1:19757/mcp" ]
-mcp_daemon_install_command=$(_mcp_daemon_install_command "service.example.test" "$mcp_credentials" "codex-service-example")
+mcp_daemon_install_command=$(_mcp_daemon_install_command "service.example.test" "$mcp_credentials" "codex-service-example" "$mcp_service_dir")
 [[ "$mcp_daemon_install_command" == *"direxio-mcp daemon install"* ]]
 [[ "$mcp_daemon_install_command" == *"--service-name service.example.test"* ]]
 [[ "$mcp_daemon_install_command" == *"--credentials-file"* ]]
 [[ "$mcp_daemon_install_command" == *"--node-id codex-service-example"* ]]
 [[ "$mcp_daemon_install_command" == *"--port 19757"* ]]
-mcp_daemon_proxy_command=$(_mcp_daemon_proxy_command "service.example.test")
+mcp_daemon_proxy_command=$(_mcp_daemon_proxy_command "service.example.test" "$mcp_service_dir")
 [[ "$mcp_daemon_proxy_command" == *"direxio-mcp proxy --url http://127.0.0.1:19757/mcp"* ]]
 
 stale_node_id=$(DIREXIO_AGENT_NODE_ID=codex-old.example.test _agent_node_id codex new.example.test '!agents-real:new.example.test')
@@ -420,6 +446,8 @@ fakebin="$tmp/fakebin"
 mkdir -p "$fakebin"
 cat > "$fakebin/npm" <<'EOF'
 #!/usr/bin/env bash
+[ -z "${NPM_CALLS:-}" ] || printf '%s\n' "$*" >> "$NPM_CALLS"
+[ "${NPM_FAIL:-0}" != "1" ] || exit 1
 exit 0
 EOF
 cat > "$fakebin/direxio-mcp" <<'EOF'
@@ -469,6 +497,9 @@ fi
 exit 1
 EOF
 chmod 700 "$fakebin/npm" "$fakebin/direxio-connect" "$fakebin/direxio-mcp"
+mkdir -p "$(dirname "$expected_mcp_command")"
+cp "$fakebin/direxio-mcp" "$expected_mcp_command"
+chmod 700 "$expected_mcp_command"
 STATE_CALLS="$tmp/state.calls"
 : > "$STATE_CALLS"
 set +e
@@ -501,6 +532,16 @@ STATE_CALLS="$tmp/state-agent-ready.calls"
 PATH="$fakebin:$PATH" CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="direxio-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
 grep -q '^connect_install_status=installed$' "$STATE_CALLS"
 
+STATE_CALLS="$tmp/state-connect-update-fallback.calls"
+NPM_CALLS="$tmp/npm-connect-update.calls"
+: > "$STATE_CALLS"
+: > "$NPM_CALLS"
+PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="direxio-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/direxio-connect/config.toml" direxio-connect service.example.test
+grep -q '^connect_install_status=installed$' "$STATE_CALLS"
+[ -s "$NPM_CALLS" ]
+grep -q -- '--prefix' "$NPM_CALLS"
+grep -q 'direxio-connent@latest' "$NPM_CALLS"
+
 STATE_CALLS="$tmp/state-no-ready-log.calls"
 : > "$STATE_CALLS"
 set +e
@@ -511,10 +552,31 @@ set -e
 grep -q '^connect_install_status=install_failed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/mcp-state.calls"
+NPM_CALLS="$tmp/npm-mcp-update.calls"
 : > "$STATE_CALLS"
-PATH="$fakebin:$PATH" _maybe_auto_install_mcp auto service.example.test "$mcp_credentials" codex-service-example
+: > "$NPM_CALLS"
+PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 _maybe_auto_install_mcp auto service.example.test "$mcp_credentials" codex-service-example
 grep -q '^mcp_install_status=installed$' "$STATE_CALLS"
 grep -q '^mcp_daemon_install_status=installed$' "$STATE_CALLS"
+[ -s "$NPM_CALLS" ]
+grep -q -- '--prefix' "$NPM_CALLS"
+grep -q 'direxio-mcp@latest' "$NPM_CALLS"
+
+cat > "$expected_mcp_command" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "install" ]; then
+  printf 'schtasks install failed: Access is denied\n' >&2
+  exit 1
+fi
+exit 0
+EOF
+chmod 700 "$expected_mcp_command"
+STATE_CALLS="$tmp/mcp-daemon-denied-state.calls"
+: > "$STATE_CALLS"
+PATH="$fakebin:$PATH" NPM_FAIL=1 _maybe_auto_install_mcp auto service.example.test "$mcp_credentials" codex-service-example
+grep -q '^mcp_install_status=installed$' "$STATE_CALLS"
+grep -q '^mcp_daemon_install_status=install_failed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/mcp-recommend-state.calls"
 : > "$STATE_CALLS"
@@ -612,9 +674,12 @@ cat > "$stale_mcp_config" <<'EOF'
 EOF
 mcp_guidance=$(
   DIREXIO_MCP_CONFIG_CONFLICT_PATHS="$stale_mcp_config" \
-    _print_mcp_guidance codex service.example.test direxio-service_example_test "$mcp_credentials" "$mcp_service_dir/mcp" "$mcp_service_dir/mcp/codex.toml" "$mcp_service_dir/mcp/openclaw.md" "$mcp_service_dir/mcp/hermes.mcp.json" "$mcp_install_command" "$mcp_doctor_command" "$mcp_service_dir/mcp/cursor.mcp.json" 2>&1 >/dev/null
+    _print_mcp_guidance codex service.example.test direxio-service_example_test "$mcp_credentials" "$mcp_service_dir/mcp" codex "$mcp_service_dir/mcp/codex.toml" "$mcp_install_command" "$mcp_doctor_command" "$mcp_service_dir" 2>&1 >/dev/null
 )
 [[ "$mcp_guidance" == *"Existing MCP config may shadow this deployment"* ]]
 [[ "$mcp_guidance" == *"$stale_mcp_config"* ]]
+[[ "$mcp_guidance" == *"Selected MCP type:"* ]]
+[[ "$mcp_guidance" == *"Selected MCP config:"* ]]
+[[ "$mcp_guidance" == *"S6 writes only the MCP config selected for the detected runtime"* ]]
 
 echo "s6 wire local ok"

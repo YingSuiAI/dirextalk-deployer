@@ -12,116 +12,93 @@ mkdir -p "$HOME"
 
 fakebin="$tmp/bin"
 mkdir -p "$fakebin"
-
-windows_path() {
-  local path=$1 drive rest
-  case "$path" in
-    /mnt/[A-Za-z]/*)
-      drive=${path#/mnt/}
-      drive=${drive%%/*}
-      rest=${path#/mnt/$drive/}
-      printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-      ;;
-    /[A-Za-z]/*)
-      drive=${path#/}
-      drive=${drive%%/*}
-      rest=${path#/$drive/}
-      printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-      ;;
-    *) printf '%s\n' "$path" ;;
-  esac
-}
-
-cat > "$fakebin/dirextalk-mcp" <<'EOF'
+cat > "$fakebin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-echo "fake dirextalk-mcp executable should be resolved but not directly executed" >&2
-exit 1
-EOF
-chmod 700 "$fakebin/dirextalk-mcp"
 
-fake_pkg="$fakebin/node_modules/dirextalk-mcp"
-mkdir -p "$fake_pkg/dist" "$fake_pkg/node_modules/@modelcontextprotocol/sdk/dist/esm/client"
-cat > "$fake_pkg/package.json" <<'EOF'
-{"name":"dirextalk-mcp","version":"0.0.0","type":"module"}
-EOF
-cat > "$fake_pkg/dist/index.js" <<'EOF'
-#!/usr/bin/env node
-throw new Error("fake MCP server entry should be launched by the SDK transport only");
-EOF
-cat > "$fake_pkg/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js" <<'EOF'
-export class StdioClientTransport {
-  constructor(options) {
-    this.options = options;
-  }
-}
-EOF
-cat > "$fake_pkg/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js" <<'EOF'
-export class Client {
-  constructor(clientInfo, options) {
-    this.clientInfo = clientInfo;
-    this.options = options;
-  }
-  async connect(transport) {
-    const serverEntry = String(transport?.options?.args?.[0] || "").replace(/\\/g, "/");
-    if (!serverEntry.endsWith("dist/index.js")) {
-      throw new Error("SDK transport did not receive dirextalk-mcp dist/index.js");
-    }
-    if (transport.options.env.DIREXTALK_CREDENTIALS_FILE !== process.env.EXPECTED_CREDENTIALS_FILE) {
-      throw new Error("wrong DIREXTALK_CREDENTIALS_FILE");
-    }
-  }
-  async listTools() {
-    return {
-      tools: [
-        { name: "search_rooms", description: "Search rooms" },
-        { name: "send_message", description: "Send message" },
-        { name: "list_messages", description: "List messages" }
-      ]
-    };
-  }
-  async close() {}
-}
-EOF
+printf '%s\n' "$*" >> "$CURL_CALLS"
 
-mcp_command=dirextalk-mcp
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) use_windows_mcp=1 ;;
-  *) use_windows_mcp=0 ;;
+want_url="https://mcp-tools.example.test/mcp"
+case " $* " in
+  *" $want_url "*|*" $want_url")
+    ;;
+  *)
+    echo "unexpected curl URL: $*" >&2
+    exit 1
+    ;;
 esac
-if [ "$use_windows_mcp" = "1" ] && command -v cygpath >/dev/null 2>&1; then
-  mcp_command=$(cygpath -w "$fakebin/dirextalk-mcp")
-elif { [ "$use_windows_mcp" = "1" ] || ! command -v node >/dev/null 2>&1; } && command -v node.exe >/dev/null 2>&1; then
-  mcp_command="$fakebin/dirextalk-mcp"
+
+case " $* " in
+  *"Authorization: Bearer AGENT_TOKEN_TOOLS"*) ;;
+  *)
+    echo "missing or wrong Authorization header: $*" >&2
+    exit 1
+    ;;
+esac
+
+case " $* " in
+  *'"method":"tools/list"'*) ;;
+  *)
+    echo "wrong MCP tools/list body: $*" >&2
+    exit 1
+    ;;
+esac
+
+body_path=""
+write_code=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      body_path=$2
+      shift 2
+      ;;
+    -w)
+      write_code=1
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+payload='{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"search_rooms"},{"name":"send_message"},{"name":"list_messages"}]}}'
+if [ -n "$body_path" ]; then
+  printf '%s\n' "$payload" > "$body_path"
+else
+  printf '%s\n' "$payload"
 fi
+[ "$write_code" -eq 1 ] && printf '200'
+EOF
+chmod 700 "$fakebin/curl"
 
 service_dir="$HOME/.dirextalk/nodes/mcp-tools.example.test"
 mkdir -p "$service_dir"
 credentials="$service_dir/credentials.json"
 : > "$credentials"
-expected_credentials="$credentials"
-if command -v cygpath >/dev/null 2>&1; then
-  expected_credentials=$(cygpath -m "$expected_credentials")
-fi
 state="$service_dir/state.json"
 json_build object \
   run_id=mcp-tools-test \
   region=ap-northeast-1 \
   domain_mode=user \
   domain=mcp-tools.example.test \
+  as_url=https://mcp-tools.example.test \
   agent_service_id=mcp-tools.example.test \
   "agent_service_dir=$service_dir" \
   "agent_credentials_file=$credentials" \
   "mcp_credentials_file=$credentials" \
-  "mcp_command=$mcp_command" \
+  mcp_endpoint_url=https://mcp-tools.example.test/mcp \
+  agent_token=AGENT_TOKEN_TOOLS \
+  agent_node_id=tools-node \
   phase=S7_VERIFY_E2E \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
   'resources={}' > "$state"
 
-verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" bash "$ROOT/scripts/orchestrate.sh" verify mcp_tools)
+calls="$tmp/curl.calls"
+verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CURL_CALLS="$calls" bash "$ROOT/scripts/orchestrate.sh" verify mcp_tools)
 printf '%s\n' "$verify_output" | grep -q 'verified runtime check: mcp_tools'
 
-json_test_check "$state" "data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.tool_count === 3 && data.runtime_checks.mcp_tools.tools.includes('search_rooms') && data.runtime_checks.mcp_tools.tools.includes('send_message') && data.runtime_checks.mcp_tools.tools.includes('list_messages') && !data.user_confirmations?.agent_mcp_runtime"
+json_test_check "$state" "data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.endpoint === 'https://mcp-tools.example.test/mcp' && data.runtime_checks.mcp_tools.tool_count === 3 && data.runtime_checks.mcp_tools.tools.some((tool) => tool.name === 'search_rooms') && data.runtime_checks.mcp_tools.tools.some((tool) => tool.name === 'send_message') && data.runtime_checks.mcp_tools.tools.some((tool) => tool.name === 'list_messages') && !data.user_confirmations?.agent_mcp_runtime"
 
 report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)

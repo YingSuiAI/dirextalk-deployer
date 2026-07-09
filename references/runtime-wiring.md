@@ -50,28 +50,28 @@ S6 writes MCP snippets under the same service directory:
 Generated files:
 
 - `codex.toml`: Codex TOML snippet using `[mcp_servers."<server-name>"]`.
-- `cursor.mcp.json`: Cursor-compatible JSON snippet using `mcpServers`. Operators can merge it into project-level `.cursor/mcp.json` or global `~/.cursor/mcp.json`; S6 does not write those locations by default because they contain machine-local credential paths.
+- `cursor.mcp.json`: Cursor-compatible JSON snippet using `mcpServers`. Operators can merge it into project-level `.cursor/mcp.json` or global `~/.cursor/mcp.json`; S6 does not write those locations by default because they contain a bearer token for this service.
 - `openclaw.md` plus `openclaw-server.json`: OpenClaw CLI setup. It must use `openclaw mcp set`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
-- `hermes.mcp.json`: Hermes JSON snippet using `mcpServers` with direct stdio `dirextalk-mcp`.
+- `hermes.mcp.json`: Hermes JSON snippet using `mcpServers` with the remote HTTP MCP endpoint.
 - `mcp-servers.json`: generic JSON snippet for other MCP-capable supported runtimes.
-- `env`: shell exports for checking `dirextalk-mcp` manually.
+- `env`: shell exports for the selected HTTP MCP URL and agent node id.
 
-S6 writes only the snippet selected for the detected runtime. Dedicated snippets are used for Codex, Cursor, OpenClaw, and Hermes; other MCP-capable supported runtimes receive the generic `mcp-servers.json`. The selected snippet runs the service-scoped `dirextalk-mcp` directly over stdio and sets:
+S6 writes only the snippet selected for the detected runtime. Dedicated snippets are used for Codex, Cursor, OpenClaw, and Hermes; other MCP-capable supported runtimes receive the generic `mcp-servers.json`. The selected snippet connects directly to the deployed message server's HTTP MCP endpoint and sets the equivalent of:
 
 ```bash
-DIREXTALK_CREDENTIALS_FILE=~/.dirextalk/nodes/<service_id>/credentials.json
+DIREXTALK_MCP_URL=https://<domain>/mcp
 DIREXTALK_AGENT_NODE_ID=__AGENT_NODE_ID__
 ```
 
-This is intentionally separate from the `dirextalk-connect` bridge. MCP uses the deployer credential file; dirextalk-connect uses a direct Matrix Client-Server session in `dirextalk-connect/config.toml`.
-Generated MCP client snippets launch the service-scoped `dirextalk-mcp` command directly over stdio. MCP does not require a local daemon, Streamable HTTP proxy endpoint, or listening port.
+This is intentionally separate from the `dirextalk-connect` bridge. MCP uses the server HTTP endpoint and service agent token; dirextalk-connect uses a direct Matrix Client-Server session in `dirextalk-connect/config.toml`.
+Generated MCP client snippets do not install or launch a local MCP CLI. MCP does not require a local daemon, proxy endpoint, or listening port.
 Cursor can load the generated MCP server after the snippet is added to `.cursor/mcp.json` or `~/.cursor/mcp.json`, but Cursor may require a full restart or MCP settings reload/enable before the server starts and tools appear.
 
-Install and check the MCP package:
+Check MCP through the deployer runtime checks:
 
 ```bash
-npm install --prefix ~/.dirextalk/nodes/<service_id>/mcp dirextalk-mcp@latest
-DIREXTALK_CREDENTIALS_FILE=~/.dirextalk/nodes/<service_id>/credentials.json ~/.dirextalk/nodes/<service_id>/mcp/dirextalk-mcp doctor --json
+DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_doctor
+DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_tools
 ```
 
 ## dirextalk-connect Matrix Bridge
@@ -121,8 +121,8 @@ DIREXTALK_OPENCLAW_ACP_ARGS_TOML=<optional OpenClaw ACP TOML array>
 DIREXTALK_HERMES_ACP_ARGS_TOML=<optional Hermes ACP TOML array>
 DIREXTALK_CONNECT_NPM_PACKAGE=dirextalk-connect@latest
 DIREXTALK_CONNECT_REPO=https://github.com/YingSuiAI/dirextalk-connect.git
-DIREXTALK_MCP_NPM_PACKAGE=dirextalk-mcp@latest
-DIREXTALK_MCP_COMMAND=dirextalk-mcp
+mcp_transport=http
+mcp_endpoint_url=https://<domain>/mcp
 DIREXTALK_SPEECH_PROVIDER=openai|groq|qwen|gemini
 DIREXTALK_SPEECH_API_KEY=<optional generic STT key>
 DIREXTALK_SPEECH_BASE_URL=<optional OpenAI-compatible STT base URL>
@@ -141,7 +141,7 @@ Defaults:
 - `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` appends agent-specific options under `[projects.agent.options]`; use it for agents with required non-command options such as `reasonix` (`serve_url`) or `tmux` (`session`).
 - OpenClaw Gateway ACP auto-detects the Gateway from `~/.openclaw/openclaw.json` when `DIREXTALK_OPENCLAW_ACP_URL` and `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE` are unset. It uses `DIREXTALK_OPENCLAW_ACP_SESSION` when provided, otherwise `agent:main:main`. To force explicit Gateway settings, complete OpenClaw pairing first and set all three real values: `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION`.
 - `DIREXTALK_OPENCLAW_ACP_ARGS_TOML` replaces the generated OpenClaw ACP args array, for example `["acp", "--url", "wss://gateway.example.test:18789", "--token-file", "$HOME/.openclaw/gateway.token", "--session", "agent:main:main"]`. `DIREXTALK_HERMES_ACP_ARGS_TOML` supplies the child Hermes args; S6 prefixes `["hermes-acp-adapter", "--", "<hermes-command>"]` automatically.
-- `DIREXTALK_AGENT_INSTALL=auto` is the default. It installs `dirextalk-connect@latest` and `dirextalk-mcp@latest` under the current service directory unless explicit binary/command overrides are set. It installs the `dirextalk-connect` daemon with the generated config and `--service-name <service_id>`. dirextalk-connect is recorded as installed only when `dirextalk-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs show `dirextalk-connect is running`. Logs that show local agent backend failures such as missing CLI, missing login/auth, workspace trust prompts, ACP session initialization failure, or agent offline state make S6 fail with `connect_install_status=install_failed`. MCP records `mcp_install_status=installed` when the service-scoped stdio command is available.
+- `DIREXTALK_AGENT_INSTALL=auto` is the default. It installs `dirextalk-connect@latest` under the current service directory unless explicit binary/command overrides are set. It installs the `dirextalk-connect` daemon with the generated config and `--service-name <service_id>`. dirextalk-connect is recorded as installed only when `dirextalk-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs show `dirextalk-connect is running`. Logs that show local agent backend failures such as missing CLI, missing login/auth, workspace trust prompts, ACP session initialization failure, or agent offline state make S6 fail with `connect_install_status=install_failed`. MCP records `mcp_install_status=not_required` in the default HTTP endpoint path.
 - `DIREXTALK_AGENT_INSTALL=recommend` prints and records commands only. `verify runtime` records the daemon check as `manual_pending` in this mode and still verifies MCP doctor/tools/smoke when the MCP command is available.
 - `DIREXTALK_AGENT_INSTALL_MODE=recommended` maps every supported local runtime to `dirextalk-connect`.
 - Speech defaults to `DIREXTALK_SPEECH_PROVIDER=openai` and `DIREXTALK_SPEECH_LANGUAGE=zh`. Provider-specific keys are also accepted: `DIREXTALK_SPEECH_OPENAI_API_KEY` or `OPENAI_API_KEY`, `DIREXTALK_SPEECH_GROQ_API_KEY` or `GROQ_API_KEY`, `DIREXTALK_SPEECH_QWEN_API_KEY` or `DASHSCOPE_API_KEY`, and `DIREXTALK_SPEECH_GEMINI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`. Set `DIREXTALK_SPEECH_ENABLED=false` to suppress speech config generation even when a key exists.
@@ -198,8 +198,8 @@ connect_matrix_session_file
 connect_matrix_user
 connect_matrix_device
 connect_matrix_homeserver
-mcp_npm_package
-mcp_command
+mcp_transport
+mcp_endpoint_url
 mcp_server_name
 mcp_config_dir
 mcp_credentials_file

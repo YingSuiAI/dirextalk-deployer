@@ -263,37 +263,65 @@ function cmdBuild(args) {
       data = { action: "agent.matrix_session.create", params: { device_id: required(args, 1, "device_id") } };
       process.stdout.write(`${JSON.stringify(data)}\n`);
       return;
-    case "mcp-json-config": {
+    case "mcp-http-json-config": {
       const serverName = required(args, 1, "server_name");
-      const argsJson = args[5] || "";
       data = {
         mcpServers: {
           [serverName]: {
-            command: required(args, 2, "command"),
-            env: {
-              DIREXTALK_CREDENTIALS_FILE: required(args, 3, "credentials_file"),
-              DIREXTALK_AGENT_NODE_ID: args[4] || ""
+            url: required(args, 2, "url"),
+            headers: {
+              Authorization: `Bearer ${required(args, 3, "agent_token")}`,
+              "DIREXTALK-Agent-Node-Id": args[4] || ""
             }
           }
         }
       };
-      if (argsJson) {
-        data.mcpServers[serverName].args = JSON.parse(argsJson);
-      }
       break;
     }
-    case "mcp-openclaw-server-config":
+    case "mcp-http-openclaw-server-config":
       data = {
-        command: required(args, 1, "command"),
-        env: {
-          DIREXTALK_CREDENTIALS_FILE: required(args, 2, "credentials_file"),
-          DIREXTALK_AGENT_NODE_ID: args[3] || ""
+        url: required(args, 1, "url"),
+        headers: {
+          Authorization: `Bearer ${required(args, 2, "agent_token")}`,
+          "DIREXTALK-Agent-Node-Id": args[3] || ""
         }
       };
-      if (args[4]) {
-        data.args = JSON.parse(args[4]);
-      }
       break;
+    case "mcp-jsonrpc-initialize":
+      data = {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: {
+            name: "dirextalk-deployer",
+            version: "0.0.0"
+          }
+        }
+      };
+      process.stdout.write(`${JSON.stringify(data)}\n`);
+      return;
+    case "mcp-jsonrpc-tools-list":
+      data = { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} };
+      process.stdout.write(`${JSON.stringify(data)}\n`);
+      return;
+    case "mcp-jsonrpc-messages-list-call":
+      data = {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "dirextalk_messages_list",
+          arguments: {
+            room_id: required(args, 1, "room_id"),
+            limit: 1
+          }
+        }
+      };
+      process.stdout.write(`${JSON.stringify(data)}\n`);
+      return;
     case "credentials-profile":
       data = {
         profiles: {
@@ -541,7 +569,8 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
     mcp: {
       status: localRefreshStatus,
       install_status: st.mcp_install_status || "",
-      package: st.mcp_npm_package || "dirextalk-mcp@latest",
+      transport: st.mcp_transport || "http",
+      endpoint_url: st.mcp_endpoint_url || "",
       server_name: st.mcp_server_name || "",
       config_dir: st.mcp_config_dir || "",
       codex: st.mcp_codex_config || "",

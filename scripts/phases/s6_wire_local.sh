@@ -1072,7 +1072,7 @@ run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and dirextalk-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
   local node_id service_dir node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_config cc_config_local cc_data cc_data_local cc_binary cc_session cc_source cc_package_dir
-  local mcp_dir mcp_dir_local mcp_server_name mcp_install_command mcp_doctor_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
+  local mcp_dir mcp_dir_local mcp_server_name mcp_endpoint_url mcp_install_command mcp_doctor_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
   local mcp_selected_config_type mcp_selected_config mcp_selected_config_local mcp_codex_config_local mcp_cursor_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_json_config_local mcp_env_file_local mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
   local skill_path global_skill_path
@@ -1112,10 +1112,11 @@ run_phase() {
   ok "Wrote $node_cred (0600)."
   node_cred_local=$(_local_connect_path "$node_cred")
 
-  _write_mcp_config_artifacts "$service_id" "$service_dir" "$node_cred" "$node_id" "$runtime"
+  _write_mcp_config_artifacts "$service_id" "$service_dir" "$asurl" "$token" "$node_cred" "$node_id" "$runtime"
   mcp_dir=$(_mcp_runtime_dir "$service_dir")
   mcp_dir_local=$(_local_connect_path "$mcp_dir")
   mcp_server_name=$(_mcp_server_name "$service_id")
+  mcp_endpoint_url=$(_mcp_endpoint_url "$asurl")
   mcp_selected_config_type=$(_mcp_config_type_for_runtime "$runtime")
   mcp_selected_config=$(_mcp_selected_config_path "$service_dir" "$runtime")
   mcp_selected_config_local=$(_local_connect_path "$mcp_selected_config")
@@ -1140,8 +1141,8 @@ run_phase() {
   esac
   mcp_env_file_local=$(_local_connect_path "$mcp_env_file")
   mcp_readme_local=$(_local_connect_path "$mcp_readme")
-  mcp_install_command=$(_mcp_install_command "$service_dir")
-  mcp_doctor_command=$(_mcp_doctor_command "$node_cred" "$node_id" "$service_dir")
+  mcp_install_command=$(_mcp_install_command "$asurl" "$service_dir")
+  mcp_doctor_command=$(_mcp_doctor_command "$asurl" "$node_cred" "$node_id" "$service_dir")
   ok "Wrote MCP config snippets under $mcp_dir."
 
   if ! envfile=$(_persist_agent_env "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id"); then
@@ -1188,9 +1189,11 @@ run_phase() {
   state_set agent_service_id "$service_id" 2>/dev/null || true
   state_set agent_service_dir "$service_dir" 2>/dev/null || true
   state_set agent_credentials_file "$node_cred" 2>/dev/null || true
-  state_set mcp_npm_package "$(_mcp_npm_package)" 2>/dev/null || true
-  state_set mcp_command "$(_mcp_command "$service_dir")" 2>/dev/null || true
-  state_set mcp_package_dir "$(_local_connect_path "$(_mcp_package_dir "$service_dir")")" 2>/dev/null || true
+  state_set mcp_transport "http" 2>/dev/null || true
+  state_set mcp_endpoint_url "$mcp_endpoint_url" 2>/dev/null || true
+  json_mutate "$STATE_JSON" delete mcp_npm_package 2>/dev/null || true
+  json_mutate "$STATE_JSON" delete mcp_command 2>/dev/null || true
+  json_mutate "$STATE_JSON" delete mcp_package_dir 2>/dev/null || true
   state_set mcp_server_name "$mcp_server_name" 2>/dev/null || true
   state_set mcp_selected_config_type "$mcp_selected_config_type" 2>/dev/null || true
   state_set mcp_selected_config "$mcp_selected_config_local" 2>/dev/null || true
@@ -1243,7 +1246,7 @@ run_phase() {
   state_set agent_global_skill_install_path "$global_skill_path" 2>/dev/null || true
   state_set dirextalk_agent_bridge "dirextalk-connect" 2>/dev/null || true
   _print_connect_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_id"
-  _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_selected_config_type" "$mcp_selected_config_local" "$mcp_install_command" "$mcp_doctor_command" "$service_dir"
+  _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_selected_config_type" "$mcp_selected_config_local" "$mcp_install_command" "$mcp_doctor_command" "$service_dir" "$mcp_endpoint_url"
   if ! _maybe_auto_install_agent "$install_policy" "$runtime" "$cc_agent" "$service_dir" "$cc_config" "$cc_binary" "$service_id"; then
     phase_set S6_WIRE_LOCAL failed "dirextalk-connect auto install/startup was not verified; check daemon logs"
     warn "Run: $cc_binary daemon logs --service-name $service_id -n ${DIREXTALK_CONNECT_LOG_TAIL_LINES:-120}"

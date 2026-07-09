@@ -2,7 +2,7 @@
 
 [简体中文](README_zh.md)
 
-`dirextalk-deployer` deploys a production Dirextalk message server and wires the local agent room through Dirextalk's Matrix bridge. The supported local bridge is `dirextalk-connect`, installed per service from the npm package `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`. S6 also writes service-scoped MCP snippets for MCP-capable supported runtimes.
+`dirextalk-deployer` deploys a production Dirextalk message server and wires the local agent room through Dirextalk's Matrix bridge. The supported local bridge is `dirextalk-connect`, installed per service from the npm package `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`. S6 also writes service-scoped MCP snippets that connect MCP-capable supported runtimes directly to the deployed message server's HTTP MCP endpoint.
 
 ## Contents
 
@@ -13,7 +13,7 @@
 
 ## Before Deployment
 
-- Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain.
+- Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain. If you do not have these yet, answer two setup questions first: do you already have an AWS account, and do you already own a domain or subdomain you can manage in DNS?
 - AWS resources created by this deployer can bill until they are destroyed. New deployments prefer the Lightsail $12/month Linux bundle by default. Users who have not used Lightsail generally receive three months of free Lightsail usage. New AWS customer accounts generally receive 100-200 USD in free credits. AWS official real-time policy prevails. If no region is configured, the deployer recommends a default AWS region from the local timezone and uses it in non-interactive runs; set `AWS_DEFAULT_REGION`, `AWS_REGION`, AWS profile region, or `DIREXTALK_DEFAULT_REGION` to override. S1 checks Lightsail bundle and availability-zone availability before confirmation; for manual zone checks, use `aws lightsail get-regions --include-availability-zones --output json` because plain `get-regions` can omit zone details. If Lightsail has no usable resource in the selected region, S1 does not automatically switch to EC2; it records an EC2 estimate and waits for the operator to choose another Lightsail-capable region/zone or explicitly set `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 uses a 50 GiB gp3 root EBS volume by default.
 - Use `SKILL.md` as the agent-facing runbook. It contains the detailed deployment rules, confirmation gates, runtime wiring behavior, and recovery procedures.
 
@@ -72,6 +72,11 @@ dirextalk-deployer skill update --agent codex
 The CLI is implemented in Node and uses native paths for the host it runs on. On Windows it writes Windows-compatible paths; on Linux, macOS, Git Bash, or WSL it writes paths for that runtime.
 
 ## Minimal Command
+
+Before importing credentials, answer:
+
+- **Do you already have an AWS account?** If not, register at AWS, complete email/phone verification, add a billing card, choose the Basic support plan, wait for activation, then create an AWS Budget or billing alert.
+- **Do you already have a domain or subdomain you control?** If not, register a domain or choose a subdomain at your DNS provider. Use `DOMAIN_MODE=route53` only when AWS Route53 will manage DNS; otherwise use `DOMAIN_MODE=user` and create the A record when the deployer prints the fixed public IP.
 
 Import and verify an AWS deployment profile from an AWS CSV. Root access keys
 are the fastest first-deploy path but are highly privileged; save the CSV
@@ -176,8 +181,9 @@ DIREXTALK_EXISTING_STATE_ACTION=continue DOMAIN=<domain> bash scripts/orchestrat
 
 Application data reset clears server-side app volumes, so the follow-up
 orchestrate run regenerates local credentials/MCP artifacts and automatically
-reinstalls/restarts `dirextalk-connect` plus `dirextalk-mcp` unless explicitly
-overridden with `DIREXTALK_AGENT_INSTALL=recommend` or `skip`.
+reinstalls/restarts `dirextalk-connect` unless explicitly overridden with
+`DIREXTALK_AGENT_INSTALL=recommend` or `skip`. MCP uses the server HTTP endpoint
+and does not install a local MCP CLI.
 
 ## Local Bridge
 
@@ -211,19 +217,12 @@ wiring done. Agent startup errors in the logs, such as a missing Cursor Agent
 CLI, login/auth/trust failures, ACP startup failure, or agent offline state,
 fail S6 instead of reporting deployment success.
 
-MCP is installed into the current service directory during S6 when
-`DIREXTALK_AGENT_INSTALL=auto`. Generated MCP client snippets launch that
-service-scoped `dirextalk-mcp` binary directly over stdio. MCP does not require a
-local daemon, HTTP proxy, or listening port; the MCP client starts the command
-when it needs tools.
-Manual recovery command:
+MCP is not installed as a local CLI during S6. Generated MCP client snippets
+connect directly to the deployed message server's HTTP MCP endpoint at
+`https://<domain>/mcp` using the service agent token. No local MCP CLI, daemon,
+proxy, or listening port is required.
 
-```bash
-npm install --prefix ~/.dirextalk/nodes/<service_id>/mcp dirextalk-mcp@latest
-DIREXTALK_CREDENTIALS_FILE=~/.dirextalk/nodes/<service_id>/credentials.json ~/.dirextalk/nodes/<service_id>/mcp/dirextalk-mcp doctor --json
-```
-
-S6 writes only the MCP snippet for the detected runtime: `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, `mcp/openclaw.md` plus `mcp/openclaw-server.json` for OpenClaw, `mcp/hermes.mcp.json` for Hermes, or `mcp/mcp-servers.json` for other MCP-capable supported runtimes. Generated MCP client snippets run the service-scoped `dirextalk-mcp` over stdio with `DIREXTALK_CREDENTIALS_FILE` set to the service credentials, so clients can start the MCP tool process without a daemon. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain machine-local credential paths; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
+S6 writes only the MCP snippet for the detected runtime: `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, `mcp/openclaw.md` plus `mcp/openclaw-server.json` for OpenClaw, `mcp/hermes.mcp.json` for Hermes, or `mcp/mcp-servers.json` for other MCP-capable supported runtimes. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain a bearer token for this service; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
 
 Voice input is supported when an STT provider key is available. Set `DIREXTALK_SPEECH_API_KEY` or provider-specific variables such as `DIREXTALK_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `dirextalk-connect/config.toml`.
 

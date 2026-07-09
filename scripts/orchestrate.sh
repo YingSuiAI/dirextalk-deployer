@@ -303,6 +303,7 @@ print_delivery() {
   local domain password keyfile pubip iid region statejson envfile agent_room_id runtime install_policy install_mode install_status install_command
   local cloud_provider cloud_label
   local agent_node_id agent_service_id agent_service_dir agent_cred cc_config cc_binary cc_agent cc_user cc_pkg
+  local mcp_endpoint
   local report_path runtime_summary app_gate real_chat_gate agent_runtime_gate
   domain=$(state_get domain)
   password=$(state_get password)
@@ -330,6 +331,7 @@ print_delivery() {
   cc_agent=$(state_get connect_agent)
   cc_user=$(state_get connect_matrix_user)
   cc_pkg=$(state_get connect_npm_package)
+  mcp_endpoint=$(state_get mcp_endpoint_url)
   install_policy=$(state_get connect_install_policy)
   install_mode=$(state_get connect_install_mode)
   install_status=$(state_get connect_install_status)
@@ -351,6 +353,7 @@ print_delivery() {
   echo "  credentials  : init code/password field, access_token, and agent_token written to ${agent_cred:-~/.dirextalk/nodes/<service_id>/credentials.json}"
   echo "  agent room   : ${agent_room_id:-written to credentials.json}"
   echo "  dirextalk-connect   : package=${cc_pkg:-dirextalk-connect@latest} config=${cc_config:-not recorded} command=${cc_binary:-dirextalk-connect}"
+  echo "  MCP          : transport=http endpoint=${mcp_endpoint:-https://$domain/mcp}"
   echo "  matrix user  : ${cc_user:-created during S6}"
   echo "  agent runtime: ${runtime:-unknown}"
   echo "  install mode : policy=${install_policy:-recommend} mode=${install_mode:-dirextalk-connect} agent=${cc_agent:-codex} status=${install_status:-recommend}"
@@ -488,12 +491,14 @@ precheck_new_deploy_domain_env() {
   if [ -z "$domain" ]; then
     warn "Deployment blocked: DOMAIN is missing. Dirextalk requires a confirmed production Matrix server_name."
     warn "Use this skill to prepare domain/DNS, then rerun:"
+    print_domain_onboarding_guide
     warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   if ! domain_is_formal_name "$domain"; then
     warn "Deployment blocked: DOMAIN=$domain is not a valid production domain."
     warn "Use a long-lived domain you own and can manage in DNS, such as __DOMAIN__. IPs, localhost, wildcards, and temporary resolver domains are not accepted."
+    print_domain_onboarding_guide
     return 2
   fi
   if [ "${CONFIRM_DOMAIN_BINDING:-0}" != "1" ]; then
@@ -535,12 +540,14 @@ ensure_production_domain_selected() {
   if [ -z "$domain" ]; then
     warn "Deployment blocked: DOMAIN is missing. Dirextalk requires a confirmed production Matrix server_name."
     warn "Use this skill to prepare domain/DNS, then rerun:"
+    print_domain_onboarding_guide
     warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   if ! domain_is_formal_name "$domain"; then
     warn "Deployment blocked: DOMAIN=$domain is not a valid production domain."
     warn "Use a long-lived domain you own and can manage in DNS, such as __DOMAIN__. IPs, localhost, wildcards, and temporary resolver domains are not accepted."
+    print_domain_onboarding_guide
     return 2
   fi
   if [ "$confirmed" != "true" ] && [ "${CONFIRM_DOMAIN_BINDING:-0}" != "1" ]; then
@@ -551,6 +558,14 @@ ensure_production_domain_selected() {
     return 2
   fi
   return 0
+}
+
+print_domain_onboarding_guide() {
+  warn "First question: do you already own a long-lived domain or subdomain and can edit its DNS records?"
+  warn "  If not, register a domain with Route53, Cloudflare, Alibaba Cloud, GoDaddy, or another registrar, then choose a subdomain such as chat.your-domain.tld."
+  warn "  If AWS Route53 will manage DNS, use DOMAIN_MODE=route53 and delegate registrar nameservers to Route53 when asked."
+  warn "  If another DNS provider manages DNS, use DOMAIN_MODE=user; the deployer will print the fixed public IP and wait for you to create an A record."
+  warn "  The Matrix server_name is bound to DOMAIN. Changing it later is effectively a new homeserver, so choose the final domain before provisioning."
 }
 
 guard_existing_state() {
@@ -708,49 +723,43 @@ cmd_verify_mcp_doctor() {
     return 1
   }
 
-  local credentials mcp_cmd node_id out err report token_status report_domain report_room
-  credentials=$(json_get "$STATE_JSON" agent_credentials_file)
-  [ -n "$credentials" ] || credentials=$(json_get "$STATE_JSON" mcp_credentials_file)
-  mcp_cmd=$(json_get "$STATE_JSON" mcp_command "dirextalk-mcp")
+  local endpoint token node_id out code payload protocol_version server_name tools_type tools_capable
+  endpoint=$(_mcp_http_endpoint_from_state)
+  token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
-  [ -n "$credentials" ] || {
-    warn "mcp doctor check requires agent_credentials_file or mcp_credentials_file in state.json"
+  if [ -z "$endpoint" ] || [ -z "$token" ]; then
+    warn "mcp doctor check requires mcp_endpoint_url/as_url/domain and agent_token in state.json"
     return 1
-  }
-  [ -n "$mcp_cmd" ] || mcp_cmd=dirextalk-mcp
+  fi
 
   out=$(mktemp)
-  err=$(mktemp)
-  if ! DIREXTALK_CREDENTIALS_FILE="$credentials" DIREXTALK_AGENT_NODE_ID="$node_id" bash -c "$mcp_cmd doctor --json" > "$out" 2> "$err"; then
-    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "evidence=dirextalk-mcp doctor failed"
-    cat "$err" >&2
-    rm -f "$out" "$err"
+  payload=$(json_build mcp-jsonrpc-initialize)
+  code=$(curl -sk -o "$out" -w '%{http_code}' \
+    -X POST "$endpoint" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2025-06-18' \
+    -H "Authorization: Bearer $token" \
+    -H "DIREXTALK-Agent-Node-Id: $node_id" \
+    -d "$payload" 2>/dev/null)
+  if [ "$code" != "200" ] || ! json_valid "$out" >/dev/null 2>&1; then
+    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "endpoint=$endpoint" "evidence=HTTP MCP initialize returned HTTP $code or non-json output"
+    rm -f "$out"
     return 1
   fi
-  if ! json_valid "$out" >/dev/null 2>&1; then
-    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "evidence=dirextalk-mcp doctor returned non-json output"
-    rm -f "$out" "$err"
-    return 1
-  fi
-  report=$(cat "$out")
-  token_status=$(printf '%s\n' "$report" | json_stdin_get token)
-  if [ "$token_status" = "redacted" ]; then
-    token_status=redacted
-  elif [ -n "$token_status" ]; then
-    token_status=present_redacted
-  else
-    token_status=missing
-  fi
-  report_domain=$(json_get "$out" domain)
-  report_room=$(json_get "$out" agent_room_id)
+  protocol_version=$(json_get "$out" result.protocolVersion)
+  server_name=$(json_get "$out" result.serverInfo.name)
+  tools_type=$(json_type "$out" result.capabilities.tools 2>/dev/null || true)
+  [ "$tools_type" = "object" ] && tools_capable=true || tools_capable=false
   state_set_object runtime_checks.mcp_doctor \
     status=passed \
     "ts=$(_now)" \
-    "evidence=dirextalk-mcp doctor --json succeeded" \
-    "domain=$report_domain" \
-    "agent_room_id=$report_room" \
-    "token=$token_status"
-  rm -f "$out" "$err"
+    "endpoint=$endpoint" \
+    "protocol_version=$protocol_version" \
+    "server_name=$server_name" \
+    "tools_capable=$tools_capable" \
+    "evidence=HTTP MCP initialize succeeded"
+  rm -f "$out"
   echo "verified runtime check: mcp_doctor"
 }
 
@@ -760,48 +769,48 @@ cmd_verify_mcp_smoke() {
     return 1
   }
 
-  local service_url token room_id body code payload url response_room_id response_messages_type
-  service_url=$(json_get "$STATE_JSON" as_url)
-  if [ -z "$service_url" ]; then
-    local domain
-    domain=$(json_get "$STATE_JSON" domain)
-    [ -n "$domain" ] && service_url="https://$domain"
-  fi
+  local endpoint token room_id body code payload response_content_type is_error
+  endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   room_id=$(json_get "$STATE_JSON" agent_room_id)
-  if [ -z "$service_url" ] || [ -z "$token" ] || [ -z "$room_id" ]; then
-    warn "mcp smoke check requires as_url/domain, agent_token, and agent_room_id in state.json"
+  if [ -z "$endpoint" ] || [ -z "$token" ] || [ -z "$room_id" ]; then
+    warn "mcp smoke check requires mcp_endpoint_url/as_url/domain, agent_token, and agent_room_id in state.json"
     return 1
   fi
 
   body=$(mktemp)
-  payload=$(json_build mcp-messages-list "$room_id")
-  url="${service_url%/}/_p2p/query"
+  payload=$(json_build mcp-jsonrpc-messages-list-call "$room_id")
   code=$(curl -sk -o "$body" -w '%{http_code}' \
-    -X POST "$url" \
+    -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2025-06-18' \
     -H "Authorization: Bearer $token" \
+    -H "DIREXTALK-Agent-Node-Id: $(json_get "$STATE_JSON" agent_node_id)" \
     -d "$payload" 2>/dev/null)
-  if [ "$code" != "200" ] || ! json_assert "$body" messages-response >/dev/null 2>&1; then
+  response_content_type=$(json_type "$body" result.content 2>/dev/null || true)
+  is_error=$(json_get "$body" result.isError false)
+  if [ "$code" != "200" ] || [ "$response_content_type" != "array" ] || [ "$is_error" = "true" ]; then
     state_set_object runtime_checks.mcp_smoke \
       status=failed \
       "ts=$(_now)" \
-      action=mcp.messages.list \
-      "evidence=mcp.messages.list returned HTTP $code or invalid response"
+      action=tools/call \
+      tool_name=dirextalk_messages_list \
+      "endpoint=$endpoint" \
+      "evidence=dirextalk_messages_list returned HTTP $code, isError=$is_error, or invalid response"
     rm -f "$body"
     return 1
   fi
 
-  response_room_id=$(json_get "$body" room_id)
-  response_messages_type=$(json_type "$body" messages)
   state_set_object runtime_checks.mcp_smoke \
     status=passed \
     "ts=$(_now)" \
-    action=mcp.messages.list \
+    action=tools/call \
+    tool_name=dirextalk_messages_list \
     "room_id=$room_id" \
-    "response_room_id=$response_room_id" \
-    "response_messages_type=$response_messages_type" \
-    "evidence=read-only backend smoke check succeeded"
+    "endpoint=$endpoint" \
+    "response_content_type=$response_content_type" \
+    "evidence=read-only HTTP MCP tool call succeeded"
   rm -f "$body"
   echo "verified runtime check: mcp_smoke"
 }
@@ -812,45 +821,56 @@ cmd_verify_mcp_tools() {
     return 1
   }
 
-  local credentials mcp_cmd node_id node_cmd node_script out err report
-  credentials=$(json_get "$STATE_JSON" agent_credentials_file)
-  [ -n "$credentials" ] || credentials=$(json_get "$STATE_JSON" mcp_credentials_file)
-  mcp_cmd=$(json_get "$STATE_JSON" mcp_command "dirextalk-mcp")
+  local endpoint token node_id out code payload tools_type
+  endpoint=$(_mcp_http_endpoint_from_state)
+  token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
-  [ -n "$credentials" ] || {
-    warn "mcp tools check requires agent_credentials_file or mcp_credentials_file in state.json"
+  if [ -z "$endpoint" ] || [ -z "$token" ]; then
+    warn "mcp tools check requires mcp_endpoint_url/as_url/domain and agent_token in state.json"
     return 1
-  }
-  [ -n "$mcp_cmd" ] || mcp_cmd=dirextalk-mcp
-  node_cmd=$(_node_command)
-  [ -n "$node_cmd" ] || {
-    warn "mcp tools check requires node or node.exe to run scripts/mcp-tools-list.mjs"
-    return 1
-  }
-  node_script=$(_node_script_path "$node_cmd" "$HERE/mcp-tools-list.mjs")
+  fi
 
   out=$(mktemp)
-  err=$(mktemp)
-  if ! DIREXTALK_CREDENTIALS_FILE="$credentials" DIREXTALK_AGENT_NODE_ID="$node_id" "$node_cmd" "$node_script" "$mcp_cmd" > "$out" 2> "$err"; then
-    state_set_object runtime_checks.mcp_tools status=failed "ts=$(_now)" "evidence=MCP tools/list failed"
-    cat "$err" >&2
-    rm -f "$out" "$err"
+  payload=$(json_build mcp-jsonrpc-tools-list)
+  code=$(curl -sk -o "$out" -w '%{http_code}' \
+    -X POST "$endpoint" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2025-06-18' \
+    -H "Authorization: Bearer $token" \
+    -H "DIREXTALK-Agent-Node-Id: $node_id" \
+    -d "$payload" 2>/dev/null)
+  tools_type=$(json_type "$out" result.tools 2>/dev/null || true)
+  if [ "$code" != "200" ] || [ "$tools_type" != "array" ]; then
+    state_set_object runtime_checks.mcp_tools status=failed "ts=$(_now)" "endpoint=$endpoint" "evidence=HTTP MCP tools/list returned HTTP $code or invalid output"
+    rm -f "$out"
     return 1
   fi
-  if ! json_assert "$out" tools-list >/dev/null 2>&1; then
-    state_set_object runtime_checks.mcp_tools status=failed "ts=$(_now)" "evidence=MCP tools/list returned invalid output"
-    rm -f "$out" "$err"
-    return 1
-  fi
-  report=$(cat "$out")
   state_set_object runtime_checks.mcp_tools \
     status=passed \
     "ts=$(_now)" \
-    "evidence=MCP tools/list succeeded" \
-    "tool_count=$(json_get "$out" tool_count 0)" \
-    "tools=$(json_get "$out" tools "[]")"
-  rm -f "$out" "$err"
+    "endpoint=$endpoint" \
+    "evidence=HTTP MCP tools/list succeeded" \
+    "tool_count=$(json_length "$out" result.tools 0)" \
+    "tools=$(json_get "$out" result.tools "[]")"
+  rm -f "$out"
   echo "verified runtime check: mcp_tools"
+}
+
+_mcp_http_endpoint_from_state() {
+  local endpoint service_url domain
+  endpoint=$(json_get "$STATE_JSON" mcp_endpoint_url)
+  if [ -n "$endpoint" ]; then
+    printf '%s\n' "$endpoint"
+    return 0
+  fi
+  service_url=$(json_get "$STATE_JSON" as_url)
+  if [ -z "$service_url" ]; then
+    domain=$(json_get "$STATE_JSON" domain)
+    [ -n "$domain" ] && service_url="https://$domain"
+  fi
+  [ -n "$service_url" ] || return 1
+  printf '%s/mcp\n' "${service_url%/}"
 }
 
 _node_command() {

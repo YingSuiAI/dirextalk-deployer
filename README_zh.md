@@ -1,6 +1,6 @@
 # Dirextalk Deployer
 
-`dirextalk-deployer` 是用于部署生产 Dirextalk message server 的通用 Agent Skill，并通过 Dirextalk 专用 Matrix 桥接把本地 agent room 接到当前 agent。当前本地桥接只支持 `dirextalk-connect`，安装包是 `dirextalk-connect`，源码仓库是 `YingSuiAI/dirextalk-connect`。S6 也会给 Codex、Cursor、OpenClaw、Hermes 这类支持 MCP 的宿主写入服务级 MCP 配置片段。
+`dirextalk-deployer` 是用于部署生产 Dirextalk message server 的通用 Agent Skill，并通过 Dirextalk 专用 Matrix 桥接把本地 agent room 接到当前 agent。当前本地桥接只支持 `dirextalk-connect`，安装包是 `dirextalk-connect`，源码仓库是 `YingSuiAI/dirextalk-connect`。S6 也会给 Codex、Cursor、OpenClaw、Hermes 这类支持 MCP 的宿主写入服务级 MCP 配置片段，直接连接已部署 message server 的 HTTP MCP endpoint。
 
 ## 内容
 
@@ -11,7 +11,7 @@
 
 ## 部署前准备
 
-- 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。
+- 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。如果还没有这些，先回答两个问题：是否已经注册 AWS 账号？是否已经拥有并能管理 DNS 的域名或子域名？
 - deployer 创建的 AWS 资源在销毁前可能持续计费。新部署默认优先使用 Lightsail 12 美元/月 Linux 套餐。未使用过 Lightsail 的用户一般会有三个月免费额度；新用户注册 AWS 一般有 100-200 美元的免费额度。一切以 AWS 官方实时政策为准。如果没有配置 region，deployer 会根据本机时区推荐默认 AWS region，并且非交互式运行也会使用该推荐；可用 `AWS_DEFAULT_REGION`、`AWS_REGION`、AWS profile region 或 `DIREXTALK_DEFAULT_REGION` 覆盖。S1 会在确认前查询 Lightsail 套餐和可用区；如果要手工查可用区，使用 `aws lightsail get-regions --include-availability-zones --output json`，裸 `get-regions` 可能不返回可用区明细。如果所选 region 没有可用 Lightsail 资源，S1 不会自动切换到 EC2；它会记录 EC2 费用估算，并等待操作者选择其他 Lightsail 可用 region/zone，或显式设置 `DIREXTALK_CLOUD_PROVIDER=ec2`。新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
 - `SKILL.md` 是给智能体看的运行手册，详细部署规则、确认门禁、运行时 wiring 和恢复流程都放在那里。
 
@@ -70,6 +70,11 @@ dirextalk-deployer skill update --agent codex
 这个 CLI 由 Node 实现，并使用当前宿主的原生路径。Windows 下写入 Windows 路径；Linux、macOS、Git Bash 或 WSL 下写入对应运行时能读取的路径。
 
 ## 最小命令
+
+导入凭据前，先确认：
+
+- **是否已经有 AWS 账号？** 如果没有，先在 AWS 注册账号，完成邮箱/手机验证、绑定支付方式、选择 Basic support plan，等待账号激活，然后创建 AWS Budget 或账单告警。
+- **是否已经有可控域名或子域名？** 如果没有，先注册域名或在现有 DNS 服务商下准备子域名。只有希望 AWS Route53 管 DNS 时才用 `DOMAIN_MODE=route53`；其他 DNS 服务商用 `DOMAIN_MODE=user`，部署器会打印固定公网 IP，等待你添加 A 记录。
 
 从 AWS CSV 导入并验证一个部署 profile。root access key 是首次部署最快路径，
 但权限极高；请安全保存 CSV，部署后轮换或删除密钥。临时
@@ -172,8 +177,9 @@ DIREXTALK_EXISTING_STATE_ACTION=continue DOMAIN=<domain> bash scripts/orchestrat
 ```
 
 清理应用数据卷后，后续 orchestrate 会重新生成本地 credentials/MCP 配置，
-并默认自动重新安装/重启 `dirextalk-connect` 和 `dirextalk-mcp`；如需只写文件，
-显式设置 `DIREXTALK_AGENT_INSTALL=recommend` 或 `skip`。
+并默认自动重新安装/重启 `dirextalk-connect`；如需只写文件，
+显式设置 `DIREXTALK_AGENT_INSTALL=recommend` 或 `skip`。MCP 使用服务端 HTTP endpoint，
+不再安装本地 MCP CLI。
 
 ## 本地 Bridge
 
@@ -203,14 +209,9 @@ npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk
 
 默认 `DIREXTALK_AGENT_INSTALL=auto` 时，S6 会等待 daemon 状态为 `Running`，并在最近日志中看到 `dirextalk-connect is running` 后才把本地 wiring 标记完成。日志中如果出现 Cursor Agent CLI 未安装、未登录/认证失败、workspace trust、ACP 启动失败或 agent offline 等错误，S6 会失败并保留 `connect_install_status=install_failed`，不会直接报告部署成功。
 
-默认 `DIREXTALK_AGENT_INSTALL=auto` 时，S6 会把 MCP 安装到当前 service 目录。生成的 MCP client 片段直接通过 stdio 启动该 service-scoped `dirextalk-mcp`，不需要本地 MCP daemon、HTTP proxy 或监听端口。手动恢复命令：
+默认 `DIREXTALK_AGENT_INSTALL=auto` 时，S6 不再安装本地 MCP CLI。生成的 MCP client 片段会直接连接已部署 message server 的 HTTP MCP endpoint：`https://<domain>/mcp`，并使用当前服务的 agent token。这里不需要本地 MCP daemon、proxy 或监听端口。
 
-```bash
-npm install --prefix ~/.dirextalk/nodes/<service_id>/mcp dirextalk-mcp@latest
-DIREXTALK_CREDENTIALS_FILE=~/.dirextalk/nodes/<service_id>/credentials.json ~/.dirextalk/nodes/<service_id>/mcp/dirextalk-mcp doctor --json
-```
-
-S6 只会写当前检测到的 runtime 对应的 MCP 片段：Codex 写 `mcp/codex.toml`，Cursor 写 `mcp/cursor.mcp.json`，OpenClaw 写 `mcp/openclaw.md` 和 `mcp/openclaw-server.json`，Hermes 写 `mcp/hermes.mcp.json`，其他支持 MCP 的 agent runtime 写 `mcp/mcp-servers.json`。生成的 MCP client 片段会通过 stdio 直接运行当前 service 的 `dirextalk-mcp`，并设置 `DIREXTALK_CREDENTIALS_FILE` 指向当前服务的 credentials，因此客户端不依赖 daemon 就能拉起 MCP 工具进程。Cursor 可读取项目级 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`，但 S6 默认不写这两个位置，因为配置里包含本机 credentials 路径；添加片段后需要重启 Cursor，或在 Cursor MCP 设置里 reload/enable 该 server。OpenClaw 使用 `mcp/openclaw.md` 中生成的 `openclaw mcp set` 命令读取 `mcp/openclaw-server.json`；不要把 MCP JSON 直接粘贴到 `~/.openclaw/openclaw.json`。
+S6 只会写当前检测到的 runtime 对应的 MCP 片段：Codex 写 `mcp/codex.toml`，Cursor 写 `mcp/cursor.mcp.json`，OpenClaw 写 `mcp/openclaw.md` 和 `mcp/openclaw-server.json`，Hermes 写 `mcp/hermes.mcp.json`，其他支持 MCP 的 agent runtime 写 `mcp/mcp-servers.json`。Cursor 可读取项目级 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`，但 S6 默认不写这两个位置，因为配置里包含当前服务的 bearer token；添加片段后需要重启 Cursor，或在 Cursor MCP 设置里 reload/enable 该 server。OpenClaw 使用 `mcp/openclaw.md` 中生成的 `openclaw mcp set` 命令读取 `mcp/openclaw-server.json`；不要把 MCP JSON 直接粘贴到 `~/.openclaw/openclaw.json`。
 
 语音输入在配置 STT provider key 后可用。设置 `DIREXTALK_SPEECH_API_KEY` 或 `DIREXTALK_SPEECH_QWEN_API_KEY` 等 provider 专用变量后，S6 会在 `dirextalk-connect/config.toml` 写入 `[speech] enabled = true`。
 

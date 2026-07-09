@@ -34,7 +34,7 @@ S7 自动验收通过后应交付:
 - Matrix bridge 用户: `@agent:<server>`
 - 安装命令: `npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk-connect@latest && ~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon install --config <config> --service-name <service_id> --force`
 - 启动验证: `~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon status --service-name <service_id>` 和同一 binary 的 `daemon logs --service-name <service_id> -n 120`
-- MCP 检查命令: `DIREXTALK_CREDENTIALS_FILE=<credentials.json> ~/.dirextalk/nodes/<service_id>/mcp/dirextalk-mcp doctor --json`
+- MCP endpoint: `https://<domain>/mcp`; use `DOMAIN=<domain> bash scripts/orchestrate.sh verify mcp_doctor` and `verify mcp_tools` for runtime checks.
 - AWS 信息: region、cloud provider、instance id、固定 public IP、Route53 hosted zone、SSH 命令、state.json、destroy 命令
 - 用户确认 gates: App 初始化、消息闭环、Agent/MCP runtime 验证仍需单独记录。
 

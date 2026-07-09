@@ -64,13 +64,13 @@ write_state() {
     "mcp_codex_config=$service_dir/mcp/codex.toml" \
     "mcp_openclaw_config=$service_dir/mcp/openclaw.md" \
     "mcp_hermes_config=$service_dir/mcp/hermes.mcp.json" \
-    "mcp_doctor_command=DIREXTALK_CREDENTIALS_FILE=$service_dir/credentials.json dirextalk-mcp doctor --json" \
+    "mcp_doctor_command=legacy local MCP doctor command" \
     mcp_install_status=installed \
     mcp_daemon_install_status=installed \
-    'mcp_daemon_install_command=dirextalk-mcp daemon install --service-name ops.example.test' \
-    'mcp_daemon_status_command=dirextalk-mcp daemon status --service-name ops.example.test --json' \
+    'mcp_daemon_install_command=legacy local MCP daemon install command' \
+    'mcp_daemon_status_command=legacy local MCP daemon status command' \
     mcp_daemon_url=http://127.0.0.1:19757/mcp \
-    'mcp_daemon_proxy_command=dirextalk-mcp proxy --url http://127.0.0.1:19757/mcp' \
+    'mcp_daemon_proxy_command=legacy local MCP proxy command' \
     'resources={"instance_id":"i-ops","public_ip":"203.0.113.77","eip_id":"eipalloc-ops","key_file":"/tmp/ops.pem"}' \
     'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
     'user_confirmations={"app_initialization":{"status":"confirmed","evidence":"old app confirmation"},"real_chat":{"status":"confirmed","evidence":"old chat confirmation"},"agent_mcp_runtime":{"status":"confirmed","evidence":"old runtime confirmation","runtime_summary_status":"passed","runtime_probe_confirmed":true}}' \

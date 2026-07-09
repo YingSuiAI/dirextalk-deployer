@@ -22,7 +22,6 @@ required=(
   scripts/update.sh
   scripts/reset-app-data.sh
   scripts/pricing-estimate.sh
-  scripts/mcp-tools-list.mjs
   scripts/lib/windows-paths.ps1
   scripts/lib/ops.sh
   scripts/lib/operation_report.sh
@@ -98,13 +97,13 @@ grep -q 'scripts/lib/local-paths.sh' AGENTS.md
 grep -q 'scripts/lib/windows-paths.ps1' AGENTS.md
 grep -q 'scripts/json.mjs' AGENTS.md
 grep -q 'dirextalk-connect@latest' AGENTS.md
-grep -q 'dirextalk-mcp@latest' AGENTS.md
+grep -q 'HTTP MCP endpoint' AGENTS.md
 grep -q 'bash tests/local_paths_test.sh' AGENTS.md
 grep -q 'npm test' AGENTS.md
 grep -q 'scripts/json.mjs' agents/README.md
 grep -q 'dirextalk-connect' agents/README.md
 grep -q 'dirextalk-connect' agents/openai.yaml
-grep -q 'dirextalk-mcp' agents/openai.yaml
+grep -q 'HTTP MCP' agents/openai.yaml
 grep -q 'connect_install_status' SKILL.md
 grep -q 'connect_install_status' scripts/phases/s6_wire_local.sh
 grep -q 'connect_install_status' scripts/orchestrate.sh
@@ -119,8 +118,8 @@ grep -q 'DIREXTALK_AGENT_TOKEN' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXTALK_AGENT_ROOM_ID' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXTALK_CONNECT_REPO' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXTALK_LOCAL_PATH_STYLE' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXTALK_CREDENTIALS_FILE' scripts/lib/mcp-client-adapters.sh
-grep -q 'dirextalk-mcp' scripts/lib/mcp-client-adapters.sh
+grep -q 'DIREXTALK_MCP_URL' scripts/lib/mcp-client-adapters.sh
+grep -q 'mcp_endpoint_url' scripts/phases/s6_wire_local.sh
 grep -q 'mcp-client-adapters.sh' scripts/phases/s6_wire_local.sh
 grep -q 'PLATFORMS_INCLUDE=matrix' scripts/phases/s6_wire_local.sh
 grep -q 'YingSuiAI/dirextalk-connect.git' scripts/phases/s6_wire_local.sh
@@ -187,7 +186,7 @@ if awk '/_write_connect_config\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep
 fi
 
 if awk '/_print_connect_guidance\(\)/,/^}/' scripts/phases/s6_wire_local.sh | grep -q 'DIREXTALK_CREDENTIALS_FILE'; then
-  echo "dirextalk-connect guidance must not use DIREXTALK_CREDENTIALS_FILE; MCP guidance owns that env var" >&2
+  echo "dirextalk-connect guidance must not use DIREXTALK_CREDENTIALS_FILE; local MCP credential-file env is deprecated" >&2
   exit 1
 fi
 
@@ -256,13 +255,17 @@ fi
 grep -q 'eight-digit app initialization code' SKILL.md
 grep -q 'S7 green is not the final product-complete state' SKILL.md
 grep -q 'non-polluting' SKILL.md
-grep -q 'dirextalk-mcp@latest' SKILL.md
+grep -q 'HTTP MCP endpoint' SKILL.md
 grep -q 'dirextalk-connect@latest' SKILL.md
 grep -q 'DirextalkDeployer' SKILL.md
 grep -q 'AdministratorAccess' SKILL.md
 grep -qi 'root access keys are allowed' SKILL.md
 grep -q 'Root access key (default fastest path)' SKILL.md
 grep -q 'Dedicated IAM deployment user' SKILL.md
+grep -q 'Do you already have an AWS account' SKILL.md
+grep -q 'Do you already own a long-lived domain' SKILL.md
+grep -q 'First question: do you already have an AWS account' scripts/phases/s0_prereq_aws.sh
+grep -q 'First question: do you already own a long-lived domain' scripts/phases/s2_domain.sh
 grep -q 'highly privileged, must be saved securely' SKILL.md
 grep -q 'safer because it avoids root keys' SKILL.md
 grep -q 'Destroy uses the same AWS identity boundary as deployment' SKILL.md
@@ -294,7 +297,7 @@ grep -q 'refresh_pending' references/token-refresh.md
 grep -q 'user_confirmations.*runtime_checks' references/token-refresh.md
 grep -q 'stops only the matching service-scoped dirextalk-connect daemon' references/token-refresh.md
 grep -q '重新生成本地 credentials/MCP snippets' references/token-refresh.md
-grep -q '刷新 dirextalk-mcp stdio command' references/token-refresh.md
+grep -q '刷新 HTTP MCP endpoint 配置' references/token-refresh.md
 grep -q 'DIREXTALK_RESET_APP_DATA_CONFIRM=1' SKILL.md
 grep -q 'scripts/aws-credentials.sh import-csv' SKILL.md
 grep -q 'scripts/aws-credentials.sh verify' SKILL.md

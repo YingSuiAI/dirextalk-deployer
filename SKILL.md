@@ -65,6 +65,18 @@ explicitly choose WSL as the host runtime.
 Do not deploy until the user has an active AWS account, a real long-lived
 domain, AWS credentials, DNS authority, and billing acknowledgement.
 
+Start first-time users with two plain-language questions:
+
+1. Do you already have an AWS account with an access-key CSV or AWS profile?
+   If not, guide them through AWS registration, billing-card/phone verification,
+   Basic support selection, account activation, AWS Budget creation, and then
+   creating either a temporary `DirextalkDeployer` IAM access-key CSV or a root
+   access-key CSV for the fastest first run.
+2. Do you already own a long-lived domain or subdomain and control DNS?
+   If not, guide them to register a domain or choose a subdomain, then decide
+   whether AWS Route53 will manage DNS (`DOMAIN_MODE=route53`) or an external
+   DNS provider will receive the final A record (`DOMAIN_MODE=user`).
+
 Credential choices for first-time users:
 
 - **Root access key (default fastest path):** simpler for first deployment, but
@@ -122,7 +134,7 @@ acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode
 The supported local bridge is `dirextalk-connect`, installed from
 `dirextalk-connect@latest` by default or built from
 `https://github.com/YingSuiAI/dirextalk-connect.git`. The MCP tool surface is
-`dirextalk-mcp@latest`.
+served by the deployed message server's HTTP MCP endpoint.
 
 S6 writes service-scoped files under `~/.dirextalk/nodes/<service_id>/`:
 
@@ -136,7 +148,7 @@ mcp/
 The dirextalk-connect config must use a direct Matrix config, create the Matrix session
 through `agent.matrix_session.create` with `agent_token`, require `@agent:<server>`,
 and restrict sync/replies to the real `agent_room_id`. It must not use
-`DIREXTALK_CREDENTIALS_FILE`; MCP owns that variable.
+MCP credential-file environment variables.
 
 Key selectors:
 
@@ -147,14 +159,14 @@ DIREXTALK_AGENT_INSTALL=auto
 DIREXTALK_AGENT_INSTALL_MODE=recommended
 ```
 
-`DIREXTALK_AGENT_INSTALL=auto` installs `dirextalk-connect@latest` and
-`dirextalk-mcp@latest` into the current service directory, not into the npm
-global prefix, unless explicit binary/command overrides are set. S6 writes only
-the MCP snippet selected for the detected runtime: Codex, Cursor, OpenClaw, and
-Hermes have dedicated snippets; other MCP-capable supported runtimes use the
-generic `mcp-servers.json`. Generated MCP snippets launch the current service's
-`dirextalk-mcp` directly over stdio with the service credential file; MCP does not
-need a local daemon, HTTP proxy, or listening port. S6 installs the
+`DIREXTALK_AGENT_INSTALL=auto` installs `dirextalk-connect@latest` into the
+current service directory, not into the npm global prefix, unless explicit
+binary/command overrides are set. S6 writes only the MCP snippet selected for the
+detected runtime: Codex, Cursor, OpenClaw, and Hermes have dedicated snippets;
+other MCP-capable supported runtimes use the generic `mcp-servers.json`.
+Generated MCP snippets point directly to the deployed message server's HTTP MCP
+endpoint with the service agent token; MCP does not need a local CLI, daemon,
+proxy, or listening port. S6 installs the
 service-scoped `dirextalk-connect` daemon and records it as installed only after
 `daemon status` reports Running and recent logs show `dirextalk-connect is
 running`; logs that show agent CLI missing, login/trust failures, ACP startup
@@ -174,7 +186,7 @@ daemon. Explicit `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CURSOR_AGENT_COMMAND`,
 State/report fields include `mcp_config_dir`, `mcp_selected_config_type`,
 `mcp_selected_config`, selected runtime-specific fields such as
 `mcp_codex_config`, `mcp_cursor_config`, `mcp_openclaw_config`,
-`mcp_hermes_config`, or `mcp_json_config`, `mcp_command`, `mcp_package_dir`,
+`mcp_hermes_config`, or `mcp_json_config`, `mcp_transport`, `mcp_endpoint_url`,
 `credentials.status`, and `mcp.status`.
 Cursor MCP artifacts are generated as JSON for `.cursor/mcp.json` or
 `~/.cursor/mcp.json`, but the deployer does not write those locations by
@@ -190,7 +202,7 @@ only after:
 1. The user receives the App domain and eight-digit app initialization code.
 2. The user confirms App initialization.
 3. dirextalk-connect is wired to the real `agent_room_id`.
-4. MCP snippets exist and `dirextalk-mcp doctor --json` succeeds.
+4. MCP snippets exist and `verify mcp_doctor` succeeds against the server HTTP MCP endpoint.
 5. Agent/MCP validation is non-polluting; prefer read-only checks and do not
    auto-send a normal chat message.
 

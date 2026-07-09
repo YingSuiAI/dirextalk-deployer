@@ -7,7 +7,7 @@
 - Deploy, resume, verify, destroy, and locally wire a production Dirextalk message server.
 - Treat `SKILL.md` as the compact agent-facing entrypoint. Detailed runbooks belong in `references/`; `scripts/` are the stable implementation entrypoints.
 - The supported local conversation bridge is `dirextalk-connect`, installed from `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`.
-- The supported local MCP package is `dirextalk-mcp@latest`.
+- MCP-capable runtimes should connect directly to the deployed message server's HTTP MCP endpoint.
 - Supported local agent targets are the dirextalk-connect agent providers, treated as peers: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
 - Do not reintroduce legacy local gateway installation flows or third-party chat platform wiring.
 - Do not hard-code one developer's home directory, shell, agent executable path, AWS region, domain, node id, token, or password.
@@ -49,7 +49,7 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 - S6 must create a Matrix session through `agent.matrix_session.create` using `agent_token`, not owner `access_token`, and require `@agent:<server>` for the bridge. Returning `@owner:<server>` is a server-side compatibility failure.
 - The generated dirextalk-connect config must contain one Matrix platform and must restrict sync/replies to the real `agent_room_id`.
 - The generated agent config must preserve the selected connect agent type and optional agent-specific TOML. Some providers require more than `cmd`; for example `reasonix` needs `serve_url`, `tmux` needs `session`, and generic `acp` may need command/args.
-- `DIREXTALK_AGENT_INSTALL=auto` is the default and installs `dirextalk-connect@latest` and `dirextalk-mcp@latest` into the current service directory, not into the npm global prefix, unless an explicit binary/command override is set. It installs the service-scoped `dirextalk-connect` daemon and refreshes the service-scoped `dirextalk-mcp` stdio command. Generated MCP client snippets for all MCP-capable supported runtimes must launch the current service's `dirextalk-mcp` binary directly over stdio with the service credentials; do not require a local MCP daemon, HTTP proxy, or listening port.
+- `DIREXTALK_AGENT_INSTALL=auto` is the default and installs `dirextalk-connect@latest` into the current service directory, not into the npm global prefix, unless an explicit binary/command override is set. It installs the service-scoped `dirextalk-connect` daemon. Generated MCP client snippets for all MCP-capable supported runtimes must point to the deployed message server's HTTP MCP endpoint with the service agent token; do not install or launch a local MCP CLI, daemon, proxy, or listening port.
 - `recommend` must only write files and print commands; `skip` writes credentials/env/config artifacts only.
 - Do not pin old package versions in runtime defaults. Keep `@latest` defaults and preserve env overrides only for explicit debugging or rollback.
 

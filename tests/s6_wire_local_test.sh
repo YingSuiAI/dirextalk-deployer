@@ -251,7 +251,7 @@ windows_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _connect_install_co
 
 mcp_service_dir="$tmp/mcp-service"
 mcp_credentials="$mcp_service_dir/credentials.json"
-expected_mcp_command="$mcp_service_dir/mcp/dirextalk-mcp"
+expected_mcp_endpoint="https://service.example.test/mcp"
 mkdir -p "$mcp_service_dir"
 : > "$mcp_credentials"
 mkdir -p "$mcp_service_dir/mcp"
@@ -260,7 +260,7 @@ expected_mcp_credentials="$mcp_credentials"
 if command -v cygpath >/dev/null 2>&1; then
   expected_mcp_credentials=$(cygpath -m "$expected_mcp_credentials")
 fi
-_write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "$mcp_credentials" "codex-service-example" codex
+_write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "https://service.example.test" "AGENT_TOKEN_TEST" "$mcp_credentials" "codex-service-example" codex
 [ -s "$mcp_service_dir/mcp/codex.toml" ]
 [ ! -e "$mcp_service_dir/mcp/cursor.mcp.json" ]
 [ ! -e "$mcp_service_dir/mcp/openclaw.md" ]
@@ -271,14 +271,15 @@ _write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "$mcp_cred
 [ -s "$mcp_service_dir/mcp/env" ]
 [ -s "$mcp_service_dir/mcp/README.md" ]
 grep -q '\[mcp_servers."dirextalk-service_example_test"\]' "$mcp_service_dir/mcp/codex.toml"
-grep -Fq "command = \"$expected_mcp_command\"" "$mcp_service_dir/mcp/codex.toml"
-! grep -q '^args = ' "$mcp_service_dir/mcp/codex.toml"
-grep -q 'DIREXTALK_CREDENTIALS_FILE' "$mcp_service_dir/mcp/codex.toml"
-grep -q "$(_local_connect_path "$mcp_credentials")" "$mcp_service_dir/mcp/codex.toml"
+grep -Fq "url = \"$expected_mcp_endpoint\"" "$mcp_service_dir/mcp/codex.toml"
+grep -Fq 'Authorization = "Bearer AGENT_TOKEN_TEST"' "$mcp_service_dir/mcp/codex.toml"
+grep -Fq '"DIREXTALK-Agent-Node-Id" = "codex-service-example"' "$mcp_service_dir/mcp/codex.toml"
+! grep -q '^command = ' "$mcp_service_dir/mcp/codex.toml"
 grep -q 'DIREXTALK_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
+grep -q 'DIREXTALK_MCP_URL=https://service.example.test/mcp' "$mcp_service_dir/mcp/env"
 grep -q 'Selected MCP type: codex' "$mcp_service_dir/mcp/README.md"
 grep -q 'same MCP server name' "$mcp_service_dir/mcp/README.md"
-! grep -R '19757\|proxy --url\|"proxy"' "$mcp_service_dir/mcp"
+! grep -R 'MCP CLI install\|19757\|proxy --url\|"proxy"' "$mcp_service_dir/mcp"
 [ "$(_mcp_config_type_for_runtime codex)" = "codex" ]
 [ "$(_mcp_config_type_for_runtime cursor)" = "cursor" ]
 [ "$(_mcp_config_type_for_runtime openclaw)" = "openclaw" ]
@@ -290,24 +291,26 @@ generic_service_dir="$tmp/generic-mcp-service"
 generic_credentials="$generic_service_dir/credentials.json"
 mkdir -p "$generic_service_dir"
 : > "$generic_credentials"
-_write_mcp_config_artifacts "generic.example.test" "$generic_service_dir" "$generic_credentials" "gemini-generic-example" gemini
+_write_mcp_config_artifacts "generic.example.test" "$generic_service_dir" "https://generic.example.test" "GENERIC_TOKEN" "$generic_credentials" "gemini-generic-example" gemini
 [ -s "$generic_service_dir/mcp/mcp-servers.json" ]
 [ ! -e "$generic_service_dir/mcp/codex.toml" ]
 [ ! -e "$generic_service_dir/mcp/cursor.mcp.json" ]
-json_test_check "$generic_service_dir/mcp/mcp-servers.json" "data.mcpServers['dirextalk-generic_example_test'].command === '$generic_service_dir/mcp/dirextalk-mcp'"
-json_test_check "$generic_service_dir/mcp/mcp-servers.json" "!('args' in data.mcpServers['dirextalk-generic_example_test'])"
+json_test_check "$generic_service_dir/mcp/mcp-servers.json" "data.mcpServers['dirextalk-generic_example_test'].url === 'https://generic.example.test/mcp'"
+json_test_check "$generic_service_dir/mcp/mcp-servers.json" "data.mcpServers['dirextalk-generic_example_test'].headers.Authorization === 'Bearer GENERIC_TOKEN'"
+json_test_check "$generic_service_dir/mcp/mcp-servers.json" "!('command' in data.mcpServers['dirextalk-generic_example_test'])"
 grep -q 'Selected MCP type: generic' "$generic_service_dir/mcp/README.md"
 
 openclaw_service_dir="$tmp/openclaw-mcp-service"
 openclaw_credentials="$openclaw_service_dir/credentials.json"
 mkdir -p "$openclaw_service_dir"
 : > "$openclaw_credentials"
-_write_mcp_config_artifacts "openclaw.example.test" "$openclaw_service_dir" "$openclaw_credentials" "openclaw-node" openclaw
+_write_mcp_config_artifacts "openclaw.example.test" "$openclaw_service_dir" "https://openclaw.example.test" "OPENCLAW_TOKEN" "$openclaw_credentials" "openclaw-node" openclaw
 [ -s "$openclaw_service_dir/mcp/openclaw.md" ]
 [ -s "$openclaw_service_dir/mcp/openclaw-server.json" ]
 [ ! -e "$openclaw_service_dir/mcp/mcp-servers.json" ]
-json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.command === '$openclaw_service_dir/mcp/dirextalk-mcp'"
-json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "!('args' in data)"
+json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.url === 'https://openclaw.example.test/mcp'"
+json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.headers.Authorization === 'Bearer OPENCLAW_TOKEN'"
+json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "!('command' in data)"
 if json_check "$openclaw_service_dir/mcp/openclaw-server.json" "'mcp' in data || 'mcpServers' in data" >/dev/null; then
   echo "OpenClaw server object must not be a root openclaw.json or mcpServers snippet" >&2
   exit 1
@@ -315,13 +318,13 @@ fi
 grep -q 'openclaw mcp set dirextalk-openclaw_example_test' "$openclaw_service_dir/mcp/openclaw.md"
 grep -q 'Do not paste' "$openclaw_service_dir/mcp/openclaw.md"
 grep -q 'openclaw.json' "$openclaw_service_dir/mcp/openclaw.md"
-mcp_install_command=$(_mcp_install_command "$mcp_service_dir")
-[[ "$mcp_install_command" == *"npm install --prefix"*"mcp-service/mcp"*"dirextalk-mcp@latest"* ]]
-custom_mcp_install_command=$(DIREXTALK_MCP_NPM_PACKAGE='dirextalk-mcp@override-test' _mcp_install_command "$mcp_service_dir")
-[[ "$custom_mcp_install_command" == *"dirextalk-mcp@override-test"* ]]
-mcp_doctor_command=$(_mcp_doctor_command "$mcp_credentials" "codex-service-example" "$mcp_service_dir")
-[[ "$mcp_doctor_command" == *"DIREXTALK_CREDENTIALS_FILE="* ]]
-[[ "$mcp_doctor_command" == *"mcp/dirextalk-mcp doctor --json"* ]]
+mcp_install_command=$(_mcp_install_command "https://service.example.test" "$mcp_service_dir")
+[[ "$mcp_install_command" == *"No local MCP CLI install is needed"* ]]
+[[ "$mcp_install_command" == *"https://service.example.test/mcp"* ]]
+mcp_doctor_command=$(_mcp_doctor_command "https://service.example.test" "$mcp_credentials" "codex-service-example" "$mcp_service_dir")
+[[ "$mcp_doctor_command" == *"scripts/orchestrate.sh verify mcp_doctor"* ]]
+[[ "$mcp_doctor_command" != *"DIREXTALK_CREDENTIALS_FILE"* ]]
+[[ "$mcp_doctor_command" != *"MCP CLI"* ]]
 
 stale_node_id=$(DIREXTALK_AGENT_NODE_ID=codex-old.example.test _agent_node_id codex new.example.test '!agents-real:new.example.test')
 [[ "$stale_node_id" == codex-new.example.test-* ]]
@@ -442,11 +445,6 @@ cat > "$fakebin/npm" <<'EOF'
 [ "${NPM_FAIL:-0}" != "1" ] || exit 1
 exit 0
 EOF
-cat > "$fakebin/dirextalk-mcp" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-exit 0
-EOF
 cat > "$fakebin/dirextalk-connect" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -475,10 +473,7 @@ if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "logs" ]; then
 fi
 exit 1
 EOF
-chmod 700 "$fakebin/npm" "$fakebin/dirextalk-connect" "$fakebin/dirextalk-mcp"
-mkdir -p "$(dirname "$expected_mcp_command")"
-cp "$fakebin/dirextalk-mcp" "$expected_mcp_command"
-chmod 700 "$expected_mcp_command"
+chmod 700 "$fakebin/npm" "$fakebin/dirextalk-connect"
 STATE_CALLS="$tmp/state.calls"
 : > "$STATE_CALLS"
 set +e
@@ -535,11 +530,9 @@ NPM_CALLS="$tmp/npm-mcp-update.calls"
 : > "$STATE_CALLS"
 : > "$NPM_CALLS"
 PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 _maybe_auto_install_mcp auto service.example.test "$mcp_credentials" codex-service-example
-grep -q '^mcp_install_status=installed$' "$STATE_CALLS"
+grep -q '^mcp_install_status=not_required$' "$STATE_CALLS"
 ! grep -q '^mcp_daemon_' "$STATE_CALLS"
-[ -s "$NPM_CALLS" ]
-grep -q -- '--prefix' "$NPM_CALLS"
-grep -q 'dirextalk-mcp@latest' "$NPM_CALLS"
+[ ! -s "$NPM_CALLS" ]
 
 STATE_CALLS="$tmp/mcp-recommend-state.calls"
 : > "$STATE_CALLS"
@@ -634,11 +627,11 @@ fi
 
 stale_mcp_config="$tmp/stale-mcp.json"
 cat > "$stale_mcp_config" <<'EOF'
-{"mcpServers":{"dirextalk-service_example_test":{"command":"dirextalk-mcp","env":{"DIREXTALK_CREDENTIALS_FILE":"/old/credentials.json"},"args":["proxy","--url","http://127.0.0.1:19999/mcp"]}}}
+{"mcpServers":{"dirextalk-service_example_test":{"url":"https://old-service.example.test/mcp","headers":{"Authorization":"Bearer old-token"}}}}
 EOF
 mcp_guidance=$(
   DIREXTALK_MCP_CONFIG_CONFLICT_PATHS="$stale_mcp_config" \
-    _print_mcp_guidance codex service.example.test dirextalk-service_example_test "$mcp_credentials" "$mcp_service_dir/mcp" codex "$mcp_service_dir/mcp/codex.toml" "$mcp_install_command" "$mcp_doctor_command" "$mcp_service_dir" 2>&1 >/dev/null
+    _print_mcp_guidance codex service.example.test dirextalk-service_example_test "$mcp_credentials" "$mcp_service_dir/mcp" codex "$mcp_service_dir/mcp/codex.toml" "$mcp_install_command" "$mcp_doctor_command" "$mcp_service_dir" "https://service.example.test/mcp" 2>&1 >/dev/null
 )
 [[ "$mcp_guidance" == *"Existing MCP config may shadow this deployment"* ]]
 [[ "$mcp_guidance" == *"$stale_mcp_config"* ]]

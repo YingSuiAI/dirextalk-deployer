@@ -11,7 +11,7 @@
 
 ## 部署前准备
 
-- 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。如果还没有这些，先回答两个问题：是否已经注册 AWS 账号？是否已经拥有并能管理 DNS 的域名或子域名？
+- 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。对新用户，默认路径是 AWS Route53：在 Route53 注册域名，并让 deployer 用 `DOMAIN_MODE=route53` 管理 DNS。
 - deployer 创建的 AWS 资源在销毁前可能持续计费。新部署默认优先使用 Lightsail 12 美元/月 Linux 套餐。未使用过 Lightsail 的用户一般会有三个月免费额度；新用户注册 AWS 一般有 100-200 美元的免费额度。一切以 AWS 官方实时政策为准。如果没有配置 region，deployer 会根据本机时区推荐默认 AWS region，并且非交互式运行也会使用该推荐；可用 `AWS_DEFAULT_REGION`、`AWS_REGION`、AWS profile region 或 `DIREXTALK_DEFAULT_REGION` 覆盖。S1 会在确认前查询 Lightsail 套餐和可用区；如果要手工查可用区，使用 `aws lightsail get-regions --include-availability-zones --output json`，裸 `get-regions` 可能不返回可用区明细。如果所选 region 没有可用 Lightsail 资源，S1 不会自动切换到 EC2；它会记录 EC2 费用估算，并等待操作者选择其他 Lightsail 可用 region/zone，或显式设置 `DIREXTALK_CLOUD_PROVIDER=ec2`。新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
 - `SKILL.md` 是给智能体看的运行手册，详细部署规则、确认门禁、运行时 wiring 和恢复流程都放在那里。
 
@@ -74,7 +74,7 @@ dirextalk-deployer skill update --agent codex
 导入凭据前，先确认：
 
 - **是否已经有 AWS 账号？** 如果没有，先在 AWS 注册账号，完成邮箱/手机验证、绑定支付方式、选择 Basic support plan，等待账号激活，然后创建 AWS Budget 或账单告警。
-- **是否已经有可控域名或子域名？** 如果没有，先注册域名或在现有 DNS 服务商下准备子域名。只有希望 AWS Route53 管 DNS 时才用 `DOMAIN_MODE=route53`；其他 DNS 服务商用 `DOMAIN_MODE=user`，部署器会打印固定公网 IP，等待你添加 A 记录。
+- **是否已经有可控域名或子域名？** 如果没有，默认在 AWS Route53 注册域名，然后使用 `DOMAIN_MODE=route53`，让部署器创建 hosted zone 和 A 记录。只有外部 DNS 服务商必须继续管理该域名时才用 `DOMAIN_MODE=user`；此时部署器会打印固定公网 IP，等待你手动添加 A 记录。
 
 从 AWS CSV 导入并验证一个部署 profile。root access key 是首次部署最快路径，
 但权限极高；请安全保存 CSV，部署后轮换或删除密钥。临时
@@ -92,13 +92,13 @@ bash scripts/aws-credentials.sh verify dirextalk-deployer
 bash scripts/pricing-estimate.sh \
   --region us-east-1 \
   --cloud-provider lightsail \
-  --domain-mode user
+  --domain-mode route53
 ```
 
 ```bash
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
-DOMAIN_MODE=user \
+DOMAIN_MODE=route53 \
 CONFIRM_DOMAIN_BINDING=1 \
 MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 bash scripts/orchestrate.sh

@@ -40,6 +40,7 @@ required=(
   tests/windows_path_wrappers_test.sh
   tests/windows_path_wrappers_test.ps1
   tests/orchestrate_status_recovery_test.sh
+  tests/domain_route53_default_test.sh
   tests/update_reset_ops_test.sh
   tests/aws_credentials_test.sh
   tests/connect_daemon_runtime_check_test.sh
@@ -267,6 +268,9 @@ grep -q 'Do you already have an AWS account' SKILL.md
 grep -q 'Do you already own a long-lived domain' SKILL.md
 grep -q 'First question: do you already have an AWS account' scripts/phases/s0_prereq_aws.sh
 grep -q 'First question: do you already own a long-lived domain' scripts/phases/s2_domain.sh
+grep -q 'Default path for new users: register the domain in AWS Route53' scripts/phases/s2_domain.sh
+grep -q 'DOMAIN_MODE=route53' README.md
+grep -q 'DOMAIN_MODE=route53' README_zh.md
 grep -q 'highly privileged, must be saved securely' SKILL.md
 grep -q 'safer because it avoids root keys' SKILL.md
 grep -q 'Destroy uses the same AWS identity boundary as deployment' SKILL.md

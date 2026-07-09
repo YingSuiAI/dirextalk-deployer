@@ -35,9 +35,10 @@ aws ec2 describe-addresses --query 'length(Addresses[?Domain==`vpc`])' --output 
    confirmation and ask the user to release an unused Elastic IP, request a
    higher EC2-VPC Elastic IP quota, or choose another region.
 4. Check dependencies with the OS-specific commands in `tooling.md`.
-5. Check current DNS provider. Prefer `DOMAIN_MODE=route53` when the user
-   confirms AWS may manage the hosted zone and A record. Use `DOMAIN_MODE=user`
-   only as a fallback when no DNS provider automation is available.
+5. Check current DNS provider. Default new users to `DOMAIN_MODE=route53` and
+   AWS Route53 registration/DNS management. Use `DOMAIN_MODE=user` only when an
+   external DNS provider must keep managing the domain and the operator will
+   create the A record manually.
 6. Check state:
 
 ```bash
@@ -75,7 +76,7 @@ region and cloud provider:
 bash scripts/pricing-estimate.sh \
   --region <region> \
   --cloud-provider lightsail \
-  --domain-mode user
+  --domain-mode route53
 ```
 
 When `state.json` already exists, refresh and persist the same estimate:
@@ -132,7 +133,7 @@ From the repository root:
 AWS_PROFILE=dirextalk-deployer \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
-DOMAIN_MODE=user \
+DOMAIN_MODE=route53 \
 CONFIRM_DOMAIN_BINDING=1 \
 DIREXTALK_CLOUD_PROVIDER=lightsail \
 MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
@@ -353,8 +354,9 @@ left in place.
 
 ## Manual DNS Mode
 
-Use manual DNS mode only when no DNS provider automation is available. When S3
-emits the fixed public IP, ask the user to set:
+Use manual DNS mode only when an external DNS provider must keep managing the
+domain and no DNS provider automation is available. When S3 emits the fixed
+public IP, ask the user to set:
 
 ```text
 <DOMAIN>  A  <PUBLIC_IP>

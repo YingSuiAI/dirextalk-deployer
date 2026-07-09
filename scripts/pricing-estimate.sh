@@ -254,7 +254,7 @@ if [ -n "$state" ]; then
   region=${region:-$(json_get "$state" region)}
   cloud_provider=${cloud_provider:-$(json_get "$state" cloud_provider)}
   instance_type=${instance_type:-$(json_get "$state" instance_type)}
-  domain_mode=${domain_mode:-$(json_get "$state" domain_mode user)}
+  domain_mode=${domain_mode:-$(json_get "$state" domain_mode route53)}
   disk_gb=${disk_gb:-$(json_get "$state" resources.root_volume_gb)}
   disk_gb=${disk_gb:-$(json_get "$state" root_volume_gb 50)}
   lightsail_bundle_id=${lightsail_bundle_id:-$(json_get "$state" resources.lightsail_bundle_id)}
@@ -270,7 +270,7 @@ cloud_provider=${cloud_provider:-${DIREXTALK_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DI
 cloud_provider=$(printf '%s' "$cloud_provider" | tr '[:upper:]' '[:lower:]')
 instance_type=${instance_type:-t3.small}
 disk_gb=${disk_gb:-50}
-domain_mode=${domain_mode:-user}
+domain_mode=${domain_mode:-route53}
 lightsail_bundle_id=${lightsail_bundle_id:-${DIREXTALK_LIGHTSAIL_BUNDLE_ID:-$DEFAULT_LIGHTSAIL_BUNDLE_ID}}
 lightsail_price=${lightsail_price:-$DEFAULT_LIGHTSAIL_MONTHLY_USD}
 lightsail_ram=${lightsail_ram:-$DEFAULT_LIGHTSAIL_RAM_GB}

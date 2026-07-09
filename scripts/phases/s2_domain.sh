@@ -5,10 +5,10 @@
 # sslip.io/public-IP domains are intentionally not part of this interface.
 #
 # Supported modes:
-#   DOMAIN_MODE=user    user owns DNS; S3 waits until A record points at the EIP
 #   DOMAIN_MODE=route53 Route53 hosted zone; ops manages the A record
+#   DOMAIN_MODE=user    user owns DNS; S3 waits until A record points at the EIP
 #
-# If DOMAIN_MODE is omitted but DOMAIN is present, user mode is assumed.
+# If DOMAIN_MODE is omitted but DOMAIN is present, Route53 mode is assumed.
 # DIREXTALK_ASSUME_DEFAULTS never chooses a domain.
 
 S2_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
@@ -16,9 +16,9 @@ source "$S2_PHASE_DIR/lib/domain.sh"
 
 _print_domain_onboarding_guide() {
   warn "First question: do you already own a long-lived domain or subdomain and can edit its DNS records?"
-  warn "  If not, register a domain with Route53, Cloudflare, Alibaba Cloud, GoDaddy, or another registrar, then choose a subdomain such as chat.your-domain.tld."
-  warn "  If AWS Route53 will manage DNS, use DOMAIN_MODE=route53 and delegate the registrar nameservers to Route53 when asked."
-  warn "  If another DNS provider manages the domain, use DOMAIN_MODE=user; the deployer will print the fixed public IP and wait for you to create an A record."
+  warn "  Default path for new users: register the domain in AWS Route53, then run with DOMAIN_MODE=route53 so the deployer can create the hosted zone/A record."
+  warn "  If the domain is registered somewhere else but you want AWS to manage DNS, use DOMAIN_MODE=route53 and delegate the registrar nameservers to Route53 when asked."
+  warn "  Use DOMAIN_MODE=user only when an external DNS provider must keep managing the domain; the deployer will print the fixed public IP and wait for you to create an A record."
   warn "  The Matrix server_name is bound to DOMAIN. Changing it later is effectively a new homeserver, so choose the final domain before provisioning."
 }
 
@@ -30,7 +30,7 @@ run_phase() {
 
   if [ -z "$mode" ]; then
     if [ -n "$domain" ]; then
-      mode=user
+      mode=route53
     elif [ -t 0 ]; then
       warn "Dirextalk requires a production domain as the Matrix server_name."
       warn "Changing the domain is effectively a new homeserver identity; temporary sslip.io defaults are not supported."
@@ -42,14 +42,14 @@ run_phase() {
         _print_domain_onboarding_guide
         return 2
       }
-      mode=user
+      mode=route53
     else
       phase_set S2_DOMAIN waiting_user "waiting for production domain"
       warn "Deployment blocked: DOMAIN is missing. Dirextalk no longer supports temporary sslip.io defaults."
       warn "Prepare a production domain such as __DOMAIN__. Matrix server_name binds to that domain; changing it later is effectively a new homeserver identity."
       _print_domain_onboarding_guide
       warn "Example:"
-      warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash scripts/orchestrate.sh"
+      warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=route53 CONFIRM_DOMAIN_BINDING=1 bash scripts/orchestrate.sh"
       return 2
     fi
   fi
@@ -96,7 +96,7 @@ run_phase() {
       phase_set S2_DOMAIN waiting_user "automatic domain purchase disabled"
       warn "buy mode is disabled: ops will not purchase domains automatically."
       warn "Domain purchase involves billing, identity/compliance steps, and irreversible ownership decisions."
-      warn "Prepare the domain manually, then use DOMAIN=$domain with DOMAIN_MODE=user or DOMAIN_MODE=route53."
+      warn "Prepare the domain manually, then use DOMAIN=$domain with DOMAIN_MODE=route53, or DOMAIN_MODE=user only for externally managed DNS."
       return 2
       ;;
     *)

@@ -131,7 +131,7 @@ _wait_for_lightsail_or_ec2_choice() {
   local region domain_mode estimate
   region=$(state_get region)
   domain_mode=$(state_get domain_mode)
-  domain_mode=${domain_mode:-user}
+  domain_mode=${domain_mode:-route53}
   state_set cloud_provider lightsail
   _record_cloud_recommendation lightsail "lightsail_unavailable"
   if estimate=$(bash "$S1_PHASE_DIR/pricing-estimate.sh" \

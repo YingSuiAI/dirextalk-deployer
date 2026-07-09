@@ -39,7 +39,7 @@ bash -lc 'echo ok; command -v node; command -v aws; command -v ssh; command -v s
 AWS_PROFILE=dirextalk-deployer \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
-DOMAIN_MODE=user \
+DOMAIN_MODE=route53 \
 CONFIRM_DOMAIN_BINDING=1 \
 DIREXTALK_CLOUD_PROVIDER=lightsail \
 MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \

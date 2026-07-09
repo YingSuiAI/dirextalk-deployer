@@ -73,9 +73,10 @@ Start first-time users with two plain-language questions:
    creating either a temporary `DirextalkDeployer` IAM access-key CSV or a root
    access-key CSV for the fastest first run.
 2. Do you already own a long-lived domain or subdomain and control DNS?
-   If not, guide them to register a domain or choose a subdomain, then decide
-   whether AWS Route53 will manage DNS (`DOMAIN_MODE=route53`) or an external
-   DNS provider will receive the final A record (`DOMAIN_MODE=user`).
+   If not, guide them to register the domain in AWS Route53 and use
+   `DOMAIN_MODE=route53` so the deployer can create the hosted zone and A
+   record. Use `DOMAIN_MODE=user` only when an external DNS provider must keep
+   managing the domain and the operator will create the final A record.
 
 Credential choices for first-time users:
 
@@ -99,7 +100,7 @@ Before final deployment confirmation:
 
 ```bash
 aws lightsail get-regions --include-availability-zones --output json
-bash scripts/pricing-estimate.sh --region <aws-region> --cloud-provider lightsail --domain-mode <user|route53>
+bash scripts/pricing-estimate.sh --region <aws-region> --cloud-provider lightsail --domain-mode route53
 bash scripts/pricing-estimate.sh --state ~/.dirextalk/nodes/<service_id>/state.json --write-state
 ```
 
@@ -109,14 +110,15 @@ Required deployment env:
 
 ```bash
 DOMAIN=<final-domain>
-DOMAIN_MODE=user
+DOMAIN_MODE=route53
 CONFIRM_DOMAIN_BINDING=1
 MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
 DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
-Use `DOMAIN_MODE=route53` only when the user authorizes AWS to manage the A
-record. If an existing A record points elsewhere, require
+Default to `DOMAIN_MODE=route53` for new users and for domains whose DNS can be
+managed by AWS. Use `DOMAIN_MODE=user` only for externally managed DNS. If an
+existing Route53 A record points elsewhere, require
 `DIREXTALK_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
 authoritative DNS before continuing.
 

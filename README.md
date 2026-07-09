@@ -13,7 +13,7 @@
 
 ## Before Deployment
 
-- Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain. If you do not have these yet, answer two setup questions first: do you already have an AWS account, and do you already own a domain or subdomain you can manage in DNS?
+- Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain. For new users, the default path is AWS Route53: register the domain there and let the deployer manage DNS with `DOMAIN_MODE=route53`.
 - AWS resources created by this deployer can bill until they are destroyed. New deployments prefer the Lightsail $12/month Linux bundle by default. Users who have not used Lightsail generally receive three months of free Lightsail usage. New AWS customer accounts generally receive 100-200 USD in free credits. AWS official real-time policy prevails. If no region is configured, the deployer recommends a default AWS region from the local timezone and uses it in non-interactive runs; set `AWS_DEFAULT_REGION`, `AWS_REGION`, AWS profile region, or `DIREXTALK_DEFAULT_REGION` to override. S1 checks Lightsail bundle and availability-zone availability before confirmation; for manual zone checks, use `aws lightsail get-regions --include-availability-zones --output json` because plain `get-regions` can omit zone details. If Lightsail has no usable resource in the selected region, S1 does not automatically switch to EC2; it records an EC2 estimate and waits for the operator to choose another Lightsail-capable region/zone or explicitly set `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 uses a 50 GiB gp3 root EBS volume by default.
 - Use `SKILL.md` as the agent-facing runbook. It contains the detailed deployment rules, confirmation gates, runtime wiring behavior, and recovery procedures.
 
@@ -76,7 +76,7 @@ The CLI is implemented in Node and uses native paths for the host it runs on. On
 Before importing credentials, answer:
 
 - **Do you already have an AWS account?** If not, register at AWS, complete email/phone verification, add a billing card, choose the Basic support plan, wait for activation, then create an AWS Budget or billing alert.
-- **Do you already have a domain or subdomain you control?** If not, register a domain or choose a subdomain at your DNS provider. Use `DOMAIN_MODE=route53` only when AWS Route53 will manage DNS; otherwise use `DOMAIN_MODE=user` and create the A record when the deployer prints the fixed public IP.
+- **Do you already have a domain or subdomain you control?** If not, register the domain in AWS Route53, then use `DOMAIN_MODE=route53` so the deployer can create the hosted zone and A record. Use `DOMAIN_MODE=user` only when an external DNS provider must keep managing the domain; then you will create the A record when the deployer prints the fixed public IP.
 
 Import and verify an AWS deployment profile from an AWS CSV. Root access keys
 are the fastest first-deploy path but are highly privileged; save the CSV
@@ -95,13 +95,13 @@ Run from the repository root:
 bash scripts/pricing-estimate.sh \
   --region us-east-1 \
   --cloud-provider lightsail \
-  --domain-mode user
+  --domain-mode route53
 ```
 
 ```bash
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
-DOMAIN_MODE=user \
+DOMAIN_MODE=route53 \
 CONFIRM_DOMAIN_BINDING=1 \
 MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 bash scripts/orchestrate.sh

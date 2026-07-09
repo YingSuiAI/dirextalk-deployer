@@ -219,7 +219,7 @@ json_test_check "$matrix_retry_dir/session.json" "data.user_id === '@agent:servi
 [ "$(_agent_global_skill_install_path claude-code)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/dirextalk-deployer' ]
 [ "$(_agent_global_skill_install_path claudecode)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/dirextalk-deployer' ]
 [ "$(_agent_global_skill_install_path generic)" = '$HOME/.agent/skills/dirextalk-deployer' ]
-[ "$(_agent_workspace "$tmp/service")" = "$(pwd -P)" ]
+[ "$(_agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
 [ "$(DIREXTALK_AGENT_WORKSPACE="$tmp/custom-workspace" _agent_workspace "$tmp/service")" = "$tmp/custom-workspace" ]
 mkdir -p "$tmp/.codex/skills/dirextalk-deployer"
 [ "$(cd "$tmp/.codex/skills/dirextalk-deployer" && _agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
@@ -352,6 +352,13 @@ grep -q '^\[display\]$' "$config_path"
 grep -q 'mode = "compact"' "$config_path"
 grep -q 'tool_messages = false' "$config_path"
 grep -q 'thinking_messages = false' "$config_path"
+
+codex_mcp_connect_config_path="$tmp/dirextalk-connect/config-with-codex-mcp.toml"
+_write_connect_config "$codex_mcp_connect_config_path" "$tmp/dirextalk-connect/data-codex-mcp" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" "" "https://service.example.test/mcp" "dirextalk-service_example_test" "agent-token" "codex-node"
+grep -q 'mcp_url = "https://service.example.test/mcp"' "$codex_mcp_connect_config_path"
+grep -q 'mcp_server_name = "dirextalk-service_example_test"' "$codex_mcp_connect_config_path"
+grep -q 'mcp_agent_token = "agent-token"' "$codex_mcp_connect_config_path"
+grep -q 'mcp_node_id = "codex-node"' "$codex_mcp_connect_config_path"
 
 speech_config_path="$tmp/dirextalk-connect/config-with-speech.toml"
 DIREXTALK_SPEECH_API_KEY=speech-key \

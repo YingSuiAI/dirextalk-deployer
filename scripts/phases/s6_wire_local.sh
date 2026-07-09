@@ -430,7 +430,7 @@ _connect_package_dir() {
 }
 
 _agent_workspace() {
-  local service_dir=$1 pwd_local
+  local service_dir=$1
   if [ -n "${DIREXTALK_AGENT_WORKSPACE:-}" ]; then
     printf '%s\n' "$DIREXTALK_AGENT_WORKSPACE"
     return 0
@@ -439,11 +439,6 @@ _agent_workspace() {
     printf '%s\n' "$DIREXTALK_AGENT_WORKSPACE_WINDOWS"
     return 0
   fi
-  pwd_local=$(pwd -P 2>/dev/null || pwd)
-  case "$pwd_local" in
-    */.codex/skills/dirextalk-deployer|*/.cursor/skills/dirextalk-deployer|*/.claude/skills/dirextalk-deployer|*/.gemini/skills/dirextalk-deployer) ;;
-    *) printf '%s\n' "$pwd_local"; return 0 ;;
-  esac
   printf '%s/workspace\n' "$service_dir"
 }
 
@@ -662,8 +657,8 @@ EOF
 }
 
 _write_connect_config() {
-  local config_path=$1 data_dir=$2 project=$3 agent=$4 workspace=$5 homeserver=$6 matrix_token=$7 matrix_user=$8 room_id=$9 admin_from=${10:-} agent_cmd=${11:-} agent_options_toml=${12:-}
-  local q_data q_project q_agent q_workspace q_homeserver q_token q_user q_room q_admin_from q_agent_cmd speech_toml default_agent_options_toml display_toml
+  local config_path=$1 data_dir=$2 project=$3 agent=$4 workspace=$5 homeserver=$6 matrix_token=$7 matrix_user=$8 room_id=$9 admin_from=${10:-} agent_cmd=${11:-} agent_options_toml=${12:-} mcp_url=${13:-} mcp_server_name=${14:-} mcp_agent_token=${15:-} mcp_node_id=${16:-}
+  local q_data q_project q_agent q_workspace q_homeserver q_token q_user q_room q_admin_from q_agent_cmd q_mcp_url q_mcp_server_name q_mcp_agent_token q_mcp_node_id speech_toml default_agent_options_toml display_toml
   mkdir -p "$(dirname "$config_path")" "$data_dir"
   q_data=$(_toml_escape "$data_dir")
   q_project=$(_toml_escape "$project")
@@ -675,6 +670,10 @@ _write_connect_config() {
   q_room=$(_toml_escape "$room_id")
   q_admin_from=$(_toml_escape "$admin_from")
   q_agent_cmd=$(_toml_escape "$agent_cmd")
+  q_mcp_url=$(_toml_escape "$mcp_url")
+  q_mcp_server_name=$(_toml_escape "$mcp_server_name")
+  q_mcp_agent_token=$(_toml_escape "$mcp_agent_token")
+  q_mcp_node_id=$(_toml_escape "$mcp_node_id")
   speech_toml=$(_connect_speech_config_toml)
   display_toml=$(_connect_display_config_toml)
   default_agent_options_toml=$(_connect_default_agent_options_toml "$agent" "$agent_options_toml")
@@ -701,6 +700,14 @@ type = "$q_agent"
 [projects.agent.options]
 work_dir = "$q_workspace"
 EOF
+  if [ -n "$mcp_url" ]; then
+    cat >> "$config_path" <<EOF
+mcp_url = "$q_mcp_url"
+mcp_server_name = "$q_mcp_server_name"
+mcp_agent_token = "$q_mcp_agent_token"
+mcp_node_id = "$q_mcp_node_id"
+EOF
+  fi
   if [ -n "$agent_cmd" ]; then
     cat >> "$config_path" <<EOF
 cmd = "$q_agent_cmd"
@@ -1075,6 +1082,7 @@ run_phase() {
   local mcp_dir mcp_dir_local mcp_server_name mcp_endpoint_url mcp_install_command mcp_doctor_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
   local mcp_selected_config_type mcp_selected_config mcp_selected_config_local mcp_codex_config_local mcp_cursor_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_json_config_local mcp_env_file_local mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
+  local connect_mcp_url connect_mcp_server_name connect_mcp_agent_token connect_mcp_node_id
   local skill_path global_skill_path
   domain=$(state_get domain)
   asurl=$(state_get as_url)
@@ -1181,7 +1189,17 @@ run_phase() {
       cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime")
     fi
   fi
-  _write_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml"
+  connect_mcp_url=
+  connect_mcp_server_name=
+  connect_mcp_agent_token=
+  connect_mcp_node_id=
+  if [ "$cc_agent" = "codex" ]; then
+    connect_mcp_url=$mcp_endpoint_url
+    connect_mcp_server_name=$mcp_server_name
+    connect_mcp_agent_token=$token
+    connect_mcp_node_id=$node_id
+  fi
+  _write_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml" "$connect_mcp_url" "$connect_mcp_server_name" "$connect_mcp_agent_token" "$connect_mcp_node_id"
   ok "Wrote dirextalk-connect Matrix config $cc_config (0600)."
 
   state_set agent_env_file "$envfile" 2>/dev/null || true
@@ -1212,6 +1230,8 @@ run_phase() {
   state_set agent_workspace "$workspace" 2>/dev/null || true
   state_set connect_agent "$cc_agent" 2>/dev/null || true
   state_set connect_agent_cmd "$cc_agent_cmd" 2>/dev/null || true
+  state_set connect_mcp_url "$connect_mcp_url" 2>/dev/null || true
+  state_set connect_mcp_server_name "$connect_mcp_server_name" 2>/dev/null || true
   if [ -n "$cc_agent_options_toml" ]; then
     state_set connect_agent_options_toml_present "true" 2>/dev/null || true
   else

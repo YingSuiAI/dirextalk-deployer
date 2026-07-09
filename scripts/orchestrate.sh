@@ -299,6 +299,45 @@ cmd_status() {
 }
 
 # Delivery summary.
+delivery_runtime_checks_strictly_passed() {
+  local summary connect doctor tools smoke
+  summary=$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")
+  connect=$(json_get "$STATE_JSON" runtime_checks.connect_daemon.status "not_run")
+  doctor=$(json_get "$STATE_JSON" runtime_checks.mcp_doctor.status "not_run")
+  tools=$(json_get "$STATE_JSON" runtime_checks.mcp_tools.status "not_run")
+  smoke=$(json_get "$STATE_JSON" runtime_checks.mcp_smoke.status "not_run")
+
+  [ "$summary" = "passed" ] &&
+    [ "$connect" = "passed" ] &&
+    [ "$doctor" = "passed" ] &&
+    [ "$tools" = "passed" ] &&
+    [ "$smoke" = "passed" ]
+}
+
+delivery_runtime_checks_summary() {
+  printf 'summary=%s connect_daemon=%s mcp_doctor=%s mcp_tools=%s mcp_smoke=%s\n' \
+    "$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")" \
+    "$(json_get "$STATE_JSON" runtime_checks.connect_daemon.status "not_run")" \
+    "$(json_get "$STATE_JSON" runtime_checks.mcp_doctor.status "not_run")" \
+    "$(json_get "$STATE_JSON" runtime_checks.mcp_tools.status "not_run")" \
+    "$(json_get "$STATE_JSON" runtime_checks.mcp_smoke.status "not_run")"
+}
+
+ensure_delivery_runtime_checks() {
+  if ! delivery_runtime_checks_strictly_passed; then
+    warn "Final delivery requires live runtime checks; running: verify runtime"
+    cmd_verify_runtime || true
+  fi
+
+  if delivery_runtime_checks_strictly_passed; then
+    return 0
+  fi
+
+  warn "Final delivery blocked because runtime checks did not all pass: $(delivery_runtime_checks_summary)"
+  warn "Fix the failed check, then rerun: DOMAIN=<DOMAIN> bash $0 verify runtime"
+  return 1
+}
+
 print_delivery() {
   local domain password keyfile pubip iid region statejson envfile agent_room_id runtime install_policy install_mode install_status install_command
   local cloud_provider cloud_label
@@ -311,6 +350,7 @@ print_delivery() {
     warn "state password field is not an exact eight-digit initialization code; rerun S5_INIT_TOKENS before reporting it."
     return 1
   fi
+  ensure_delivery_runtime_checks || return $?
   keyfile=$(res_get key_file); pubip=$(res_get public_ip)
   iid=$(res_get instance_id); region=$(state_get region); statejson="$STATE_JSON"
   cloud_provider=$(state_get cloud_provider)
@@ -629,7 +669,7 @@ cmd_run() {
     local cur; cur=$(first_unfinished_phase)
     if [ "$cur" = "DONE" ]; then
       ok "All phases completed."
-      print_delivery
+      print_delivery || return $?
       return 0
     fi
     log "Entering phase $cur (current status=$(phase_status "$cur"))"

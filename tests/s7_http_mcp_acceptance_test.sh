@@ -20,6 +20,23 @@ EOF
   chmod 700 "$fakebin/$tool"
 done
 
+cat > "$fakebin/dirextalk-connect" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "${1:-}" = "daemon" ]
+[ "${2:-}" = "status" ]
+[ "${3:-}" = "--service-name" ]
+[ "${4:-}" = "s7-mcp.example.test" ]
+cat <<STATUS
+dirextalk-connect daemon status
+
+  Status:    Running
+  Platform:  test
+  WorkDir:   ${CONNECT_WORK_DIR:-}
+STATUS
+EOF
+chmod 700 "$fakebin/dirextalk-connect"
+
 cat > "$fakebin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -82,6 +99,12 @@ case "$url" in
     ;;
   https://s7-mcp.example.test/mcp)
     case " $* " in
+      *"Authorization: Bearer AGENT_TOKEN_S7"*'"method":"initialize"'*)
+        body='{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"dirextalk-message-server","version":"test"},"capabilities":{"tools":{}}}}'
+        ;;
+      *"Authorization: Bearer AGENT_TOKEN_S7"*'"method":"tools/list"'*)
+        body='{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"dirextalk_messages_list"}]}}'
+        ;;
       *"Authorization: Bearer AGENT_TOKEN_S7"*'"method":"tools/call"'*'"name":"dirextalk_messages_list"'*'"room_id":"!agent:s7-mcp.example.test"'*)
         body='{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"[]"}],"isError":false}}'
         ;;
@@ -103,7 +126,10 @@ EOF
 chmod 700 "$fakebin/curl"
 
 service_dir="$HOME/.dirextalk/nodes/s7-mcp.example.test"
-mkdir -p "$service_dir"
+runtime_dir="$service_dir/dirextalk-connect"
+mkdir -p "$runtime_dir"
+config="$runtime_dir/config.toml"
+: > "$config"
 state="$service_dir/state.json"
 json_build object \
   run_id=s7-mcp-test \
@@ -119,15 +145,20 @@ json_build object \
   agent_token=AGENT_TOKEN_S7 \
   agent_node_id=s7-node \
   'agent_room_id=!agent:s7-mcp.example.test' \
+  agent_service_id=s7-mcp.example.test \
+  "agent_service_dir=$service_dir" \
+  "connect_config=$config" \
+  connect_binary=dirextalk-connect \
   phase=S7_VERIFY_E2E \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"pending"}}' \
   'resources={"public_ip":"203.0.113.17"}' > "$state"
 
 calls="$tmp/curl.calls"
-run_output=$(DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CURL_CALLS="$calls" bash "$ROOT/scripts/orchestrate.sh" 2>&1)
+run_output=$(DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CURL_CALLS="$calls" CONNECT_WORK_DIR="$runtime_dir" bash "$ROOT/scripts/orchestrate.sh" 2>&1)
 printf '%s\n' "$run_output" | grep -q 'HTTP MCP dirextalk_messages_list (agent token)'
+printf '%s\n' "$run_output" | grep -q 'Automated Deployment Gates Passed'
 
-json_test_check "$state" "data.phases.S7_VERIFY_E2E.status === 'done' && data.runtime_checks.mcp_smoke.status === 'passed'"
+json_test_check "$state" "data.phases.S7_VERIFY_E2E.status === 'done' && data.runtime_checks.mcp_smoke.status === 'passed' && data.runtime_checks.summary.status === 'passed'"
 if grep -q '/_p2p/query' "$calls"; then
   echo "S7 must not call legacy /_p2p/query for MCP acceptance" >&2
   exit 1

@@ -79,6 +79,8 @@ mcp/mcp-servers.json
 The generated `dirextalk-connect/config.toml` contains exactly one Matrix platform and includes:
 
 ```toml
+language = "auto"
+
 [speech]
 enabled = true
 provider = "openai"
@@ -94,6 +96,10 @@ admin_from = "@owner:<server>"
 [projects.agent.options]
 work_dir = "<workspace>"
 cmd = "<optional explicit agent executable path>"
+mcp_url = "https://<domain>/mcp"
+mcp_server_name = "dirextalk-<domain>"
+mcp_agent_token = "<service agent token>"
+mcp_node_id = "<agent-node-id>"
 
 [[projects.platforms]]
 type = "matrix"

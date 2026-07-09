@@ -63,7 +63,7 @@ DIREXTALK_MCP_URL=https://<domain>/mcp
 DIREXTALK_AGENT_NODE_ID=__AGENT_NODE_ID__
 ```
 
-This is intentionally separate from the `dirextalk-connect` bridge. MCP uses the server HTTP endpoint and service agent token; dirextalk-connect uses a direct Matrix Client-Server session in `dirextalk-connect/config.toml`.
+MCP uses the server HTTP endpoint and service agent token. S6 writes the selected client snippet and also writes the same MCP endpoint fields into `dirextalk-connect/config.toml` under `[projects.agent.options]`. Codex consumes those fields as native `mcp_servers` config, ACP consumes them as `mcpServers` session parameters, and other connect agents receive standard `DIREXTALK_MCP_*` environment variables.
 Generated MCP client snippets do not install or launch a local MCP CLI. MCP does not require a local daemon, proxy endpoint, or listening port.
 Cursor can load the generated MCP server after the snippet is added to `.cursor/mcp.json` or `~/.cursor/mcp.json`, but Cursor may require a full restart or MCP settings reload/enable before the server starts and tools appear.
 
@@ -97,6 +97,7 @@ The config uses:
 - `admin_from = "@owner:<server>"` at the project level, so only the portal owner can run privileged commands such as `/dir` and `/shell`.
 - `share_session_in_channel = true` and `group_reply_all = true` for agent-room conversation continuity.
 - `auto_join = false` and `auto_verify = false`; message-server creates and joins the real room.
+- `mcp_url`, `mcp_server_name`, `mcp_agent_token`, and `mcp_node_id` under `[projects.agent.options]` for every generated connect agent.
 - `[speech]` is generated and enabled automatically when S6 can find a speech-to-text API key. Without a key, voice input is not enabled and `dirextalk-connect` will answer voice messages with its speech configuration warning.
 
 `/dir reset` is expected to restore the generated `work_dir` and remove the current project directory override from `dirextalk-connect/data/projects/<project>.state.json`.
@@ -198,6 +199,8 @@ connect_matrix_session_file
 connect_matrix_user
 connect_matrix_device
 connect_matrix_homeserver
+connect_mcp_url
+connect_mcp_server_name
 mcp_transport
 mcp_endpoint_url
 mcp_server_name

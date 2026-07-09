@@ -679,7 +679,7 @@ _write_connect_config() {
   default_agent_options_toml=$(_connect_default_agent_options_toml "$agent" "$agent_options_toml")
   umask 077
   cat > "$config_path" <<EOF
-language = "zh"
+language = "auto"
 data_dir = "$q_data"
 EOF
   if [ -n "$speech_toml" ]; then
@@ -1189,16 +1189,10 @@ run_phase() {
       cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime")
     fi
   fi
-  connect_mcp_url=
-  connect_mcp_server_name=
-  connect_mcp_agent_token=
-  connect_mcp_node_id=
-  if [ "$cc_agent" = "codex" ]; then
-    connect_mcp_url=$mcp_endpoint_url
-    connect_mcp_server_name=$mcp_server_name
-    connect_mcp_agent_token=$token
-    connect_mcp_node_id=$node_id
-  fi
+  connect_mcp_url=$mcp_endpoint_url
+  connect_mcp_server_name=$mcp_server_name
+  connect_mcp_agent_token=$token
+  connect_mcp_node_id=$node_id
   _write_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml" "$connect_mcp_url" "$connect_mcp_server_name" "$connect_mcp_agent_token" "$connect_mcp_node_id"
   ok "Wrote dirextalk-connect Matrix config $cc_config (0600)."
 

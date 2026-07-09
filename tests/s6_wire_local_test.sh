@@ -334,6 +334,7 @@ matching_node_id=$(DIREXTALK_AGENT_NODE_ID=codex-new.example.test-123 _agent_nod
 
 config_path="$tmp/dirextalk-connect/config.toml"
 _write_connect_config "$config_path" "$tmp/dirextalk-connect/data" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
+grep -q '^language = "auto"$' "$config_path"
 grep -q 'type = "matrix"' "$config_path"
 grep -q 'type = "codex"' "$config_path"
 grep -q 'admin_from = "@owner:service.example.test"' "$config_path"
@@ -359,6 +360,12 @@ grep -q 'mcp_url = "https://service.example.test/mcp"' "$codex_mcp_connect_confi
 grep -q 'mcp_server_name = "dirextalk-service_example_test"' "$codex_mcp_connect_config_path"
 grep -q 'mcp_agent_token = "agent-token"' "$codex_mcp_connect_config_path"
 grep -q 'mcp_node_id = "codex-node"' "$codex_mcp_connect_config_path"
+
+generic_mcp_connect_config_path="$tmp/dirextalk-connect/config-with-generic-mcp.toml"
+_write_connect_config "$generic_mcp_connect_config_path" "$tmp/dirextalk-connect/data-generic-mcp" "gemini-node" "gemini" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" "" "https://service.example.test/mcp" "dirextalk-service_example_test" "agent-token" "gemini-node"
+grep -q 'type = "gemini"' "$generic_mcp_connect_config_path"
+grep -q 'mcp_url = "https://service.example.test/mcp"' "$generic_mcp_connect_config_path"
+grep -q 'mcp_agent_token = "agent-token"' "$generic_mcp_connect_config_path"
 
 speech_config_path="$tmp/dirextalk-connect/config-with-speech.toml"
 DIREXTALK_SPEECH_API_KEY=speech-key \

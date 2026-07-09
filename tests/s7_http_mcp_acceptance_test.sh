@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck disable=SC1090
+source "$ROOT/tests/lib/json_test.sh"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+export HOME="$tmp/home"
+mkdir -p "$HOME"
+
+fakebin="$tmp/bin"
+mkdir -p "$fakebin"
+for tool in aws ssh scp; do
+  cat > "$fakebin/$tool" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod 700 "$fakebin/$tool"
+done
+
+cat > "$fakebin/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >> "$CURL_CALLS"
+
+case " $* " in
+  *"/_p2p/query"*)
+    echo "legacy _p2p/query must not be used by S7 MCP acceptance" >&2
+    exit 1
+    ;;
+esac
+
+body_path=""
+header_path=""
+write_code=0
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[$i]}" in
+    -o)
+      body_path=${args[$((i + 1))]}
+      ;;
+    -D)
+      header_path=${args[$((i + 1))]}
+      ;;
+    -w)
+      write_code=1
+      ;;
+  esac
+done
+
+url=""
+for arg in "$@"; do
+  case "$arg" in
+    https://*) url=$arg ;;
+  esac
+done
+
+body=""
+code=200
+case "$url" in
+  https://s7-mcp.example.test/healthz)
+    body='{"status":"ok"}'
+    ;;
+  https://s7-mcp.example.test/_matrix/client/versions)
+    body='{"versions":["v1.0"]}'
+    ;;
+  https://s7-mcp.example.test/.well-known/matrix/server)
+    body='{"m.server":"s7-mcp.example.test:443"}'
+    ;;
+  https://s7-mcp.example.test/.well-known/portal/owner.json)
+    body='{"ok":true}'
+    [ -n "$header_path" ] && printf 'HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: http://127.0.0.1:51820\r\n\r\n' > "$header_path"
+    ;;
+  https://s7-mcp.example.test/_p2p/command)
+    body='{"access_token":"OWNER_ACCESS"}'
+    ;;
+  https://s7-mcp.example.test/_matrix/client/v3/voip/turnServer)
+    body='{"username":"u","password":"p","ttl":86400,"uris":["turn:s7-mcp.example.test:3478?transport=udp"]}'
+    ;;
+  https://s7-mcp.example.test/mcp)
+    case " $* " in
+      *"Authorization: Bearer AGENT_TOKEN_S7"*'"method":"tools/call"'*'"name":"dirextalk_messages_list"'*'"room_id":"!agent:s7-mcp.example.test"'*)
+        body='{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"[]"}],"isError":false}}'
+        ;;
+      *)
+        echo "unexpected MCP smoke request: $*" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  *)
+    echo "unexpected curl URL: $url" >&2
+    exit 1
+    ;;
+esac
+
+[ -n "$body_path" ] && printf '%s\n' "$body" > "$body_path" || printf '%s\n' "$body"
+[ "$write_code" -eq 1 ] && printf '%s' "$code"
+EOF
+chmod 700 "$fakebin/curl"
+
+service_dir="$HOME/.dirextalk/nodes/s7-mcp.example.test"
+mkdir -p "$service_dir"
+state="$service_dir/state.json"
+json_build object \
+  run_id=s7-mcp-test \
+  region=ap-northeast-2 \
+  cloud_provider=lightsail \
+  domain_mode=route53 \
+  domain=s7-mcp.example.test \
+  domain_confirmed_irreversible=true \
+  as_url=https://s7-mcp.example.test \
+  mcp_endpoint_url=https://s7-mcp.example.test/mcp \
+  password=12345678 \
+  access_token=OWNER_ACCESS \
+  agent_token=AGENT_TOKEN_S7 \
+  agent_node_id=s7-node \
+  'agent_room_id=!agent:s7-mcp.example.test' \
+  phase=S7_VERIFY_E2E \
+  'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"pending"}}' \
+  'resources={"public_ip":"203.0.113.17"}' > "$state"
+
+calls="$tmp/curl.calls"
+run_output=$(DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CURL_CALLS="$calls" bash "$ROOT/scripts/orchestrate.sh" 2>&1)
+printf '%s\n' "$run_output" | grep -q 'HTTP MCP dirextalk_messages_list (agent token)'
+
+json_test_check "$state" "data.phases.S7_VERIFY_E2E.status === 'done' && data.runtime_checks.mcp_smoke.status === 'passed'"
+if grep -q '/_p2p/query' "$calls"; then
+  echo "S7 must not call legacy /_p2p/query for MCP acceptance" >&2
+  exit 1
+fi
+grep -q 'https://s7-mcp.example.test/mcp' "$calls"
+
+echo "s7 http mcp acceptance ok"

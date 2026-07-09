@@ -2,12 +2,12 @@
 # S7 VERIFY_E2E - end-to-end acceptance. DONE only when every check passes.
 #
 # Checks: healthz, Matrix versions, Matrix federation well-known, owner.json+CORS,
-# token-authenticated /_p2p command, and non-empty TURN turnServer.
+# token-authenticated HTTP MCP read action, and non-empty TURN turnServer.
 # Local bridge message send/read is validated separately; this script checks HTTP actions.
 
 run_phase() {
   phase_set S7_VERIFY_E2E in_progress "running end-to-end acceptance"
-  local domain token password
+  local domain password
   domain=$(state_get domain)
   password=$(state_get password)
   local fails=0
@@ -16,13 +16,7 @@ run_phase() {
   _check "matrix versions"       "https://$domain/_matrix/client/versions"       "" 200 || fails=$((fails+1))
   _check_matrix_server_wellknown "$domain" || fails=$((fails+1))
   _check_owner_cors "$domain" || fails=$((fails+1))
-  token=$(_p2p_access_token "$domain" "$password")
-  if [ -n "$token" ]; then
-    _check_p2p_agent_auth "$domain" "$token" || fails=$((fails+1))
-  else
-    warn "  ✗ _p2p/query mcp.messages.list (failed to exchange fresh access_token)"
-    fails=$((fails+1))
-  fi
+  _check_mcp_agent_auth || fails=$((fails+1))
   _check_turn "$domain" "$password" || fails=$((fails+1))
 
   if [ "$fails" -eq 0 ]; then
@@ -34,25 +28,12 @@ run_phase() {
   return 1
 }
 
-_check_p2p_agent_auth() {
-  local domain=$1 token=$2 code body
-  local room_id
-  room_id=$(state_get agent_room_id)
-  local args=()
-  while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
-  body=$(mktemp)
-  code=$(curl -sk "${args[@]}" -o "$body" -w '%{http_code}' \
-    -X POST "https://$domain/_p2p/query" \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer $token" \
-    -d "$(json_build mcp-messages-list "$room_id")" 2>/dev/null)
-  if [ "$code" = "200" ] && json_assert "$body" messages-response >/dev/null 2>&1; then
-    rm -f "$body"
-    ok "  ✓ _p2p/query mcp.messages.list (agent token)"
+_check_mcp_agent_auth() {
+  if cmd_verify_mcp_smoke >/dev/null; then
+    ok "  ✓ HTTP MCP dirextalk_messages_list (agent token)"
     return 0
   fi
-  warn "  ✗ _p2p/query mcp.messages.list (got $code, body=$(head -c 120 "$body" 2>/dev/null))"
-  rm -f "$body"
+  warn "  ✗ HTTP MCP dirextalk_messages_list (agent token)"
   return 1
 }
 

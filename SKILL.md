@@ -65,18 +65,117 @@ explicitly choose WSL as the host runtime.
 Do not deploy until the user has an active AWS account, a real long-lived
 domain, AWS credentials, DNS authority, and billing acknowledgement.
 
-Start first-time users with two plain-language questions:
+For first-time users, guide them step by step. Do not front-load the whole
+cloud setup checklist. Ask only the next blocking question, wait for the user's
+answer or completion, then continue to the next step.
 
-1. Do you already have an AWS account with an access-key CSV or AWS profile?
-   If not, guide them through AWS registration, billing-card/phone verification,
-   Basic support selection, account activation, AWS Budget creation, and then
-   creating either a temporary `DirextalkDeployer` IAM access-key CSV or a root
-   access-key CSV for the fastest first run.
-2. Do you already own a long-lived domain or subdomain and control DNS?
-   If not, guide them to register the domain in AWS Route53 and use
-   `DOMAIN_MODE=route53` so the deployer can create the hosted zone and A
-   record. Use `DOMAIN_MODE=user` only when an external DNS provider must keep
-   managing the domain and the operator will create the final A record.
+Default tone for new users:
+
+- Use product language such as account, domain, access key file, DNS provider,
+  server, fixed IP, and monthly AWS cost.
+- Avoid technical labels such as EC2, EIP, IAM policy, security group, EBS,
+  Matrix `server_name`, Route53 hosted zone, federation identity, or TURN unless
+  the user asks what they mean or the term appears in an AWS screen they must
+  operate.
+- When a technical term is unavoidable, explain it in one short sentence before
+  asking the user to act.
+- Never give a long architecture explanation during onboarding unless the user
+  explicitly asks why the step is needed.
+
+Step-by-step onboarding flow:
+
+1. **AWS account.**
+   - Shortcut: if the user already provided valid AWS credentials, such as a
+     configured profile or a CSV that passed `aws sts get-caller-identity`, skip
+     browser sign-in and email questions. The agent already has AWS access.
+   - Ask: "Do you already have an AWS account you can log into?"
+   - If yes, continue to the access key step.
+   - If no, ask the user to open
+     `https://signin.aws.amazon.com/signup?request_type=register`, register in
+     their browser, complete payment/phone verification and Basic support
+     selection if AWS asks, then stop until they say the account is ready.
+   - Never ask for, collect, paste, log, or store payment card details, root
+     password, MFA code, email verification code, or phone verification code.
+
+2. **AWS access key or profile.**
+   - Ask: "Do you already have an AWS access key CSV file or AWS profile for
+     deployment?"
+   - If yes, ask only for the local CSV path or profile name, then verify it.
+   - If no, offer two credential paths and ask the user to choose:
+     1. **Root access key (default fastest path):** simpler to create for a
+        first deployment because it uses the account owner identity directly.
+        Explain that it is highly privileged, must be saved securely, must never
+        be pasted into chat or committed, and should be rotated or deleted after
+        deployment.
+     2. **Dedicated IAM deployment user:** safer because it avoids root keys,
+        but requires more AWS console steps. Explain in one sentence: "This
+        temporary user lets the deployment tool create and later destroy this
+        Dirextalk node; delete or disable it after deployment."
+   - Root access keys are allowed when the operator explicitly chooses them.
+     Do not block deployment only because STS returns a root ARN; report
+     `root=true`, repeat the security warning once, and continue if the user
+     accepts that risk.
+   - Prefer the repository helper for CSV import and redacted verification:
+     ```bash
+     bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv dirextalk-deployer <region>
+     export AWS_PROFILE=dirextalk-deployer
+     bash scripts/aws-credentials.sh verify dirextalk-deployer
+     ```
+   - The agent may read the local CSV path, but must never print the Access Key
+     ID together with the Secret Access Key, and must never write secrets into
+     the repository, skill files, logs, or chat output.
+
+3. **Domain.**
+   - Ask: "Do you already own a long-lived domain or subdomain you want to use
+     for this Dirextalk node?"
+   - If yes, ask for the domain.
+   - If no, first check whether the AWS account already has Route53 registered
+     domains when AWS CLI access is available:
+     ```bash
+     aws route53domains list-domains --profile <profile>
+     ```
+     If domains exist, present only the domain names and ask whether to use one.
+     If none exist, ask the user to buy or prepare a domain, then stop until
+     they have it.
+   - Default new users to Route53 registration and `DOMAIN_MODE=route53` so the
+     deployer can create the hosted zone and A record. Use `DOMAIN_MODE=user`
+     only when an external DNS provider must keep managing the domain and the
+     operator will create the final A record.
+   - Explain only this much by default: "Use a real long-term domain because
+     changing it later means creating a new chat server identity."
+   - Do not use localhost, raw IP addresses, wildcard domains, disposable
+     domains, temporary `sslip.io`, or other throwaway names for production.
+
+4. **DNS control.**
+   - Ask: "Is this domain managed in AWS Route53, or somewhere else like
+     Cloudflare, GoDaddy, or Alibaba Cloud?"
+   - If AWS Route53, use `DOMAIN_MODE=route53` only after the user confirms AWS
+     may create or update the domain's hosted zone and A record.
+   - If another provider manages DNS and no provider automation is available,
+     use `DOMAIN_MODE=user` as a waiting external-action state. Later, when the
+     script emits the fixed IP, ask the user to create exactly:
+     ```text
+     <DOMAIN>  A  <PUBLIC_IP>
+     ```
+   - If the user prefers Route53 while the domain is registered elsewhere, S3
+     can create the Route53 hosted zone and record NS nameservers. The user or a
+     provider-specific DNS connector must still delegate those NS records at the
+     current registrar before authoritative DNS can resolve.
+
+5. **Billing confirmation.**
+   - Give a short billing warning before the first mutating AWS command: "This
+     will create paid AWS resources for the server. They keep billing until
+     destroyed."
+   - Provide an upfront monthly estimate for the selected region and cloud
+     provider before asking for final approval. Use the pricing helper output;
+     do not invent a fixed quote from memory.
+   - Tell the operator that new AWS customer accounts generally receive
+     `100-200 USD` in free credits, and that users who have not used Lightsail
+     generally receive three months of free Lightsail usage. Coverage is
+     account-specific; recommend an AWS Budget and AWS Billing Console review,
+     and say AWS official real-time policy prevails.
+   - Check EC2-VPC Elastic IP quota before mutating AWS resources. For explicit
+     EC2, also check default VPC, EC2 vCPU quota, and AMI availability.
 
 Credential choices for first-time users:
 
@@ -105,6 +204,20 @@ bash scripts/pricing-estimate.sh --state ~/.dirextalk/nodes/<service_id>/state.j
 ```
 
 Record and report `cost_estimate` and billing reminders. Tell the operator that new AWS customer accounts generally receive `100-200 USD` in free credits, and that users who have not used Lightsail generally receive three months of free Lightsail usage. Coverage is account-specific; recommend an AWS Budget, AWS Billing Console review, and say AWS official real-time policy prevails. Check EC2-VPC Elastic IP quota before mutating AWS resources.
+
+Required first-time deployment confirmation. Fill in the concrete domain,
+profile, region, and cloud provider. Include the AWS credit/Lightsail trial
+sentence immediately before the confirmation line:
+
+```text
+Please confirm before I deploy. New AWS customer accounts generally receive 100-200 USD in free credits, and users who have not used Lightsail generally receive three months of free Lightsail usage. Credits and trials are account-specific, actual coverage must be verified in AWS Billing Console, and AWS official real-time policy prevails.
+
+Reply with this exact sentence:
+I confirm that I have an active AWS account, the long-lived domain <domain>, and authorize the current <profile-or-identity> AWS profile in <region> to create the Dirextalk service using <cloud-provider>. I understand this can create billable AWS resources, credits or trials are not guaranteed to cover all usage, and resources keep billing until destroyed.
+```
+
+If any prerequisite is missing, stop deployment and guide the user through that
+specific step before running `scripts/orchestrate.sh`.
 
 Required deployment env:
 

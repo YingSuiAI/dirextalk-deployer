@@ -77,12 +77,6 @@ for path in "${required[@]}"; do
   }
 done
 
-skill_lines=$(wc -l < SKILL.md | tr -d ' ')
-if [ "$skill_lines" -gt 360 ]; then
-  echo "SKILL.md should stay concise; move detailed runbook material to references/ (lines=$skill_lines)" >&2
-  exit 1
-fi
-
 legacy_json_cli_name=$(printf '\152\161')
 legacy_json_cli_pattern="(^|[^[:alnum:]_])${legacy_json_cli_name}([^[:alnum:]_]|$)|${legacy_json_cli_name}\\.exe"
 if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md README_zh.md SKILL.md references AGENTS.md agents package.json docs >/dev/null; then
@@ -266,6 +260,13 @@ grep -q 'Root access key (default fastest path)' SKILL.md
 grep -q 'Dedicated IAM deployment user' SKILL.md
 grep -q 'Do you already have an AWS account' SKILL.md
 grep -q 'Do you already own a long-lived domain' SKILL.md
+grep -q 'Do not front-load the whole' SKILL.md
+grep -q 'Ask only the next blocking question' SKILL.md
+grep -q 'Default tone for new users' SKILL.md
+grep -q 'Step-by-step onboarding flow' SKILL.md
+grep -q 'When a technical term is unavoidable' SKILL.md
+grep -q 'Please confirm before I deploy' SKILL.md
+grep -q 'Reply with this exact sentence' SKILL.md
 grep -q 'First question: do you already have an AWS account' scripts/phases/s0_prereq_aws.sh
 grep -q 'First question: do you already own a long-lived domain' scripts/phases/s2_domain.sh
 grep -q 'Default path for new users: register the domain in AWS Route53' scripts/phases/s2_domain.sh

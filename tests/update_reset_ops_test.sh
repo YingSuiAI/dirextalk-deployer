@@ -110,7 +110,11 @@ write_state "$state" "$service_dir"
 
 update_calls="$tmp/update.calls"
 : > "$update_calls"
-CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" MESSAGE_SERVER_IMAGE="dirextalk/message-server:test" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
+if CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" MESSAGE_SERVER_IMAGE="dirextalk/message-server:test" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-unconfirmed.out" 2>&1; then
+  echo "update image override must require explicit debug/legacy confirmation" >&2
+  exit 1
+fi
+CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" MESSAGE_SERVER_IMAGE="dirextalk/message-server:test" DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
 assert_not_contains "$tmp/update.out" 'Old user confirmations and runtime checks were cleared'
 assert_not_contains "$tmp/update.out" 'Scoped local bridge daemon was stopped'
 assert_not_contains "$tmp/update.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'

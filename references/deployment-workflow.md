@@ -135,9 +135,13 @@ AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 CONFIRM_DOMAIN_BINDING=1 \
 DIREXTALK_CLOUD_PROVIDER=lightsail \
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 bash scripts/orchestrate.sh
 ```
+
+S3 resolves the latest published stable GitHub Release, verifies the manifest
+checksum, and persists `server_release.version/image/digest/image_ref/manifest_digest`
+before provisioning. The rendered Compose runtime uses the immutable image ref.
+Go is required locally to build the bundled Linux updater binary.
 
 For EC2, replace `DIREXTALK_CLOUD_PROVIDER=lightsail` with `DIREXTALK_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
 
@@ -232,7 +236,7 @@ Update the running service image without recreating infrastructure or deleting
 data:
 
 ```bash
-DOMAIN=__DOMAIN__ MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest bash scripts/update.sh
+DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 DOMAIN=__DOMAIN__ MESSAGE_SERVER_IMAGE=dirextalk/message-server:<debug-tag> bash scripts/update.sh
 DIREXTALK_EXISTING_STATE_ACTION=continue DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
 ```
 
@@ -376,7 +380,6 @@ DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
 DIREXTALK_CLOUD_PROVIDER=lightsail \
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 DIREXTALK_EXISTING_STATE_ACTION=continue \
 bash scripts/orchestrate.sh
 ```

@@ -13,6 +13,11 @@ source "$HERE/lib/ops.sh"
 STATE_JSON=$(ops_state_path "${1:-}")
 ops_require_state "$STATE_JSON"
 
+if [ -n "${MESSAGE_SERVER_IMAGE:-}" ] && [ "${DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE:-0}" != "1" ]; then
+  echo "MESSAGE_SERVER_IMAGE is a debug/legacy override; set DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 explicitly." >&2
+  exit 1
+fi
+
 remote_command=$(ops_update_remote_command "${MESSAGE_SERVER_IMAGE:-}")
 ops_ssh "$STATE_JSON" "$remote_command"
 report=$(ops_write_report update update_remote_restart_complete "$STATE_JSON")

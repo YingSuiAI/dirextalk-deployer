@@ -225,9 +225,14 @@ Required deployment env:
 ```bash
 DOMAIN=<final-domain>
 CONFIRM_DOMAIN_BINDING=1
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
 DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
+
+Normal server selection resolves the latest published stable GitHub Release and
+persists its immutable digest in deployment state. `MESSAGE_SERVER_IMAGE` is
+disabled unless `DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1` explicitly
+marks a debug/legacy deployment. Go is currently required to build the bundled
+Linux updater binary.
 
 Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
 `route53` only when the current AWS account contains a matching public hosted

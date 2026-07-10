@@ -10,10 +10,15 @@ DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
 DEFAULT_EC2_INSTANCE_TYPE=${DEFAULT_EC2_INSTANCE_TYPE:-t3.small}
 S1_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
+source "$S1_PHASE_DIR/lib/server-release.sh"
 
 run_phase() {
   aws_env_prep
   phase_set S1_PREFLIGHT in_progress "running preflight checks"
+  if ! server_release_validate_override; then
+    phase_set S1_PREFLIGHT failed "mutable server image override requires explicit debug/legacy confirmation"
+    return 1
+  fi
   local cloud_provider
   cloud_provider=$(_resolve_cloud_provider)
   state_set cloud_provider "$cloud_provider"

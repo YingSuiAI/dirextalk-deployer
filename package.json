@@ -15,7 +15,8 @@
     "agents/",
     "bin/",
     "references/",
-    "scripts/"
+    "scripts/",
+    "updater/"
   ],
   "scripts": {
     "test": "bash tests/lib/run_isolated.sh bash tests/npm_test_suite.sh"

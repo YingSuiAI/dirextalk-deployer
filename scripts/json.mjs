@@ -550,6 +550,14 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       config: st.connect_config || "",
       install_status: st.connect_install_status || ""
     },
+    release: {
+      source: st.server_release?.source || "unknown",
+      version: st.server_release?.version || "",
+      image: st.server_release?.image || "",
+      digest: st.server_release?.digest || "",
+      image_ref: st.server_release?.image_ref || "",
+      manifest_digest: st.server_release?.manifest_digest || ""
+    },
     mcp: {
       status: localRefreshStatus,
       install_status: st.mcp_install_status || "",

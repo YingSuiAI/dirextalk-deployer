@@ -76,6 +76,8 @@ services:
       - message-config:/etc/dirextalk-message-server
       - message-data:/var/dirextalk-message-server
       - /var/dirextalk-message-server/p2p:/var/dirextalk-message-server/p2p
+      - /run/dirextalk-updater:/run/dirextalk-updater:ro
+      - /etc/dirextalk-updater/control-token:/etc/dirextalk-updater/control-token:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8008/_p2p/health >/dev/null"]
       interval: 10s
@@ -87,9 +89,6 @@ services:
   caddy:
     image: caddy:2
     networks: [dirextalk-net]
-    depends_on:
-      message-server:
-        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"
@@ -98,6 +97,7 @@ services:
       - ACME_EMAIL=${ACME_EMAIL}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /run/dirextalk-updater:/run/dirextalk-updater:ro
       - caddy-data:/data
       - caddy-config:/config
     restart: unless-stopped

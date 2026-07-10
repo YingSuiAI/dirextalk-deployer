@@ -33,6 +33,16 @@ runcmd:
       curl -fsSL https://get.docker.com | sh
     fi
   - systemctl enable --now docker
+  - |
+    deadline=$(($(date +%s) + 900))
+    while [ ! -x /var/dirextalk-message-server/dirextalk-updater ]; do
+      if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "timed out waiting 900 seconds for deployer to upload dirextalk-updater" >&2
+        exit 1
+      fi
+      sleep 5
+    done
+    bash /var/dirextalk-message-server/updater/install.sh /var/dirextalk-message-server/dirextalk-updater
   - mkdir -p /var/dirextalk-message-server/p2p
   - chmod 700 /var/dirextalk-message-server
   - |

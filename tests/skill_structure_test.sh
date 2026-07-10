@@ -98,7 +98,11 @@ if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md README_zh.md
   exit 1
 fi
 
-grep -q 'dirextalk/message-server:latest' SKILL.md
+grep -q 'latest published stable GitHub Release' SKILL.md
+if grep -q 'dirextalk/message-server:latest' SKILL.md; then
+  echo "normal deployment guidance must not pin production to mutable latest" >&2
+  exit 1
+fi
 grep -q 'dirextalk-deployer' package.json
 grep -q 'bin/dirextalk-deployer.mjs' package.json
 grep -q 'compact agent-facing entrypoint' AGENTS.md

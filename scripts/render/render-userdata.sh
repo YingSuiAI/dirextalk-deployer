@@ -9,15 +9,15 @@
 # clone repos.
 #
 # Usage:
-#   render-userdata.sh --domain <domain> --acme <email> --message-server-image <img> > user-data.yaml
-#   render-userdata.sh --format shell --domain <domain> --acme <email> --message-server-image <img> > user-data.sh
+#   render-userdata.sh --domain <domain> --acme <email> --message-server-image <img> --updater-binary <path> > user-data.yaml
+#   render-userdata.sh --format shell --domain <domain> --acme <email> --message-server-image <img> --updater-binary <path> > user-data.sh
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 CI="$HERE/cloud-init"
 source "$HERE/lib/domain.sh"
 
-DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; FORMAT="cloud-config"
+DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; UPDATER_BINARY=""; FORMAT="cloud-config"
 while [ $# -gt 0 ]; do
   case "$1" in
     --format) FORMAT=$2; shift 2;;
@@ -25,10 +25,12 @@ while [ $# -gt 0 ]; do
     --acme) ACME=$2; shift 2;;
     --message-server-image) MESSAGE_SERVER_IMAGE=$2; shift 2;;
     --as-image) MESSAGE_SERVER_IMAGE=$2; shift 2;;
+    --updater-binary) UPDATER_BINARY=$2; shift 2;;
     *) echo "unknown arg: $1" >&2; exit 1;;
   esac
 done
 [ -n "$MESSAGE_SERVER_IMAGE" ] || { echo "--message-server-image required" >&2; exit 1; }
+[ -n "$UPDATER_BINARY" ] || { echo "--updater-binary required" >&2; exit 1; }
 [ -n "$DOMAIN" ] || { echo "--domain required; production deployments require a real domain" >&2; exit 1; }
 DOMAIN=$(domain_normalize "$DOMAIN")
 [ "$DOMAIN" != "PLACEHOLDER" ] || { echo "PLACEHOLDER/sslip.io domains are not accepted in the production renderer" >&2; exit 1; }
@@ -37,7 +39,6 @@ case "$FORMAT" in
   cloud-config|shell) ;;
   *) echo "invalid --format: $FORMAT" >&2; exit 1 ;;
 esac
-
 # Single-line base64 compatible with GNU/Linux and macOS/BSD base64.
 b64() { base64 | tr -d '\n'; }
 sed_replacement_escape() { printf '%s' "$1" | sed 's/[\\&#]/\\&/g'; }
@@ -45,15 +46,21 @@ sed_replacement_escape() { printf '%s' "$1" | sed 's/[\\&#]/\\&/g'; }
 # Build a deterministic tar.gz bundle with fixed permissions and no extra attrs.
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
+[ -f "$UPDATER_BINARY" ] || { echo "updater binary not found: $UPDATER_BINARY" >&2; exit 1; }
 cp "$CI/docker-compose.yml" "$WORK/docker-compose.yml"
 cp "$CI/Caddyfile"          "$WORK/Caddyfile"
 tr -d '\r' < "$CI/init-tokens.sh" > "$WORK/init-tokens.sh"
+mkdir -p "$WORK/updater"
+for updater_file in install.sh config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do
+  tr -d '\r' < "$HERE/updater/$updater_file" > "$WORK/updater/$updater_file"
+done
 chmod 0644 "$WORK/docker-compose.yml" "$WORK/Caddyfile"
-chmod 0755 "$WORK/init-tokens.sh"
+chmod 0644 "$WORK/updater/config.json" "$WORK/updater/"*.service "$WORK/updater/"*.timer
+chmod 0755 "$WORK/init-tokens.sh" "$WORK/updater/install.sh"
 find "$WORK" -name '._*' -delete
 # -C creates a flat archive. Explicit gzip avoids macOS tar stdout quirks.
 # COPYFILE_DISABLE=1 avoids AppleDouble ._* extended-attribute files.
-BUNDLE_B64=$(COPYFILE_DISABLE=1 tar -C "$WORK" -cf - docker-compose.yml Caddyfile init-tokens.sh | gzip -n | b64)
+BUNDLE_B64=$(COPYFILE_DISABLE=1 tar -C "$WORK" -cf - docker-compose.yml Caddyfile init-tokens.sh updater | gzip -n | b64)
 
 if [ "$FORMAT" = "shell" ]; then
   cat <<EOF
@@ -72,7 +79,7 @@ $BUNDLE_B64
 DIREXTALK_BUNDLE
 
 tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server
-chmod 0755 /var/dirextalk-message-server/init-tokens.sh
+chmod 0755 /var/dirextalk-message-server/init-tokens.sh /var/dirextalk-message-server/updater/install.sh
 
 TOK=\$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \\
       -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)
@@ -90,6 +97,15 @@ if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
 fi
 systemctl enable --now docker
+deadline=\$((\$(date +%s) + 900))
+while [ ! -x /var/dirextalk-message-server/dirextalk-updater ]; do
+  if [ "\$(date +%s)" -ge "\$deadline" ]; then
+    echo "timed out waiting 900 seconds for deployer to upload dirextalk-updater" >&2
+    exit 1
+  fi
+  sleep 5
+done
+bash /var/dirextalk-message-server/updater/install.sh /var/dirextalk-message-server/dirextalk-updater
 mkdir -p /var/dirextalk-message-server/p2p
 chmod 700 /var/dirextalk-message-server
 cd /var/dirextalk-message-server
@@ -112,7 +128,7 @@ cat > "$EXTRA_WF" <<EOF
 EOF
 
 # Insert unpack as the first runcmd step before Docker install / compose up.
-UNPACK='  - mkdir -p /var/dirextalk-message-server && tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server && chmod 0755 /var/dirextalk-message-server/init-tokens.sh'
+UNPACK='  - mkdir -p /var/dirextalk-message-server && tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server && chmod 0755 /var/dirextalk-message-server/init-tokens.sh /var/dirextalk-message-server/updater/install.sh'
 
 strip_userdata_comments() {
   awk '

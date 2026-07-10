@@ -8,6 +8,7 @@
 公网 443/80 -> Caddy
   ├─ /_matrix/*, /_dendrite/*, /_synapse/* -> message-server:8008
   ├─ /_p2p/*                              -> message-server:8008
+  ├─ /_dirextalk/updater/v1/*             -> /run/dirextalk-updater/http.sock
   ├─ /.well-known/matrix/*                -> Caddy 静态响应
   ├─ /.well-known/portal/*                -> message-server:8008
   └─ /healthz                             -> /_p2p/health
@@ -16,9 +17,10 @@ message-server -> PostgreSQL 18
 coturn         -> TURN 3478 + 49160-49200/udp
 ```
 
-- **message-server**: `dirextalk/message-server:latest`，同时承载 Matrix homeserver 和 `/_p2p/query`/`/_p2p/command`。
+- **message-server**: 使用正式 GitHub Release 解析得到的不可变 `tag@sha256`，同时承载 Matrix homeserver 和 `/_p2p/query`/`/_p2p/command`；只读挂 updater socket 目录和 control-token file，不挂 Docker socket。
 - **PostgreSQL 18**: Matrix 与 Dirextalk 业务表共库持久化，compose 使用 `/var/lib/postgresql`。
 - **Caddy**: 唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
+- **dirextalk-updater**: root-owned systemd host service，独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token。
 - **coturn**: WebRTC TURN relay，Dirextalk message-server 通过 shared-secret 动态签发 TURN 凭证。
 
 ## 启动顺序

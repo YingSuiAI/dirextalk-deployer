@@ -99,9 +99,12 @@ bash scripts/pricing-estimate.sh \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 CONFIRM_DOMAIN_BINDING=1 \
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 bash scripts/orchestrate.sh
 ```
+
+正常部署会解析最新已发布的稳定 GitHub Release，校验 manifest checksum，并把不可变的
+version、镜像 digest、image reference 和 manifest digest 写入 `state.json`。在发布包提供
+预构建 updater 二进制前，本机需要 Go 来构建并打包 Linux host updater。
 
 `DIREXTALK_CLOUD_PROVIDER=lightsail` 可省略，因为 Lightsail 是默认选择。如需保留的 EC2 部署路径，添加 `DIREXTALK_CLOUD_PROVIDER=ec2`。EC2 可继续设置 `INSTANCE_TYPE=t3.small` 或更大的显式规格，并默认使用 50 GiB gp3 root EBS 卷。如果默认 Lightsail 在当前 region 没有可用套餐或可用区，S1 会记录 EC2 费用估算，但不会自动切换到 EC2；请选择其他 Lightsail 可用 region/zone，或显式用 `DIREXTALK_CLOUD_PROVIDER=ec2` 重新运行。如果未配置 region，非交互式运行会使用本机时区推荐；可用 `DIREXTALK_DEFAULT_REGION` 或标准 AWS region 设置覆盖。除非在排查 AWS 返回值，否则让 S1 自动检测 Lightsail 可用性；安全的手工命令是 `aws lightsail get-regions --include-availability-zones --output json`。
 
@@ -112,7 +115,6 @@ $env:AWS_DEFAULT_REGION = "us-east-1"
 $env:DOMAIN = "__DOMAIN__"
 $env:CONFIRM_DOMAIN_BINDING = "1"
 $env:DIREXTALK_CLOUD_PROVIDER = "lightsail"
-$env:MESSAGE_SERVER_IMAGE = "dirextalk/message-server:latest"
 .\scripts\orchestrate.ps1
 ```
 
@@ -161,10 +163,11 @@ service 目录。
 更新现有节点但不删除数据：
 
 ```bash
-DOMAIN=<domain> MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest bash scripts/update.sh
+DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
+DOMAIN=<domain> MESSAGE_SERVER_IMAGE=dirextalk/message-server:<debug-tag> bash scripts/update.sh
 ```
 
-镜像刷新只重启远端服务，不重置本地 credentials、`dirextalk-connect`、MCP
+这是显式 debug/legacy override，不是正常生产升级路径。镜像刷新只重启远端服务，不重置本地 credentials、`dirextalk-connect`、MCP
 配置、用户确认和 runtime checks。
 
 重置应用数据但保留 EC2、DNS、固定 IP 和 Caddy TLS：

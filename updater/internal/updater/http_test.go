@@ -37,6 +37,34 @@ func TestControlJobCreationRequiresControlTokenAndRejectsInfrastructureFields(t 
 	}
 }
 
+func TestControlDiscoveryRequiresTokenAndUsesTheResidentStateOwner(t *testing.T) {
+	store := NewStateStore(filepath.Join(t.TempDir(), "state.json"))
+	calls := 0
+	service, err := NewService(store, testControlToken, WithReleaseSource(releaseSourceFunc(func(context.Context) ([]byte, error) {
+		calls++
+		return []byte(validManifestJSON()), nil
+	})))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	unauthorized := postJSON(t, service.Handler(), controlDiscoveryPath, `{}`, "", "")
+	if unauthorized.Code != http.StatusUnauthorized || calls != 0 {
+		t.Fatalf("unauthorized discovery reached release source: status=%d calls=%d", unauthorized.Code, calls)
+	}
+	authorized := postJSON(t, service.Handler(), controlDiscoveryPath, `{}`, testControlToken, "")
+	if authorized.Code != http.StatusOK || calls != 1 {
+		t.Fatalf("resident discovery failed: status=%d calls=%d body=%s", authorized.Code, calls, authorized.Body.String())
+	}
+	state, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Discovery.Status != DiscoveryFresh || state.Discovery.Manifest == nil {
+		t.Fatalf("discovery was not persisted by the resident service: %#v", state.Discovery)
+	}
+}
+
 func TestJobBearerIsHashedAndAuthorizesPublicStatus(t *testing.T) {
 	service, store := newTestService(t)
 	response := postJSON(t, service.Handler(), controlJobsPath, `{"plan_token":"test-plan-token","idempotency_key":"request-1","confirm":"apply_release_change"}`, testControlToken, "")

@@ -4,11 +4,15 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+fake_updater="$tmp/dirextalk-updater"
+printf '#!/bin/sh\nexit 0\n' > "$fake_updater"
+chmod 0755 "$fake_updater"
 
 bash "$ROOT/scripts/render/render-userdata.sh" \
   --domain service.example.test \
   --acme ops@example.test \
   --message-server-image dirextalk/message-server:test \
+  --updater-binary "$fake_updater" \
   > "$tmp/user-data.yaml"
 
 bash "$ROOT/scripts/render/render-userdata.sh" \
@@ -16,6 +20,7 @@ bash "$ROOT/scripts/render/render-userdata.sh" \
   --domain service.example.test \
   --acme ops@example.test \
   --message-server-image dirextalk/message-server:test \
+  --updater-binary "$fake_updater" \
   > "$tmp/user-data.sh"
 
 grep -q '^#cloud-config' "$tmp/user-data.yaml"

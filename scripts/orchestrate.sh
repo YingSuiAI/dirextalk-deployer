@@ -9,7 +9,7 @@
 #
 # Usage:
 #   export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-east-1
-#   export MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
+#   # Normal server selection resolves a stable GitHub Release to an immutable digest.
 #   # First run asks for region, production domain, instance size, and existing-state handling.
 #   # Non-interactive:
 #   #   DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=t3.small
@@ -40,6 +40,7 @@ source "$HERE/lib/local-paths.sh"
 source "$HERE/lib/connect-daemon-logs.sh"
 source "$HERE/lib/region.sh"
 source "$HERE/lib/http-secrets.sh"
+source "$HERE/lib/server-release.sh"
 
 # Phase -> script mapping. Use case instead of declare -A for macOS bash 3.2.
 phase_file() {

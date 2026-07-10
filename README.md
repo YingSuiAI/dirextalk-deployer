@@ -102,9 +102,13 @@ bash scripts/pricing-estimate.sh \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
 CONFIRM_DOMAIN_BINDING=1 \
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 bash scripts/orchestrate.sh
 ```
+
+Normal deployment resolves the latest published stable GitHub Release, verifies
+its manifest checksum, and records an immutable version, image digest, image
+reference, and manifest digest in `state.json`. Go is required locally to build
+the bundled Linux host updater until release packages ship prebuilt binaries.
 
 `DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
 
@@ -115,7 +119,6 @@ $env:AWS_DEFAULT_REGION = "us-east-1"
 $env:DOMAIN = "__DOMAIN__"
 $env:CONFIRM_DOMAIN_BINDING = "1"
 $env:DIREXTALK_CLOUD_PROVIDER = "lightsail"
-$env:MESSAGE_SERVER_IMAGE = "dirextalk/message-server:latest"
 .\scripts\orchestrate.ps1
 ```
 
@@ -164,10 +167,12 @@ directory, then removes that service directory.
 Update an existing node without deleting data:
 
 ```bash
-DOMAIN=<domain> MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest bash scripts/update.sh
+DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
+DOMAIN=<domain> MESSAGE_SERVER_IMAGE=dirextalk/message-server:<debug-tag> bash scripts/update.sh
 ```
 
-Image refresh restarts the remote service only. It leaves local credentials,
+This is an explicit debug/legacy override, not the normal production upgrade
+path. Image refresh restarts the remote service only. It leaves local credentials,
 `dirextalk-connect`, MCP artifacts, user confirmations, and runtime checks intact.
 
 Reset application data while preserving EC2, DNS, fixed IP, and Caddy TLS:

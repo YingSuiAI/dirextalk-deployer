@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Dirextalk server release discovery
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=dirextalk-updater-discovery.service
+
+[Install]
+WantedBy=timers.target

@@ -18,21 +18,31 @@ import (
 )
 
 const (
-	apiPrefix          = "/_dirextalk/updater/v1/"
-	controlJobsPath    = apiPrefix + "control/jobs"
-	publicJobsPrefix   = apiPrefix + "jobs/"
-	controlTokenHeader = "X-Dirextalk-Control-Token"
-	applyConfirmation  = "apply_release_change"
-	maxRequestBytes    = 64 * 1024
+	apiPrefix            = "/_dirextalk/updater/v1/"
+	controlJobsPath      = apiPrefix + "control/jobs"
+	controlDiscoveryPath = apiPrefix + "control/discovery"
+	publicJobsPrefix     = apiPrefix + "jobs/"
+	controlTokenHeader   = "X-Dirextalk-Control-Token"
+	applyConfirmation    = "apply_release_change"
+	maxRequestBytes      = 64 * 1024
 )
 
 type Service struct {
 	store            *StateStore
 	controlTokenHash string
 	now              func() time.Time
+	releaseSource    ReleaseSource
 }
 
-func NewService(store *StateStore, controlToken string) (*Service, error) {
+type ServiceOption func(*Service)
+
+func WithReleaseSource(source ReleaseSource) ServiceOption {
+	return func(service *Service) {
+		service.releaseSource = source
+	}
+}
+
+func NewService(store *StateStore, controlToken string, options ...ServiceOption) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("state store is required")
 	}
@@ -42,11 +52,15 @@ func NewService(store *StateStore, controlToken string) (*Service, error) {
 	if _, err := store.Load(context.Background()); err != nil {
 		return nil, err
 	}
-	return &Service{
+	service := &Service{
 		store:            store,
 		controlTokenHash: tokenHash(controlToken),
 		now:              time.Now,
-	}, nil
+	}
+	for _, option := range options {
+		option(service)
+	}
+	return service, nil
 }
 
 func (service *Service) Handler() http.Handler {
@@ -90,6 +104,12 @@ func (service *Service) RegisterPlan(ctx context.Context, rawToken string, plan 
 
 func (service *Service) serveHTTP(response http.ResponseWriter, request *http.Request) {
 	switch {
+	case request.URL.Path == controlDiscoveryPath:
+		if request.Method != http.MethodPost {
+			writeAPIError(response, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		service.refreshDiscovery(response, request)
 	case request.URL.Path == controlJobsPath:
 		if request.Method != http.MethodPost {
 			writeAPIError(response, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -110,6 +130,34 @@ func (service *Service) serveHTTP(response http.ResponseWriter, request *http.Re
 	default:
 		writeAPIError(response, http.StatusNotFound, "not_found")
 	}
+}
+
+func (service *Service) refreshDiscovery(response http.ResponseWriter, request *http.Request) {
+	if !constantTokenEqual(service.controlTokenHash, request.Header.Get(controlTokenHeader)) {
+		writeAPIError(response, http.StatusUnauthorized, "control_token_required")
+		return
+	}
+	if service.releaseSource == nil {
+		writeAPIError(response, http.StatusServiceUnavailable, "release_source_unavailable")
+		return
+	}
+	var input struct{}
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, maxRequestBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeAPIError(response, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if err := ensureJSONEOF(decoder, "discovery request"); err != nil {
+		writeAPIError(response, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	cache, err := RefreshDiscovery(request.Context(), service.store, service.releaseSource, service.now())
+	if err != nil {
+		writeAPIError(response, http.StatusBadGateway, "release_discovery_failed")
+		return
+	}
+	writeJSON(response, http.StatusOK, cache)
 }
 
 type createJobRequest struct {

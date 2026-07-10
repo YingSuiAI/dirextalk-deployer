@@ -1,0 +1,14 @@
+[Unit]
+Description=Refresh the latest formal Dirextalk server release
+Requires=dirextalk-updater.service
+After=dirextalk-updater.service network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/bin/dirextalk-updater --config /etc/dirextalk-updater/config.json trigger-discovery
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

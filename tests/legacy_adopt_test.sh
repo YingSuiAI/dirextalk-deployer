@@ -106,6 +106,18 @@ printf '\n# drift\n' >> "$legacy/docker-compose.p2p.yml"
 expect_probe_failure env
 cp "$ROOT/scripts/updater/legacy-d1-compose.p2p.yml" "$legacy/docker-compose.p2p.yml"
 
+# The approved d1 host uses the Compose defaults and has no source .env.
+# Adoption must remain read-only during probe and create only the controlled
+# target env during commit.
+rm -f "$legacy/.env"
+actual=$(PATH="$tmp/bin:$PATH" DIREXTALK_LEGACY_ADOPT_ROOT="$host" \
+  bash "$ROOT/scripts/updater/adopt-legacy-host.sh" probe \
+    /root/dirextalk/dirextalk-message-server "$ROOT/scripts/updater")
+[ "$actual" = "$expected" ] || {
+  echo "approved legacy host without a source .env was rejected" >&2
+  exit 1
+}
+
 PATH="$tmp/bin:$PATH" DIREXTALK_LEGACY_ADOPT_ROOT="$host" \
   DIREXTALK_LEGACY_ADOPT_ALLOW_NON_ROOT_TEST=1 \
   bash "$ROOT/scripts/updater/adopt-legacy-host.sh" commit \

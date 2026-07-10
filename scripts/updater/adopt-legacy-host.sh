@@ -27,7 +27,7 @@ compose_file="$physical_source/$compose_name"
   echo "legacy adoption templates are incomplete" >&2
   exit 1
 }
-[ -d "$physical_source" ] && [ -f "$compose_file" ] && [ -f "$physical_source/.env" ] || {
+[ -d "$physical_source" ] && [ -f "$compose_file" ] || {
   echo "legacy Compose layout is incomplete" >&2
   exit 1
 }
@@ -138,11 +138,12 @@ if [ ! -d "$target" ]; then
   stage=$(mktemp -d "$root/var/.dirextalk-message-server.adopt.XXXXXX")
   cleanup_stage() { rm -rf "$stage"; }
   trap cleanup_stage EXIT
-  install -m 0600 "$physical_source/.env" "$stage/.env.source"
-  awk '$0 !~ /^MESSAGE_SERVER_IMAGE=/' "$stage/.env.source" > "$stage/.env"
+  : > "$stage/.env"
+  if [ -f "$physical_source/.env" ]; then
+    awk '$0 !~ /^MESSAGE_SERVER_IMAGE=/' "$physical_source/.env" > "$stage/.env"
+  fi
   printf 'MESSAGE_SERVER_IMAGE=%s\n' "$fixed_image" >> "$stage/.env"
   chmod 0600 "$stage/.env"
-  rm -f "$stage/.env.source"
   install -m 0600 "$template_dir/legacy-adopt-compose.yml" "$stage/docker-compose.yml"
   install -d -m 0700 "$stage/p2p"
   docker cp "$container:/var/dirextalk-message-server/p2p/." "$stage/p2p"

@@ -22,7 +22,7 @@ cat > "$REMOTE_BUNDLE"
 if [ "${SSH_MODE:-success}" != success ]; then
   exit 88
 fi
-printf 'v1.0.0\t6d4d33a1cd4baad2b490f25e57124675c74771d1\td54b786c30b9b866341a89b6496b574b0d29cc48f26bf4787b7686faf4c1f0f1\n'
+printf 'v1.0.0\tbe85fc7238b81976b4527201ad4807c1135f2875\t633fe1fc43149a0576e45e74a991db331640fa606e1df2d170881bed8426c060\n'
 EOF
 cat > "$tmp/bin/sleep" <<'EOF'
 #!/usr/bin/env bash
@@ -66,7 +66,7 @@ grep -F -q 'systemctl is-active' "$tmp/old-remote/updater/reconcile-host.sh"
 grep -F -q '/usr/local/bin/dirextalk-updater version' "$tmp/old-remote/updater/reconcile-host.sh"
 grep -F -q 'sha256sum /usr/local/bin/dirextalk-updater' "$tmp/old-remote/updater/reconcile-host.sh"
 [ "$(json_get "$STATE_JSON" updater_release.version)" = v1.0.0 ]
-[ "$(json_get "$STATE_JSON" updater_release.commit)" = 6d4d33a1cd4baad2b490f25e57124675c74771d1 ]
+[ "$(json_get "$STATE_JSON" updater_release.commit)" = be85fc7238b81976b4527201ad4807c1135f2875 ]
 
 state_set_raw updater_release '{"version":"v0.9.0","commit":"1111111111111111111111111111111111111111","sha256":"2222222222222222222222222222222222222222222222222222222222222222"}'
 export SSH_MODE=fail

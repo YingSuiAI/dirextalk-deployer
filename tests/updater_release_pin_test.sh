@@ -13,10 +13,10 @@ source "$lib"
 updater_release_validate_pin
 
 [ "$UPDATER_PIN_VERSION" = v1.0.0 ]
-[ "$UPDATER_PIN_COMMIT" = 6d4d33a1cd4baad2b490f25e57124675c74771d1 ]
+[ "$UPDATER_PIN_COMMIT" = be85fc7238b81976b4527201ad4807c1135f2875 ]
 [ "$UPDATER_PIN_URL" = https://github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.0/dirextalk-updater-linux-amd64 ]
 [ "$UPDATER_PIN_ASSET" = dirextalk-updater-linux-amd64 ]
-[ "$UPDATER_PIN_SHA256" = d54b786c30b9b866341a89b6496b574b0d29cc48f26bf4787b7686faf4c1f0f1 ]
+[ "$UPDATER_PIN_SHA256" = 633fe1fc43149a0576e45e74a991db331640fa606e1df2d170881bed8426c060 ]
 [ "$UPDATER_PIN_OS" = linux ]
 [ "$UPDATER_PIN_ARCH" = amd64 ]
 [ "$UPDATER_PIN_UBUNTU_VERSION" = 24.04 ]
@@ -34,7 +34,7 @@ source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null 2>&1
 updater_release_record_state
 [ "$(json_get "$STATE_JSON" updater_release.version)" = v1.0.0 ]
-[ "$(json_get "$STATE_JSON" updater_release.commit)" = 6d4d33a1cd4baad2b490f25e57124675c74771d1 ]
-[ "$(json_get "$STATE_JSON" updater_release.sha256)" = d54b786c30b9b866341a89b6496b574b0d29cc48f26bf4787b7686faf4c1f0f1 ]
+[ "$(json_get "$STATE_JSON" updater_release.commit)" = be85fc7238b81976b4527201ad4807c1135f2875 ]
+[ "$(json_get "$STATE_JSON" updater_release.sha256)" = 633fe1fc43149a0576e45e74a991db331640fa606e1df2d170881bed8426c060 ]
 
 echo "updater release pin ok"

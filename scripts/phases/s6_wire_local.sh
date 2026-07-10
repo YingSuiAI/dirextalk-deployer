@@ -1193,6 +1193,14 @@ run_phase() {
   connect_mcp_server_name=$mcp_server_name
   connect_mcp_agent_token=$token
   connect_mcp_node_id=$node_id
+  if [ "$runtime" = "openclaw" ]; then
+    # OpenClaw Gateway ACP rejects per-session MCP servers; S6 installs MCP
+    # through `openclaw mcp set` instead.
+    connect_mcp_url=
+    connect_mcp_server_name=
+    connect_mcp_agent_token=
+    connect_mcp_node_id=
+  fi
   _write_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml" "$connect_mcp_url" "$connect_mcp_server_name" "$connect_mcp_agent_token" "$connect_mcp_node_id"
   ok "Wrote dirextalk-connect Matrix config $cc_config (0600)."
 
@@ -1266,7 +1274,7 @@ run_phase() {
     warn "Run: $cc_binary daemon logs --service-name $service_id -n ${DIREXTALK_CONNECT_LOG_TAIL_LINES:-120}"
     return 1
   fi
-  _maybe_auto_install_mcp "$install_policy" "$service_id" "$node_cred" "$node_id" "$service_dir"
+  _maybe_auto_install_mcp "$install_policy" "$runtime" "$mcp_server_name" "$node_cred" "$node_id" "$service_dir"
 
   phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;env_file=$envfile;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;connect_config=$cc_config;mcp_config_dir=$mcp_dir;connect_agent=$cc_agent"
   return 0

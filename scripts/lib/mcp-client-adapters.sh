@@ -294,9 +294,43 @@ EOF
 }
 
 _maybe_auto_install_mcp() {
-  local policy=$1 service_id=${2:-} credentials_file=${3:-} node_id=${4:-} service_dir=${5:-}
+  local policy=$1 runtime=${2:-generic} server_name=${3:-} credentials_file=${4:-} node_id=${5:-} service_dir=${6:-}
+  local openclaw_config payload
   if [ "$policy" != "auto" ]; then
     state_set mcp_install_status "$policy" 2>/dev/null || true
+    return 0
+  fi
+  if [ "$runtime" = "openclaw" ]; then
+    [ -n "$server_name" ] || server_name=$(_mcp_server_name local)
+    openclaw_config=$(_mcp_openclaw_server_config_path "$service_dir")
+    if [ ! -s "$openclaw_config" ]; then
+      state_set mcp_install_status "install_failed" 2>/dev/null || true
+      warn "OpenClaw MCP server config was not found at $openclaw_config."
+      return 1
+    fi
+    if ! command -v openclaw >/dev/null 2>&1; then
+      state_set mcp_install_status "openclaw_missing" 2>/dev/null || true
+      warn "OpenClaw runtime detected but openclaw CLI is not on PATH; cannot install MCP config automatically."
+      return 1
+    fi
+    payload=$(cat "$openclaw_config")
+    if ! openclaw mcp set "$server_name" "$payload"; then
+      state_set mcp_install_status "install_failed" 2>/dev/null || true
+      warn "openclaw mcp set failed for $server_name."
+      return 1
+    fi
+    if ! openclaw mcp doctor; then
+      state_set mcp_install_status "doctor_failed" 2>/dev/null || true
+      warn "openclaw mcp doctor failed after installing $server_name."
+      return 1
+    fi
+    if ! openclaw mcp reload; then
+      state_set mcp_install_status "reload_failed" 2>/dev/null || true
+      warn "openclaw mcp reload failed after installing $server_name."
+      return 1
+    fi
+    ok "OpenClaw MCP config installed for $server_name."
+    state_set mcp_install_status "installed" 2>/dev/null || true
     return 0
   fi
   ok "MCP uses the remote HTTP endpoint; no local MCP CLI install is required."

@@ -318,6 +318,29 @@ fi
 grep -q 'openclaw mcp set dirextalk-openclaw_example_test' "$openclaw_service_dir/mcp/openclaw.md"
 grep -q 'Do not paste' "$openclaw_service_dir/mcp/openclaw.md"
 grep -q 'openclaw.json' "$openclaw_service_dir/mcp/openclaw.md"
+fake_bin="$tmp/fake-bin"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/openclaw" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$OPENCLAW_CALL_LOG"
+case "$*" in
+  "mcp set dirextalk-openclaw_example_test "*)
+    printf '%s\n' "$4" > "$OPENCLAW_SET_PAYLOAD"
+    ;;
+esac
+EOF
+chmod +x "$fake_bin/openclaw"
+OPENCLAW_CALL_LOG="$tmp/openclaw-calls.log" \
+OPENCLAW_SET_PAYLOAD="$tmp/openclaw-set-payload.json" \
+STATE_CALLS="$tmp/openclaw-state-calls.log" \
+PATH="$fake_bin:$PATH" \
+  _maybe_auto_install_mcp auto openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
+grep -q '^mcp set dirextalk-openclaw_example_test ' "$tmp/openclaw-calls.log"
+grep -q '^mcp doctor$' "$tmp/openclaw-calls.log"
+grep -q '^mcp reload$' "$tmp/openclaw-calls.log"
+json_test_check "$tmp/openclaw-set-payload.json" "data.url === 'https://openclaw.example.test/mcp'"
+grep -q 'mcp_install_status=installed' "$tmp/openclaw-state-calls.log"
 mcp_install_command=$(_mcp_install_command "https://service.example.test" "$mcp_service_dir")
 [[ "$mcp_install_command" == *"No local MCP CLI install is needed"* ]]
 [[ "$mcp_install_command" == *"https://service.example.test/mcp"* ]]
@@ -366,6 +389,14 @@ _write_connect_config "$generic_mcp_connect_config_path" "$tmp/dirextalk-connect
 grep -q 'type = "gemini"' "$generic_mcp_connect_config_path"
 grep -q 'mcp_url = "https://service.example.test/mcp"' "$generic_mcp_connect_config_path"
 grep -q 'mcp_agent_token = "agent-token"' "$generic_mcp_connect_config_path"
+
+openclaw_mcp_connect_config_path="$tmp/dirextalk-connect/config-with-openclaw-mcp.toml"
+_write_connect_config "$openclaw_mcp_connect_config_path" "$tmp/dirextalk-connect/data-openclaw-mcp" "openclaw-node" "acp" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "openclaw" 'mode = "yolo"
+args = ["acp", "--session", "agent:main:main"]
+display_name = "OpenClaw ACP"' "" "" "" ""
+grep -q 'cmd = "openclaw"' "$openclaw_mcp_connect_config_path"
+! grep -q '^mcp_url = ' "$openclaw_mcp_connect_config_path"
+! grep -q '^mcp_servers = ' "$openclaw_mcp_connect_config_path"
 
 speech_config_path="$tmp/dirextalk-connect/config-with-speech.toml"
 DIREXTALK_SPEECH_API_KEY=speech-key \

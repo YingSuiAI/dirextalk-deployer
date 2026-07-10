@@ -29,13 +29,17 @@ case " $* " in
     ;;
 esac
 
-case " $* " in
-  *"Authorization: Bearer AGENT_TOKEN_SMOKE"*) ;;
-  *)
-    echo "missing or wrong Authorization header: $*" >&2
-    exit 1
-    ;;
-esac
+case " $* " in *AGENT_TOKEN_SMOKE*) echo "token leaked into curl argv" >&2; exit 1 ;; esac
+headers=
+previous=
+for arg in "$@"; do
+  [ "$previous" != "-H" ] || { case "$arg" in @*) headers=${arg#@} ;; esac; }
+  previous=$arg
+done
+[ -n "$headers" ] && grep -Fxq 'Authorization: Bearer AGENT_TOKEN_SMOKE' "$headers" || {
+  echo "missing or wrong protected Authorization header" >&2
+  exit 1
+}
 
 case " $* " in
   *'"method":"tools/call"'*'"name":"dirextalk_messages_list"'*'"room_id":"!agent:mcp-smoke.example.test"'*) ;;

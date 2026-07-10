@@ -45,7 +45,7 @@ install rule. Use a Git clone only for deployer development or local patching.
 ## Platform Law
 
 Classify every path by consumer before writing it to `state.json`,
-`credentials.json`, `mcp/env`, `dirextalk-connect/config.toml`, docs, or printed commands:
+`credentials.json`, `dirextalk-connect/config.toml`, docs, or printed commands:
 
 - Remote server paths are Linux paths consumed on EC2, such as `/var/dirextalk-message-server`.
 - Deployer execution paths may be POSIX paths inside Bash phases.
@@ -286,8 +286,8 @@ select `DIREXTALK_AGENT_PLATFORM=codex` instead.
 Unsupported and unknown effective agents fail closed. The protocol vocabulary
 retains `project` and `conditional`, but no current connect backend uses them.
 S6 never generates a generic fallback artifact. Dedicated manual artifacts are
-limited to registry entries that name one, while `mcp/env` remains the canonical
-HTTP endpoint artifact. MCP does not need a local CLI, daemon, proxy, or listening
+limited to registry entries that name one; no unconsumed MCP env artifact is
+generated. MCP does not need a local CLI, daemon, proxy, or listening
 port. S6 installs the
 service-scoped `dirextalk-connect` daemon and records it as installed only after
 `daemon status` reports Running and recent logs show `dirextalk-connect is

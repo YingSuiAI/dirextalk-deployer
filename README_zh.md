@@ -134,7 +134,7 @@ bash scripts/orchestrate.sh
 ```
 
 可选安装模式：`recommended`、`dirextalk-connect`。
-如果 `DIREXTALK_AGENT_PLATFORM=auto` 无法唯一识别当前运行时，显式设置 `DIREXTALK_CONNECT_AGENT`。S6 会为生成的 agent options 默认写入 `mode = "yolo"`；如果 `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` 或 `DIREXTALK_CURSOR_MODE` 显式提供 `mode`，仍以显式值为准。Windows 上的 Cursor 接线使用 `%LOCALAPPDATA%\cursor-agent\agent.cmd`；OpenCode 会优先查找 PATH 中的 `opencode` 和 npm 全局 `opencode-ai` 包，也可用 `DIREXTALK_OPENCODE_COMMAND` 显式指定。若 `agent.cmd status` 显示未登录，先交互执行一次 `agent.cmd login`，然后重新运行 deployer，它会刷新配置并重启 daemon。需要触发 OpenClaw 或 Hermes 默认配置时，设置 `DIREXTALK_AGENT_PLATFORM=openclaw` 或 `DIREXTALK_AGENT_PLATFORM=hermes`；只设置 `DIREXTALK_CONNECT_AGENT=acp` 会进入通用 ACP，需要手动提供 options。OpenClaw Gateway ACP 默认写入 `["acp", "--session", "agent:main:main"]`，让 `openclaw acp` 从 `~/.openclaw/openclaw.json` 自动发现 Gateway。需要强制指定 Gateway 时，完成 pairing 后从当前 OpenClaw runtime 同时填写 `DIREXTALK_OPENCLAW_ACP_URL`、`DIREXTALK_OPENCLAW_ACP_TOKEN_FILE` 和 `DIREXTALK_OPENCLAW_ACP_SESSION`。只有需要完整覆盖 OpenClaw ACP args 数组时才使用 `DIREXTALK_OPENCLAW_ACP_ARGS_TOML`；Hermes 自定义参数用 `DIREXTALK_HERMES_ACP_ARGS_TOML`，S6 会自动在前面加上 `hermes-acp-adapter -- <hermes-command>`。
+如果 `DIREXTALK_AGENT_PLATFORM=auto` 无法唯一识别当前运行时，显式设置 `DIREXTALK_CONNECT_AGENT`。S6 会为生成的 agent options 默认写入 `mode = "yolo"`；如果 `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` 或 `DIREXTALK_CURSOR_MODE` 显式提供 `mode`，仍以显式值为准。Windows 上的 Cursor 接线使用 `%LOCALAPPDATA%\cursor-agent\agent.cmd`；OpenCode 会优先查找 PATH 中的 `opencode` 和 npm 全局 `opencode-ai` 包，也可用 `DIREXTALK_OPENCODE_COMMAND` 显式指定。若 `agent.cmd status` 显示未登录，先交互执行一次 `agent.cmd login`，然后重新运行 deployer。运行中的 OpenClaw/Hermes 宿主即使启动 Codex 等 child，MCP 所有权仍属于宿主；只有显式 `DIREXTALK_AGENT_PLATFORM=<child>` 才绕过自动宿主检测。OpenClaw Gateway ACP 默认写入 `["acp", "--session", "agent:main:main"]` 并自动发现 Gateway；显式连接必须同时提供 URL、token file 和 session。脚本拒绝完整替换 OpenClaw args 或用通用命令覆盖宿主 bridge。Hermes 可用 `DIREXTALK_HERMES_ACP_ARGS_TOML` 添加 child 参数，但固定保留 adapter/profile 前缀。
 
 查看状态：
 
@@ -190,7 +190,6 @@ credentials.json
 dirextalk-connect/config.toml
 dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
-mcp/env
 mcp/README.md
 mcp/openclaw.md
 mcp/hermes.md

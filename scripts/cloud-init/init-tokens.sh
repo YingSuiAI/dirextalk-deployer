@@ -30,19 +30,21 @@ matrix_room_path() {
 }
 
 container_post_json() {
-  local path=$1 json=$2 token=${3:-}
-  if [ -n "$token" ]; then
-    $COMPOSE exec -T message-server wget -q -O - \
-      --header='Content-Type: application/json' \
-      --header="Authorization: Bearer ${token}" \
-      --post-data="$json" \
-      "http://127.0.0.1:8008${path}"
-  else
-    $COMPOSE exec -T message-server wget -q -O - \
-      --header='Content-Type: application/json' \
-      --post-data="$json" \
-      "http://127.0.0.1:8008${path}"
-  fi
+  local path=$1 json=$2 token=${3:-} url
+  url="http://127.0.0.1:8008${path}"
+  {
+    printf 'header=Content-Type: application/json\n'
+    [ -z "$token" ] || printf 'header=Authorization: Bearer %s\n' "$token"
+    printf 'post_data=%s\n' "$json"
+  } | $COMPOSE exec -T message-server sh -c '
+    set -eu
+    umask 077
+    config=$(mktemp)
+    trap '\''rm -f "$config"'\'' EXIT HUP INT TERM
+    cat > "$config"
+    chmod 600 "$config"
+    wget -q -O - --config="$config" "$1"
+  ' sh "$url"
 }
 
 wait_for_message_server() {

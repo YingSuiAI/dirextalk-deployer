@@ -147,7 +147,10 @@ if grep -q '_write_agent_env_file\|state_set agent_env_file' scripts/phases/s6_w
 fi
 grep -q 'DIREXTALK_CONNECT_REPO' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXTALK_LOCAL_PATH_STYLE' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXTALK_MCP_URL' scripts/lib/mcp-client-adapters.sh
+if grep -q 'DIREXTALK_MCP_URL' scripts/lib/mcp-client-adapters.sh; then
+  echo "deployer must not recreate an unconsumed MCP env artifact" >&2
+  exit 1
+fi
 grep -q 'mcp_endpoint_url' scripts/phases/s6_wire_local.sh
 grep -q 'mcp-client-adapters.sh' scripts/phases/s6_wire_local.sh
 grep -q 'PLATFORMS_INCLUDE=matrix' scripts/phases/s6_wire_local.sh

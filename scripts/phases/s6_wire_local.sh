@@ -16,6 +16,8 @@ source "$S6_DIR/../lib/json.sh"
 source "$S6_DIR/../lib/local-paths.sh"
 # shellcheck disable=SC1090
 source "$S6_DIR/../lib/atomic-write.sh"
+# shellcheck disable=SC1090
+source "$S6_DIR/../lib/http-secrets.sh"
 # S6 local bridge paths honor DIREXTALK_LOCAL_PATH_STYLE through local-paths.sh.
 
 _dirextalk_home() {
@@ -66,10 +68,17 @@ source "$S6_DIR/../lib/connect-daemon-logs.sh"
 source "$S6_DIR/../lib/mcp-client-adapters.sh"
 
 _detect_agent_runtime() {
-  local active_runtime explicit_agent home_runtime
+  local active_runtime explicit_agent home_runtime host_runtime
   if [ -n "${DIREXTALK_AGENT_PLATFORM:-}" ] && [ "${DIREXTALK_AGENT_PLATFORM:-}" != "auto" ]; then
     _validate_agent_platform "$DIREXTALK_AGENT_PLATFORM" || return 1
     printf '%s\n' "$DIREXTALK_AGENT_PLATFORM"
+    return 0
+  fi
+  # Host orchestrators own their native MCP registry even when a child process
+  # advertises another agent runtime. Only an explicit platform may bypass it.
+  host_runtime=$(_active_mcp_host_runtime)
+  if [ -n "$host_runtime" ]; then
+    printf '%s\n' "$host_runtime"
     return 0
   fi
   if [ -n "${DIREXTALK_CONNECT_AGENT:-}" ]; then
@@ -87,6 +96,31 @@ _detect_agent_runtime() {
   home_runtime=$(_single_runtime_from_config_dirs)
   if [ -n "$home_runtime" ]; then printf '%s\n' "$home_runtime"; return 0; fi
   printf 'unknown\n'
+}
+
+_active_mcp_host_runtime() {
+  local runtime
+  for runtime in openclaw hermes; do
+    if _runtime_has_host_session_signal "$runtime"; then
+      printf '%s\n' "$runtime"
+      return 0
+    fi
+  done
+  for runtime in openclaw hermes; do
+    if _runtime_has_context_signal "$runtime"; then
+      printf '%s\n' "$runtime"
+      return 0
+    fi
+  done
+  return 0
+}
+
+_runtime_has_host_session_signal() {
+  case "$1" in
+    openclaw) _env_name_matches '^OPENCLAW_(SESSION|RUNTIME|GATEWAY|AGENT)(_|$)' ;;
+    hermes) _env_name_matches '^HERMES_(SESSION|RUNTIME|AGENT)(_|$)' ;;
+    *) return 1 ;;
+  esac
 }
 
 _active_agent_runtime() {
@@ -587,7 +621,7 @@ _local_connect_path() {
 
 _create_connect_matrix_session() {
   local asurl=$1 agent_auth_token=$2 device_id=$3 out=$4 body code http_body
-  local max_attempts interval max_interval attempt preview sleep_for
+  local max_attempts interval max_interval attempt preview sleep_for headers
   body=$(json_build matrix-session-create "$device_id") || return 1
   mkdir -p "$(dirname "$out")" || return 1
   max_attempts=${DIREXTALK_MATRIX_SESSION_CREATE_MAX:-12}
@@ -601,13 +635,18 @@ _create_connect_matrix_session() {
       rm -f "$http_body" 2>/dev/null || true
       return 1
     fi
+    headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$agent_auth_token") || {
+      rm -f "$http_body" 2>/dev/null || true
+      return 1
+    }
     code=$(curl -sk \
       --connect-timeout "${DIREXTALK_MATRIX_SESSION_CURL_CONNECT_TIMEOUT:-10}" \
       --max-time "${DIREXTALK_MATRIX_SESSION_CURL_MAX_TIME:-20}" \
       -o "$http_body" -w '%{http_code}' -X POST "$asurl/_p2p/command" \
       -H 'Content-Type: application/json' \
-      -H "Authorization: Bearer $agent_auth_token" \
+      -H "@$headers" \
       -d "$body" 2>/dev/null || true)
+    rm -f "$headers"
     if [ "$code" = "200" ]; then
       if ! json_assert "$http_body" matrix-session >/dev/null; then
         warn "agent.matrix_session.create response is missing Matrix session fields: $(head -c 200 "$http_body" 2>/dev/null)"
@@ -1101,7 +1140,7 @@ _clear_mcp_daemon_state() {
     mcp_daemon_proxy_command \
     mcp_daemon_install_status
   do
-    json_mutate "$STATE_JSON" delete "$key" 2>/dev/null || true
+    json_mutate "$STATE_JSON" delete "$key" 2>/dev/null || return 1
   done
 }
 
@@ -1109,11 +1148,11 @@ run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and dirextalk-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id runtime install_policy install_mode install_command
   local node_id service_dir service_dir_local node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_runtime_dir_local cc_config cc_config_local cc_data cc_data_local cc_binary cc_binary_local cc_session cc_session_local cc_source cc_package_dir
-  local mcp_dir mcp_dir_local mcp_capability mcp_server_name mcp_endpoint_url mcp_install_command mcp_doctor_command mcp_openclaw_config mcp_hermes_config mcp_env_file mcp_readme
-  local mcp_selected_config_type mcp_selected_config mcp_selected_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_hermes_home_local mcp_hermes_profile mcp_env_file_local mcp_readme_local node_cred_local
+  local mcp_dir mcp_dir_local mcp_capability mcp_server_name mcp_endpoint_url mcp_install_command mcp_doctor_command mcp_openclaw_config mcp_hermes_config mcp_readme
+  local mcp_selected_config_type mcp_selected_config mcp_selected_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_hermes_home_local mcp_hermes_profile mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
   local connect_mcp_url connect_mcp_server_name connect_mcp_agent_token connect_mcp_node_id
-  local skill_path global_skill_path
+  local skill_path global_skill_path state_persist_rc
   domain=$(state_get domain)
   asurl=$(state_get as_url)
   token=$(state_get agent_token)
@@ -1122,6 +1161,11 @@ run_phase() {
   agent_room_id=$(state_get agent_room_id)
   [ -n "$domain" ] && [ -n "$asurl" ] && [ -n "$token" ] || { phase_set S6_WIRE_LOCAL failed "missing domain/as_url/token"; fail "state is missing domain/as_url/agent_token; complete S5 first."; return 1; }
   [ -n "$access_token" ] && [ -n "$password" ] || { phase_set S6_WIRE_LOCAL failed "missing bootstrap credentials"; fail "state is missing password/access_token; complete S5 first."; return 1; }
+  if ! mcp_endpoint_url=$(_mcp_endpoint_url "$asurl"); then
+    phase_set S6_WIRE_LOCAL failed "non-canonical service URL"
+    fail "as_url must be an absolute HTTPS origin; refusing to write credentials or MCP config."
+    return 1
+  fi
   if ! ( _validate_real_agent_room_id "$agent_room_id" ); then
     phase_set S6_WIRE_LOCAL failed "invalid or missing agent room id"
     return 1
@@ -1202,7 +1246,6 @@ run_phase() {
   mcp_dir=$(_mcp_runtime_dir "$service_dir")
   mcp_dir_local=$(_local_connect_path "$mcp_dir")
   mcp_server_name=$(_mcp_server_name "$service_id")
-  mcp_endpoint_url=$(_mcp_endpoint_url "$asurl")
   if ! cc_agent_options_toml=$(_connect_agent_options_toml "$runtime" "$cc_agent" "$service_dir" "$mcp_server_name"); then
     phase_set S6_WIRE_LOCAL failed "invalid dirextalk-connect agent options"
     return 1
@@ -1228,7 +1271,6 @@ run_phase() {
     mcp_hermes_home_local=$(_local_connect_path "$(_mcp_hermes_home "$service_dir")")
     mcp_hermes_profile=$(_mcp_hermes_profile "$mcp_server_name")
   fi
-  mcp_env_file=$(_mcp_env_file_path "$service_dir")
   mcp_readme=$(_mcp_readme_path "$service_dir")
   mcp_openclaw_config_local=
   mcp_hermes_config_local=
@@ -1236,7 +1278,6 @@ run_phase() {
     openclaw) mcp_openclaw_config_local=$mcp_selected_config_local ;;
     hermes) mcp_hermes_config_local=$mcp_selected_config_local ;;
   esac
-  mcp_env_file_local=$(_local_connect_path "$mcp_env_file")
   mcp_readme_local=$(_local_connect_path "$mcp_readme")
   mcp_install_command=$(_mcp_install_command "$asurl" "$service_dir")
   mcp_doctor_command=$(_mcp_doctor_command "$asurl" "$node_cred" "$node_id" "$service_dir")
@@ -1291,55 +1332,63 @@ run_phase() {
   fi
   ok "Wrote dirextalk-connect Matrix config $cc_config (0600)."
 
-  state_set agent_node_id "$node_id" 2>/dev/null || true
-  state_set agent_service_id "$service_id" 2>/dev/null || true
-  state_set agent_service_dir "$service_dir_local" 2>/dev/null || true
-  state_set agent_credentials_file "$node_cred_local" 2>/dev/null || true
-  state_set mcp_transport "http" 2>/dev/null || true
-  state_set mcp_capability "$mcp_capability" 2>/dev/null || true
-  state_set mcp_endpoint_url "$mcp_endpoint_url" 2>/dev/null || true
-  json_mutate "$STATE_JSON" delete mcp_npm_package 2>/dev/null || true
-  json_mutate "$STATE_JSON" delete mcp_command 2>/dev/null || true
-  json_mutate "$STATE_JSON" delete mcp_package_dir 2>/dev/null || true
-  state_set mcp_server_name "$mcp_server_name" 2>/dev/null || true
-  state_set mcp_selected_config_type "$mcp_selected_config_type" 2>/dev/null || true
-  state_set mcp_selected_config "$mcp_selected_config_local" 2>/dev/null || true
-  state_set mcp_config_dir "$mcp_dir_local" 2>/dev/null || true
-  state_set mcp_credentials_file "$node_cred_local" 2>/dev/null || true
-  state_set mcp_openclaw_config "$mcp_openclaw_config_local" 2>/dev/null || true
-  state_set mcp_hermes_config "$mcp_hermes_config_local" 2>/dev/null || true
-  state_set mcp_hermes_home "$mcp_hermes_home_local" 2>/dev/null || true
-  state_set mcp_hermes_profile "$mcp_hermes_profile" 2>/dev/null || true
-  state_set mcp_env_file "$mcp_env_file_local" 2>/dev/null || true
-  state_set mcp_readme "$mcp_readme_local" 2>/dev/null || true
-  state_set mcp_install_command "$mcp_install_command" 2>/dev/null || true
-  state_set mcp_doctor_command "$mcp_doctor_command" 2>/dev/null || true
-  _clear_mcp_daemon_state
-  state_set agent_workspace "$workspace_local" 2>/dev/null || true
-  state_set connect_agent "$cc_agent" 2>/dev/null || true
-  state_set connect_agent_cmd "$cc_agent_cmd" 2>/dev/null || true
-  state_set connect_mcp_url "$connect_mcp_url" 2>/dev/null || true
-  state_set connect_mcp_server_name "$connect_mcp_server_name" 2>/dev/null || true
-  state_set connect_mcp_capability "$mcp_capability" 2>/dev/null || true
-  if [ -n "$cc_agent_options_toml" ]; then
-    state_set connect_agent_options_toml_present "true" 2>/dev/null || true
-  else
-    state_set connect_agent_options_toml_present "false" 2>/dev/null || true
+  (
+    set -e
+    state_set agent_node_id "$node_id"
+    state_set agent_service_id "$service_id"
+    state_set agent_service_dir "$service_dir_local"
+    state_set agent_credentials_file "$node_cred_local"
+    state_set mcp_transport "http"
+    state_set mcp_capability "$mcp_capability"
+    state_set mcp_endpoint_url "$mcp_endpoint_url"
+    json_mutate "$STATE_JSON" delete mcp_npm_package
+    json_mutate "$STATE_JSON" delete mcp_command
+    json_mutate "$STATE_JSON" delete mcp_package_dir
+    json_mutate "$STATE_JSON" delete mcp_env_file
+    state_set mcp_server_name "$mcp_server_name"
+    state_set mcp_selected_config_type "$mcp_selected_config_type"
+    state_set mcp_selected_config "$mcp_selected_config_local"
+    state_set mcp_config_dir "$mcp_dir_local"
+    state_set mcp_credentials_file "$node_cred_local"
+    state_set mcp_openclaw_config "$mcp_openclaw_config_local"
+    state_set mcp_hermes_config "$mcp_hermes_config_local"
+    state_set mcp_hermes_home "$mcp_hermes_home_local"
+    state_set mcp_hermes_profile "$mcp_hermes_profile"
+    state_set mcp_readme "$mcp_readme_local"
+    state_set mcp_install_command "$mcp_install_command"
+    state_set mcp_doctor_command "$mcp_doctor_command"
+    _clear_mcp_daemon_state
+    state_set agent_workspace "$workspace_local"
+    state_set connect_agent "$cc_agent"
+    state_set connect_agent_cmd "$cc_agent_cmd"
+    state_set connect_mcp_url "$connect_mcp_url"
+    state_set connect_mcp_server_name "$connect_mcp_server_name"
+    state_set connect_mcp_capability "$mcp_capability"
+    if [ -n "$cc_agent_options_toml" ]; then
+      state_set connect_agent_options_toml_present "true"
+    else
+      state_set connect_agent_options_toml_present "false"
+    fi
+    state_set connect_npm_package "$(_connect_npm_package)"
+    state_set connect_repo "$(_connect_repo)"
+    state_set connect_ref "$(_connect_ref)"
+    state_set connect_source_dir "$cc_source"
+    state_set connect_package_dir "$(_local_connect_path "$cc_package_dir")"
+    state_set connect_runtime_dir "$cc_runtime_dir_local"
+    state_set connect_config "$cc_config_local"
+    state_set connect_binary "$cc_binary_local"
+    state_set connect_data_dir "$cc_data_local"
+    state_set connect_admin_from "$admin_from"
+    state_set connect_matrix_session_file "$cc_session_local"
+    state_set connect_matrix_user "$matrix_user"
+    state_set connect_matrix_device "$matrix_device"
+    state_set connect_matrix_homeserver "$matrix_homeserver"
+  )
+  state_persist_rc=$?
+  if [ "$state_persist_rc" -ne 0 ]; then
+    phase_set S6_WIRE_LOCAL failed "deployment state persistence failed" 2>/dev/null || true
+    return 1
   fi
-  state_set connect_npm_package "$(_connect_npm_package)" 2>/dev/null || true
-  state_set connect_repo "$(_connect_repo)" 2>/dev/null || true
-  state_set connect_ref "$(_connect_ref)" 2>/dev/null || true
-  state_set connect_source_dir "$cc_source" 2>/dev/null || true
-  state_set connect_package_dir "$(_local_connect_path "$cc_package_dir")" 2>/dev/null || true
-  state_set connect_runtime_dir "$cc_runtime_dir_local" 2>/dev/null || true
-  state_set connect_config "$cc_config_local" 2>/dev/null || true
-  state_set connect_binary "$cc_binary_local" 2>/dev/null || true
-  state_set connect_data_dir "$cc_data_local" 2>/dev/null || true
-  state_set connect_admin_from "$admin_from" 2>/dev/null || true
-  state_set connect_matrix_session_file "$cc_session_local" 2>/dev/null || true
-  state_set connect_matrix_user "$matrix_user" 2>/dev/null || true
-  state_set connect_matrix_device "$matrix_device" 2>/dev/null || true
-  state_set connect_matrix_homeserver "$matrix_homeserver" 2>/dev/null || true
 
   if ! install_command=$(_connect_install_command "$cc_binary" "$cc_config" "$service_id" "$service_dir"); then
     phase_set S6_WIRE_LOCAL failed "dirextalk-connect recommendation rendering failed"
@@ -1347,14 +1396,22 @@ run_phase() {
   fi
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
-  state_set agent_runtime "$runtime" 2>/dev/null || true
-  state_set connect_install_policy "$install_policy" 2>/dev/null || true
-  state_set connect_install_mode "$install_mode" 2>/dev/null || true
-  state_set connect_install_command "$install_command" 2>/dev/null || true
-  state_set mcp_install_policy "$install_policy" 2>/dev/null || true
-  state_set agent_skill_install_path "$skill_path" 2>/dev/null || true
-  state_set agent_global_skill_install_path "$global_skill_path" 2>/dev/null || true
-  state_set dirextalk_agent_bridge "dirextalk-connect" 2>/dev/null || true
+  (
+    set -e
+    state_set agent_runtime "$runtime"
+    state_set connect_install_policy "$install_policy"
+    state_set connect_install_mode "$install_mode"
+    state_set connect_install_command "$install_command"
+    state_set mcp_install_policy "$install_policy"
+    state_set agent_skill_install_path "$skill_path"
+    state_set agent_global_skill_install_path "$global_skill_path"
+    state_set dirextalk_agent_bridge "dirextalk-connect"
+  )
+  state_persist_rc=$?
+  if [ "$state_persist_rc" -ne 0 ]; then
+    phase_set S6_WIRE_LOCAL failed "deployment state persistence failed" 2>/dev/null || true
+    return 1
+  fi
   _print_connect_guidance "$runtime" "$asurl" "$node_cred_local" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary_local" "$cc_agent" "$cc_agent_cmd" "$service_id"
   _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_selected_config_type" "$mcp_selected_config_local" "$mcp_install_command" "$mcp_doctor_command" "$service_dir" "$mcp_endpoint_url" "$mcp_capability"
   mcp_enrollment_rc=0
@@ -1373,6 +1430,8 @@ run_phase() {
     return 1
   fi
 
-  phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;connect_config=$cc_config_local;mcp_config_dir=$mcp_dir_local;connect_agent=$cc_agent"
+  if ! phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;connect_config=$cc_config_local;mcp_config_dir=$mcp_dir_local;connect_agent=$cc_agent"; then
+    return 1
+  fi
   return 0
 }

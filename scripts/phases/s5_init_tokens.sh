@@ -3,6 +3,9 @@
 # Also verify owner.json so the client does not report Portal as undeployed.
 
 DIREXTALK_REMOTE_BOOTSTRAP_FILE=${DIREXTALK_REMOTE_BOOTSTRAP_FILE:-/var/dirextalk-message-server/p2p/bootstrap.json}
+S5_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1090
+source "$S5_DIR/../lib/remote-mcp-contract.sh"
 
 run_phase() {
   phase_set S5_INIT_TOKENS in_progress "fetching tokens"
@@ -41,6 +44,10 @@ run_phase() {
     fail "bootstrap.json must contain password as an eight-digit initialization-code string plus access_token and agent_token."
   fi
   asurl=$(json_get "$out" as_url "https://$domain")
+  if ! asurl=$(dirextalk_service_origin "$asurl"); then
+    phase_set S5_INIT_TOKENS failed "bootstrap.json contains a non-canonical service URL"
+    fail "bootstrap as_url must be an absolute HTTPS origin with no path, query, fragment, or userinfo."
+  fi
   agent_room_id=$(json_get "$out" agent_room_id)
   if [ -z "$agent_room_id" ] || [[ "$agent_room_id" == \!agent:* ]]; then
     phase_set S5_INIT_TOKENS failed "bootstrap.json missing real agent_room_id"

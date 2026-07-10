@@ -29,13 +29,17 @@ case " $* " in
     ;;
 esac
 
-case " $* " in
-  *"Authorization: Bearer AGENT_TOKEN_DOCTOR"*) ;;
-  *)
-    echo "missing or wrong Authorization header: $*" >&2
-    exit 1
-    ;;
-esac
+case " $* " in *AGENT_TOKEN_DOCTOR*) echo "token leaked into curl argv" >&2; exit 1 ;; esac
+headers=
+previous=
+for arg in "$@"; do
+  [ "$previous" != "-H" ] || { case "$arg" in @*) headers=${arg#@} ;; esac; }
+  previous=$arg
+done
+[ -n "$headers" ] && grep -Fxq 'Authorization: Bearer AGENT_TOKEN_DOCTOR' "$headers" || {
+  echo "missing or wrong protected Authorization header" >&2
+  exit 1
+}
 
 case " $* " in
   *'"method":"initialize"'*) ;;

@@ -39,6 +39,7 @@ phase_set() {
 }
 
 state_set() {
+  [ "${STATE_FAIL_KEY:-}" != "$1" ] || return 1
   printf '%s=%s\n' "$1" "$2" >> "${STATE_CALLS:?}"
 }
 
@@ -70,7 +71,7 @@ run_failure_case() {
   : > "$STATE_CALLS"
   json_build object > "$STATE_JSON"
 
-  unset DIREXTALK_AGENT_PLATFORM DIREXTALK_CONNECT_AGENT DIREXTALK_CONNECT_AGENT_OPTIONS_TOML
+  unset DIREXTALK_AGENT_PLATFORM DIREXTALK_CONNECT_AGENT DIREXTALK_CONNECT_AGENT_OPTIONS_TOML STATE_FAIL_KEY
   unset DIREXTALK_AGENT_INSTALL DIREXTALK_AGENT_INSTALL_MODE
   unset DIREXTALK_OPENCLAW_ACP_URL DIREXTALK_OPENCLAW_ACP_TOKEN_FILE DIREXTALK_OPENCLAW_ACP_SESSION
   DIREXTALK_AGENT_INSTALL=skip
@@ -123,6 +124,11 @@ run_failure_case() {
       DIREXTALK_AGENT_PLATFORM=codex
       mkdir -p "$DIREXTALK_HOME/nodes/service.example.test/dirextalk-connect/config.toml"
       ;;
+    state_persistence)
+      DIREXTALK_AGENT_PLATFORM=codex
+      STATE_FAIL_KEY=agent_node_id
+      export STATE_FAIL_KEY
+      ;;
     *)
       echo "unknown case: $name" >&2
       return 2
@@ -150,9 +156,11 @@ run_failure_case() {
   fi
 }
 
-for failure_case in invalid_runtime invalid_agent invalid_options invalid_policy invalid_mode host_openclaw_override host_hermes_override mcp_enrollment artifact_path_directory connect_config_path_directory; do
+for failure_case in invalid_runtime invalid_agent invalid_options invalid_policy invalid_mode host_openclaw_override host_hermes_override mcp_enrollment artifact_path_directory connect_config_path_directory state_persistence; do
   run_failure_case "$failure_case"
 done
+
+unset STATE_FAIL_KEY
 
 success_dir="$tmp/success"
 mkdir -p "$success_dir"
@@ -167,7 +175,6 @@ json_build object \
   mcp_json_config=/legacy/service/mcp/mcp-servers.json \
   mcp_codex_config=/legacy/service/mcp/codex.toml \
   mcp_cursor_config=/legacy/service/mcp/cursor.mcp.json \
-  mcp_env_file=/canonical/mcp/env \
   mcp_daemon_install_command=legacy-command > "$STATE_JSON"
 unset -f _maybe_auto_install_mcp 2>/dev/null || true
 # shellcheck disable=SC1090
@@ -189,17 +196,17 @@ grep -q '^S6_WIRE_LOCAL|done|' "$PHASE_CALLS"
   echo "S6 must remove the legacy service env artifact" >&2
   exit 1
 }
-[ -s "$service_dir/mcp/env" ] || {
-  echo "S6 must retain the canonical MCP env artifact" >&2
+[ ! -e "$service_dir/mcp/env" ] || {
+  echo "S6 must not retain an unconsumed MCP env artifact" >&2
   exit 1
 }
 if grep -q '^agent_env_file=' "$STATE_CALLS"; then
   echo "S6 must not write the legacy agent_env_file state field" >&2
   exit 1
 fi
-grep -q '^mcp_env_file=' "$STATE_CALLS"
+! grep -q '^mcp_env_file=' "$STATE_CALLS"
 grep -q '^mcp_capability=session$' "$STATE_CALLS"
-json_test_check "$STATE_JSON" "!('agent_env_file' in data) && !('mcp_json_config' in data) && !('mcp_codex_config' in data) && !('mcp_cursor_config' in data) && !('mcp_daemon_install_command' in data) && data.mcp_env_file === '/canonical/mcp/env'"
+json_test_check "$STATE_JSON" "!('agent_env_file' in data) && !('mcp_env_file' in data) && !('mcp_json_config' in data) && !('mcp_codex_config' in data) && !('mcp_cursor_config' in data) && !('mcp_daemon_install_command' in data)"
 
 run_capability_case() {
   local name=$1 runtime=$2 agent=$3 expected_capability=$4 expect_connect_mcp=$5 expected_result=${6:-done}

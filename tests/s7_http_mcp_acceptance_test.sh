@@ -53,6 +53,8 @@ esac
 
 body_path=""
 header_path=""
+secret_headers=""
+request_body=""
 write_code=0
 args=("$@")
 for ((i = 0; i < ${#args[@]}; i++)); do
@@ -65,6 +67,19 @@ for ((i = 0; i < ${#args[@]}; i++)); do
       ;;
     -w)
       write_code=1
+      ;;
+    -H)
+      case "${args[$((i + 1))]}" in
+        @*) secret_headers=$(cat "${args[$((i + 1))]#@}") ;;
+      esac
+      ;;
+    -d)
+      request_body=${args[$((i + 1))]}
+      ;;
+    --data-binary)
+      case "${args[$((i + 1))]}" in
+        @*) request_body=$(cat "${args[$((i + 1))]#@}") ;;
+      esac
       ;;
   esac
 done
@@ -99,7 +114,7 @@ case "$url" in
     body='{"username":"u","password":"p","ttl":86400,"uris":["turn:s7-mcp.example.test:3478?transport=udp"]}'
     ;;
   https://s7-mcp.example.test/mcp)
-    case " $* " in
+    case " $secret_headers $request_body " in
       *"Authorization: Bearer AGENT_TOKEN_S7"*'"method":"initialize"'*)
         body='{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"dirextalk-message-server","version":"test"},"capabilities":{"tools":{}}}}'
         ;;
@@ -165,5 +180,9 @@ if grep -q '/_p2p/query' "$calls"; then
   exit 1
 fi
 grep -q 'https://s7-mcp.example.test/mcp' "$calls"
+if grep -q 'AGENT_TOKEN_S7\|OWNER_ACCESS\|12345678' "$calls"; then
+  echo "S7 secrets must not appear in curl argv" >&2
+  exit 1
+fi
 
 echo "s7 http mcp acceptance ok"

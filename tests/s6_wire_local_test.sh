@@ -121,6 +121,11 @@ assert_active_runtime pi PI_AGENT_SESSION PI_AGENT_SESSION=1
 assert_active_runtime antigravity ANTIGRAVITY_SESSION ANTIGRAVITY_SESSION=1
 assert_active_runtime openclaw OPENCLAW_SESSION OPENCLAW_SESSION=1
 assert_active_runtime hermes HERMES_SESSION HERMES_SESSION=1
+assert_active_runtime openclaw 'OpenClaw host plus Codex child' OPENCLAW_SESSION=1 CODEX_SANDBOX=1 DIREXTALK_CONNECT_AGENT=codex
+assert_active_runtime hermes 'Hermes host plus Codex child' HERMES_SESSION=1 CODEX_SANDBOX=1 DIREXTALK_CONNECT_AGENT=codex
+assert_active_runtime openclaw 'OpenClaw host plus explicit Codex child' OPENCLAW_SESSION=1 DIREXTALK_CONNECT_AGENT=codex
+assert_active_runtime hermes 'Hermes host plus explicit Codex child' HERMES_SESSION=1 DIREXTALK_CONNECT_AGENT=codex
+assert_active_runtime codex 'explicit platform bypasses host auto-detection' OPENCLAW_SESSION=1 DIREXTALK_AGENT_PLATFORM=codex
 assert_active_runtime codex .codex/tmp PATH="/tmp/.codex/tmp/codex-arg123:/usr/bin:/bin"
 (
   clear_runtime_env
@@ -160,7 +165,12 @@ auth=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) out=$2; shift 2 ;;
-    -H) [ "${2:-}" = "Authorization: Bearer agent-token" ] && auth=agent-token; shift 2 ;;
+    -H)
+      case "${2:-}" in
+        @*) grep -Fxq 'Authorization: Bearer agent-token' "${2#@}" && auth=agent-token ;;
+      esac
+      shift 2
+      ;;
     -w) shift 2 ;;
     *) shift ;;
   esac
@@ -263,6 +273,12 @@ posix_mcp_doctor_command=$(DIREXTALK_LOCAL_PATH_STYLE=posix _mcp_doctor_command 
 mcp_service_dir="$tmp/mcp-service"
 mcp_credentials="$mcp_service_dir/credentials.json"
 expected_mcp_endpoint="https://service.example.test/mcp"
+for invalid_mcp_origin in http://service.example.test https://service.example.test/mcp 'https://service.example.test?x=1' 'https://service.example.test#fragment' 'https://user@service.example.test' 'https://bad_host.example.test' 'https://-bad.example.test' 'https://service.example.test:not-a-port' 'https://service.example.test:70000'; do
+  if _mcp_endpoint_url "$invalid_mcp_origin" >/dev/null 2>&1; then
+    echo "invalid MCP service origin must fail closed: $invalid_mcp_origin" >&2
+    exit 1
+  fi
+done
 mkdir -p "$mcp_service_dir"
 : > "$mcp_credentials"
 mkdir -p "$mcp_service_dir/mcp"
@@ -281,10 +297,8 @@ _write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "https://s
 [ ! -e "$mcp_service_dir/mcp/openclaw.mcp.json" ]
 [ ! -e "$mcp_service_dir/mcp/hermes.mcp.json" ]
 [ ! -e "$mcp_service_dir/mcp/mcp-servers.json" ]
-[ -s "$mcp_service_dir/mcp/env" ]
+[ ! -e "$mcp_service_dir/mcp/env" ]
 [ -s "$mcp_service_dir/mcp/README.md" ]
-grep -q 'DIREXTALK_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
-grep -q 'DIREXTALK_MCP_URL=https://service.example.test/mcp' "$mcp_service_dir/mcp/env"
 grep -q 'Selected MCP type: none' "$mcp_service_dir/mcp/README.md"
 grep -q 'same MCP server name' "$mcp_service_dir/mcp/README.md"
 ! grep -R 'MCP CLI install\|19757\|proxy --url\|"proxy"' "$mcp_service_dir/mcp"
@@ -373,7 +387,7 @@ _write_mcp_config_artifacts "generic.example.test" "$generic_service_dir" "https
 [ ! -e "$generic_service_dir/mcp/mcp-servers.json" ]
 [ ! -e "$generic_service_dir/mcp/codex.toml" ]
 [ ! -e "$generic_service_dir/mcp/cursor.mcp.json" ]
-[ -s "$generic_service_dir/mcp/env" ]
+[ ! -e "$generic_service_dir/mcp/env" ]
 grep -q 'Selected MCP type: none' "$generic_service_dir/mcp/README.md"
 grep -q 'MCP capability: session' "$generic_service_dir/mcp/README.md"
 
@@ -593,6 +607,8 @@ grep -q 'model = "whisper-test"' "$speech_config_path"
 [ "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/agent _connect_agent_command codex)" = "/custom/agent" ]
 [ "$(_connect_agent_command acp openclaw)" = "openclaw" ]
 [ "$(_connect_agent_command acp hermes)" = "dirextalk-connect" ]
+[ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp openclaw 2>/dev/null || true)" ]
+[ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp hermes 2>/dev/null || true)" ]
 [ "$(DIREXTALK_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _connect_agent_command acp openclaw)" = "/opt/openclaw/bin/openclaw" ]
 [ "$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_command acp hermes)" = "dirextalk-connect" ]
 
@@ -781,8 +797,11 @@ openclaw_session_options=$(
 )
 [[ "$openclaw_session_options" == *'--session", "agent:dirextalk:main"'* ]]
 
-openclaw_url_options=$(DIREXTALK_OPENCLAW_ACP_ARGS_TOML='["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]' _connect_agent_options_toml openclaw acp)
-[[ "$openclaw_url_options" == *'args = ["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]'* ]]
+if DIREXTALK_OPENCLAW_ACP_ARGS_TOML='["codex"]' _connect_agent_options_toml openclaw acp > "$tmp/openclaw-unsafe.out" 2> "$tmp/openclaw-unsafe.err"; then
+  echo "OpenClaw host bridge must reject a fully replaceable ACP args array" >&2
+  exit 1
+fi
+grep -q 'cannot safely replace' "$tmp/openclaw-unsafe.err"
 openclaw_profile_options=$(DIREXTALK_OPENCLAW_PROFILE=service-isolated OPENCLAW_CONFIG_PATH=/mnt/c/Users/alice/.openclaw-service/config.json DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_profile_options" == *'args = ["--profile", "service-isolated", "acp", "--session", "agent:main:main"]'* ]]
 [[ "$openclaw_profile_options" == *'env = { OPENCLAW_CONFIG_PATH = "C:/Users/alice/.openclaw-service/config.json" }'* ]]

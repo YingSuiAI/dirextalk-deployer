@@ -7,7 +7,7 @@ runtime_notes:
   - When installing or updating this skill itself, read references/agent-targets.md and use the npm-managed global skill install by default.
   - Do not clone the GitHub repository to install or use the skill unless the user explicitly asks for deployer development, local patching, or a project-local install.
   - On POSIX use scripts/orchestrate.sh and scripts/destroy.sh; on Windows use the PowerShell wrappers.
-  - S6 writes service-scoped credentials, dirextalk-connect config, canonical mcp/env, and explicit MCP capability/artifact state; it does not write the retired service env file.
+  - S6 writes service-scoped credentials, dirextalk-connect config, and explicit MCP capability/artifact state; it does not write retired or unconsumed env files.
   - Antigravity, Cursor, iFlow, and every detected OpenClaw or Hermes host are host-managed; Devin, Pi, Reasonix, and tmux are unsupported. Unknown runtimes fail closed without a generic artifact.
   - OpenClaw and Hermes keep MCP in native registries and must pass service-scoped secret-free live probes before the ACP bridge starts; never mutate their real user config automatically.
   - S6 never mutates OpenClaw's global MCP config.

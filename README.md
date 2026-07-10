@@ -137,7 +137,7 @@ bash scripts/orchestrate.sh
 ```
 
 Supported install modes: `recommended` and `dirextalk-connect`.
-If `DIREXTALK_AGENT_PLATFORM=auto` cannot identify a single supported runtime, set `DIREXTALK_CONNECT_AGENT` explicitly. S6 writes `mode = "yolo"` by default for generated agent options; an explicit `mode` in `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` or `DIREXTALK_CURSOR_MODE` still overrides it. On Windows, Cursor wiring uses Cursor Agent CLI at `%LOCALAPPDATA%\cursor-agent\agent.cmd`; OpenCode wiring searches `opencode` on PATH and the global `opencode-ai` npm package, or accepts `DIREXTALK_OPENCODE_COMMAND`. If `agent.cmd status` is not logged in, run `agent.cmd login` once, then rerun the deployer to refresh config and restart the daemon. For OpenClaw or Hermes defaults, force the host runtime with `DIREXTALK_AGENT_PLATFORM=openclaw` or `DIREXTALK_AGENT_PLATFORM=hermes`; setting only `DIREXTALK_CONNECT_AGENT=acp` selects generic ACP and requires manual options. OpenClaw Gateway ACP defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-detect the Gateway from `~/.openclaw/openclaw.json`. To force explicit Gateway settings, set all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime after pairing. Use `DIREXTALK_OPENCLAW_ACP_ARGS_TOML` only when you need to provide the complete OpenClaw ACP args array yourself. Use `DIREXTALK_HERMES_ACP_ARGS_TOML` for the child Hermes args; S6 prefixes the `hermes-acp-adapter -- <hermes-command>` wrapper automatically.
+If `DIREXTALK_AGENT_PLATFORM=auto` cannot identify a single supported runtime, set `DIREXTALK_CONNECT_AGENT` explicitly. S6 writes `mode = "yolo"` by default for generated agent options; an explicit `mode` in `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` or `DIREXTALK_CURSOR_MODE` still overrides it. On Windows, Cursor wiring uses Cursor Agent CLI at `%LOCALAPPDATA%\cursor-agent\agent.cmd`; OpenCode wiring searches `opencode` on PATH and the global `opencode-ai` npm package, or accepts `DIREXTALK_OPENCODE_COMMAND`. If `agent.cmd status` is not logged in, run `agent.cmd login` once, then rerun the deployer. An active OpenClaw or Hermes host owns MCP even when it launches Codex or another child; only explicit `DIREXTALK_AGENT_PLATFORM=<child>` bypasses host auto-detection. OpenClaw Gateway ACP defaults to `["acp", "--session", "agent:main:main"]` and auto-detects its Gateway. Explicit settings require all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION`. Fully replaceable OpenClaw args and generic host command overrides are rejected. `DIREXTALK_HERMES_ACP_ARGS_TOML` may add child Hermes args while S6 preserves the required adapter/profile prefix.
 
 Check status:
 
@@ -194,7 +194,6 @@ credentials.json
 dirextalk-connect/config.toml
 dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
-mcp/env
 mcp/README.md
 mcp/openclaw.md
 mcp/hermes.md

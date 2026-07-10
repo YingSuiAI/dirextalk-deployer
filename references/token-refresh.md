@@ -62,14 +62,12 @@ chmod 600 ~/.dirextalk/nodes/<service_id>/credentials.json
 S6 也会写：
 
 ```text
-~/.dirextalk/nodes/<service_id>/mcp/env
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/matrix-session.json
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/config.toml
 ```
 
-服务级旧 `~/.dirextalk/nodes/<service_id>/env` 不再生成；S6 会清理遗留的
-`agent_env_file` state，但保留 `mcp/env` 作为手工检查远端 MCP endpoint 的
-canonical artifact。
+服务级旧 `~/.dirextalk/nodes/<service_id>/env` 与 `mcp/env` 均不再生成；S6 会清理遗留的
+`agent_env_file`、`mcp_env_file` state。MCP endpoint 由当前消费者的 state/connect 配置持有。
 
 刷新后重新安装或重启本地 bridge：
 

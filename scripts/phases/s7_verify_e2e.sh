@@ -5,6 +5,10 @@
 # token-authenticated HTTP MCP read action, and non-empty TURN turnServer.
 # Local bridge message send/read is validated separately; this script checks HTTP actions.
 
+S7_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1090
+source "$S7_DIR/../lib/http-secrets.sh"
+
 run_phase() {
   phase_set S7_VERIFY_E2E in_progress "running end-to-end acceptance"
   local domain password
@@ -38,11 +42,17 @@ _check_mcp_agent_auth() {
 }
 
 _p2p_access_token() {
-  local domain=$1 password=$2 at
+  local domain=$1 password=$2 at payload_file
   local args=()
   while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
+  payload_file=$(dirextalk_private_temp_file "${TMPDIR:-/tmp}" portal-auth) || return 1
+  if ! json_build portal-auth "$password" > "$payload_file"; then
+    rm -f "$payload_file"
+    return 1
+  fi
   at=$(curl -sk "${args[@]}" -X POST "https://$domain/_p2p/command" -H 'Content-Type: application/json' \
-        -d "{\"action\":\"portal.auth\",\"params\":{\"password\":\"$password\"}}" 2>/dev/null | json_stdin_get access_token)
+        --data-binary "@$payload_file" 2>/dev/null | json_stdin_get access_token)
+  rm -f "$payload_file"
   printf '%s' "$at"
 }
 
@@ -86,12 +96,14 @@ _check_matrix_server_wellknown() {
 
 # _check <name> <url> <bearer-token-or-empty> <expected-code>
 _check() {
-  local name=$1 url=$2 tok=$3 want=$4 code
+  local name=$1 url=$2 tok=$3 want=$4 code headers
   local domain args=()
   domain=$(state_get domain)
   while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
   if [ -n "$tok" ]; then
-    code=$(curl -sk "${args[@]}" -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $tok" "$url" 2>/dev/null)
+    headers=$(dirextalk_curl_secret_headers "${TMPDIR:-/tmp}" "$tok") || return 1
+    code=$(curl -sk "${args[@]}" -o /dev/null -w '%{http_code}' -H "@$headers" "$url" 2>/dev/null)
+    rm -f "$headers"
   else
     code=$(curl -sk "${args[@]}" -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)
   fi
@@ -102,13 +114,15 @@ _check() {
 # TURN acceptance: exchange the backend password/init-code field for Matrix access_token, then verify
 # /voip/turnServer returns non-empty valid TURN credentials.
 _check_turn() {
-  local domain=$1 password=$2 at turn
+  local domain=$1 password=$2 at turn headers
   local args=()
   while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
   at=$(_p2p_access_token "$domain" "$password")
   if [ -z "$at" ]; then warn "  x TURN (failed to exchange access_token; cannot verify turnServer)"; return 1; fi
+  headers=$(dirextalk_curl_secret_headers "${TMPDIR:-/tmp}" "$at") || return 1
   turn=$(curl -sk "${args[@]}" "https://$domain/_matrix/client/v3/voip/turnServer" \
-          -H "Authorization: Bearer $at" 2>/dev/null)
+          -H "@$headers" 2>/dev/null)
+  rm -f "$headers"
   if printf '%s' "$turn" | json_stdin_assert turn-credentials >/dev/null 2>&1; then
     ok "  ✓ TURN turnServer non-empty and valid"; return 0
   else

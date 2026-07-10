@@ -21,7 +21,7 @@ Every deployer change must classify paths and commands by the platform that will
 - **Local bridge paths** are consumed by `dirextalk-connect` and the local agent process. On Windows they must be Windows-compatible paths, not `/mnt/c/...` or Git Bash-only `/c/...` paths.
 - **Documentation paths** must be portable examples using `$HOME`, `%USERPROFILE%`, `$env:USERPROFILE`, `<service_id>`, or `<domain>`, not machine-specific absolute paths.
 
-If a change writes a path into `state.json`, `credentials.json`, `mcp/env`, `dirextalk-connect/config.toml`, docs, or printed commands, verify which process will read that path and format it for that process.
+If a change writes a path into `state.json`, `credentials.json`, `dirextalk-connect/config.toml`, docs, or printed commands, verify which process will read that path and format it for that process. Do not generate an artifact without a current consumer.
 Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `scripts/lib/windows-paths.ps1` for PowerShell wrapper conversion. These helpers must lexically recognize `C:\Users\alice`, `C:/Users/alice`, `/mnt/c/Users/alice`, `/cygdrive/c/Users/alice`, and `/c/Users/alice` before calling shell-specific conversion tools.
 
 ## Entrypoints
@@ -40,7 +40,7 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 - Use `scripts/json.mjs` through `scripts/lib/json.sh` for JSON reads/writes. Do not reintroduce legacy external JSON CLI dependencies.
 - Remote server commands may assume Linux because the EC2 host is Linux. Local commands must not assume Linux.
 - Use PowerShell for Windows-native process and path behavior when the consumer is Windows-local, especially `dirextalk-connect.exe`, local agent executables, Windows user profile paths, or npm global binaries.
-- When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXTALK_CONNECT_AGENT`, `DIREXTALK_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, or `DIREXTALK_CLAUDE_CODE_COMMAND`.
+- When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXTALK_CONNECT_AGENT`, `DIREXTALK_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, or `DIREXTALK_CLAUDE_CODE_COMMAND`. Host-owned OpenClaw/Hermes bridges reject generic child command/args overrides.
 - Do not make Codex, Claude, Gemini, Cursor, or any other provider the semantic default for an unknown runtime. Unknown or ambiguous detection should require an explicit `DIREXTALK_CONNECT_AGENT`.
 
 ## Dirextalk Connect Wiring

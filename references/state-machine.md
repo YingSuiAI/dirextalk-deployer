@@ -28,7 +28,7 @@ S7 自动验收通过后应交付:
 - App 域名: `<domain>`
 - 八位 App 初始化码: 后端 `password` 字段的当前值
 - 本地服务凭据: `~/.dirextalk/nodes/<service_id>/credentials.json`
-- Canonical MCP 环境文件: `~/.dirextalk/nodes/<service_id>/mcp/env`（服务级旧 `env` 已退役）
+- MCP endpoint 由 `state.json` 与 `dirextalk-connect/config.toml` 的当前消费者持有，不再生成无人消费的 `mcp/env`
 - dirextalk-connect 配置: `~/.dirextalk/nodes/<service_id>/dirextalk-connect/config.toml`
 - MCP 配置目录: `~/.dirextalk/nodes/<service_id>/mcp/`
 - Matrix bridge 用户: `@agent:<server>`

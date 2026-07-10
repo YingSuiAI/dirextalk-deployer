@@ -12,6 +12,20 @@ JSON="$NODE_BIN scripts/json.mjs"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/node-no-secret-argv" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\${NODE_ARGV_LOG:?}"
+exec "$NODE_BIN" "\$@"
+EOF
+chmod 700 "$tmp/bin/node-no-secret-argv"
+NODE_ARGV_LOG="$tmp/node-argv.log" NODE="$tmp/bin/node-no-secret-argv" json_build object agent_token=SECRET_ARGV_SENTINEL > "$tmp/argv-safe.json"
+if grep -q 'SECRET_ARGV_SENTINEL' "$tmp/node-argv.log"; then
+  echo "JSON secret values must be delivered over stdin, not Node argv" >&2
+  exit 1
+fi
+json_check "$tmp/argv-safe.json" "data.agent_token === 'SECRET_ARGV_SENTINEL'"
+
 cat > "$tmp/input.json" <<'JSON'
 {
   "domain": "im.test",

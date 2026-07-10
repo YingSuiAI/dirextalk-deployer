@@ -46,7 +46,10 @@ json_node() {
 json_cli() {
   local node_bin
   node_bin=$(json_node) || return 1
-  "$node_bin" "$JSON_HELPER" "$@"
+  case "${1:-}" in
+    stdin-*) "$node_bin" "$JSON_HELPER" "$@" ;;
+    *) printf '%s\0' "$@" | "$node_bin" "$JSON_HELPER" --args0 ;;
+  esac
 }
 
 json_get() {
@@ -106,7 +109,12 @@ json_build() {
 }
 
 json_mutate() {
-  json_cli mutate "$@"
+  local file=${1:-}
+  json_cli mutate "$@" || return 1
+  chmod 600 "$file" || return 1
+  if declare -F dirextalk_restrict_private_file >/dev/null 2>&1; then
+    dirextalk_restrict_private_file "$file" || return 1
+  fi
 }
 
 json_valid() {

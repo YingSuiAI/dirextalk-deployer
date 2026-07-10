@@ -1,8 +1,14 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-const [command, ...args] = process.argv.slice(2);
+let cliArgs = process.argv.slice(2);
+if (cliArgs.length === 1 && cliArgs[0] === "--args0") {
+  const input = readFileSync(0);
+  cliArgs = input.toString("utf8").split("\0");
+  if (cliArgs.at(-1) === "") cliArgs.pop();
+}
+const [command, ...args] = cliArgs;
 
 try {
   switch (command) {
@@ -257,6 +263,10 @@ function cmdBuild(args) {
       break;
     case "matrix-session-create":
       data = { action: "agent.matrix_session.create", params: { device_id: required(args, 1, "device_id") } };
+      process.stdout.write(`${JSON.stringify(data)}\n`);
+      return;
+    case "portal-auth":
+      data = { action: "portal.auth", params: { password: required(args, 1, "password") } };
       process.stdout.write(`${JSON.stringify(data)}\n`);
       return;
     case "mcp-jsonrpc-initialize":
@@ -660,7 +670,8 @@ function readJsonStdin() {
 
 function atomicWriteJson(file, data) {
   const tmp = `${file}.tmp.${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  chmodSync(tmp, 0o600);
   renameSync(tmp, file);
 }
 

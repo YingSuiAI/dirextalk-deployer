@@ -68,7 +68,6 @@ credentials.json
 dirextalk-connect/config.toml
 dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
-mcp/env
 mcp/README.md
 mcp/openclaw.md
 mcp/hermes.md
@@ -119,7 +118,7 @@ The `[speech]` block is present only when S6 finds a speech-to-text API key from
 
 ## MCP Targets
 
-S6 always writes canonical `mcp/env` plus a README under the service directory.
+S6 writes a README under the service directory and removes legacy `mcp/env`.
 Standalone artifacts are limited to token-free OpenClaw `openclaw.md` and
 Hermes `hermes.md` host guidance. Session agents receive canonical MCP data
 through dirextalk-connect; no runtime receives a generic JSON fallback.
@@ -164,4 +163,4 @@ With `recommend` or `skip`, output generation completes but
 Prefer `DIREXTALK_CONNECT_AGENT=<agent>` to choose the local agent that `dirextalk-connect` should run. Keep `DIREXTALK_AGENT_PLATFORM=<runtime>` for auto-detection overrides and legacy host-runtime naming. Use `DIREXTALK_AGENT_INSTALL_MODE=dirextalk-connect` only when overriding the default `recommended` mapping explicitly.
 Use `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXTALK_CONNECT_AGENT_CMD` is not enough.
 For OpenCode, use `DIREXTALK_OPENCODE_COMMAND` when PATH lookup does not find the right CLI. The Windows wrapper also checks the global `opencode-ai` npm package under the npm global prefix.
-For OpenClaw Gateway ACP, S6 defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-discover the Gateway from `~/.openclaw/openclaw.json`. To force an explicit Gateway, complete OpenClaw pairing first, then set all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime. S6 writes `["acp", "--url", <url>, "--token-file", <local path>, "--session", <session>]` and converts the token-file with `DIREXTALK_LOCAL_PATH_STYLE`. `DIREXTALK_OPENCLAW_ACP_ARGS_TOML` replaces the OpenClaw ACP args array only when the runtime needs a fully custom argument list. `DIREXTALK_HERMES_ACP_ARGS_TOML` supplies the child Hermes args and keeps the Dirextalk adapter prefix.
+For OpenClaw Gateway ACP, S6 defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-discover the Gateway from `~/.openclaw/openclaw.json`. To force an explicit Gateway, complete OpenClaw pairing first, then set all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime. S6 writes `["acp", "--url", <url>, "--token-file", <local path>, "--session", <session>]` and converts the token-file with `DIREXTALK_LOCAL_PATH_STYLE`. Fully replaceable OpenClaw args are rejected so the host ACP shape cannot be bypassed. `DIREXTALK_HERMES_ACP_ARGS_TOML` supplies child Hermes args and keeps the Dirextalk adapter/profile prefix.

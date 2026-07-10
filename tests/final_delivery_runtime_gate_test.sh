@@ -49,23 +49,26 @@ set -euo pipefail
 body_path=""
 write_code=0
 args="$*"
+secret_headers=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) body_path=$2; shift 2 ;;
     -w) write_code=1; shift 2 ;;
+    -H) case "${2:-}" in @*) secret_headers=$(cat "${2#@}") ;; esac; shift 2 ;;
     *) shift ;;
   esac
 done
 
 case "$args" in
   *"https://final-delivery.example.test/mcp"*)
-    case "$args" in
+    case "$secret_headers" in
       *"Authorization: Bearer AGENT_TOKEN_FINAL"*) ;;
       *)
         echo "missing or wrong Authorization header: $args" >&2
         exit 1
         ;;
     esac
+    case "$args" in *AGENT_TOKEN_FINAL*) echo "token leaked into curl argv" >&2; exit 1 ;; esac
     case "$args" in
       *'"method":"initialize"'*)
         payload='{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"dirextalk-message-server","version":"test"},"capabilities":{"tools":{}}}}'

@@ -39,6 +39,7 @@ source "$HERE/lib/operation_report.sh"
 source "$HERE/lib/local-paths.sh"
 source "$HERE/lib/connect-daemon-logs.sh"
 source "$HERE/lib/region.sh"
+source "$HERE/lib/http-secrets.sh"
 
 # Phase -> script mapping. Use case instead of declare -A for macOS bash 3.2.
 phase_file() {
@@ -773,7 +774,7 @@ cmd_verify_mcp_doctor() {
     return 1
   }
 
-  local endpoint token node_id out code payload protocol_version server_name tools_type tools_capable
+  local endpoint token node_id out code payload protocol_version server_name tools_type tools_capable headers
   endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
@@ -783,15 +784,16 @@ cmd_verify_mcp_doctor() {
   fi
 
   out=$(mktemp)
+  headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
   payload=$(json_build mcp-jsonrpc-initialize)
   code=$(curl -sk -o "$out" -w '%{http_code}' \
     -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-06-18' \
-    -H "Authorization: Bearer $token" \
-    -H "DIREXTALK-Agent-Node-Id: $node_id" \
+    -H "@$headers" \
     -d "$payload" 2>/dev/null)
+  rm -f "$headers"
   if [ "$code" != "200" ] || ! json_valid "$out" >/dev/null 2>&1; then
     state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "endpoint=$endpoint" "evidence=HTTP MCP initialize returned HTTP $code or non-json output"
     rm -f "$out"
@@ -819,7 +821,7 @@ cmd_verify_mcp_smoke() {
     return 1
   }
 
-  local endpoint token room_id body code payload response_content_type is_error
+  local endpoint token room_id body code payload response_content_type is_error headers node_id
   endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   room_id=$(json_get "$STATE_JSON" agent_room_id)
@@ -829,15 +831,17 @@ cmd_verify_mcp_smoke() {
   fi
 
   body=$(mktemp)
+  node_id=$(json_get "$STATE_JSON" agent_node_id)
+  headers=$(dirextalk_curl_secret_headers "$(dirname "$body")" "$token" "$node_id") || return 1
   payload=$(json_build mcp-jsonrpc-messages-list-call "$room_id")
   code=$(curl -sk -o "$body" -w '%{http_code}' \
     -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-06-18' \
-    -H "Authorization: Bearer $token" \
-    -H "DIREXTALK-Agent-Node-Id: $(json_get "$STATE_JSON" agent_node_id)" \
+    -H "@$headers" \
     -d "$payload" 2>/dev/null)
+  rm -f "$headers"
   response_content_type=$(json_type "$body" result.content 2>/dev/null || true)
   is_error=$(json_get "$body" result.isError false)
   if [ "$code" != "200" ] || [ "$response_content_type" != "array" ] || [ "$is_error" = "true" ]; then
@@ -871,7 +875,7 @@ cmd_verify_mcp_tools() {
     return 1
   }
 
-  local endpoint token node_id out code payload tools_type
+  local endpoint token node_id out code payload tools_type headers
   endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
@@ -881,15 +885,16 @@ cmd_verify_mcp_tools() {
   fi
 
   out=$(mktemp)
+  headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
   payload=$(json_build mcp-jsonrpc-tools-list)
   code=$(curl -sk -o "$out" -w '%{http_code}' \
     -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-06-18' \
-    -H "Authorization: Bearer $token" \
-    -H "DIREXTALK-Agent-Node-Id: $node_id" \
+    -H "@$headers" \
     -d "$payload" 2>/dev/null)
+  rm -f "$headers"
   tools_type=$(json_type "$out" result.tools 2>/dev/null || true)
   if [ "$code" != "200" ] || [ "$tools_type" != "array" ]; then
     state_set_object runtime_checks.mcp_tools status=failed "ts=$(_now)" "endpoint=$endpoint" "evidence=HTTP MCP tools/list returned HTTP $code or invalid output"

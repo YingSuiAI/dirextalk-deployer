@@ -26,6 +26,12 @@ _connect_agent_command() {
   runtime=${2:-$1}
   agent=$(_connect_agent_alias "$1" 2>/dev/null || printf '%s\n' "$1")
   if [ -n "${DIREXTALK_CONNECT_AGENT_CMD:-}" ]; then
+    case "$runtime" in
+      openclaw|hermes)
+        fail "DIREXTALK_CONNECT_AGENT_CMD cannot override the host-owned bridge for runtime=$runtime; use its runtime-specific command variable."
+        return 1
+        ;;
+    esac
     printf '%s\n' "$DIREXTALK_CONNECT_AGENT_CMD"
     return 0
   fi
@@ -170,12 +176,8 @@ _openclaw_acp_args_toml() {
   local url token_file session profile missing=
   profile=${DIREXTALK_OPENCLAW_PROFILE:-}
   if [ -n "${DIREXTALK_OPENCLAW_ACP_ARGS_TOML:-}" ]; then
-    if [ -n "$profile" ]; then
-      _toml_array_prepend "$DIREXTALK_OPENCLAW_ACP_ARGS_TOML" --profile "$profile"
-    else
-      printf '%s\n' "$DIREXTALK_OPENCLAW_ACP_ARGS_TOML"
-    fi
-    return 0
+    fail "DIREXTALK_OPENCLAW_ACP_ARGS_TOML cannot safely replace the host-owned OpenClaw ACP command shape; use the URL, token-file, session, and profile variables."
+    return 1
   fi
   url=${DIREXTALK_OPENCLAW_ACP_URL:-}
   token_file=${DIREXTALK_OPENCLAW_ACP_TOKEN_FILE:-}

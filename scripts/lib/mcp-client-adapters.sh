@@ -1,14 +1,16 @@
 # mcp-client-adapters.sh - MCP client config artifacts and install guidance.
 
+MCP_CLIENT_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1090
+source "$MCP_CLIENT_LIB_DIR/remote-mcp-contract.sh"
+
 _mcp_runtime_dir() {
   local service_dir=$1
   printf '%s/mcp\n' "$service_dir"
 }
 
 _mcp_endpoint_url() {
-  local service_url=${1:-}
-  [ -n "$service_url" ] || return 1
-  printf '%s/mcp\n' "${service_url%/}"
+  dirextalk_mcp_endpoint_url "$1"
 }
 
 _mcp_codex_config_path() {
@@ -39,11 +41,6 @@ _mcp_hermes_home() {
 _mcp_hermes_profile() {
   local server_name=$1
   printf '%s\n' "${DIREXTALK_HERMES_PROFILE:-$server_name}"
-}
-
-_mcp_env_file_path() {
-  local service_dir=$1
-  printf '%s/env\n' "$(_mcp_runtime_dir "$service_dir")"
 }
 
 _mcp_readme_path() {
@@ -230,14 +227,6 @@ _hermes_mcp_probe() {
   HERMES_HOME="$hermes_home" "$command" -p "$profile" mcp test "$server_name" >/dev/null 2>&1
 }
 
-_render_mcp_env() {
-  local endpoint_url=$1 node_id=${2:-}
-  printf 'export DIREXTALK_MCP_URL=%q\n' "$endpoint_url" || return 1
-  if [ -n "$node_id" ]; then
-    printf 'export DIREXTALK_AGENT_NODE_ID=%q\n' "$node_id" || return 1
-  fi
-}
-
 _render_openclaw_mcp_guidance() {
   local endpoint_url=$1 node_id=$2 credentials_file=$3 capability=$4
   cat <<EOF || return 1
@@ -292,7 +281,7 @@ EOF
 _write_mcp_config_artifacts() {
   local service_id=$1 service_dir=$2 service_url=$3 _agent_token=$4 credentials_file=$5 node_id=${6:-} runtime=${7:-generic}
   local mcp_dir server_name endpoint_url
-  local codex_config cursor_config legacy_json_config legacy_hermes_json openclaw_config hermes_config env_file readme
+  local codex_config cursor_config legacy_json_config legacy_hermes_json openclaw_config hermes_config readme
   local credentials_file_local hermes_home hermes_home_local hermes_profile
   local capability=${8:-} config_type selected_config selected_config_local selected_label
   mcp_dir=$(_mcp_runtime_dir "$service_dir")
@@ -304,7 +293,6 @@ _write_mcp_config_artifacts() {
   legacy_hermes_json="$mcp_dir/hermes.mcp.json"
   openclaw_config=$(_mcp_openclaw_config_path "$service_dir")
   hermes_config=$(_mcp_hermes_config_path "$service_dir")
-  env_file=$(_mcp_env_file_path "$service_dir")
   readme=$(_mcp_readme_path "$service_dir")
   if [ -z "$capability" ]; then
     capability=$(_mcp_runtime_capability "$runtime") || return 1
@@ -326,7 +314,7 @@ _write_mcp_config_artifacts() {
     mkdir -p "$hermes_home" || return 1
   fi
   umask 077
-  rm -f "$legacy_json_config" "$legacy_hermes_json" "$mcp_dir/openclaw-server.json" "$mcp_dir/openclaw.mcp.json" || return 1
+  rm -f "$legacy_json_config" "$legacy_hermes_json" "$mcp_dir/openclaw-server.json" "$mcp_dir/openclaw.mcp.json" "$mcp_dir/env" || return 1
   case "$config_type" in
     codex) rm -f "$cursor_config" "$openclaw_config" "$hermes_config" || return 1 ;;
     cursor) rm -f "$codex_config" "$openclaw_config" "$hermes_config" || return 1 ;;
@@ -351,8 +339,6 @@ _write_mcp_config_artifacts() {
     *) return 1 ;;
   esac
 
-  dirextalk_atomic_write "$env_file" 600 _render_mcp_env "$endpoint_url" "$node_id" || return 1
-
   if ! dirextalk_atomic_write "$readme" 644 cat <<EOF
 # Dirextalk MCP Config
 
@@ -372,7 +358,7 @@ Config snippets:
 - MCP transport: http
 - MCP endpoint: $endpoint_url
 
-The deployer writes only token-free host guidance when the declarative runtime map names one. Session agents receive canonical MCP data through dirextalk-connect; host-managed, unsupported, and undeclared runtimes never receive a generic or token-bearing standalone fallback. The canonical MCP env artifact contains only the endpoint and node id, so no local MCP CLI, daemon, proxy, or listening port is required.
+The deployer writes only token-free host guidance when the declarative runtime map names one. Session agents receive canonical MCP data through dirextalk-connect; host-managed, unsupported, and undeclared runtimes never receive a generic or token-bearing standalone fallback. No local MCP CLI, daemon, proxy, env artifact, or listening port is required.
 
 If a client already has the same MCP server name, replace or unset that old entry when its URL differs from this deployment. Otherwise the client can keep talking to a stale node even after this deployer writes fresh snippets.
 

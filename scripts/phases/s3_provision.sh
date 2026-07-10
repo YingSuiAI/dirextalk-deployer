@@ -356,37 +356,74 @@ _run_phase_lightsail() {
 }
 
 _ensure_ec2_eip_attachment() {
-  local instance_id=$1 allocation_id=$2 attached_to public_ip
+  local instance_id=$1 allocation_id=$2 attached_to public_ip attempt
+  local attempts=${DIREXTALK_STABLE_IP_RECONCILE_ATTEMPTS:-12}
+  local delay=${DIREXTALK_STABLE_IP_RECONCILE_DELAY:-2}
   attached_to=$(aws ec2 describe-addresses --allocation-ids "$allocation_id" \
     --query 'Addresses[0].InstanceId' --output text) || return 1
   if [ "$attached_to" != "$instance_id" ]; then
     log "Associating Elastic IP $allocation_id with current instance $instance_id ..." >&2
     aws ec2 associate-address --instance-id "$instance_id" --allocation-id "$allocation_id" --allow-reassociation >/dev/null || return 1
+    attempt=1
+    while [ "$attempt" -le "$attempts" ]; do
+      attached_to=$(aws ec2 describe-addresses --allocation-ids "$allocation_id" \
+        --query 'Addresses[0].InstanceId' --output text) || return 1
+      [ "$attached_to" = "$instance_id" ] && break
+      [ "$attempt" -lt "$attempts" ] && sleep "$delay"
+      attempt=$((attempt + 1))
+    done
+    [ "$attached_to" = "$instance_id" ] || return 1
   fi
   public_ip=$(aws ec2 describe-addresses --allocation-ids "$allocation_id" \
     --query 'Addresses[0].PublicIp' --output text) || return 1
-  [ -n "$public_ip" ] && [ "$public_ip" != "None" ] || return 1
+  _is_canonical_ipv4 "$public_ip" || return 1
   printf '%s\n' "$public_ip"
 }
 
 _ensure_lightsail_static_ip_attachment() {
-  local instance_name=$1 static_ip_name=$2 attached_to public_ip
+  local instance_name=$1 static_ip_name=$2 attached_to public_ip attempt
+  local attempts=${DIREXTALK_STABLE_IP_RECONCILE_ATTEMPTS:-12}
+  local delay=${DIREXTALK_STABLE_IP_RECONCILE_DELAY:-2}
   attached_to=$(aws lightsail get-static-ip --static-ip-name "$static_ip_name" \
     --query 'staticIp.attachedTo' --output text) || return 1
   if [ "$attached_to" != "$instance_name" ]; then
     log "Attaching Lightsail static IP $static_ip_name to current instance $instance_name ..." >&2
     aws lightsail attach-static-ip --static-ip-name "$static_ip_name" --instance-name "$instance_name" >/dev/null || return 1
+    attempt=1
+    while [ "$attempt" -le "$attempts" ]; do
+      attached_to=$(aws lightsail get-static-ip --static-ip-name "$static_ip_name" \
+        --query 'staticIp.attachedTo' --output text) || return 1
+      [ "$attached_to" = "$instance_name" ] && break
+      [ "$attempt" -lt "$attempts" ] && sleep "$delay"
+      attempt=$((attempt + 1))
+    done
+    [ "$attached_to" = "$instance_name" ] || return 1
   fi
   public_ip=$(aws lightsail get-static-ip --static-ip-name "$static_ip_name" \
     --query 'staticIp.ipAddress' --output text) || return 1
-  [ -n "$public_ip" ] && [ "$public_ip" != "None" ] || return 1
+  _is_canonical_ipv4 "$public_ip" || return 1
   printf '%s\n' "$public_ip"
+}
+
+_is_canonical_ipv4() {
+  local ip=${1:-} part
+  local -a parts
+  case "$ip" in *$'\n'*|*$'\r'*|*$'\t'*|*' '*) return 1 ;; esac
+  printf '%s\n' "$ip" | grep -Eq '^((0|[1-9][0-9]{0,2})\.){3}(0|[1-9][0-9]{0,2})$' || return 1
+  IFS=. read -r -a parts <<< "$ip"
+  for part in "${parts[@]}"; do
+    [ "$part" -le 255 ] || return 1
+  done
 }
 
 _upload_updater_binary() {
   local public_ip=$1 keyfile=$2 binary=$3
   local known_hosts="$DIREXTALK_WORKDIR/known_hosts" remote_tmp=/tmp/dirextalk-updater remote_bootstrap=/tmp/dirextalk-bootstrap-host attempt
   local bootstrap="$S3_PHASE_DIR/updater/bootstrap-host.sh"
+  _is_canonical_ipv4 "$public_ip" || {
+    warn "Updater upload rejected a non-canonical public IPv4 address."
+    return 1
+  }
   [ -n "$public_ip" ] && [ -f "$keyfile" ] && [ -x "$binary" ] && [ -f "$bootstrap" ] || {
     warn "Updater upload requires a stable public IP, the recorded SSH key, and executable updater/bootstrap files."
     return 1
@@ -412,7 +449,7 @@ _upload_updater_binary() {
         -o StrictHostKeyChecking=accept-new \
         -o "UserKnownHostsFile=$known_hosts" \
         "ubuntu@$public_ip" \
-        "sudo install -d -m 0755 /var/dirextalk-message-server /usr/local/libexec && sudo install -m 0755 $remote_tmp /var/dirextalk-message-server/dirextalk-updater && sudo install -m 0755 $remote_bootstrap /usr/local/libexec/dirextalk-bootstrap-host && rm -f $remote_tmp $remote_bootstrap && sudo /usr/local/libexec/dirextalk-bootstrap-host $public_ip"; then
+        "sudo install -d -m 0755 /var/dirextalk-message-server /usr/local/libexec && sudo install -m 0755 $remote_tmp /var/dirextalk-message-server/dirextalk-updater && sudo install -m 0755 $remote_bootstrap /usr/local/libexec/dirextalk-bootstrap-host && rm -f $remote_tmp $remote_bootstrap && sudo /usr/local/libexec/dirextalk-bootstrap-host '$public_ip'"; then
       return 0
     fi
     warn "SSH is not ready for updater upload (attempt $attempt/60); retrying in 5s."

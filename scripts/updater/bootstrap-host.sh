@@ -12,7 +12,8 @@ lock_file="$lock_dir/dirextalk-bootstrap.lock"
 valid_public_ip() {
   local ip=$1 part
   local -a parts
-  printf '%s\n' "$ip" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
+  case "$ip" in *$'\n'*|*$'\r'*|*$'\t'*|*' '*) return 1 ;; esac
+  printf '%s\n' "$ip" | grep -Eq '^((0|[1-9][0-9]{0,2})\.){3}(0|[1-9][0-9]{0,2})$' || return 1
   IFS=. read -r -a parts <<< "$ip"
   for part in "${parts[@]}"; do
     [ "$part" -le 255 ] || return 1
@@ -55,9 +56,35 @@ ready || { echo "deployment prerequisites disappeared while waiting for bootstra
 stable_ip=$(cat "$base/stable-public-ip")
 valid_public_ip "$stable_ip" || { echo "invalid recorded stable public IP" >&2; exit 1; }
 
+first_nonempty_env_value() {
+  local key=$1
+  awk -F= -v key="$key" '
+    $1 == key {
+      value=substr($0, index($0, "=") + 1)
+      if (value != "") { print value; exit }
+    }
+  ' "$base/.env"
+}
+
+turn_secret=$(first_nonempty_env_value TURN_SECRET)
+if [ -z "$turn_secret" ]; then
+  turn_secret=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+fi
+p2p_portal_password=$(first_nonempty_env_value P2P_PORTAL_PASSWORD)
+if [ -z "$p2p_portal_password" ]; then
+  random_number=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')
+  p2p_portal_password=$(printf '%08d' "$((random_number % 100000000))")
+fi
+[ -n "$turn_secret" ] && [ -n "$p2p_portal_password" ] || {
+  echo "failed to establish non-empty service secrets" >&2
+  exit 1
+}
+
 env_tmp=$(mktemp "$base/.env.XXXXXX")
-awk '$0 !~ /^PUBLIC_IP=/' "$base/.env" > "$env_tmp"
+awk '$0 !~ /^(PUBLIC_IP|TURN_SECRET|P2P_PORTAL_PASSWORD)=/' "$base/.env" > "$env_tmp"
 printf 'PUBLIC_IP=%s\n' "$stable_ip" >> "$env_tmp"
+printf 'TURN_SECRET=%s\n' "$turn_secret" >> "$env_tmp"
+printf 'P2P_PORTAL_PASSWORD=%s\n' "$p2p_portal_password" >> "$env_tmp"
 chmod 0600 "$env_tmp"
 mv -f "$env_tmp" "$base/.env"
 

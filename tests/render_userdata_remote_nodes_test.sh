@@ -73,7 +73,12 @@ if grep -R -q "$deprecated_wellknown_dir\\|$deprecated_caddy_mount\\|$deprecated
   echo "portal well-known must be served by message-server, not static mounted files" >&2
   exit 1
 fi
-grep -q '^    grep -q .*P2P_PORTAL_PASSWORD=' "$tmp/user-data.yaml"
+grep -q 'first_nonempty_env_value TURN_SECRET' "$tmp/bundle/updater/bootstrap-host.sh"
+grep -q 'first_nonempty_env_value P2P_PORTAL_PASSWORD' "$tmp/bundle/updater/bootstrap-host.sh"
+if grep -q '^    grep -q .*\(TURN_SECRET\|P2P_PORTAL_PASSWORD\)=' "$tmp/user-data.yaml"; then
+  echo "service secrets must be normalized by the locked bootstrap, not a separate cloud-init command" >&2
+  exit 1
+fi
 grep -q '/var/dirextalk-message-server/p2p/bootstrap.json' "$tmp/bundle/init-tokens.sh"
 grep -q 'BOOTSTRAP_FILE=${BOOTSTRAP_FILE:-/var/dirextalk-message-server/p2p/bootstrap.json}' "$tmp/bundle/init-tokens.sh"
 grep -q 'if \[ -s "$BOOTSTRAP_FILE" \]' "$tmp/bundle/init-tokens.sh"

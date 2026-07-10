@@ -38,18 +38,16 @@ case "${1:-} ${2:-}" in
     printf 'running\n'
     ;;
   "lightsail get-static-ip")
-    count_file="$TMPDIR/get-static-ip.count"
-    count=0
-    [ -f "$count_file" ] && count=$(cat "$count_file")
-    count=$((count + 1))
-    printf '%s\n' "$count" > "$count_file"
-    if [ "$count" -eq 1 ]; then
-      exit 255
-    fi
-    printf '203.0.113.144\n'
+    case "$*" in
+      *staticIp.name*) [ -f "$TMPDIR/static-ip.allocated" ] || exit 255; printf 'dirextalk-ip-lightsail-example-test\n' ;;
+      *staticIp.attachedTo*) [ -f "$TMPDIR/static-ip.attached" ] && printf 'dirextalk-lightsail-example-test\n' || printf 'None\n' ;;
+      *staticIp.ipAddress*) printf '203.0.113.144\n' ;;
+      *) exit 90 ;;
+    esac
     ;;
-  "lightsail create-instances"|"lightsail open-instance-public-ports"|"lightsail allocate-static-ip"|"lightsail attach-static-ip")
-    ;;
+  "lightsail create-instances"|"lightsail open-instance-public-ports") ;;
+  "lightsail allocate-static-ip") touch "$TMPDIR/static-ip.allocated" ;;
+  "lightsail attach-static-ip") touch "$TMPDIR/static-ip.attached" ;;
   *)
     echo "unexpected aws command: $*" >&2
     exit 1

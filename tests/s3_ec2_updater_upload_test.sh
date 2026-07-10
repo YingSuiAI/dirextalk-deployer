@@ -26,11 +26,16 @@ printf '\n' >> "$CALLS"
 case "${1:-} ${2:-}" in
   "ec2 create-key-pair") printf 'test-private-key\n' ;;
   "ec2 create-security-group") printf 'sg-test\n' ;;
-  "ec2 authorize-security-group-ingress"|"ec2 associate-address"|"ec2 wait") ;;
+  "ec2 authorize-security-group-ingress"|"ec2 wait") ;;
+  "ec2 associate-address") touch "$EC2_ATTACHED" ;;
   "ec2 run-instances") printf 'i-test\n' ;;
   "ec2 describe-instances") printf 'vol-root-test\n' ;;
   "ec2 allocate-address") printf 'eipalloc-test\n' ;;
-  "ec2 describe-addresses") printf '203.0.113.155\n' ;;
+  "ec2 describe-addresses")
+    case "$*" in
+      *InstanceId*) [ -f "$EC2_ATTACHED" ] && printf 'i-test\n' || printf 'None\n' ;;
+      *PublicIp*) printf '203.0.113.155\n' ;;
+    esac ;;
   *) echo "unexpected aws command: $*" >&2; exit 1 ;;
 esac
 EOF
@@ -51,6 +56,7 @@ EOF
 done
 chmod 0700 "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH"
+export EC2_ATTACHED="$tmp/ec2.attached"
 export DIREXTALK_UPDATER_BINARY="$tmp/bin/dirextalk-updater"
 export DIREXTALK_UPDATER_RESOLVER_BINARY="$tmp/bin/dirextalk-updater"
 

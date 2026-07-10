@@ -81,12 +81,6 @@ DIREXTALK_BUNDLE
 tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server
 chmod 0755 /var/dirextalk-message-server/init-tokens.sh /var/dirextalk-message-server/updater/install.sh /var/dirextalk-message-server/updater/bootstrap-host.sh
 
-grep -q '^TURN_SECRET=' /var/dirextalk-message-server/.env || \\
-  echo "TURN_SECRET=\$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)" >> /var/dirextalk-message-server/.env
-grep -q '^P2P_PORTAL_PASSWORD=' /var/dirextalk-message-server/.env || \\
-  echo "P2P_PORTAL_PASSWORD=\$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", \$1 % 100000000}')" >> /var/dirextalk-message-server/.env
-
-export DOMAIN=\$(grep '^DOMAIN=' /var/dirextalk-message-server/.env | cut -d= -f2)
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
 fi

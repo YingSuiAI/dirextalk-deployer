@@ -8,11 +8,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -26,9 +27,7 @@ const (
 )
 
 type Service struct {
-	mu               sync.Mutex
 	store            *StateStore
-	state            RuntimeState
 	controlTokenHash string
 	now              func() time.Time
 }
@@ -40,13 +39,11 @@ func NewService(store *StateStore, controlToken string) (*Service, error) {
 	if strings.TrimSpace(controlToken) == "" {
 		return nil, fmt.Errorf("control token is required")
 	}
-	state, err := store.Load(context.Background())
-	if err != nil {
+	if _, err := store.Load(context.Background()); err != nil {
 		return nil, err
 	}
 	return &Service{
 		store:            store,
-		state:            state,
 		controlTokenHash: tokenHash(controlToken),
 		now:              time.Now,
 	}, nil
@@ -63,13 +60,32 @@ func (service *Service) RegisterPlan(ctx context.Context, rawToken string, plan 
 	if err := plan.Manifest.Validate(); err != nil {
 		return err
 	}
+	if !digestPattern.MatchString(plan.ManifestDigest) {
+		return fmt.Errorf("plan manifest_digest is invalid")
+	}
+	if err := plan.Manifest.ValidateUpgradeFrom(plan.CurrentVersion); err != nil {
+		return err
+	}
 	if !plan.ExpiresAt.After(service.now()) {
 		return fmt.Errorf("plan expiry must be in the future")
 	}
-	service.mu.Lock()
-	defer service.mu.Unlock()
-	service.state.Plans[tokenHash(rawToken)] = plan
-	return service.store.Save(ctx, service.state)
+	return service.store.Update(ctx, func(state *RuntimeState) error {
+		if state.Discovery.Status != DiscoveryFresh || state.Discovery.Manifest == nil {
+			return fmt.Errorf("a fresh discovered release is required")
+		}
+		if state.Discovery.ManifestDigest != plan.ManifestDigest || !reflect.DeepEqual(*state.Discovery.Manifest, plan.Manifest) {
+			return fmt.Errorf("plan manifest does not match the discovered release")
+		}
+		planHash := tokenHash(rawToken)
+		if existing, ok := state.Plans[planHash]; ok {
+			if reflect.DeepEqual(existing, plan) {
+				return nil
+			}
+			return fmt.Errorf("plan token is already bound to a different plan")
+		}
+		state.Plans[planHash] = plan
+		return nil
+	})
 }
 
 func (service *Service) serveHTTP(response http.ResponseWriter, request *http.Request) {
@@ -141,76 +157,76 @@ func (service *Service) createJob(response http.ResponseWriter, request *http.Re
 		return
 	}
 
-	service.mu.Lock()
-	defer service.mu.Unlock()
 	planHash := tokenHash(input.PlanToken)
-	plan, ok := service.state.Plans[planHash]
-	if !ok || !plan.ExpiresAt.After(service.now()) {
-		writeAPIError(response, http.StatusConflict, "plan_invalid_or_expired")
-		return
-	}
-	if existingID, exists := service.state.Idempotency[input.IdempotencyKey]; exists {
-		job, jobExists := service.state.Jobs[existingID]
-		if !jobExists {
-			writeAPIError(response, http.StatusInternalServerError, "state_inconsistent")
-			return
+	var ticket JobTicket
+	var rejection *mutationRejection
+	err := service.store.Update(request.Context(), func(state *RuntimeState) error {
+		plan, ok := state.Plans[planHash]
+		if !ok || !plan.ExpiresAt.After(service.now()) {
+			return rejectMutation(http.StatusConflict, "plan_invalid_or_expired")
 		}
-		if job.PlanTokenHash != planHash {
-			writeAPIError(response, http.StatusConflict, "idempotency_conflict")
-			return
+		if existingID, exists := state.Idempotency[input.IdempotencyKey]; exists {
+			job, jobExists := state.Jobs[existingID]
+			if !jobExists {
+				return rejectMutation(http.StatusInternalServerError, "state_inconsistent")
+			}
+			if job.PlanTokenHash != planHash {
+				return rejectMutation(http.StatusConflict, "idempotency_conflict")
+			}
+			rawBearer, tokenErr := randomToken(32)
+			if tokenErr != nil {
+				return rejectMutation(http.StatusInternalServerError, "token_generation_failed")
+			}
+			job.BearerTokenHashes = append(job.BearerTokenHashes, tokenHash(rawBearer))
+			job.UpdatedAt = service.now().UTC()
+			state.Jobs[job.ID] = job
+			ticket = JobTicket{JobID: job.ID, JobToken: rawBearer, StatusURL: publicJobPath(job.ID), Status: job.Status}
+			return nil
 		}
-		rawBearer, err := randomToken(32)
-		if err != nil {
-			writeAPIError(response, http.StatusInternalServerError, "token_generation_failed")
-			return
-		}
-		job.BearerTokenHashes = append(job.BearerTokenHashes, tokenHash(rawBearer))
-		job.UpdatedAt = service.now().UTC()
-		service.state.Jobs[job.ID] = job
-		if err := service.store.Save(request.Context(), service.state); err != nil {
-			writeAPIError(response, http.StatusInternalServerError, "state_write_failed")
-			return
-		}
-		writeJSON(response, http.StatusAccepted, JobTicket{JobID: job.ID, JobToken: rawBearer, StatusURL: publicJobPath(job.ID), Status: job.Status})
-		return
-	}
 
-	jobIDToken, err := randomToken(18)
+		jobIDToken, tokenErr := randomToken(18)
+		if tokenErr != nil {
+			return rejectMutation(http.StatusInternalServerError, "token_generation_failed")
+		}
+		rawBearer, tokenErr := randomToken(32)
+		if tokenErr != nil {
+			return rejectMutation(http.StatusInternalServerError, "token_generation_failed")
+		}
+		now := service.now().UTC()
+		job := Job{
+			ID:                "job_" + jobIDToken,
+			Status:            JobQueued,
+			PlanTokenHash:     planHash,
+			ManifestDigest:    plan.ManifestDigest,
+			BearerTokenHashes: []string{tokenHash(rawBearer)},
+			IdempotencyKey:    input.IdempotencyKey,
+			TargetVersion:     plan.Manifest.Version,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}
+		state.Jobs[job.ID] = job
+		state.Idempotency[input.IdempotencyKey] = job.ID
+		ticket = JobTicket{JobID: job.ID, JobToken: rawBearer, StatusURL: publicJobPath(job.ID), Status: job.Status}
+		return nil
+	})
 	if err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "token_generation_failed")
+		if errors.As(err, &rejection) {
+			writeAPIError(response, rejection.status, rejection.code)
+		} else {
+			writeAPIError(response, http.StatusInternalServerError, "state_write_failed")
+		}
 		return
 	}
-	rawBearer, err := randomToken(32)
-	if err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "token_generation_failed")
-		return
-	}
-	now := service.now().UTC()
-	job := Job{
-		ID:                "job_" + jobIDToken,
-		Status:            JobQueued,
-		PlanTokenHash:     planHash,
-		BearerTokenHashes: []string{tokenHash(rawBearer)},
-		IdempotencyKey:    input.IdempotencyKey,
-		TargetVersion:     plan.Manifest.Version,
-		CreatedAt:         now,
-		UpdatedAt:         now,
-	}
-	service.state.Jobs[job.ID] = job
-	service.state.Idempotency[input.IdempotencyKey] = job.ID
-	if err := service.store.Save(request.Context(), service.state); err != nil {
-		delete(service.state.Jobs, job.ID)
-		delete(service.state.Idempotency, input.IdempotencyKey)
-		writeAPIError(response, http.StatusInternalServerError, "state_write_failed")
-		return
-	}
-	writeJSON(response, http.StatusAccepted, JobTicket{JobID: job.ID, JobToken: rawBearer, StatusURL: publicJobPath(job.ID), Status: job.Status})
+	writeJSON(response, http.StatusAccepted, ticket)
 }
 
 func (service *Service) getJob(response http.ResponseWriter, request *http.Request, jobID string) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
-	job, ok := service.state.Jobs[jobID]
+	state, err := service.store.Load(request.Context())
+	if err != nil {
+		writeAPIError(response, http.StatusInternalServerError, "state_read_failed")
+		return
+	}
+	job, ok := state.Jobs[jobID]
 	if !ok {
 		writeAPIError(response, http.StatusNotFound, "job_not_found")
 		return
@@ -228,6 +244,17 @@ func (service *Service) getJob(response http.ResponseWriter, request *http.Reque
 		CreatedAt:      job.CreatedAt,
 		UpdatedAt:      job.UpdatedAt,
 	})
+}
+
+type mutationRejection struct {
+	status int
+	code   string
+}
+
+func (rejection *mutationRejection) Error() string { return rejection.code }
+
+func rejectMutation(status int, code string) error {
+	return &mutationRejection{status: status, code: code}
 }
 
 func publicJobPath(jobID string) string {

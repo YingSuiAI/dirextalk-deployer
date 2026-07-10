@@ -3,6 +3,7 @@ package updater
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -30,6 +31,12 @@ func TestLoadControlTokenReturnsTrimmedToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := LoadControlToken(path)
+	if runtime.GOOS == "windows" {
+		if err == nil {
+			t.Fatal("Windows control-token loading must fail closed without ACL verification")
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("LoadControlToken: %v", err)
 	}

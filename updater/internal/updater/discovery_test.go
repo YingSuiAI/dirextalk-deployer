@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -61,5 +62,59 @@ func TestRefreshDiscoveryRetainsLastGoodReleaseWhenSourceFails(t *testing.T) {
 	}
 	if cache.ErrorCode != "release_source_unavailable" || !cache.CheckedAt.Equal(secondCheck) {
 		t.Fatalf("unexpected stale discovery metadata: %#v", cache)
+	}
+}
+
+func TestRefreshDiscoveryAndPlanRegistrationDoNotLoseEachOthersUpdates(t *testing.T) {
+	store := NewStateStore(filepath.Join(t.TempDir(), "state.json"))
+	manifestData := []byte(validManifestJSON())
+	if _, err := RefreshDiscovery(context.Background(), store, releaseSourceFunc(func(context.Context) ([]byte, error) {
+		return manifestData, nil
+	}), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(store, testControlToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	refreshDone := make(chan error, 1)
+	go func() {
+		_, refreshErr := RefreshDiscovery(context.Background(), store, releaseSourceFunc(func(context.Context) ([]byte, error) {
+			once.Do(func() { close(started) })
+			<-release
+			return manifestData, nil
+		}), time.Now().Add(time.Hour))
+		refreshDone <- refreshErr
+	}()
+	<-started
+	manifest, err := ValidateManifest(manifestData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RegisterPlan(context.Background(), "parallel-plan", Plan{
+		Manifest:       manifest,
+		ManifestDigest: manifestDigest(manifestData),
+		CurrentVersion: "v1.0.0",
+		ExpiresAt:      time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-refreshDone; err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := persisted.Plans[tokenHash("parallel-plan")]; !ok {
+		t.Fatal("discovery refresh overwrote the concurrently registered plan")
+	}
+	if persisted.Discovery.Status != DiscoveryFresh || persisted.Discovery.ManifestDigest != manifestDigest(manifestData) {
+		t.Fatalf("plan registration overwrote discovery: %#v", persisted.Discovery)
 	}
 }

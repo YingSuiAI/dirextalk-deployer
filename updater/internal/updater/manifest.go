@@ -102,6 +102,23 @@ func (manifest Manifest) Validate() error {
 	return nil
 }
 
+func (manifest Manifest) ValidateUpgradeFrom(currentVersion string) error {
+	current, err := parseCanonicalVersion("current_version", currentVersion)
+	if err != nil {
+		return err
+	}
+	for _, value := range manifest.UpgradeFrom {
+		constraint, constraintErr := semver.NewConstraint(strings.TrimSpace(value))
+		if constraintErr != nil {
+			return fmt.Errorf("upgrade_from is invalid: %w", constraintErr)
+		}
+		if constraint.Check(current) {
+			return nil
+		}
+	}
+	return fmt.Errorf("current_version %s is not an allowed upgrade source", currentVersion)
+}
+
 func parseCanonicalVersion(field, value string) (*semver.Version, error) {
 	if !canonicalVersionPattern.MatchString(value) {
 		return nil, fmt.Errorf("%s must be a canonical stable version such as v1.0.0", field)

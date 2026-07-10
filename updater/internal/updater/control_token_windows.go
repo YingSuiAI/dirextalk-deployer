@@ -2,8 +2,11 @@
 
 package updater
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 func validateControlTokenFile(os.FileInfo) error {
-	return nil
+	return fmt.Errorf("control-token ACL validation is not implemented on Windows; updater execution is Linux-only")
 }

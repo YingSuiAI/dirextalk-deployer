@@ -66,7 +66,7 @@ func TestRuntimeStateRejectsInvalidPersistedPlanAndJobState(t *testing.T) {
 		state := NewRuntimeState()
 		invalidManifest := manifest
 		invalidManifest.ImageDigest = "sha256:attacker"
-		state.Plans[tokenHash("plan")] = Plan{Manifest: invalidManifest, ExpiresAt: time.Now().Add(time.Hour)}
+		state.Plans[tokenHash("plan")] = Plan{Manifest: invalidManifest, ManifestDigest: manifestDigest([]byte(validManifestJSON())), CurrentVersion: "v1.0.0", ExpiresAt: time.Now().Add(time.Hour)}
 		if err := NewStateStore(filepath.Join(t.TempDir(), "state.json")).Save(context.Background(), state); err == nil {
 			t.Fatal("expected invalid persisted manifest to be rejected")
 		}
@@ -74,11 +74,22 @@ func TestRuntimeStateRejectsInvalidPersistedPlanAndJobState(t *testing.T) {
 	t.Run("job status", func(t *testing.T) {
 		state := NewRuntimeState()
 		planHash := tokenHash("plan")
-		state.Plans[planHash] = Plan{Manifest: manifest, ExpiresAt: time.Now().Add(time.Hour)}
-		state.Jobs["job_1"] = Job{ID: "job_1", Status: JobStatus("run_shell"), PlanTokenHash: planHash, BearerTokenHashes: []string{tokenHash("bearer")}, IdempotencyKey: "request-1"}
+		state.Plans[planHash] = Plan{Manifest: manifest, ManifestDigest: manifestDigest([]byte(validManifestJSON())), CurrentVersion: "v1.0.0", ExpiresAt: time.Now().Add(time.Hour)}
+		state.Jobs["job_1"] = Job{ID: "job_1", Status: JobStatus("run_shell"), PlanTokenHash: planHash, ManifestDigest: manifestDigest([]byte(validManifestJSON())), BearerTokenHashes: []string{tokenHash("bearer")}, IdempotencyKey: "request-1", TargetVersion: manifest.Version}
 		state.Idempotency["request-1"] = "job_1"
 		if err := NewStateStore(filepath.Join(t.TempDir(), "state.json")).Save(context.Background(), state); err == nil {
 			t.Fatal("expected invalid persisted job state to be rejected")
+		}
+	})
+	t.Run("job target", func(t *testing.T) {
+		state := NewRuntimeState()
+		planHash := tokenHash("plan")
+		digest := manifestDigest([]byte(validManifestJSON()))
+		state.Plans[planHash] = Plan{Manifest: manifest, ManifestDigest: digest, CurrentVersion: "v1.0.0", ExpiresAt: time.Now().Add(time.Hour)}
+		state.Jobs["job_1"] = Job{ID: "job_1", Status: JobQueued, PlanTokenHash: planHash, ManifestDigest: digest, BearerTokenHashes: []string{tokenHash("bearer")}, IdempotencyKey: "request-1", TargetVersion: "v9.0.0"}
+		state.Idempotency["request-1"] = "job_1"
+		if err := NewStateStore(filepath.Join(t.TempDir(), "state.json")).Save(context.Background(), state); err == nil {
+			t.Fatal("expected a job target inconsistent with its plan to be rejected")
 		}
 	})
 }

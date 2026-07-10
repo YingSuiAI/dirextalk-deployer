@@ -53,8 +53,10 @@ type DiscoveryCache struct {
 }
 
 type Plan struct {
-	Manifest  Manifest  `json:"manifest"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Manifest       Manifest  `json:"manifest"`
+	ManifestDigest string    `json:"manifest_digest"`
+	CurrentVersion string    `json:"current_version"`
+	ExpiresAt      time.Time `json:"expires_at"`
 }
 
 type JobStatus string
@@ -67,6 +69,7 @@ type Job struct {
 	ID                string    `json:"id"`
 	Status            JobStatus `json:"status"`
 	PlanTokenHash     string    `json:"plan_token_hash"`
+	ManifestDigest    string    `json:"manifest_digest"`
 	BearerTokenHashes []string  `json:"bearer_token_hashes"`
 	IdempotencyKey    string    `json:"idempotency_key"`
 	CurrentVersion    string    `json:"current_version,omitempty"`
@@ -133,6 +136,12 @@ func (state *RuntimeState) normalizeAndValidate() error {
 		if err := plan.Manifest.Validate(); err != nil {
 			return fmt.Errorf("plan manifest is invalid: %w", err)
 		}
+		if !digestPattern.MatchString(plan.ManifestDigest) {
+			return fmt.Errorf("plan manifest_digest is invalid")
+		}
+		if err := plan.Manifest.ValidateUpgradeFrom(plan.CurrentVersion); err != nil {
+			return fmt.Errorf("plan upgrade edge is invalid: %w", err)
+		}
 		if plan.ExpiresAt.IsZero() {
 			return fmt.Errorf("plan expiry is required")
 		}
@@ -146,6 +155,10 @@ func (state *RuntimeState) normalizeAndValidate() error {
 		}
 		if _, ok := state.Plans[job.PlanTokenHash]; !ok {
 			return fmt.Errorf("job %s references an unknown plan", jobID)
+		}
+		plan := state.Plans[job.PlanTokenHash]
+		if job.ManifestDigest != plan.ManifestDigest || job.TargetVersion != plan.Manifest.Version {
+			return fmt.Errorf("job %s target does not match its plan", jobID)
 		}
 		if job.IdempotencyKey == "" || state.Idempotency[job.IdempotencyKey] != jobID {
 			return fmt.Errorf("job %s idempotency mapping is invalid", jobID)
@@ -177,12 +190,13 @@ func storedTokenHashValid(value string) bool {
 }
 
 type StateStore struct {
-	path string
-	mu   sync.Mutex
+	path          string
+	syncDirectory func(string) error
+	mu            sync.Mutex
 }
 
 func NewStateStore(path string) *StateStore {
-	return &StateStore{path: path}
+	return &StateStore{path: path, syncDirectory: syncDirectory}
 }
 
 func (store *StateStore) Path() string {
@@ -219,6 +233,25 @@ func (store *StateStore) loadLocked(ctx context.Context) (RuntimeState, error) {
 func (store *StateStore) Save(ctx context.Context, state RuntimeState) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	return store.saveLocked(ctx, state)
+}
+
+// Update serializes a complete read-modify-write transaction. Callers must not
+// perform external I/O in mutate because the state lock remains held until the
+// updated snapshot has been durably committed or the write has failed.
+func (store *StateStore) Update(ctx context.Context, mutate func(*RuntimeState) error) error {
+	if mutate == nil {
+		return fmt.Errorf("state mutation is required")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	state, err := store.loadLocked(ctx)
+	if err != nil {
+		return err
+	}
+	if err := mutate(&state); err != nil {
+		return err
+	}
 	return store.saveLocked(ctx, state)
 }
 
@@ -272,7 +305,7 @@ func (store *StateStore) saveLocked(ctx context.Context, state RuntimeState) err
 		return fmt.Errorf("replace updater state: %w", err)
 	}
 	keepTemporary = true
-	if err := syncDirectory(directory); err != nil {
+	if err := store.syncDirectory(directory); err != nil {
 		return fmt.Errorf("fsync updater state directory: %w", err)
 	}
 	return nil

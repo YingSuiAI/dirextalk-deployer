@@ -152,6 +152,19 @@ wildcard, hyphen and OR forms used by the canonical Go validators. The independe
 Go updater and message-server Release CI remain authoritative for tested upgrade
 compatibility.
 
+### Fixed legacy d1 adoption
+
+`scripts/adopt-legacy-node.sh` is a separate explicit operation, not normal
+resume. Its dry run accepts only the recorded d1 source directory, Compose
+project `dirextalk-p2p`, runtime v0.15.2, the approved legacy digest, minimal
+healthy response, exact source Compose revision, and root-managed systemd Caddy
+running as user/group `caddy`. A confirmed run copies an updater-owned Compose
+definition and P2P state without pulling or recreating a container, records
+`server_release.source=legacy_adopted`, then enters the existing pinned updater
+bootstrap in systemd-Caddy mode. The Caddy edit exposes only public job URLs;
+validation or reload failure restores the original file and removes the partial
+updater layout.
+
 For EC2, replace `DIREXTALK_CLOUD_PROVIDER=lightsail` with `DIREXTALK_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
 
 Exit codes:

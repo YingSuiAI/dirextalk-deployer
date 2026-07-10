@@ -45,6 +45,16 @@ server_release_state_is_debug() {
     && [ -z "$manifest_digest" ]
 }
 
+server_release_state_is_legacy_adopted() {
+  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5
+  local approved=sha256:d57a0b7830f7248e29fe7c45c0848cb1167454709fd33effe07ff074415f571c
+  [ "$source" = legacy_adopted ] \
+    && [ "$version" = v0.15.2 ] \
+    && [ "$image" = dirextalk/message-server:v0.15.2 ] \
+    && [ "$digest" = "$approved" ] \
+    && [ "$image_ref" = "$image@$digest" ]
+}
+
 server_release_prepare_state() {
   server_release_validate_override || return 1
   local source version image digest image_ref manifest_digest node_binary resolver_script resolved_file resolved_json instance_id
@@ -71,6 +81,13 @@ server_release_prepare_state() {
       fi
       warn "Server release is frozen after infrastructure creation; the existing debug image cannot be changed."
       return 1
+    fi
+    if server_release_state_is_legacy_adopted "$source" "$version" "$image" "$digest" "$image_ref"; then
+      [ -z "${MESSAGE_SERVER_IMAGE:-}" ] || {
+        warn "An adopted legacy release cannot be replaced by an image override."
+        return 1
+      }
+      return 0
     fi
     warn "Server release state is missing or inconsistent for existing infrastructure; refusing to select a replacement release."
     return 1

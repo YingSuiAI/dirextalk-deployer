@@ -240,6 +240,15 @@ invalid `upgrade_from` ranges and ranges that include the target. Its constraint
 corpus mirrors the forms accepted by the canonical Go validators; the updater
 and message-server Release CI own cross-version compatibility evidence.
 
+The only legacy host adoption path is `scripts/adopt-legacy-node.sh`. It first
+requires a dry-run proof of the fixed d1 v0.15.2 Compose project, approved image
+digest, live health, binary version, and systemd Caddy identity. Mutation then
+requires the exact printed confirmation. It creates the updater-owned
+`/var/dirextalk-message-server` view without pulling or recreating the running
+container, installs the pinned updater with `caddy_mode=systemd`, and
+transactionally adds only `/_dirextalk/updater/v1/jobs/*` to Caddy. Never use
+this command to guess or normalize another legacy topology.
+
 Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
 `route53` only when the current AWS account contains a matching public hosted
 zone; otherwise it chooses `user` and gives manual A-record guidance after IP

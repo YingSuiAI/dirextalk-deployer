@@ -418,8 +418,9 @@ _is_canonical_ipv4() {
 }
 
 _resume_host_bootstrap() {
-  local public_ip=$1 keyfile=$2
+  local public_ip=$1 keyfile=$2 legacy_source=${3:-}
   local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt result identity integration_bundle remote_command
+  local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
   local attempts=${DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS:-60}
   local delay=${DIREXTALK_BOOTSTRAP_SSH_DELAY:-5}
   _is_canonical_ipv4 "$public_ip" || {
@@ -435,9 +436,13 @@ _resume_host_bootstrap() {
       updater/bootstrap-host.sh \
       updater/install.sh \
       updater/reconcile-host.sh \
+      updater/adopt-legacy-host.sh \
+      updater/legacy-d1-compose.p2p.yml \
+      updater/legacy-adopt-compose.yml \
       updater/set-desired-state.sh \
       updater/release.env \
       updater/config.json \
+      updater/config.legacy-systemd-caddy.json \
       updater/dirextalk-updater.service \
       updater/dirextalk-updater-discovery.service \
       updater/dirextalk-updater-discovery.timer \
@@ -446,7 +451,11 @@ _resume_host_bootstrap() {
     warn "Failed to build the updater integration bundle."
     return 1
   fi
-  remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'"
+  case "$ssh_user:$legacy_source" in
+    ubuntu:) remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'" ;;
+    root:/root/dirextalk/dirextalk-message-server) remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip' '$legacy_source'" ;;
+    *) rm -f "$integration_bundle"; warn "Host bootstrap rejected an unsupported SSH user or legacy source."; return 1 ;;
+  esac
   identity=$(printf '%s\t%s\t%s' "$UPDATER_PIN_VERSION" "$UPDATER_PIN_COMMIT" "$UPDATER_PIN_SHA256")
   log "Synchronizing the pinned updater integration and resuming bootstrap through the stable public IP before DNS gating..."
   attempt=1
@@ -456,7 +465,7 @@ _resume_host_bootstrap() {
         -o ConnectTimeout=10 \
         -o StrictHostKeyChecking=accept-new \
         -o "UserKnownHostsFile=$known_hosts" \
-        "ubuntu@$public_ip" \
+        "$ssh_user@$public_ip" \
         "$remote_command" < "$integration_bundle"); then
       if [ "$(printf '%s\n' "$result" | tail -n 1)" = "$identity" ]; then
         rm -f "$integration_bundle"

@@ -5,6 +5,8 @@ set -euo pipefail
 root=${DIREXTALK_BOOTSTRAP_ROOT:-}
 base="$root/var/dirextalk-message-server"
 timeout=${DIREXTALK_BOOTSTRAP_TIMEOUT:-900}
+adopt_existing=${DIREXTALK_BOOTSTRAP_ADOPT_EXISTING:-0}
+legacy_source=${DIREXTALK_LEGACY_ADOPT_SOURCE_DIR:-}
 stable_ip=${1:-}
 lock_dir="$root/run/lock"
 lock_file="$lock_dir/dirextalk-bootstrap.lock"
@@ -33,9 +35,9 @@ ready() {
   [ -s "$base/stable-public-ip" ] \
     && [ -f "$base/.env" ] \
     && [ -f "$base/docker-compose.yml" ] \
-    && [ -x "$base/init-tokens.sh" ] \
     && [ -x "$base/updater/install.sh" ] \
-    && [ -f "$base/updater/release.env" ]
+    && [ -f "$base/updater/release.env" ] \
+    && { [ "$adopt_existing" = 1 ] || [ -x "$base/init-tokens.sh" ]; }
 }
 
 deadline=$(($(date +%s) + timeout))
@@ -131,6 +133,15 @@ chmod 0600 "$env_tmp"
 mv -f "$env_tmp" "$base/.env"
 
 bash "$base/updater/install.sh" "$updater_binary"
+if [ "$adopt_existing" = 1 ]; then
+  [ "$legacy_source" = /root/dirextalk/dirextalk-message-server ] || {
+    echo "legacy adoption source is not approved" >&2
+    exit 1
+  }
+  bash "$base/updater/adopt-legacy-host.sh" probe "$legacy_source" "$base/updater" >/dev/null
+  touch "$base/.deploy-done"
+  exit 0
+fi
 mkdir -p "$base/p2p"
 chmod 0700 "$base"
 cd "$base"

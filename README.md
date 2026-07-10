@@ -118,6 +118,17 @@ Its accepted/rejected corpus covers the constraint forms used by the canonical
 Go validators; the independent updater and message-server Release CI remain
 authoritative for cross-version compatibility evidence.
 
+One pre-updater node can be adopted only through the explicit, fixed d1
+contract. Run `scripts/adopt-legacy-node.sh --dry-run <state.json>` with
+`DIREXTALK_LEGACY_ADOPT_SOURCE_DIR=/root/dirextalk/dirextalk-message-server`
+and `DIREXTALK_LEGACY_ADOPT_SSH_USER=root`. After reviewing the read-only
+v0.15.2 image/digest, health, Compose, and host-Caddy evidence, set the exact
+confirmation printed by the command and rerun without `--dry-run`. It never
+pulls or starts a different image: it creates the updater-owned immutable
+Compose view, copies live P2P state, installs the pinned updater, and adds only
+the public updater jobs route to validated host Caddy. Other legacy topologies
+and existing formal release state are rejected.
+
 `DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
 
 On Windows, use the PowerShell entrypoint so the deployer selects Git Bash for the cloud phases while writing Windows-compatible local `dirextalk-connect` paths:

@@ -34,6 +34,7 @@ tests=(
   tests/s3_stable_ip_reconcile_test.sh
   tests/s3_public_ip_validation_test.sh
   tests/s3_updater_integration_migration_test.sh
+  tests/legacy_adopt_test.sh
   tests/lightsail_static_ip_quota_test.sh
   tests/destroy_lightsail_test.sh
   tests/mcp_tools_runtime_check_test.sh

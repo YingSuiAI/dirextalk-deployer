@@ -8,6 +8,10 @@ const manifestAsset = "release-manifest.json";
 const checksumAsset = `${manifestAsset}.sha256`;
 const allowedImage = "dirextalk/message-server";
 const maximumBytes = 1024 * 1024;
+const requestTimeoutMs = 30_000;
+const maximumRedirects = 5;
+const assetCDNHosts = new Set(["release-assets.githubusercontent.com", "objects.githubusercontent.com"]);
+const assetURLPattern = /^https:\/\/github\.com\/YingSuiAI\/dirextalk-message-server\/releases\/download\/v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\/release-manifest\.json(?:\.sha256)?$/;
 const versionPattern = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const manifestFields = new Set([
@@ -31,6 +35,7 @@ function parseJSON(data, label) {
 }
 
 function parseVersion(value, label) {
+  if (typeof value !== "string") throw new Error(`${label} must be canonical vX.Y.Z`);
   const match = versionPattern.exec(value);
   if (!match) throw new Error(`${label} must be canonical vX.Y.Z`);
   return match.slice(1).map(Number);
@@ -43,28 +48,14 @@ function compareVersion(left, right) {
   return 0;
 }
 
-function comparatorMatches(version, token) {
-  const match = /^(<=|>=|<|>|=)?(v?(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$/.exec(token);
-  if (!match) throw new Error(`unsupported upgrade_from comparator: ${token}`);
-  const target = parseVersion(match[2].startsWith("v") ? match[2] : `v${match[2]}`, "upgrade_from version");
-  const comparison = compareVersion(version, target);
-  switch (match[1] || "=") {
-    case "<": return comparison < 0;
-    case "<=": return comparison <= 0;
-    case ">": return comparison > 0;
-    case ">=": return comparison >= 0;
-    default: return comparison === 0;
+function validateUpgradeFrom(values) {
+  if (!Array.isArray(values)) throw new Error("release manifest upgrade_from must be an array");
+  const unique = new Set();
+  for (const value of values) {
+    if (typeof value !== "string" || value.trim() === "") throw new Error("release manifest upgrade_from entries must be non-empty strings");
+    if (unique.has(value)) throw new Error("release manifest upgrade_from entries must be unique");
+    unique.add(value);
   }
-}
-
-function constraintMatches(version, constraint) {
-  const groups = constraint.split("||").map((group) => group.trim()).filter(Boolean);
-  if (groups.length === 0) throw new Error("upgrade_from constraint is empty");
-  return groups.some((group) => {
-    const tokens = group.replaceAll(",", " ").split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) throw new Error("upgrade_from constraint is empty");
-    return tokens.every((token) => comparatorMatches(version, token));
-  });
 }
 
 function validateManifest(manifest) {
@@ -72,12 +63,10 @@ function validateManifest(manifest) {
     if (!manifestFields.has(field)) throw new Error(`release manifest contains unknown field ${field}`);
   }
   if (Object.keys(manifest).length !== manifestFields.size || manifest.manifest_version !== 1) throw new Error("release manifest fields/version are invalid");
-  const target = parseVersion(manifest.version, "manifest version");
+  parseVersion(manifest.version, "manifest version");
   if (manifest.image !== `${allowedImage}:${manifest.version}`) throw new Error("release manifest image is inconsistent");
   if (!digestPattern.test(manifest.image_digest)) throw new Error("release manifest image_digest is invalid");
-  if (!Array.isArray(manifest.upgrade_from) || manifest.upgrade_from.some((value) => typeof value !== "string" || constraintMatches(target, value))) {
-    throw new Error("release manifest upgrade_from is invalid or includes the target");
-  }
+  validateUpgradeFrom(manifest.upgrade_from);
   if (!Number.isInteger(manifest.schema_version) || !Number.isInteger(manifest.schema_compat_version)
       || manifest.schema_version < 1 || manifest.schema_compat_version < 1 || manifest.schema_compat_version > manifest.schema_version) {
     throw new Error("release manifest schema window is invalid");
@@ -131,15 +120,89 @@ export async function resolveServerRelease(getBytes) {
   };
 }
 
-async function fetchBytes(url) {
-  const response = await fetch(url, {
-    headers: { Accept: "application/vnd.github+json", "User-Agent": "dirextalk-deployer" },
-    redirect: "follow",
-  });
-  if (!response.ok) throw new Error(`release request failed with HTTP ${response.status}`);
-  const data = Buffer.from(await response.arrayBuffer());
-  if (data.length > maximumBytes) throw new Error(`release response exceeds ${maximumBytes} bytes`);
-  return data;
+function classifyInitialURL(value) {
+  if (value === latestReleaseAPI) return "metadata";
+  if (assetURLPattern.test(value)) return "asset";
+  throw new Error("release request URL is outside the fixed GitHub contract");
+}
+
+function validateHop(value, kind, initial) {
+  let parsed;
+  try { parsed = new URL(value); } catch { throw new Error("release redirect URL is invalid"); }
+  if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "" || parsed.hash !== "" || parsed.port !== "") {
+    throw new Error("release redirect URL must be credential-free fragment-free HTTPS on the default port");
+  }
+  if (kind === "metadata") {
+    if (parsed.href !== initial) throw new Error("release metadata redirects may not leave the exact API URL");
+    return parsed.href;
+  }
+  if (parsed.href === initial) return parsed.href;
+  if (!assetCDNHosts.has(parsed.hostname)) throw new Error("release asset redirect host is not GitHub-owned");
+  return parsed.href;
+}
+
+async function readBoundedBody(response) {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null) {
+    if (!/^(0|[1-9][0-9]*)$/.test(contentLength)) throw new Error("release response Content-Length is invalid");
+    if (Number(contentLength) > maximumBytes) throw new Error(`release response Content-Length exceeds ${maximumBytes} bytes`);
+  }
+  if (!response.body || typeof response.body.getReader !== "function") throw new Error("release response body is not readable");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!(value instanceof Uint8Array)) throw new Error("release response yielded an invalid body chunk");
+    total += value.byteLength;
+    if (total > maximumBytes) {
+      await reader.cancel();
+      throw new Error(`release response exceeds ${maximumBytes} bytes`);
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks, total);
+}
+
+export async function fetchBytes(url, options = {}) {
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const timeoutMs = options.timeoutMs ?? requestTimeoutMs;
+  const maxRedirects = options.maxRedirects ?? maximumRedirects;
+  const kind = classifyInitialURL(url);
+  const initial = url;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error(`release request timed out after ${timeoutMs}ms`)), timeoutMs);
+  let current = validateHop(url, kind, initial);
+  let redirects = 0;
+  try {
+    while (true) {
+      let response;
+      try {
+        response = await fetchImpl(current, {
+          headers: { Accept: "application/vnd.github+json", "User-Agent": "dirextalk-deployer" },
+          redirect: "manual",
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        throw error;
+      }
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        if (kind === "metadata") throw new Error("release metadata redirects are forbidden");
+        if (redirects >= maxRedirects) throw new Error("release request has too many redirects");
+        const location = response.headers.get("location");
+        if (!location) throw new Error("release redirect is missing Location");
+        current = validateHop(new URL(location, current).href, kind, initial);
+        redirects += 1;
+        continue;
+      }
+      if (!response.ok) throw new Error(`release request failed with HTTP ${response.status}`);
+      return await readBoundedBody(response);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

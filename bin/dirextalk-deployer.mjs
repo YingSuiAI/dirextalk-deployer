@@ -20,8 +20,7 @@ const skillFiles = [
   "bin",
   "package.json",
   "references",
-  "scripts",
-  "updater"
+  "scripts"
 ];
 
 const projectTargets = {

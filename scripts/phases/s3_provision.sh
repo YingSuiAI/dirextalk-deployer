@@ -19,7 +19,7 @@ DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
 
 run_phase() {
   aws_env_prep
-  if ! updater_release_record_state; then
+  if ! updater_release_validate_pin; then
     phase_set S3_PROVISION failed "pinned updater release metadata is invalid"
     return 1
   fi
@@ -419,7 +419,9 @@ _is_canonical_ipv4() {
 
 _resume_host_bootstrap() {
   local public_ip=$1 keyfile=$2
-  local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt
+  local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt result identity integration_bundle remote_command
+  local attempts=${DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS:-60}
+  local delay=${DIREXTALK_BOOTSTRAP_SSH_DELAY:-5}
   _is_canonical_ipv4 "$public_ip" || {
     warn "Host bootstrap resume rejected a non-canonical public IPv4 address."
     return 1
@@ -428,22 +430,45 @@ _resume_host_bootstrap() {
     warn "Host bootstrap resume requires a stable public IP and the recorded SSH key."
     return 1
   }
-  log "Resuming the user-data bundled host bootstrap through the stable public IP before DNS gating..."
+  integration_bundle=$(mktemp "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz") || return 1
+  if ! tar -C "$S3_PHASE_DIR" -cf - \
+      updater/bootstrap-host.sh \
+      updater/install.sh \
+      updater/reconcile-host.sh \
+      updater/release.env \
+      updater/config.json \
+      updater/dirextalk-updater.service \
+      updater/dirextalk-updater-discovery.service \
+      updater/dirextalk-updater-discovery.timer \
+      | gzip -n > "$integration_bundle"; then
+    rm -f "$integration_bundle"
+    warn "Failed to build the updater integration bundle."
+    return 1
+  fi
+  remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'"
+  identity=$(printf '%s\t%s\t%s' "$UPDATER_PIN_VERSION" "$UPDATER_PIN_COMMIT" "$UPDATER_PIN_SHA256")
+  log "Synchronizing the pinned updater integration and resuming bootstrap through the stable public IP before DNS gating..."
   attempt=1
-  while [ "$attempt" -le 60 ]; do
-    if ssh -T -i "$keyfile" \
+  while [ "$attempt" -le "$attempts" ]; do
+    if result=$(ssh -T -i "$keyfile" \
         -o BatchMode=yes \
         -o ConnectTimeout=10 \
         -o StrictHostKeyChecking=accept-new \
         -o "UserKnownHostsFile=$known_hosts" \
         "ubuntu@$public_ip" \
-        "sudo bash /var/dirextalk-message-server/updater/bootstrap-host.sh '$public_ip'"; then
-      return 0
+        "$remote_command" < "$integration_bundle"); then
+      if [ "$(printf '%s\n' "$result" | tail -n 1)" = "$identity" ]; then
+        rm -f "$integration_bundle"
+        updater_release_record_state
+        return $?
+      fi
+      warn "Remote updater identity did not match the deployer pin (attempt $attempt/$attempts)."
     fi
-    warn "SSH/user-data bootstrap is not ready (attempt $attempt/60); retrying in 5s."
+    warn "SSH/updater integration bootstrap is not ready (attempt $attempt/$attempts); retrying in ${delay}s."
     attempt=$((attempt + 1))
-    sleep 5
+    [ "$attempt" -le "$attempts" ] && sleep "$delay"
   done
+  rm -f "$integration_bundle"
   warn "Timed out resuming host bootstrap through $public_ip. Rerun S3 to retry the idempotent bootstrap."
   return 1
 }

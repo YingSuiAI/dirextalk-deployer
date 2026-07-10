@@ -145,6 +145,10 @@ It also records the deployer-owned independent updater version, commit, and
 SHA-256 pin. User-data on the verified Ubuntu 24.04 x86_64 host downloads that
 fixed Release asset, verifies the local pin, and atomically installs it; no
 local Go toolchain or updater SCP step is required.
+The deployer-side Node Release selector does not duplicate Masterminds SemVer:
+it checks that `upgrade_from` is an array of unique non-empty strings, while the
+independent Go updater and message-server Release CI remain authoritative for
+the meaning and tested compatibility of each constraint.
 
 For EC2, replace `DIREXTALK_CLOUD_PROVIDER=lightsail` with `DIREXTALK_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
 

@@ -115,11 +115,16 @@ fi
 
 "$NODE_BIN" bin/dirextalk-deployer.mjs skill install --agent gemini --home "$tmp/home2" --dry-run > "$tmp/dry-run.out"
 assert_contains "$tmp/dry-run.out" '"dryRun": true'
+assert_contains "$tmp/dry-run.out" '"fileCount": 10'
 assert_contains "$tmp/dry-run.out" '.gemini'
 if [ -e "$tmp/home2/.gemini" ]; then
   echo "dry-run should not create global target directories" >&2
   exit 1
 fi
+
+assert_contains "$ROOT/agents/openai.yaml" 'Ubuntu 24.04 x86_64'
+assert_contains "$ROOT/agents/openai.yaml" 'pinned'
+assert_contains "$ROOT/agents/openai.yaml" 'dirextalk-updater'
 
 PI_CODING_AGENT_DIR="$tmp/pi-agent-root" "$NODE_BIN" bin/dirextalk-deployer.mjs skill install --agent pi --scope global --dry-run > "$tmp/pi-global.out"
 assert_contains "$tmp/pi-global.out" 'pi-agent-root'

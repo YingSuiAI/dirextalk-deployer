@@ -67,6 +67,8 @@ set -euo pipefail
 printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
+cat >/dev/null
+printf 'v1.0.0\t6d4d33a1cd4baad2b490f25e57124675c74771d1\td54b786c30b9b866341a89b6496b574b0d29cc48f26bf4787b7686faf4c1f0f1\n'
 EOF
 chmod 700 "$fakebin/ssh"
 export PATH="$fakebin:$PATH"
@@ -120,7 +122,7 @@ grep -q -- '--availability-zone us-east-1b' "$CALLS" || { cat "$CALLS" >&2; exit
 grep -q 'lightsail allocate-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail attach-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 if grep -q '^scp-called$\|^scp ' "$CALLS"; then echo "S3 must not SCP updater artifacts" >&2; cat "$CALLS" >&2; exit 1; fi
-grep -q '^ssh .*ubuntu@203\.0\.113\.144.*\/var\/dirextalk-message-server\/updater\/bootstrap-host\.sh.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q '^ssh .*ubuntu@203\.0\.113\.144.*tar.*reconcile-host\.sh.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)

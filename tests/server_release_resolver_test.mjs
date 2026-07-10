@@ -66,6 +66,16 @@ function fixture({ release = {}, manifest: manifestOverrides = {}, rawManifest, 
   assert.match(resolved.manifest_digest, /^sha256:[0-9a-f]{64}$/);
 }
 
+for (const upgradeFrom of [
+  ["~v1.0.0"],
+  ["^v0.9.0"],
+  ["v0.x"],
+  ["v0.9.0 - v1.0.9"],
+]) {
+  const fake = fixture({ manifest: { upgrade_from: upgradeFrom } });
+  await resolveServerRelease(fake.get);
+}
+
 const rejected = [
   fixture({ release: { draft: true } }),
   fixture({ release: { prerelease: true } }),
@@ -84,7 +94,9 @@ const rejected = [
   fixture({ manifest: { shell: "attacker" } }),
   fixture({ manifest: { image: "attacker/image:v1.1.0" } }),
   fixture({ manifest: { image_digest: `sha256:${"A".repeat(64)}` } }),
-  fixture({ manifest: { upgrade_from: [">=v1.1.0"] } }),
+  fixture({ manifest: { upgrade_from: [""] } }),
+  fixture({ manifest: { upgrade_from: [">=v1.0.0", ">=v1.0.0"] } }),
+  fixture({ manifest: { upgrade_from: [1] } }),
   fixture({ manifest: { schema_compat_version: 3 } }),
   fixture({ manifest: { minimum_client_version: "1.0.0" } }),
   fixture({ manifest: { release_notes_url: "https://attacker.example/v1.1.0" } }),

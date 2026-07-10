@@ -20,6 +20,8 @@ cat > "$tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 printf 'ssh\n' >> "$CALLS"
 printf '%s\n' "${!#}" > "$REMOTE_COMMAND"
+cat >/dev/null
+printf 'v1.0.0\t6d4d33a1cd4baad2b490f25e57124675c74771d1\td54b786c30b9b866341a89b6496b574b0d29cc48f26bf4787b7686faf4c1f0f1\n'
 EOF
 cat > "$tmp/bin/aws" <<'EOF'
 #!/usr/bin/env bash
@@ -75,6 +77,8 @@ done
 _resume_host_bootstrap 203.0.113.44 "$tmp/key.pem"
 [ "$(grep -c '^scp$' "$CALLS")" = 0 ]
 [ "$(grep -c '^ssh$' "$CALLS")" = 1 ]
-grep -F -q "/var/dirextalk-message-server/updater/bootstrap-host.sh '203.0.113.44'" "$REMOTE_COMMAND"
+grep -F -q 'tar -xzf -' "$REMOTE_COMMAND"
+grep -F -q 'reconcile-host.sh' "$REMOTE_COMMAND"
+grep -F -q "'203.0.113.44'" "$REMOTE_COMMAND"
 
 echo "s3 public IP validation ok"

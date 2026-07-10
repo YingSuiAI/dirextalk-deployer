@@ -107,9 +107,9 @@ version、镜像 digest、image reference 和 manifest digest 写入 `state.json
 由独立的 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release 提供：
 Ubuntu 24.04 x86_64 宿主直接下载 deployer 固定的 `v1.0.0` 资产，使用 deployer 内固定的
 SHA-256 校验后原子安装。本机不需要 Go，S3 也不会再通过 SSH 复制 updater 二进制。
-deployer 的 Node selector 只严格校验选择不可变镜像所需的 manifest 字段，不重复实现
-Masterminds SemVer 的 `upgrade_from` 约束语义；升级边兼容性的权威实现是独立 Go updater
-和 message-server Release CI。
+deployer 的 Node selector 使用固定版本的成熟 `semver` 包严格解析每条 `upgrade_from`，
+并拒绝包含目标版本的约束；接受/拒绝语料覆盖 canonical Go validator 使用的约束形式。
+跨版本兼容性证据仍以独立 updater 和 message-server Release CI 为权威。
 
 `DIREXTALK_CLOUD_PROVIDER=lightsail` 可省略，因为 Lightsail 是默认选择。如需保留的 EC2 部署路径，添加 `DIREXTALK_CLOUD_PROVIDER=ec2`。EC2 可继续设置 `INSTANCE_TYPE=t3.small` 或更大的显式规格，并默认使用 50 GiB gp3 root EBS 卷。如果默认 Lightsail 在当前 region 没有可用套餐或可用区，S1 会记录 EC2 费用估算，但不会自动切换到 EC2；请选择其他 Lightsail 可用 region/zone，或显式用 `DIREXTALK_CLOUD_PROVIDER=ec2` 重新运行。如果未配置 region，非交互式运行会使用本机时区推荐；可用 `DIREXTALK_DEFAULT_REGION` 或标准 AWS region 设置覆盖。除非在排查 AWS 返回值，否则让 S1 自动检测 Lightsail 可用性；安全的手工命令是 `aws lightsail get-regions --include-availability-zones --output json`。
 

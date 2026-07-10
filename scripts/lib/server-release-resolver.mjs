@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import semver from "semver";
 
 export const latestReleaseAPI = "https://api.github.com/repos/YingSuiAI/dirextalk-message-server/releases/latest";
 const manifestAsset = "release-manifest.json";
@@ -48,13 +49,22 @@ function compareVersion(left, right) {
   return 0;
 }
 
-function validateUpgradeFrom(values) {
+function validateUpgradeFrom(values, targetVersion) {
   if (!Array.isArray(values)) throw new Error("release manifest upgrade_from must be an array");
   const unique = new Set();
   for (const value of values) {
     if (typeof value !== "string" || value.trim() === "") throw new Error("release manifest upgrade_from entries must be non-empty strings");
     if (unique.has(value)) throw new Error("release manifest upgrade_from entries must be unique");
     unique.add(value);
+    let constraint;
+    try {
+      constraint = new semver.Range(value.trim(), { loose: false, includePrerelease: false });
+    } catch {
+      throw new Error(`release manifest upgrade_from constraint is invalid: ${value}`);
+    }
+    if (constraint.test(targetVersion.slice(1))) {
+      throw new Error(`release manifest upgrade_from constraint includes target ${targetVersion}: ${value}`);
+    }
   }
 }
 
@@ -66,7 +76,7 @@ function validateManifest(manifest) {
   parseVersion(manifest.version, "manifest version");
   if (manifest.image !== `${allowedImage}:${manifest.version}`) throw new Error("release manifest image is inconsistent");
   if (!digestPattern.test(manifest.image_digest)) throw new Error("release manifest image_digest is invalid");
-  validateUpgradeFrom(manifest.upgrade_from);
+  validateUpgradeFrom(manifest.upgrade_from, manifest.version);
   if (!Number.isInteger(manifest.schema_version) || !Number.isInteger(manifest.schema_compat_version)
       || manifest.schema_version < 1 || manifest.schema_compat_version < 1 || manifest.schema_compat_version > manifest.schema_version) {
     throw new Error("release manifest schema window is invalid");

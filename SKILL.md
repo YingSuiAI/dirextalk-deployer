@@ -235,9 +235,10 @@ marks a debug/legacy deployment. The independent `YingSuiAI/dirextalk-updater`
 host binary is downloaded only on a verified Ubuntu 24.04 x86_64 server from
 the deployer-pinned Release URL and must match the deployer-pinned SHA-256.
 The local deployer host does not need Go and does not SCP updater artifacts.
-The deployer Node selector treats `upgrade_from` as strict non-empty unique
-strings only; canonical Masterminds SemVer compatibility is owned by the
-independent Go updater and message-server Release CI.
+The deployer Node selector uses the pinned mature `semver` dependency to reject
+invalid `upgrade_from` ranges and ranges that include the target. Its constraint
+corpus mirrors the forms accepted by the canonical Go validators; the updater
+and message-server Release CI own cross-version compatibility evidence.
 
 Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
 `route53` only when the current AWS account contains a matching public hosted

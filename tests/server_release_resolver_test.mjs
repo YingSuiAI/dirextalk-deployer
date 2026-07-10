@@ -71,6 +71,7 @@ for (const upgradeFrom of [
   ["^v0.9.0"],
   ["v0.x"],
   ["v0.9.0 - v1.0.9"],
+  ["<v1.0.0 || >=v2.0.0"],
 ]) {
   const fake = fixture({ manifest: { upgrade_from: upgradeFrom } });
   await resolveServerRelease(fake.get);
@@ -95,6 +96,8 @@ const rejected = [
   fixture({ manifest: { image: "attacker/image:v1.1.0" } }),
   fixture({ manifest: { image_digest: `sha256:${"A".repeat(64)}` } }),
   fixture({ manifest: { upgrade_from: [""] } }),
+  fixture({ manifest: { upgrade_from: ["not-a-semver-constraint"] } }),
+  fixture({ manifest: { upgrade_from: [">=v1.1.0"] } }),
   fixture({ manifest: { upgrade_from: [">=v1.0.0", ">=v1.0.0"] } }),
   fixture({ manifest: { upgrade_from: [1] } }),
   fixture({ manifest: { schema_compat_version: 3 } }),

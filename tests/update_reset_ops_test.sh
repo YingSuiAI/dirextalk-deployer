@@ -7,6 +7,20 @@ source "$ROOT/tests/lib/json_test.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+# shellcheck disable=SC1090
+source "$ROOT/scripts/lib/ops.sh"
+ops_desired_state_helper_payload | base64 --decode > "$tmp/decoded-desired-state-helper.sh"
+cmp "$ROOT/scripts/updater/set-desired-state.sh" "$tmp/decoded-desired-state-helper.sh"
+legacy_root="$tmp/base-99f55dd-remote"
+mkdir -p "$legacy_root/var/dirextalk-message-server/updater"
+[ ! -e "$legacy_root/var/dirextalk-message-server/updater/set-desired-state.sh" ]
+legacy_prelude=$(ops_desired_state_helper_prelude)
+legacy_prelude=${legacy_prelude//\/var\/dirextalk-message-server/$legacy_root\/var\/dirextalk-message-server}
+legacy_prelude=${legacy_prelude//sudo /}
+bash -c "$legacy_prelude"
+cmp "$ROOT/scripts/updater/set-desired-state.sh" "$legacy_root/var/dirextalk-message-server/updater/set-desired-state.sh"
+[ -x "$legacy_root/var/dirextalk-message-server/updater/set-desired-state.sh" ]
+
 export HOME="$tmp/home"
 export DIREXTALK_HOME="$HOME/.dirextalk"
 mkdir -p "$HOME"
@@ -136,6 +150,10 @@ assert_not_contains "$tmp/update.out" 'rerun orchestrate with DIREXTALK_EXISTING
 
 assert_contains "$update_calls" 'docker compose --env-file \.env pull'
 assert_contains "$update_calls" 'docker compose --env-file \.env up -d'
+assert_contains "$update_calls" 'set-desired-state\.sh maintenance'
+assert_contains "$update_calls" 'set-desired-state\.sh running'
+assert_contains "$update_calls" 'base64 --decode'
+assert_contains "$update_calls" 'install -m 0755.*set-desired-state\.sh'
 assert_contains "$update_calls" 'cd /var/dirextalk-message-server'
 assert_contains "$update_calls" 'bash /var/dirextalk-message-server/init-tokens\.sh'
 assert_contains "$update_calls" '/var/dirextalk-message-server/p2p/bootstrap\.json'
@@ -176,6 +194,10 @@ assert_contains "$tmp/reset.out" 'Scoped local bridge daemon was stopped'
 assert_contains "$tmp/reset.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'
 
 assert_contains "$reset_calls" 'docker compose --env-file \.env down'
+assert_contains "$reset_calls" 'set-desired-state\.sh maintenance'
+assert_contains "$reset_calls" 'set-desired-state\.sh running'
+assert_contains "$reset_calls" 'base64 --decode'
+assert_contains "$reset_calls" 'install -m 0755.*set-desired-state\.sh'
 assert_contains "$reset_calls" 'docker volume rm'
 assert_contains "$reset_calls" 'postgres-data'
 assert_contains "$reset_calls" 'message-config'

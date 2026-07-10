@@ -480,6 +480,33 @@ stop_current_connect_daemon() {
   fi
 }
 
+mark_remote_deprovisioned() {
+  local key_file=$1 public_ip=$2 helper_payload remote remote_q
+  [ -n "$key_file" ] && [ -f "$key_file" ] && [ -n "$public_ip" ] || return 0
+  helper_payload=$(base64 < "$HERE/updater/set-desired-state.sh" | tr -d '\r\n')
+  remote=$(cat <<'EOF'
+set -eu
+desired_helper_tmp=$(mktemp /tmp/dirextalk-updater-desired-state.XXXXXX)
+cleanup_desired_helper() { rm -f "$desired_helper_tmp"; }
+trap cleanup_desired_helper EXIT
+printf '%s' '__DIREXTALK_DESIRED_HELPER__' | base64 --decode > "$desired_helper_tmp"
+sudo install -d -m 0755 /var/dirextalk-message-server/updater
+sudo install -m 0755 "$desired_helper_tmp" /var/dirextalk-message-server/updater/set-desired-state.sh
+rm -f "$desired_helper_tmp"
+trap - EXIT
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh deprovisioned
+EOF
+)
+  remote=${remote/__DIREXTALK_DESIRED_HELPER__/$helper_payload}
+  printf -v remote_q '%q' "$remote"
+  if ssh -T -i "$key_file" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
+      ubuntu@"$public_ip" "sudo bash -lc $remote_q" >/dev/null 2>&1; then
+    log "remote updater desired-state reconciliation completed before termination"
+  else
+    log "remote updater was unreachable or rejected deprovisioned state; cloud termination will continue"
+  fi
+}
+
 cleanup_local_service_dir() {
   local service_dir=$1 root=$2 nodes_root src_real nodes_real src_norm nodes_norm name
 
@@ -523,6 +550,7 @@ cleanup_local_service_dir() {
 # 0. Remove DNS record if ops created it through Route53 mode.
 CURRENT_SERVICE_DIR=$(current_service_dir "$AGENT_SERVICE_DIR" "$AS_URL" "$DOMAIN" "$CONNECT_CONFIG")
 CURRENT_SERVICE_NAME=$(connect_service_name "$AGENT_SERVICE_ID" "$CURRENT_SERVICE_DIR" "$AS_URL" "$DOMAIN")
+mark_remote_deprovisioned "$KEY_FILE" "$PUBLIC_IP"
 stop_current_connect_daemon "$CONNECT_CONFIG" "$CONNECT_BINARY" "$CONNECT_RUNTIME_DIR" "$CURRENT_SERVICE_DIR" "$CURRENT_SERVICE_NAME"
 
 if [ "${DOMAIN_MODE:-}" = "route53" ]; then

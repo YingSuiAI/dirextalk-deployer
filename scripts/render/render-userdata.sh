@@ -48,12 +48,12 @@ cp "$CI/docker-compose.yml" "$WORK/docker-compose.yml"
 cp "$CI/Caddyfile"          "$WORK/Caddyfile"
 tr -d '\r' < "$CI/init-tokens.sh" > "$WORK/init-tokens.sh"
 mkdir -p "$WORK/updater"
-for updater_file in install.sh bootstrap-host.sh release.env config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do
+for updater_file in install.sh bootstrap-host.sh set-desired-state.sh release.env config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do
   tr -d '\r' < "$HERE/updater/$updater_file" > "$WORK/updater/$updater_file"
 done
 chmod 0644 "$WORK/docker-compose.yml" "$WORK/Caddyfile"
 chmod 0644 "$WORK/updater/release.env" "$WORK/updater/config.json" "$WORK/updater/"*.service "$WORK/updater/"*.timer
-chmod 0755 "$WORK/init-tokens.sh" "$WORK/updater/install.sh" "$WORK/updater/bootstrap-host.sh"
+chmod 0755 "$WORK/init-tokens.sh" "$WORK/updater/install.sh" "$WORK/updater/bootstrap-host.sh" "$WORK/updater/set-desired-state.sh"
 find "$WORK" -name '._*' -delete
 # -C creates a flat archive. Explicit gzip avoids macOS tar stdout quirks.
 # COPYFILE_DISABLE=1 avoids AppleDouble ._* extended-attribute files.

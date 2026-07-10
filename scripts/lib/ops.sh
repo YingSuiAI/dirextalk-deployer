@@ -7,6 +7,28 @@ source "$OPS_LIB_DIR/json.sh"
 # shellcheck disable=SC1090
 source "$OPS_LIB_DIR/local-paths.sh"
 
+ops_desired_state_helper_payload() {
+  base64 < "$OPS_LIB_DIR/../updater/set-desired-state.sh" | tr -d '\r\n'
+}
+
+ops_desired_state_helper_prelude() {
+  local payload template
+  payload=$(ops_desired_state_helper_payload)
+  template=$(cat <<'EOF'
+set -eu
+desired_helper_tmp=$(mktemp /tmp/dirextalk-updater-desired-state.XXXXXX)
+cleanup_desired_helper() { rm -f "$desired_helper_tmp"; }
+trap cleanup_desired_helper EXIT
+printf '%s' '__DIREXTALK_DESIRED_HELPER__' | base64 --decode > "$desired_helper_tmp"
+sudo install -d -m 0755 /var/dirextalk-message-server/updater
+sudo install -m 0755 "$desired_helper_tmp" /var/dirextalk-message-server/updater/set-desired-state.sh
+rm -f "$desired_helper_tmp"
+trap - EXIT
+EOF
+)
+  printf '%s\n' "${template/__DIREXTALK_DESIRED_HELPER__/$payload}"
+}
+
 ops_state_path() {
   local explicit=${1:-}
   if [ -n "$explicit" ]; then
@@ -122,9 +144,9 @@ ops_stop_scoped_daemon() {
 
 ops_update_remote_command() {
   local image=${1:-} image_q remote_script
-  remote_script=$(cat <<'EOF'
-set -eu
+  remote_script="$(ops_desired_state_helper_prelude)"$'\n'$(cat <<'EOF'
 cd /var/dirextalk-message-server
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh maintenance
 if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
   IMAGE=$MESSAGE_SERVER_IMAGE
   escaped_image=$(printf '%s\n' "$IMAGE" | sed 's/[\/&]/\\&/g')
@@ -150,6 +172,7 @@ if bootstrap_ready; then
 else
   DOMAIN="$DOMAIN" bash /var/dirextalk-message-server/init-tokens.sh
 fi
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh running
 EOF
 )
   if [ -n "$image" ]; then
@@ -161,9 +184,10 @@ EOF
 }
 
 ops_reset_remote_command() {
+  ops_desired_state_helper_prelude
   cat <<'EOF'
-set -eu
 cd /var/dirextalk-message-server
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh maintenance
 sudo docker compose --env-file .env down
 project=$(basename "$PWD")
 for volume in postgres-data message-config message-data; do
@@ -180,6 +204,7 @@ printf 'P2P_PORTAL_PASSWORD=%s\n' "$new_code" | sudo tee -a .env >/dev/null
 sudo docker compose --env-file .env up -d
 DOMAIN=$(grep '^DOMAIN=' .env | cut -d= -f2)
 sudo DOMAIN="$DOMAIN" bash /var/dirextalk-message-server/init-tokens.sh
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh running
 EOF
 }
 

@@ -46,6 +46,7 @@ for path in \
   updater/bootstrap-host.sh \
   updater/install.sh \
   updater/reconcile-host.sh \
+  updater/set-desired-state.sh \
   updater/release.env \
   updater/config.json \
   updater/dirextalk-updater.service \

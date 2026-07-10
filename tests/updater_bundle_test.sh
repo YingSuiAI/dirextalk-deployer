@@ -23,6 +23,7 @@ tar -xzf "$tmp/bundle.tar.gz" -C "$tmp/bundle"
 for path in \
   updater/install.sh \
   updater/bootstrap-host.sh \
+  updater/set-desired-state.sh \
   updater/release.env \
   updater/config.json \
   updater/dirextalk-updater.service \
@@ -30,6 +31,9 @@ for path in \
   updater/dirextalk-updater-discovery.timer; do
   [ -f "$tmp/bundle/$path" ] || { echo "missing updater bundle file: $path" >&2; exit 1; }
 done
+grep -q 'systemctl cat dirextalk-updater.service' "$tmp/bundle/updater/set-desired-state.sh"
+grep -q 'systemctl start dirextalk-updater.service' "$tmp/bundle/updater/set-desired-state.sh"
+grep -q -- '--config -' "$tmp/bundle/updater/set-desired-state.sh"
 if [ -e "$tmp/bundle/dirextalk-updater" ]; then
   echo "the updater ELF must be downloaded from the pinned independent Release, not embedded in user-data" >&2
   exit 1

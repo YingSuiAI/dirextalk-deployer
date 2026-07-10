@@ -12,7 +12,7 @@ stable_ip=${3:-}
 
 integration_dir="$base/updater"
 install -d -m 0755 "$integration_dir"
-for file in bootstrap-host.sh install.sh reconcile-host.sh; do
+for file in bootstrap-host.sh install.sh reconcile-host.sh set-desired-state.sh; do
   install -m 0755 "$source_dir/$file" "$integration_dir/$file"
 done
 for file in release.env config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do

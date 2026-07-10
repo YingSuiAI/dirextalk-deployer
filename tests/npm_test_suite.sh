@@ -30,6 +30,7 @@ tests=(
   tests/root_volume_size_test.sh
   tests/s3_lightsail_provision_test.sh
   tests/s3_ec2_updater_upload_test.sh
+  tests/s3_stable_ip_reconcile_test.sh
   tests/lightsail_static_ip_quota_test.sh
   tests/destroy_lightsail_test.sh
   tests/mcp_tools_runtime_check_test.sh
@@ -42,6 +43,8 @@ tests=(
   tests/render_userdata_remote_nodes_test.sh
   tests/server_release_test.sh
   tests/updater_bundle_test.sh
+  tests/updater_binary_rebuild_test.sh
+  tests/updater_bootstrap_resume_test.sh
 )
 
 for test_file in "${tests[@]}"; do

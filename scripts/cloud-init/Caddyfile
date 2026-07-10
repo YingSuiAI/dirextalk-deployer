@@ -36,7 +36,7 @@
 		reverse_proxy message-server:8008
 	}
 
-	handle /_dirextalk/updater/v1/* {
+	handle /_dirextalk/updater/v1/jobs/* {
 		reverse_proxy unix//run/dirextalk-updater/http.sock
 	}
 

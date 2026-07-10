@@ -168,10 +168,10 @@ _run_phase_ec2() {
   _record_root_volume_id "$iid"
 
   # 5) Public address. Production-domain deployments require EIP for stable DNS.
-  local pubip
-  if [ -z "$(res_get eip_id)" ]; then
+  local pubip eip
+  eip=$(res_get eip_id)
+  if [ -z "$eip" ]; then
     log "Allocating and associating Elastic IP ..."
-    local eip
     eip=$(aws ec2 allocate-address --domain vpc --query AllocationId --output text) || {
       phase_set S3_PROVISION failed "failed to allocate EIP"
       warn "Failed to allocate Elastic IP. Check EIP quota, region, and AWS permissions."
@@ -183,21 +183,10 @@ _run_phase_ec2() {
       return 1
     }
     res_set eip_id "$eip"
-    aws ec2 associate-address --instance-id "$iid" --allocation-id "$eip" >/dev/null || {
-      phase_set S3_PROVISION failed "failed to associate EIP"
-      warn "Failed to associate Elastic IP with the instance. Check instance status, EIP quota, and AWS permissions."
-      return 1
-    }
   fi
-  pubip=$(aws ec2 describe-addresses --allocation-ids "$(res_get eip_id)" \
-            --query 'Addresses[0].PublicIp' --output text) || {
-              phase_set S3_PROVISION failed "failed to read EIP public IP"
-              warn "Failed to read Elastic IP address. Check AllocationId=$(res_get eip_id)."
-              return 1
-            }
-  [ -n "$pubip" ] && [ "$pubip" != "None" ] || {
-    phase_set S3_PROVISION failed "EIP returned no public IP"
-    warn "Elastic IP returned no public IP. Check AWS address allocation status."
+  pubip=$(_ensure_ec2_eip_attachment "$iid" "$eip") || {
+    phase_set S3_PROVISION failed "failed to reconcile EIP attachment"
+    warn "Failed to prove and reconcile Elastic IP $eip with instance $iid."
     return 1
   }
   res_set public_ip "$pubip"
@@ -325,41 +314,26 @@ _run_phase_lightsail() {
     res_set lightsail_ports_configured "true"
   fi
 
-  if [ -z "$(res_get public_ip)" ]; then
-    if ! aws lightsail get-static-ip --static-ip-name "$static_ip_name" >/dev/null 2>&1; then
-      log "Allocating Lightsail static IP $static_ip_name ..."
-      local allocate_rc=0
-      _allocate_lightsail_static_ip "$static_ip_name" || allocate_rc=$?
-      if [ "$allocate_rc" -eq 2 ]; then
-        return 2
-      fi
-      [ "$allocate_rc" -eq 0 ] || {
-        phase_set S3_PROVISION failed "failed to allocate Lightsail static IP"
-        warn "Failed to allocate Lightsail static IP. Check regional Lightsail quota and AWS permissions."
-        return 1
-      }
+  if ! aws lightsail get-static-ip --static-ip-name "$static_ip_name" --query 'staticIp.name' --output text >/dev/null 2>&1; then
+    log "Allocating Lightsail static IP $static_ip_name ..."
+    local allocate_rc=0
+    _allocate_lightsail_static_ip "$static_ip_name" || allocate_rc=$?
+    if [ "$allocate_rc" -eq 2 ]; then
+      return 2
     fi
-    log "Attaching Lightsail static IP $static_ip_name to $instance_name ..."
-    aws lightsail attach-static-ip --static-ip-name "$static_ip_name" --instance-name "$instance_name" >/dev/null || {
-      phase_set S3_PROVISION failed "failed to attach Lightsail static IP"
-      warn "Failed to attach Lightsail static IP. Check instance status and rerun to resume."
+    [ "$allocate_rc" -eq 0 ] || {
+      phase_set S3_PROVISION failed "failed to allocate Lightsail static IP"
+      warn "Failed to allocate Lightsail static IP. Check regional Lightsail quota and AWS permissions."
       return 1
     }
-    pubip=$(aws lightsail get-static-ip --static-ip-name "$static_ip_name" --query 'staticIp.ipAddress' --output text) || {
-      phase_set S3_PROVISION failed "failed to read Lightsail static IP"
-      warn "Failed to read Lightsail static IP address."
-      return 1
-    }
-    [ -n "$pubip" ] && [ "$pubip" != "None" ] || {
-      phase_set S3_PROVISION failed "Lightsail static IP returned no public IP"
-      warn "Lightsail static IP returned no public IP. Check AWS response and rerun."
-      return 1
-    }
-    res_set public_ip "$pubip"
-    res_set static_ip_name "$static_ip_name"
-  else
-    pubip=$(res_get public_ip)
   fi
+  pubip=$(_ensure_lightsail_static_ip_attachment "$instance_name" "$static_ip_name") || {
+    phase_set S3_PROVISION failed "failed to reconcile Lightsail static IP attachment"
+    warn "Failed to prove and reconcile static IP $static_ip_name with instance $instance_name."
+    return 1
+  }
+  res_set public_ip "$pubip"
+  res_set static_ip_name "$static_ip_name"
   if ! _upload_updater_binary "$pubip" "$keyfile" "$updater_binary"; then
     phase_set S3_PROVISION failed "failed to upload host updater to Lightsail"
     return 1
@@ -381,11 +355,40 @@ _run_phase_lightsail() {
   return 0
 }
 
+_ensure_ec2_eip_attachment() {
+  local instance_id=$1 allocation_id=$2 attached_to public_ip
+  attached_to=$(aws ec2 describe-addresses --allocation-ids "$allocation_id" \
+    --query 'Addresses[0].InstanceId' --output text) || return 1
+  if [ "$attached_to" != "$instance_id" ]; then
+    log "Associating Elastic IP $allocation_id with current instance $instance_id ..." >&2
+    aws ec2 associate-address --instance-id "$instance_id" --allocation-id "$allocation_id" --allow-reassociation >/dev/null || return 1
+  fi
+  public_ip=$(aws ec2 describe-addresses --allocation-ids "$allocation_id" \
+    --query 'Addresses[0].PublicIp' --output text) || return 1
+  [ -n "$public_ip" ] && [ "$public_ip" != "None" ] || return 1
+  printf '%s\n' "$public_ip"
+}
+
+_ensure_lightsail_static_ip_attachment() {
+  local instance_name=$1 static_ip_name=$2 attached_to public_ip
+  attached_to=$(aws lightsail get-static-ip --static-ip-name "$static_ip_name" \
+    --query 'staticIp.attachedTo' --output text) || return 1
+  if [ "$attached_to" != "$instance_name" ]; then
+    log "Attaching Lightsail static IP $static_ip_name to current instance $instance_name ..." >&2
+    aws lightsail attach-static-ip --static-ip-name "$static_ip_name" --instance-name "$instance_name" >/dev/null || return 1
+  fi
+  public_ip=$(aws lightsail get-static-ip --static-ip-name "$static_ip_name" \
+    --query 'staticIp.ipAddress' --output text) || return 1
+  [ -n "$public_ip" ] && [ "$public_ip" != "None" ] || return 1
+  printf '%s\n' "$public_ip"
+}
+
 _upload_updater_binary() {
   local public_ip=$1 keyfile=$2 binary=$3
-  local known_hosts="$DIREXTALK_WORKDIR/known_hosts" remote_tmp=/tmp/dirextalk-updater-upload attempt
-  [ -n "$public_ip" ] && [ -f "$keyfile" ] && [ -x "$binary" ] || {
-    warn "Updater upload requires a stable public IP, the recorded SSH key, and an executable Linux updater binary."
+  local known_hosts="$DIREXTALK_WORKDIR/known_hosts" remote_tmp=/tmp/dirextalk-updater remote_bootstrap=/tmp/dirextalk-bootstrap-host attempt
+  local bootstrap="$S3_PHASE_DIR/updater/bootstrap-host.sh"
+  [ -n "$public_ip" ] && [ -f "$keyfile" ] && [ -x "$binary" ] && [ -f "$bootstrap" ] || {
+    warn "Updater upload requires a stable public IP, the recorded SSH key, and executable updater/bootstrap files."
     return 1
   }
   log "Uploading the host updater through the node's stable public IP before DNS gating..."
@@ -397,13 +400,19 @@ _upload_updater_binary() {
       -o StrictHostKeyChecking=accept-new \
       -o "UserKnownHostsFile=$known_hosts" \
       "$binary" "ubuntu@$public_ip:$remote_tmp" \
+      && scp -q -i "$keyfile" \
+        -o BatchMode=yes \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=accept-new \
+        -o "UserKnownHostsFile=$known_hosts" \
+        "$bootstrap" "ubuntu@$public_ip:$remote_bootstrap" \
       && ssh -T -i "$keyfile" \
         -o BatchMode=yes \
         -o ConnectTimeout=10 \
         -o StrictHostKeyChecking=accept-new \
         -o "UserKnownHostsFile=$known_hosts" \
         "ubuntu@$public_ip" \
-        "sudo install -d -m 0755 /var/dirextalk-message-server && sudo install -m 0755 $remote_tmp /var/dirextalk-message-server/dirextalk-updater && rm -f $remote_tmp"; then
+        "sudo install -d -m 0755 /var/dirextalk-message-server /usr/local/libexec && sudo install -m 0755 $remote_tmp /var/dirextalk-message-server/dirextalk-updater && sudo install -m 0755 $remote_bootstrap /usr/local/libexec/dirextalk-bootstrap-host && rm -f $remote_tmp $remote_bootstrap && sudo /usr/local/libexec/dirextalk-bootstrap-host $public_ip"; then
       return 0
     fi
     warn "SSH is not ready for updater upload (attempt $attempt/60); retrying in 5s."

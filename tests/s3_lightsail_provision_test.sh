@@ -128,7 +128,8 @@ grep -q -- '--availability-zone us-east-1b' "$CALLS" || { cat "$CALLS" >&2; exit
 grep -q 'lightsail allocate-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail attach-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q '^scp .*dirextalk-updater.*ubuntu@203\.0\.113\.144:/tmp/dirextalk-updater' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-grep -q '^ssh .*ubuntu@203\.0\.113\.144.*\/var\/dirextalk-message-server\/dirextalk-updater' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q '^scp .*bootstrap-host\.sh.*ubuntu@203\.0\.113\.144:/tmp/dirextalk-bootstrap-host' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q '^ssh .*ubuntu@203\.0\.113\.144.*\/usr\/local\/libexec\/dirextalk-bootstrap-host.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^scp ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)
@@ -140,7 +141,7 @@ dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)
 before=$(grep -c '^scp ' "$CALLS")
 _upload_updater_binary 203.0.113.144 "$(res_get key_file)" "$DIREXTALK_UPDATER_BINARY"
 after=$(grep -c '^scp ' "$CALLS")
-[ "$after" -eq $((before + 1)) ] || { echo "updater upload must be idempotently retryable" >&2; exit 1; }
+[ "$after" -eq $((before + 2)) ] || { echo "updater and bootstrap upload must be idempotently retryable" >&2; exit 1; }
 grep -q 'fromPort=49160\\,toPort=49200\\,protocol=udp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 if grep -q '^aws ec2 ' "$CALLS"; then
   echo "Lightsail provisioning must not call EC2 APIs" >&2

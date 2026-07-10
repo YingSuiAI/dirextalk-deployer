@@ -23,6 +23,7 @@ tar -xzf "$tmp/bundle.tar.gz" -C "$tmp/bundle"
 
 for path in \
   updater/install.sh \
+  updater/bootstrap-host.sh \
   updater/config.json \
   updater/dirextalk-updater.service \
   updater/dirextalk-updater-discovery.service \
@@ -51,11 +52,15 @@ awk '
   END { exit bad ? 1 : 0 }
 ' "$compose" || { echo "Caddy must not depend on message-server health" >&2; exit 1; }
 
-updater_route=$(grep -n -F 'handle /_dirextalk/updater/v1/*' "$caddy" | cut -d: -f1)
+updater_route=$(grep -n -F 'handle /_dirextalk/updater/v1/jobs/*' "$caddy" | cut -d: -f1)
 catch_all=$(grep -n $'^\thandle {$' "$caddy" | cut -d: -f1)
 [ -n "$updater_route" ] && [ -n "$catch_all" ] && [ "$updater_route" -lt "$catch_all" ] \
   || { echo "updater Unix-socket route must precede Caddy catch-all" >&2; exit 1; }
 grep -F -q 'reverse_proxy unix//run/dirextalk-updater/http.sock' "$caddy"
+if grep -F -q 'handle /_dirextalk/updater/v1/*' "$caddy" || grep -q '/control/' "$caddy"; then
+  echo "Caddy must expose only public updater job paths, never the control namespace" >&2
+  exit 1
+fi
 
 extract_service() {
   local name=$1 file=$2
@@ -84,6 +89,7 @@ grep -q '^User=root$' "$main_unit"
 grep -q '^Group=root$' "$main_unit"
 grep -q '^RuntimeDirectory=dirextalk-updater$' "$main_unit"
 grep -q '^RuntimeDirectoryMode=0755$' "$main_unit"
+grep -q '^RuntimeDirectoryPreserve=yes$' "$main_unit"
 grep -q '^StateDirectory=dirextalk-updater$' "$main_unit"
 grep -q '^StateDirectoryMode=0700$' "$main_unit"
 grep -q '^ConfigurationDirectory=dirextalk-updater$' "$main_unit"
@@ -101,10 +107,11 @@ if grep -q 'runtime.json\|curl\|\$(cat\|--header' "$discovery_unit" \
   exit 1
 fi
 
-install_line=$(grep -n '/updater/install.sh' "$tmp/user-data.yaml" | cut -d: -f1 | head -n1)
-compose_line=$(grep -n 'docker compose --env-file .env up -d' "$tmp/user-data.yaml" | cut -d: -f1 | head -n1)
+grep -q 'bash /var/dirextalk-message-server/updater/bootstrap-host.sh' "$tmp/user-data.yaml"
+install_line=$(grep -n 'bash "$base/updater/install.sh"' "$tmp/bundle/updater/bootstrap-host.sh" | cut -d: -f1 | head -n1)
+compose_line=$(grep -n 'docker compose --env-file .env up -d' "$tmp/bundle/updater/bootstrap-host.sh" | cut -d: -f1 | head -n1)
 [ -n "$install_line" ] && [ -n "$compose_line" ] && [ "$install_line" -lt "$compose_line" ] \
-  || { echo "updater must install before Compose starts" >&2; exit 1; }
+  || { echo "host bootstrap must install updater before Compose starts" >&2; exit 1; }
 
 DESTDIR="$tmp/root" DIREXTALK_UPDATER_SKIP_SYSTEMD=1 \
   bash "$tmp/bundle/updater/install.sh" "$fake_updater"
@@ -116,5 +123,11 @@ DESTDIR="$tmp/root" DIREXTALK_UPDATER_SKIP_SYSTEMD=1 \
 [ "$(wc -c < "$tmp/root/etc/dirextalk-updater/control-token")" -ge 32 ]
 grep -q 'chown root:root' "$tmp/bundle/updater/install.sh"
 grep -q 'systemctl start dirextalk-updater-discovery.service' "$tmp/bundle/updater/install.sh"
+grep -q 'flock' "$tmp/bundle/updater/bootstrap-host.sh"
+grep -q 'docker compose --env-file .env up -d' "$tmp/bundle/updater/bootstrap-host.sh"
+if grep -q 'latest/meta-data/public-ipv4\|api.ipify.org\|ifconfig.me' "$tmp/user-data.yaml"; then
+  echo "cloud-init must not persist a temporary pre-EIP public address" >&2
+  exit 1
+fi
 
 echo "updater bundle and Caddy continuity ok"

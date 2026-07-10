@@ -17,38 +17,13 @@ write_files:
 
 runcmd:
   - |
-    TOK=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
-          -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
-    IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOK" \
-           http://169.254.169.254/latest/meta-data/public-ipv4)
-    [ -n "$IP" ] || IP=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
-    grep -q '^PUBLIC_IP=' /var/dirextalk-message-server/.env || echo "PUBLIC_IP=$IP" >> /var/dirextalk-message-server/.env
     grep -q '^TURN_SECRET=' /var/dirextalk-message-server/.env || \
       echo "TURN_SECRET=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)" >> /var/dirextalk-message-server/.env
     grep -q '^P2P_PORTAL_PASSWORD=' /var/dirextalk-message-server/.env || \
       echo "P2P_PORTAL_PASSWORD=$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", $1 % 100000000}')" >> /var/dirextalk-message-server/.env
-  - export DOMAIN=$(grep '^DOMAIN=' /var/dirextalk-message-server/.env | cut -d= -f2)
   - |
     if ! command -v docker >/dev/null 2>&1; then
       curl -fsSL https://get.docker.com | sh
     fi
   - systemctl enable --now docker
-  - |
-    deadline=$(($(date +%s) + 900))
-    while [ ! -x /var/dirextalk-message-server/dirextalk-updater ]; do
-      if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "timed out waiting 900 seconds for deployer to upload dirextalk-updater" >&2
-        exit 1
-      fi
-      sleep 5
-    done
-    bash /var/dirextalk-message-server/updater/install.sh /var/dirextalk-message-server/dirextalk-updater
-  - mkdir -p /var/dirextalk-message-server/p2p
-  - chmod 700 /var/dirextalk-message-server
-  - |
-    set -e
-    cd /var/dirextalk-message-server
-    docker compose --env-file .env pull
-    docker compose --env-file .env up -d
-    DOMAIN=$(grep '^DOMAIN=' .env | cut -d= -f2) bash init-tokens.sh
-    touch /var/dirextalk-message-server/.deploy-done
+  - bash /var/dirextalk-message-server/updater/bootstrap-host.sh

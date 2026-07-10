@@ -9,14 +9,14 @@ source "$HERE/lib/paths.sh"
 source "$HERE/lib/operation_report.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/ops.sh"
+warn() { printf '%s\n' "$*" >&2; }
+# shellcheck disable=SC1090
+source "$HERE/lib/server-release.sh"
 
 STATE_JSON=$(ops_state_path "${1:-}")
 ops_require_state "$STATE_JSON"
 
-if [ -n "${MESSAGE_SERVER_IMAGE:-}" ] && [ "${DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE:-0}" != "1" ]; then
-  echo "MESSAGE_SERVER_IMAGE is a debug/legacy override; set DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 explicitly." >&2
-  exit 1
-fi
+server_release_validate_override
 
 remote_command=$(ops_update_remote_command "${MESSAGE_SERVER_IMAGE:-}")
 ops_ssh "$STATE_JSON" "$remote_command"

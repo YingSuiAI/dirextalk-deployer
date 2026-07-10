@@ -114,6 +114,21 @@ if CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/di
   echo "update image override must require explicit debug/legacy confirmation" >&2
   exit 1
 fi
+for unsafe_image in \
+  'dirextalk/message-server:debug#e touch /tmp/injected' \
+  $'dirextalk/message-server:debug\n#e touch /tmp/injected' \
+  $'dirextalk/message-server:debug\rbroken' \
+  $'dirextalk/message-server:debug\tbroken' \
+  'dirextalk/message-server:debug broken'; do
+  : > "$update_calls"
+  if CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" \
+    MESSAGE_SERVER_IMAGE="$unsafe_image" DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
+    bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-unsafe.out" 2>&1; then
+    echo "unsafe debug image override reached update SSH path" >&2
+    exit 1
+  fi
+  [ ! -s "$update_calls" ] || { echo "unsafe debug image override reached SSH" >&2; cat "$update_calls" >&2; exit 1; }
+done
 CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" MESSAGE_SERVER_IMAGE="dirextalk/message-server:test" DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
 assert_not_contains "$tmp/update.out" 'Old user confirmations and runtime checks were cleared'
 assert_not_contains "$tmp/update.out" 'Scoped local bridge daemon was stopped'

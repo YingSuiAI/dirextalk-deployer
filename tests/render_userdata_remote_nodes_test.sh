@@ -32,14 +32,13 @@ if grep -q '^package_update: true' "$tmp/user-data.yaml"; then
 fi
 grep -q 'if ! command -v docker >/dev/null 2>&1' "$tmp/user-data.yaml"
 grep -q 'if ! command -v docker >/dev/null 2>&1' "$tmp/user-data.sh"
-grep -q 'docker compose --env-file .env pull' "$tmp/user-data.yaml"
-grep -q 'docker compose --env-file .env pull' "$tmp/user-data.sh"
+grep -q 'bash /var/dirextalk-message-server/updater/bootstrap-host.sh' "$tmp/user-data.yaml"
+grep -q 'bash /var/dirextalk-message-server/updater/bootstrap-host.sh' "$tmp/user-data.sh"
 if grep -q '^#cloud-config' "$tmp/user-data.sh"; then
   echo "Lightsail shell user-data must not be rendered as cloud-config" >&2
   exit 1
 fi
 grep -q 'base64 --decode > /var/dirextalk-message-server/bundle.tar.gz' "$tmp/user-data.sh"
-grep -q 'docker compose --env-file .env up -d' "$tmp/user-data.sh"
 
 awk '/encoding: b64/ { getline; sub(/^    content: /, ""); print; exit }' "$tmp/user-data.yaml" \
   | base64 -d > "$tmp/bundle.tar.gz"
@@ -52,7 +51,9 @@ if grep -q 'P2P_REMOTE_NODE_' "$tmp/user-data.yaml"; then
 fi
 
 grep -q '/var/dirextalk-message-server/bundle.tar.gz' "$tmp/user-data.yaml"
-grep -q 'cd /var/dirextalk-message-server' "$tmp/user-data.yaml"
+grep -q 'docker compose --env-file .env pull' "$tmp/bundle/updater/bootstrap-host.sh"
+grep -q 'docker compose --env-file .env up -d' "$tmp/bundle/updater/bootstrap-host.sh"
+grep -q 'cd "$base"' "$tmp/bundle/updater/bootstrap-host.sh"
 grep -q '/etc/dirextalk-message-server/message-server.yaml' "$tmp/bundle/docker-compose.yml"
 grep -q '/var/dirextalk-message-server/p2p/bootstrap.json' "$tmp/bundle/docker-compose.yml"
 grep -q 'P2P_PORTAL_CREDENTIALS_FILE: /var/dirextalk-message-server/p2p/bootstrap.json' "$tmp/bundle/docker-compose.yml"

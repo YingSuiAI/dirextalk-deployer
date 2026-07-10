@@ -11,21 +11,22 @@ server_release_validate_override() {
     return 1
   fi
   if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
-    case "$MESSAGE_SERVER_IMAGE" in
-      *$'\n'*|*$'\r'*|*$'\t'*|*' '*)
-        warn "MESSAGE_SERVER_IMAGE contains invalid characters for a debug/legacy image reference."
-        return 1
-        ;;
-    esac
-    if ! printf '%s' "$MESSAGE_SERVER_IMAGE" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$'; then
+    if ! server_release_image_is_safe "$MESSAGE_SERVER_IMAGE"; then
       warn "MESSAGE_SERVER_IMAGE contains invalid characters for a debug/legacy image reference."
       return 1
     fi
   fi
 }
 
+server_release_image_is_safe() {
+  case "${1:-}" in
+    ''|*$'\n'*|*$'\r'*|*$'\t'*|*' '*) return 1 ;;
+  esac
+  printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$'
+}
+
 server_release_updater_binary() {
-  local output
+  local output temporary
   if [ -n "${DIREXTALK_UPDATER_BINARY:-}" ]; then
     [ -x "$DIREXTALK_UPDATER_BINARY" ] || {
       warn "DIREXTALK_UPDATER_BINARY is not executable: $DIREXTALK_UPDATER_BINARY"
@@ -36,14 +37,18 @@ server_release_updater_binary() {
   fi
   : "${DIREXTALK_WORKDIR:?DIREXTALK_WORKDIR is required to build the updater}"
   output="$DIREXTALK_WORKDIR/dirextalk-updater-linux-${DIREXTALK_UPDATER_GOARCH:-amd64}"
-  if [ ! -x "$output" ]; then
-    bash "$SERVER_RELEASE_SCRIPTS_DIR/updater/build.sh" --output "$output" --arch "${DIREXTALK_UPDATER_GOARCH:-amd64}" || return 1
+  temporary=$(mktemp "$DIREXTALK_WORKDIR/.dirextalk-updater-linux-XXXXXX") || return 1
+  if ! bash "$SERVER_RELEASE_SCRIPTS_DIR/updater/build.sh" --output "$temporary" --arch "${DIREXTALK_UPDATER_GOARCH:-amd64}"; then
+    rm -f "$temporary"
+    return 1
   fi
+  [ -x "$temporary" ] || { rm -f "$temporary"; warn "Updater build did not produce an executable binary."; return 1; }
+  mv -f "$temporary" "$output" || { rm -f "$temporary"; return 1; }
   printf '%s\n' "$output"
 }
 
 server_release_resolver_binary() {
-  local output host_os host_arch extension=""
+  local output host_os host_arch extension="" seed temporary
   if [ -n "${DIREXTALK_UPDATER_RESOLVER_BINARY:-}" ]; then
     [ -x "$DIREXTALK_UPDATER_RESOLVER_BINARY" ] || {
       warn "DIREXTALK_UPDATER_RESOLVER_BINARY is not executable: $DIREXTALK_UPDATER_RESOLVER_BINARY"
@@ -58,15 +63,68 @@ server_release_resolver_binary() {
   host_arch=$(go env GOARCH)
   [ "$host_os" = "windows" ] && extension=.exe
   output="$DIREXTALK_WORKDIR/dirextalk-updater-resolver-$host_os-$host_arch$extension"
-  if [ ! -x "$output" ]; then
-    bash "$SERVER_RELEASE_SCRIPTS_DIR/updater/build.sh" --output "$output" --os "$host_os" --arch "$host_arch" || return 1
+  seed=$(mktemp "$DIREXTALK_WORKDIR/.dirextalk-updater-resolver-XXXXXX") || return 1
+  rm -f "$seed"
+  temporary="$seed$extension"
+  if ! bash "$SERVER_RELEASE_SCRIPTS_DIR/updater/build.sh" --output "$temporary" --os "$host_os" --arch "$host_arch"; then
+    rm -f "$temporary"
+    return 1
   fi
+  [ -x "$temporary" ] || { rm -f "$temporary"; warn "Release resolver build did not produce an executable binary."; return 1; }
+  mv -f "$temporary" "$output" || { rm -f "$temporary"; return 1; }
   printf '%s\n' "$output"
+}
+
+server_release_state_is_formal() {
+  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
+  [ "$source" = "github_release" ] \
+    && server_release_is_version "$version" \
+    && [ "$image" = "dirextalk/message-server:$version" ] \
+    && server_release_is_digest "$digest" \
+    && server_release_is_digest "$manifest_digest" \
+    && [ "$image_ref" = "$image@$digest" ]
+}
+
+server_release_state_is_debug() {
+  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
+  [ "$source" = "debug_override" ] \
+    && [ "$version" = "debug" ] \
+    && server_release_image_is_safe "$image" \
+    && [ "$image_ref" = "$image" ] \
+    && [ -z "$digest" ] \
+    && [ -z "$manifest_digest" ]
 }
 
 server_release_prepare_state() {
   server_release_validate_override || return 1
-  local source version image digest image_ref manifest_digest binary resolved_file resolved_json
+  local source version image digest image_ref manifest_digest binary resolved_file resolved_json instance_id
+
+  source=$(state_get server_release.source)
+  version=$(state_get server_release.version)
+  image=$(state_get server_release.image)
+  image_ref=$(state_get server_release.image_ref)
+  digest=$(state_get server_release.digest)
+  manifest_digest=$(state_get server_release.manifest_digest)
+  instance_id=$(state_get resources.instance_id)
+
+  if [ -n "$instance_id" ]; then
+    if server_release_state_is_formal "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
+      if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
+        warn "Server release is frozen after infrastructure creation; the existing formal release cannot be replaced by an image override."
+        return 1
+      fi
+      return 0
+    fi
+    if server_release_state_is_debug "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
+      if [ -z "${MESSAGE_SERVER_IMAGE:-}" ] || [ "$MESSAGE_SERVER_IMAGE" = "$image_ref" ]; then
+        return 0
+      fi
+      warn "Server release is frozen after infrastructure creation; the existing debug image cannot be changed."
+      return 1
+    fi
+    warn "Server release state is missing or inconsistent for existing infrastructure; refusing to select a replacement release."
+    return 1
+  fi
 
   if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
     resolved_json=$(json_build object \
@@ -80,18 +138,7 @@ server_release_prepare_state() {
     return 0
   fi
 
-  source=$(state_get server_release.source)
-  version=$(state_get server_release.version)
-  image=$(state_get server_release.image)
-  image_ref=$(state_get server_release.image_ref)
-  digest=$(state_get server_release.digest)
-  manifest_digest=$(state_get server_release.manifest_digest)
-  if [ "$source" = "github_release" ] \
-    && server_release_is_version "$version" \
-    && [ "$image" = "dirextalk/message-server:$version" ] \
-    && server_release_is_digest "$digest" \
-    && server_release_is_digest "$manifest_digest" \
-    && [ "$image_ref" = "$image@$digest" ]; then
+  if server_release_state_is_formal "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
     return 0
   fi
 

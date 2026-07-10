@@ -51,12 +51,12 @@ cp "$CI/docker-compose.yml" "$WORK/docker-compose.yml"
 cp "$CI/Caddyfile"          "$WORK/Caddyfile"
 tr -d '\r' < "$CI/init-tokens.sh" > "$WORK/init-tokens.sh"
 mkdir -p "$WORK/updater"
-for updater_file in install.sh config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do
+for updater_file in install.sh bootstrap-host.sh config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do
   tr -d '\r' < "$HERE/updater/$updater_file" > "$WORK/updater/$updater_file"
 done
 chmod 0644 "$WORK/docker-compose.yml" "$WORK/Caddyfile"
 chmod 0644 "$WORK/updater/config.json" "$WORK/updater/"*.service "$WORK/updater/"*.timer
-chmod 0755 "$WORK/init-tokens.sh" "$WORK/updater/install.sh"
+chmod 0755 "$WORK/init-tokens.sh" "$WORK/updater/install.sh" "$WORK/updater/bootstrap-host.sh"
 find "$WORK" -name '._*' -delete
 # -C creates a flat archive. Explicit gzip avoids macOS tar stdout quirks.
 # COPYFILE_DISABLE=1 avoids AppleDouble ._* extended-attribute files.
@@ -79,14 +79,8 @@ $BUNDLE_B64
 DIREXTALK_BUNDLE
 
 tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server
-chmod 0755 /var/dirextalk-message-server/init-tokens.sh /var/dirextalk-message-server/updater/install.sh
+chmod 0755 /var/dirextalk-message-server/init-tokens.sh /var/dirextalk-message-server/updater/install.sh /var/dirextalk-message-server/updater/bootstrap-host.sh
 
-TOK=\$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \\
-      -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)
-IP=\$(curl -s -H "X-aws-ec2-metadata-token: \$TOK" \\
-       http://169.254.169.254/latest/meta-data/public-ipv4 || true)
-[ -n "\$IP" ] || IP=\$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
-grep -q '^PUBLIC_IP=' /var/dirextalk-message-server/.env || echo "PUBLIC_IP=\$IP" >> /var/dirextalk-message-server/.env
 grep -q '^TURN_SECRET=' /var/dirextalk-message-server/.env || \\
   echo "TURN_SECRET=\$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)" >> /var/dirextalk-message-server/.env
 grep -q '^P2P_PORTAL_PASSWORD=' /var/dirextalk-message-server/.env || \\
@@ -97,22 +91,7 @@ if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
 fi
 systemctl enable --now docker
-deadline=\$((\$(date +%s) + 900))
-while [ ! -x /var/dirextalk-message-server/dirextalk-updater ]; do
-  if [ "\$(date +%s)" -ge "\$deadline" ]; then
-    echo "timed out waiting 900 seconds for deployer to upload dirextalk-updater" >&2
-    exit 1
-  fi
-  sleep 5
-done
-bash /var/dirextalk-message-server/updater/install.sh /var/dirextalk-message-server/dirextalk-updater
-mkdir -p /var/dirextalk-message-server/p2p
-chmod 700 /var/dirextalk-message-server
-cd /var/dirextalk-message-server
-docker compose --env-file .env pull
-docker compose --env-file .env up -d
-DOMAIN="\$DOMAIN" bash init-tokens.sh
-touch /var/dirextalk-message-server/.deploy-done
+bash /var/dirextalk-message-server/updater/bootstrap-host.sh
 EOF
   exit 0
 fi
@@ -128,7 +107,7 @@ cat > "$EXTRA_WF" <<EOF
 EOF
 
 # Insert unpack as the first runcmd step before Docker install / compose up.
-UNPACK='  - mkdir -p /var/dirextalk-message-server && tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server && chmod 0755 /var/dirextalk-message-server/init-tokens.sh /var/dirextalk-message-server/updater/install.sh'
+UNPACK='  - mkdir -p /var/dirextalk-message-server && tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server && chmod 0755 /var/dirextalk-message-server/init-tokens.sh /var/dirextalk-message-server/updater/install.sh /var/dirextalk-message-server/updater/bootstrap-host.sh'
 
 strip_userdata_comments() {
   awk '

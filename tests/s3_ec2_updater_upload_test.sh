@@ -75,7 +75,8 @@ domain_resolves_to_ip() {
 run_phase > "$tmp/s3.out" 2>&1 || { cat "$tmp/s3.out" >&2; exit 1; }
 json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.server_release.digest === 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'"
 grep -q '^scp .*ubuntu@203\.0\.113\.155:/tmp/dirextalk-updater' "$CALLS"
-grep -q '^ssh .*ubuntu@203\.0\.113\.155.*\/var\/dirextalk-message-server\/dirextalk-updater' "$CALLS"
+grep -q '^scp .*bootstrap-host\.sh.*ubuntu@203\.0\.113\.155:/tmp/dirextalk-bootstrap-host' "$CALLS"
+grep -q '^ssh .*ubuntu@203\.0\.113\.155.*\/usr\/local\/libexec\/dirextalk-bootstrap-host.*203\.0\.113\.155' "$CALLS"
 address_line=$(grep -n '^aws ec2 describe-addresses' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^scp ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)

@@ -200,6 +200,7 @@ func (service *Service) createJob(response http.ResponseWriter, request *http.Re
 			ManifestDigest:    plan.ManifestDigest,
 			BearerTokenHashes: []string{tokenHash(rawBearer)},
 			IdempotencyKey:    input.IdempotencyKey,
+			CurrentVersion:    plan.CurrentVersion,
 			TargetVersion:     plan.Manifest.Version,
 			CreatedAt:         now,
 			UpdatedAt:         now,

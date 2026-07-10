@@ -157,7 +157,7 @@ func (state *RuntimeState) normalizeAndValidate() error {
 			return fmt.Errorf("job %s references an unknown plan", jobID)
 		}
 		plan := state.Plans[job.PlanTokenHash]
-		if job.ManifestDigest != plan.ManifestDigest || job.TargetVersion != plan.Manifest.Version {
+		if job.ManifestDigest != plan.ManifestDigest || job.CurrentVersion != plan.CurrentVersion || job.TargetVersion != plan.Manifest.Version {
 			return fmt.Errorf("job %s target does not match its plan", jobID)
 		}
 		if job.IdempotencyKey == "" || state.Idempotency[job.IdempotencyKey] != jobID {

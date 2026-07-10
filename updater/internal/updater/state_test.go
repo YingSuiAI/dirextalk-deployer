@@ -92,6 +92,17 @@ func TestRuntimeStateRejectsInvalidPersistedPlanAndJobState(t *testing.T) {
 			t.Fatal("expected a job target inconsistent with its plan to be rejected")
 		}
 	})
+	t.Run("job current version", func(t *testing.T) {
+		state := NewRuntimeState()
+		planHash := tokenHash("plan")
+		digest := manifestDigest([]byte(validManifestJSON()))
+		state.Plans[planHash] = Plan{Manifest: manifest, ManifestDigest: digest, CurrentVersion: "v1.0.0", ExpiresAt: time.Now().Add(time.Hour)}
+		state.Jobs["job_1"] = Job{ID: "job_1", Status: JobQueued, PlanTokenHash: planHash, ManifestDigest: digest, BearerTokenHashes: []string{tokenHash("bearer")}, IdempotencyKey: "request-1", CurrentVersion: "v0.9.0", TargetVersion: manifest.Version}
+		state.Idempotency["request-1"] = "job_1"
+		if err := NewStateStore(filepath.Join(t.TempDir(), "state.json")).Save(context.Background(), state); err == nil {
+			t.Fatal("expected a job current version inconsistent with its plan to be rejected")
+		}
+	})
 }
 
 func TestDiscoveryRefreshCachesValidReleaseAndRetainsItOnFailure(t *testing.T) {

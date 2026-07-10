@@ -63,6 +63,11 @@ func TestJobBearerIsHashedAndAuthorizesPublicStatus(t *testing.T) {
 	if status.Code != http.StatusOK {
 		t.Fatalf("authorized job status: %d %s", status.Code, status.Body.String())
 	}
+	var publicStatus publicJob
+	decodeResponse(t, status, &publicStatus)
+	if publicStatus.CurrentVersion != "v1.0.0" || publicStatus.TargetVersion != "v1.1.0" {
+		t.Fatalf("job status lost its immutable version edge: %#v", publicStatus)
+	}
 	request = httptest.NewRequest(http.MethodGet, publicJobPath(ticket.JobID), nil)
 	request.Header.Set("Authorization", "Bearer wrong")
 	status = httptest.NewRecorder()

@@ -71,3 +71,17 @@ func TestValidateManifestRejectsReleaseURLUserInfo(t *testing.T) {
 		t.Fatal("expected release URL userinfo to be rejected")
 	}
 }
+
+func TestValidateUpgradeFromRejectsDowngradeEvenWhenConstraintMatches(t *testing.T) {
+	manifest, err := ValidateManifest([]byte(validManifestJSON()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.UpgradeFrom = []string{">=v1.2.0"}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("test manifest must remain structurally valid: %v", err)
+	}
+	if err := manifest.ValidateUpgradeFrom("v1.2.0"); err == nil {
+		t.Fatal("an upgrade plan must not accept a current version above its target")
+	}
+}

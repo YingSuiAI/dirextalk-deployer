@@ -107,6 +107,13 @@ func (manifest Manifest) ValidateUpgradeFrom(currentVersion string) error {
 	if err != nil {
 		return err
 	}
+	target, err := parseCanonicalVersion("version", manifest.Version)
+	if err != nil {
+		return err
+	}
+	if !current.LessThan(target) {
+		return fmt.Errorf("current_version %s must be lower than upgrade target %s", currentVersion, manifest.Version)
+	}
 	for _, value := range manifest.UpgradeFrom {
 		constraint, constraintErr := semver.NewConstraint(strings.TrimSpace(value))
 		if constraintErr != nil {

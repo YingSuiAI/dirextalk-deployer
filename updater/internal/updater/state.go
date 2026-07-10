@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const RuntimeStateSchemaVersion = 1
+const RuntimeStateSchemaVersion = 2
 
 type DesiredState string
 
@@ -224,10 +224,38 @@ func (store *StateStore) loadLocked(ctx context.Context) (RuntimeState, error) {
 	if err := decodeStrict(data, &state, "updater state"); err != nil {
 		return RuntimeState{}, err
 	}
+	if err := migrateRuntimeState(&state); err != nil {
+		return RuntimeState{}, err
+	}
 	if err := state.normalizeAndValidate(); err != nil {
 		return RuntimeState{}, err
 	}
 	return state, nil
+}
+
+func migrateRuntimeState(state *RuntimeState) error {
+	switch state.SchemaVersion {
+	case RuntimeStateSchemaVersion:
+		return nil
+	case 1:
+		for jobID, job := range state.Jobs {
+			plan, ok := state.Plans[job.PlanTokenHash]
+			if !ok || plan.CurrentVersion == "" || plan.ManifestDigest == "" {
+				return fmt.Errorf("cannot migrate schema 1 job %s without a bound version edge", jobID)
+			}
+			if job.CurrentVersion == "" {
+				job.CurrentVersion = plan.CurrentVersion
+			}
+			if job.ManifestDigest == "" {
+				job.ManifestDigest = plan.ManifestDigest
+			}
+			state.Jobs[jobID] = job
+		}
+		state.SchemaVersion = RuntimeStateSchemaVersion
+		return nil
+	default:
+		return fmt.Errorf("state schema_version %d is not supported", state.SchemaVersion)
+	}
 }
 
 func (store *StateStore) Save(ctx context.Context, state RuntimeState) error {

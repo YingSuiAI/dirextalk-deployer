@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -103,6 +104,38 @@ func TestRuntimeStateRejectsInvalidPersistedPlanAndJobState(t *testing.T) {
 			t.Fatal("expected a job current version inconsistent with its plan to be rejected")
 		}
 	})
+}
+
+func TestStateStoreMigratesSchemaOneQueuedJobCurrentVersion(t *testing.T) {
+	manifest, err := ValidateManifest([]byte(validManifestJSON()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := manifestDigest([]byte(validManifestJSON()))
+	planHash := tokenHash("plan")
+	legacy := NewRuntimeState()
+	legacy.SchemaVersion = 1
+	legacy.Plans[planHash] = Plan{Manifest: manifest, ManifestDigest: digest, CurrentVersion: "v1.0.0", ExpiresAt: time.Now().Add(time.Hour)}
+	legacy.Jobs["job_1"] = Job{ID: "job_1", Status: JobQueued, PlanTokenHash: planHash, ManifestDigest: digest, BearerTokenHashes: []string{tokenHash("bearer")}, IdempotencyKey: "request-1", TargetVersion: manifest.Version}
+	legacy.Idempotency["request-1"] = "job_1"
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "runtime.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := NewStateStore(path).Load(context.Background())
+	if err != nil {
+		t.Fatalf("load schema one state: %v", err)
+	}
+	if migrated.SchemaVersion != RuntimeStateSchemaVersion || RuntimeStateSchemaVersion != 2 {
+		t.Fatalf("state schema was not upgraded: %d", migrated.SchemaVersion)
+	}
+	if migrated.Jobs["job_1"].CurrentVersion != "v1.0.0" {
+		t.Fatalf("queued job version edge was not restored: %#v", migrated.Jobs["job_1"])
+	}
 }
 
 func TestDiscoveryRefreshCachesValidReleaseAndRetainsItOnFailure(t *testing.T) {

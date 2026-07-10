@@ -178,7 +178,7 @@ cat >/dev/null
 if [[ "$command" == *'adopt-legacy-host.sh'* && "$command" == *' probe '* ]]; then
   printf 'legacy_adoptable\tv0.15.2\tdirextalk/message-server:v0.15.2@sha256:d57a0b7830f7248e29fe7c45c0848cb1167454709fd33effe07ff074415f571c\t/root/dirextalk/dirextalk-message-server\tdocker-compose.p2p.yml\tsystemd_caddy\n'
 elif [[ "$command" == *'reconcile-host.sh'* ]]; then
-  printf 'v1.0.0\tbe85fc7238b81976b4527201ad4807c1135f2875\t633fe1fc43149a0576e45e74a991db331640fa606e1df2d170881bed8426c060\n'
+  printf 'v1.0.1\t1c7426d4fb019c209612ce6753b79bf98fcb2d50\t8d565249f597e9646c5f1c3648f28eb1ae241b511549167871d9ee08e985c66c\n'
 else
   echo "unexpected ssh command: $command" >&2
   exit 94
@@ -194,7 +194,7 @@ res_set instance_id legacy-instance
 res_set public_ip 203.0.113.44
 res_set key_file "$key_file"
 
-state_set_raw server_release '{"source":"github_release","version":"v1.0.0","image":"dirextalk/message-server:v1.0.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.0.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+state_set_raw server_release '{"source":"github_release","version":"v1.0.1","image":"dirextalk/message-server:v1.0.1","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.0.1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
 if DIREXTALK_LEGACY_ADOPT_SOURCE_DIR=/root/dirextalk/dirextalk-message-server \
     DIREXTALK_LEGACY_ADOPT_SSH_USER=root \
     bash "$ROOT/scripts/adopt-legacy-node.sh" --dry-run "$STATE_JSON" >/dev/null 2>&1; then
@@ -226,7 +226,7 @@ DIREXTALK_LEGACY_ADOPT_SOURCE_DIR=/root/dirextalk/dirextalk-message-server \
 [ "$(state_get server_release.source)" = legacy_adopted ]
 [ "$(state_get server_release.version)" = v0.15.2 ]
 [ "$(state_get server_release.digest)" = sha256:d57a0b7830f7248e29fe7c45c0848cb1167454709fd33effe07ff074415f571c ]
-[ "$(state_get updater_release.version)" = v1.0.0 ]
+[ "$(state_get updater_release.version)" = v1.0.1 ]
 grep -F -q 'reconcile-host.sh' "$calls"
 grep -F -q '/root/dirextalk/dirextalk-message-server' "$calls"
 # shellcheck disable=SC1091

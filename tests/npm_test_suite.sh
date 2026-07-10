@@ -23,6 +23,8 @@ tests=(
   tests/orchestrate_status_recovery_test.sh
   tests/orchestrate_region_env_test.sh
   tests/domain_route53_default_test.sh
+  tests/domain_dns_mode_detection_test.sh
+  tests/route53_zone_required_test.sh
   tests/eip_preflight_test.sh
   tests/s1_lightsail_availability_fallback_test.sh
   tests/root_volume_size_test.sh

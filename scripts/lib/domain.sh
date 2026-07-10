@@ -31,6 +31,34 @@ domain_is_formal_name() {
   return 0
 }
 
+# Print the longest matching public Route53 hosted zone as "id<TAB>name".
+# Return 1 when the current AWS account has no matching zone and 2 when AWS
+# could not be queried, so callers never confuse missing IAM permission with
+# externally managed DNS.
+route53_find_public_hosted_zone() {
+  local domain=$1 best_id="" best_name="" best_len=0 id name private clean len zones_json
+  zones_json=$(aws route53 list-hosted-zones --output json) || return 2
+  while IFS=$'\t' read -r id name private; do
+    id=${id%$'\r'}
+    name=${name%$'\r'}
+    private=${private%$'\r'}
+    [ "$private" = "true" ] && continue
+    clean=${name%.}
+    case "$domain" in
+      "$clean"|*."$clean")
+        len=${#clean}
+        if [ "$len" -gt "$best_len" ]; then
+          best_id=${id#/hostedzone/}
+          best_name=$clean
+          best_len=$len
+        fi
+        ;;
+    esac
+  done < <(printf '%s\n' "$zones_json" | json_stdin_tsv HostedZones Id Name Config.PrivateZone)
+  [ -n "$best_id" ] || return 1
+  printf '%s\t%s\n' "$best_id" "$best_name"
+}
+
 domain_has_dns_record() {
   local domain=$1
   [ -n "$domain" ] || return 1

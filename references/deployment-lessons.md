@@ -123,19 +123,19 @@ secrets because they contain the portal/agent token after S5.
 Symptom:
 
 - User chose `DOMAIN_MODE=route53` but the domain is registered at Alibaba Cloud / GoDaddy / Cloudflare (not AWS Route53 registrar).
-- S3 creates or reuses a Route53 hosted zone and upserts the A record, but public
-  DNS still does not resolve to the new IP.
+- A matching Route53 hosted zone already exists and S3 upserts the A record,
+  but public DNS still does not resolve to the new IP.
 
 Cause:
 
-S3 can create the Route53 hosted zone, but Route53 does not become
-authoritative until the current registrar delegates the zone's NS records. When
-the domain administrator is a third party, the user or a provider-specific DNS
-connector must update NS delegation outside AWS.
+The deployer does not create hosted zones or change registrar delegation.
+Route53 does not become authoritative until the current registrar delegates the
+existing zone's NS records. When the domain administrator is a third party, the
+user or a provider-specific DNS connector must update NS delegation outside AWS.
 
 Fix procedure:
 
-1. Read the created or reused zone details from `state.json`:
+1. Read the detected zone details from `state.json`:
    ```bash
    node scripts/json.mjs get ~/.dirextalk/nodes/<service_id>/state.json resources
    ```

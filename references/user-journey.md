@@ -30,7 +30,7 @@ bash -lc 'echo ok; command -v node; command -v aws; command -v ssh; command -v s
 
 | Mode | Meaning | DNS behavior |
 |---|---|---|
-| `route53` | User authorizes AWS Route53 automation | S3 reuses or creates the hosted zone, records NS, upserts the A record, and waits for DNS to resolve |
+| `route53` | S2 found a matching public hosted zone in the current AWS account, or the operator explicitly selected it | S3 reuses the hosted zone, upserts the A record, and waits for DNS to resolve |
 | `user` | Fallback when no DNS provider automation is available | S3 emits the fixed public IP and waits until the domain A record resolves to it |
 
 ## Minimal Command
@@ -39,7 +39,6 @@ bash -lc 'echo ok; command -v node; command -v aws; command -v ssh; command -v s
 AWS_PROFILE=dirextalk-deployer \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
-DOMAIN_MODE=route53 \
 CONFIRM_DOMAIN_BINDING=1 \
 DIREXTALK_CLOUD_PROVIDER=lightsail \
 MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \

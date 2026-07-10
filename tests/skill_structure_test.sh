@@ -53,6 +53,7 @@ required=(
   tests/s6_run_phase_failure_test.sh
   tests/orchestrate_status_recovery_test.sh
   tests/domain_route53_default_test.sh
+  tests/domain_dns_mode_detection_test.sh
   tests/update_reset_ops_test.sh
   tests/aws_credentials_test.sh
   tests/connect_daemon_runtime_check_test.sh
@@ -64,7 +65,7 @@ required=(
   tests/s3_lightsail_provision_test.sh
   tests/lightsail_static_ip_quota_test.sh
   tests/destroy_lightsail_test.sh
-  tests/route53_zone_auto_create_test.sh
+  tests/route53_zone_required_test.sh
   tests/route53_overwrite_guard_test.sh
   tests/destroy_root_identity_test.sh
   tests/destroy_route53_zone_test.sh
@@ -272,8 +273,8 @@ fi
 
 grep -q 'Root access keys are allowed when the operator explicitly chooses them' SKILL.md
 
-if grep -RE '_find_route53_zone.*does NOT create|never creates hosted zone|hosted zone must exist before S3_PROVISION|Do not rely on the script to create the zone' SKILL.md references README.md README_zh.md >/dev/null; then
-  echo "published docs must not preserve stale Route53 hosted-zone manual-create guidance" >&2
+if grep -RE 'S3 reuses or creates the hosted zone|deployer can create the hosted zone|部署器创建 hosted zone' SKILL.md references README.md README_zh.md >/dev/null; then
+  echo "published docs must not claim that deployment creates Route53 hosted zones" >&2
   exit 1
 fi
 
@@ -302,10 +303,10 @@ grep -q 'When a technical term is unavoidable' SKILL.md
 grep -q 'Please confirm before I deploy' SKILL.md
 grep -q 'Reply with this exact sentence' SKILL.md
 grep -q 'First question: do you already have an AWS account' scripts/phases/s0_prereq_aws.sh
-grep -q 'First question: do you already own a long-lived domain' scripts/phases/s2_domain.sh
-grep -q 'Default path for new users: register the domain in AWS Route53' scripts/phases/s2_domain.sh
-grep -q 'DOMAIN_MODE=route53' README.md
-grep -q 'DOMAIN_MODE=route53' README_zh.md
+grep -q 'automatically checks the current AWS account' scripts/phases/s2_domain.sh
+grep -q 'not hosted in the current AWS account' scripts/phases/s2_domain.sh
+grep -q 'automatically uses Route53' README.md
+grep -q '自动使用 Route53' README_zh.md
 grep -q 'highly privileged, must be saved securely' SKILL.md
 grep -q 'safer because it avoids root keys' SKILL.md
 grep -q 'Destroy uses the same AWS identity boundary as deployment' SKILL.md

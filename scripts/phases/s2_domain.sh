@@ -8,17 +8,19 @@
 #   DOMAIN_MODE=route53 Route53 hosted zone; ops manages the A record
 #   DOMAIN_MODE=user    user owns DNS; S3 waits until A record points at the EIP
 #
-# If DOMAIN_MODE is omitted but DOMAIN is present, Route53 mode is assumed.
+# If DOMAIN_MODE is omitted, the current AWS account is inspected first.
+# A matching public Route53 hosted zone selects Route53 automation; otherwise
+# external DNS mode is selected and S3 prints the A record after allocating IP.
 # DIREXTALK_ASSUME_DEFAULTS never chooses a domain.
 
 S2_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 source "$S2_PHASE_DIR/lib/domain.sh"
 
 _print_domain_onboarding_guide() {
-  warn "First question: do you already own a long-lived domain or subdomain and can edit its DNS records?"
-  warn "  Default path for new users: register the domain in AWS Route53, then run with DOMAIN_MODE=route53 so the deployer can create the hosted zone/A record."
-  warn "  If the domain is registered somewhere else but you want AWS to manage DNS, use DOMAIN_MODE=route53 and delegate the registrar nameservers to Route53 when asked."
-  warn "  Use DOMAIN_MODE=user only when an external DNS provider must keep managing the domain; the deployer will print the fixed public IP and wait for you to create an A record."
+  warn "Provide the long-lived domain or subdomain to use as the Matrix server_name."
+  warn "  The deployer automatically checks the current AWS account for a matching public Route53 hosted zone."
+  warn "  When found, it creates the A record automatically. Otherwise it prints the fixed public IP later and asks you to add the A record at the external DNS provider."
+  warn "  DOMAIN_MODE=user or DOMAIN_MODE=route53 remains available as an explicit automation override."
   warn "  The Matrix server_name is bound to DOMAIN. Changing it later is effectively a new homeserver, so choose the final domain before provisioning."
 }
 
@@ -30,7 +32,7 @@ run_phase() {
 
   if [ -z "$mode" ]; then
     if [ -n "$domain" ]; then
-      mode=route53
+      : # Detect DNS hosting after validating the domain and confirmation.
     elif [ -t 0 ]; then
       warn "Dirextalk requires a production domain as the Matrix server_name."
       warn "Changing the domain is effectively a new homeserver identity; temporary sslip.io defaults are not supported."
@@ -42,14 +44,14 @@ run_phase() {
         _print_domain_onboarding_guide
         return 2
       }
-      mode=route53
+      : # Detect DNS hosting after validating the domain and confirmation.
     else
       phase_set S2_DOMAIN waiting_user "waiting for production domain"
       warn "Deployment blocked: DOMAIN is missing. Dirextalk no longer supports temporary sslip.io defaults."
       warn "Prepare a production domain such as __DOMAIN__. Matrix server_name binds to that domain; changing it later is effectively a new homeserver identity."
       _print_domain_onboarding_guide
       warn "Example:"
-      warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=route53 CONFIRM_DOMAIN_BINDING=1 bash scripts/orchestrate.sh"
+      warn "  DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 bash scripts/orchestrate.sh"
       return 2
     fi
   fi
@@ -74,8 +76,41 @@ run_phase() {
     warn "Deployment blocked: Matrix server_name domain binding must be confirmed."
     warn "After $domain becomes server_name, changing the domain is effectively a new homeserver identity."
     warn "Rerun after confirmation:"
-    warn "  DOMAIN=$domain DOMAIN_MODE=$mode CONFIRM_DOMAIN_BINDING=1 bash scripts/orchestrate.sh"
+    warn "  DOMAIN=$domain${mode:+ DOMAIN_MODE=$mode} CONFIRM_DOMAIN_BINDING=1 bash scripts/orchestrate.sh"
     return 2
+  fi
+
+  if [ -z "$mode" ] || [ "$mode" = "route53" ]; then
+    local zone zone_id zone_name find_rc=0
+    zone=$(route53_find_public_hosted_zone "$domain") || find_rc=$?
+    case "$find_rc" in
+      0)
+        zone_id=$(printf '%s' "$zone" | cut -f1)
+        zone_name=$(printf '%s' "$zone" | cut -f2)
+        res_set route53_zone_id "$zone_id"
+        res_set route53_zone_name "$zone_name"
+        res_set route53_zone_created_by_deployer "false"
+        mode=route53
+        log "Domain $domain is covered by existing public Route53 hosted zone $zone_name; DNS A record will be managed automatically."
+        ;;
+      1)
+        if [ -n "${DOMAIN_MODE:-}" ]; then
+          phase_set S2_DOMAIN failed "Route53 hosted zone not found"
+          warn "DOMAIN_MODE=route53 was requested, but $domain is not covered by a public Route53 hosted zone in the current AWS account."
+          warn "Create or delegate the hosted zone explicitly, or omit DOMAIN_MODE to use external DNS guidance."
+          return 1
+        fi
+        mode=user
+        warn "Domain $domain is not hosted in the current AWS account's public Route53 zones. Deployment will continue with external DNS."
+        warn "After the fixed public IP is allocated, add the A record at your DNS provider; no DNS action is needed yet."
+        ;;
+      *)
+        phase_set S2_DOMAIN failed "could not inspect Route53 hosted zones"
+        warn "The deployer could not inspect Route53 hosted zones in the current AWS account."
+        warn "Check AWS credentials and route53:ListHostedZones permission, then rerun. DNS hosting was not guessed."
+        return 1
+        ;;
+    esac
   fi
 
   case "$mode" in
@@ -90,7 +125,7 @@ run_phase() {
       state_set domain_mode route53
       state_set domain "$domain"
       state_set_raw domain_confirmed_irreversible 'true'
-      log "Domain mode = route53 ($domain). The agent will create the A record automatically; IAM needs Route53 permissions."
+      log "Domain mode = route53 ($domain). The agent will create the A record in the detected hosted zone automatically."
       ;;
     buy)
       phase_set S2_DOMAIN waiting_user "automatic domain purchase disabled"

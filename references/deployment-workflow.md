@@ -35,10 +35,10 @@ aws ec2 describe-addresses --query 'length(Addresses[?Domain==`vpc`])' --output 
    confirmation and ask the user to release an unused Elastic IP, request a
    higher EC2-VPC Elastic IP quota, or choose another region.
 4. Check dependencies with the OS-specific commands in `tooling.md`.
-5. Check current DNS provider. Default new users to `DOMAIN_MODE=route53` and
-   AWS Route53 registration/DNS management. Use `DOMAIN_MODE=user` only when an
-   external DNS provider must keep managing the domain and the operator will
-   create the A record manually.
+5. Do not ask for the DNS provider. S2 checks the current AWS account for the
+   longest matching public Route53 hosted zone. It selects Route53 automation
+   when found; otherwise it continues with external DNS and requests the A
+   record only after the fixed public IP exists.
 6. Check state:
 
 ```bash
@@ -133,7 +133,6 @@ From the repository root:
 AWS_PROFILE=dirextalk-deployer \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
-DOMAIN_MODE=route53 \
 CONFIRM_DOMAIN_BINDING=1 \
 DIREXTALK_CLOUD_PROVIDER=lightsail \
 MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
@@ -313,9 +312,10 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
 
 ## Route53 DNS Mode
 
-With `DOMAIN_MODE=route53`, S3 reuses a matching hosted zone or creates one,
-records the zone id and nameservers in `state.json`, upserts the A record, and
-waits for DNS to resolve.
+With automatically detected or explicitly selected `DOMAIN_MODE=route53`, S3
+requires and reuses a matching public hosted zone, records the zone id in
+`state.json`, upserts the A record, and waits for DNS to resolve. It does not
+create a hosted zone or change registrar NS delegation.
 
 If the current Route53 A record already points to a different IP, S3 stops
 before changing DNS and records `route53_existing_a_value` plus
@@ -331,8 +331,9 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-If the domain is registered outside Route53, delegate the recorded nameservers
-at the current registrar or through a provider API:
+If an existing Route53 hosted zone is not yet authoritative because the domain
+is registered elsewhere, delegate that zone's nameservers at the registrar or
+through a provider API:
 
 ```bash
 node scripts/json.mjs get ~/.dirextalk/nodes/<service_id>/state.json resources
@@ -348,7 +349,8 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-Destroy deletes deployer-created hosted zones when state records
+Destroy retains backward-compatible cleanup for older state and deletes a
+deployer-created hosted zone when state records
 `route53_zone_created_by_deployer=true`; pre-existing or user-owned zones are
 left in place.
 

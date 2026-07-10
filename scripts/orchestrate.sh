@@ -12,7 +12,7 @@
 #   export MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
 #   # First run asks for region, production domain, instance size, and existing-state handling.
 #   # Non-interactive:
-#   #   DOMAIN=__DOMAIN__ DOMAIN_MODE=route53 CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=t3.small
+#   #   DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=t3.small
 #   bash orchestrate.sh                 # run or resume until completion
 #   DOMAIN=__DOMAIN__ bash orchestrate.sh status   # show current service state only
 #   bash orchestrate.sh reset           # archive state.json; destroy will no longer know the resources
@@ -536,14 +536,14 @@ precheck_new_deploy_domain_env() {
   [ -f "$STATE_JSON" ] && return 0
   if [ "${DOMAIN_MODE:-}" = "ec2" ]; then
     warn "Deployment blocked: DOMAIN_MODE=ec2 temporary-domain mode has been removed."
-    warn "Prepare a production domain and use DOMAIN=__DOMAIN__ DOMAIN_MODE=route53 CONFIRM_DOMAIN_BINDING=1."
+    warn "Prepare a production domain and use DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1."
     return 2
   fi
   if [ -z "$domain" ]; then
     warn "Deployment blocked: DOMAIN is missing. Dirextalk requires a confirmed production Matrix server_name."
     warn "Use this skill to prepare domain/DNS, then rerun:"
     print_domain_onboarding_guide
-    warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=route53 CONFIRM_DOMAIN_BINDING=1 bash $0"
+    warn "  DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   if ! domain_is_formal_name "$domain"; then
@@ -585,14 +585,14 @@ ensure_production_domain_selected() {
 
   if [ "$mode" = "ec2" ]; then
     warn "Deployment blocked: DOMAIN_MODE=ec2 temporary-domain mode has been removed."
-    warn "Prepare a production domain and use DOMAIN=__DOMAIN__ DOMAIN_MODE=route53 CONFIRM_DOMAIN_BINDING=1."
+    warn "Prepare a production domain and use DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1."
     return 2
   fi
   if [ -z "$domain" ]; then
     warn "Deployment blocked: DOMAIN is missing. Dirextalk requires a confirmed production Matrix server_name."
     warn "Use this skill to prepare domain/DNS, then rerun:"
     print_domain_onboarding_guide
-    warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=route53 CONFIRM_DOMAIN_BINDING=1 bash $0"
+    warn "  DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   if ! domain_is_formal_name "$domain"; then
@@ -612,10 +612,10 @@ ensure_production_domain_selected() {
 }
 
 print_domain_onboarding_guide() {
-  warn "First question: do you already own a long-lived domain or subdomain and can edit its DNS records?"
-  warn "  Default path for new users: register the domain in AWS Route53, then run with DOMAIN_MODE=route53 so the deployer can create the hosted zone/A record."
-  warn "  If the domain is registered somewhere else but you want AWS to manage DNS, use DOMAIN_MODE=route53 and delegate registrar nameservers to Route53 when asked."
-  warn "  Use DOMAIN_MODE=user only when an external DNS provider must keep managing the domain; the deployer will print the fixed public IP and wait for you to create an A record."
+  warn "Provide the long-lived domain or subdomain to use as the Matrix server_name."
+  warn "  The deployer automatically checks the current AWS account for a matching public Route53 hosted zone."
+  warn "  When found, it creates the A record automatically. Otherwise it prints the fixed public IP later and asks you to add the A record at the external DNS provider."
+  warn "  DOMAIN_MODE=user or DOMAIN_MODE=route53 remains available as an explicit automation override."
   warn "  The Matrix server_name is bound to DOMAIN. Changing it later is effectively a new homeserver, so choose the final domain before provisioning."
 }
 
@@ -628,7 +628,7 @@ guard_existing_state() {
     warn "Found legacy temporary-domain deployment state (domain_mode=ec2). Production deployment no longer supports resuming this mode."
     warn "Destroy and rebuild, or use a new service directory:"
     warn "  DIREXTALK_EXISTING_STATE_ACTION=destroy bash $0"
-    warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=route53 CONFIRM_DOMAIN_BINDING=1 bash $0"
+    warn "  DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   confirmed=$(json_get "$STATE_JSON" existing_state_confirmed false)
@@ -657,7 +657,7 @@ guard_existing_state() {
       warn "Existing service state must be handled explicitly to avoid accidental reuse or duplicate EC2 creation."
       warn "Resume:  DIREXTALK_EXISTING_STATE_ACTION=continue bash $0"
       warn "Rebuild: DIREXTALK_EXISTING_STATE_ACTION=destroy bash $0"
-      warn "New service: DOMAIN=__DOMAIN__ DOMAIN_MODE=route53 CONFIRM_DOMAIN_BINDING=1 bash $0"
+      warn "New service: DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 bash $0"
       return 2 ;;
     *)
       warn "Unknown DIREXTALK_EXISTING_STATE_ACTION=$action (expected continue|destroy|abort)."

@@ -609,9 +609,9 @@ _record_root_volume_id() {
 
 _upsert_route53_record() {
   local domain=$1 pubip=$2 zone zone_id zone_name change_file change_id
-  zone=$(_find_or_create_route53_zone "$domain") || {
+  zone=$(_find_required_route53_zone "$domain") || {
     phase_set S3_PROVISION failed "Route53 hosted zone unavailable"
-    warn "DOMAIN_MODE=route53 requires Route53 permission to list or create the hosted zone for $domain."
+    warn "DOMAIN_MODE=route53 requires an existing public Route53 hosted zone for $domain and permission to list it."
     return 1
   }
   zone_id=$(printf '%s' "$zone" | cut -f1)
@@ -709,14 +709,14 @@ _record_route53_zone() {
   [ -n "$name_servers" ] && res_set route53_name_servers "$name_servers"
 }
 
-_find_or_create_route53_zone() {
+_find_required_route53_zone() {
   local domain=$1 zone zone_id zone_name find_rc
   if zone=$(_route53_zone_from_state); then
     printf '%s\n' "$zone"
     return 0
   fi
 
-  if zone=$(_find_route53_zone "$domain"); then
+  if zone=$(route53_find_public_hosted_zone "$domain"); then
     zone_id=$(printf '%s' "$zone" | cut -f1)
     zone_name=$(printf '%s' "$zone" | cut -f2)
     _record_route53_zone "$zone_id" "$zone_name" false
@@ -726,54 +726,8 @@ _find_or_create_route53_zone() {
     find_rc=$?
   fi
 
-  case "$find_rc" in
-    1) _create_route53_zone "$domain" ;;
-    *) return 1 ;;
-  esac
-}
-
-_find_route53_zone() {
-  local domain=$1 best_id="" best_name="" best_len=0 id name clean len zones_json
-  zones_json=$(aws route53 list-hosted-zones --output json) || return 2
-  while IFS=$'\t' read -r id name; do
-    id=${id%$'\r'}
-    name=${name%$'\r'}
-    clean=${name%.}
-    case "$domain" in
-      "$clean"|*."$clean")
-        len=${#clean}
-        if [ "$len" -gt "$best_len" ]; then
-          best_id=${id#/hostedzone/}
-          best_name=$clean
-          best_len=$len
-        fi
-        ;;
-    esac
-  done < <(printf '%s\n' "$zones_json" | json_stdin_tsv HostedZones Id Name)
-  [ -n "$best_id" ] || return 1
-  printf '%s\t%s\n' "$best_id" "$best_name"
-}
-
-_create_route53_zone() {
-  local domain=$1 zone_name caller created zone_id returned_name name_servers
-  zone_name=${DIREXTALK_ROUTE53_ZONE_NAME:-$domain}
-  caller="dirextalk-$(state_get run_id)-$(date -u +%Y%m%d%H%M%S)"
-  created=$(aws route53 create-hosted-zone \
-    --name "$zone_name" \
-    --caller-reference "$caller" \
-    --output json) || return 1
-  zone_id=$(printf '%s\n' "$created" | json_stdin_get HostedZone.Id | sed 's#^/hostedzone/##')
-  returned_name=$(printf '%s\n' "$created" | json_stdin_get HostedZone.Name)
-  name_servers=$(printf '%s\n' "$created" | json_stdin_join DelegationSet.NameServers ",")
-  [ -n "$zone_id" ] && [ -n "$returned_name" ] || return 1
-
-  _record_route53_zone "$zone_id" "${returned_name%.}" true "$name_servers"
-  warn "Created Route53 hosted zone ${returned_name%.} (id=$zone_id). This hosted zone is billable until deleted."
-  if [ -n "$name_servers" ]; then
-    warn "Route53 nameservers: $name_servers"
-    warn "If the domain is registered outside Route53, delegate NS at the registrar before DNS can resolve."
-  fi
-  printf '%s\t%s\n' "$zone_id" "${returned_name%.}"
+  [ "$find_rc" -eq 1 ] && warn "No matching public Route53 hosted zone exists for $domain."
+  return 1
 }
 
 _require_user_dns_ready() {

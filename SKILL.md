@@ -137,29 +137,30 @@ Step-by-step onboarding flow:
      If domains exist, present only the domain names and ask whether to use one.
      If none exist, ask the user to buy or prepare a domain, then stop until
      they have it.
-   - Default new users to Route53 registration and `DOMAIN_MODE=route53` so the
-     deployer can create the hosted zone and A record. Use `DOMAIN_MODE=user`
-     only when an external DNS provider must keep managing the domain and the
-     operator will create the final A record.
+   - Do not ask where DNS is managed. After AWS credentials are available, the
+     deployer checks for the longest matching public Route53 hosted zone in the
+     current AWS account. If one exists it manages the A record automatically;
+     otherwise it continues with external DNS and asks for the A record only
+     after the fixed public IP exists.
    - Explain only this much by default: "Use a real long-term domain because
      changing it later means creating a new chat server identity."
    - Do not use localhost, raw IP addresses, wildcard domains, disposable
      domains, temporary `sslip.io`, or other throwaway names for production.
 
 4. **DNS control.**
-   - Ask: "Is this domain managed in AWS Route53, or somewhere else like
-     Cloudflare, GoDaddy, or Alibaba Cloud?"
-   - If AWS Route53, use `DOMAIN_MODE=route53` only after the user confirms AWS
-     may create or update the domain's hosted zone and A record.
-   - If another provider manages DNS and no provider automation is available,
-     use `DOMAIN_MODE=user` as a waiting external-action state. Later, when the
-     script emits the fixed IP, ask the user to create exactly:
+   - Let S2 query public Route53 hosted zones before asking any DNS-management
+     question. A matching zone selects `DOMAIN_MODE=route53`; no matching zone
+     selects `DOMAIN_MODE=user` without blocking infrastructure creation.
+   - If Route53 listing fails, stop with an AWS credential/IAM error. Never
+     misclassify an API failure as externally managed DNS.
+   - For external DNS, wait until the script emits the fixed IP, then ask the
+     user to create exactly:
      ```text
      <DOMAIN>  A  <PUBLIC_IP>
      ```
-   - If the user prefers Route53 while the domain is registered elsewhere, S3
-     can create the Route53 hosted zone and record NS nameservers. The user or a
-     provider-specific DNS connector must still delegate those NS records at the
+   - If the user prefers Route53 while the domain is registered elsewhere, the
+     hosted zone and NS delegation must be prepared explicitly first. The user
+     or a provider-specific DNS connector must delegate those NS records at the
      current registrar before authoritative DNS can resolve.
 
 5. **Billing confirmation.**
@@ -223,15 +224,16 @@ Required deployment env:
 
 ```bash
 DOMAIN=<final-domain>
-DOMAIN_MODE=route53
 CONFIRM_DOMAIN_BINDING=1
 MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
 DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
-Default to `DOMAIN_MODE=route53` for new users and for domains whose DNS can be
-managed by AWS. Use `DOMAIN_MODE=user` only for externally managed DNS. If an
-existing Route53 A record points elsewhere, require
+Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
+`route53` only when the current AWS account contains a matching public hosted
+zone; otherwise it chooses `user` and gives manual A-record guidance after IP
+allocation. Explicit `DOMAIN_MODE=user|route53` remains an advanced automation
+override. If an existing Route53 A record points elsewhere, require
 `DIREXTALK_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
 authoritative DNS before continuing.
 

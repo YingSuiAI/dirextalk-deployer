@@ -7,7 +7,7 @@
 - Deploy, resume, verify, destroy, and locally wire a production Dirextalk message server.
 - Treat `SKILL.md` as the compact agent-facing entrypoint. Detailed runbooks belong in `references/`; `scripts/` are the stable implementation entrypoints.
 - The supported local conversation bridge is `dirextalk-connect`, installed from `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`.
-- MCP-capable runtimes should connect directly to the deployed message server's HTTP MCP endpoint.
+- MCP support is capability-driven and is separate from bridge-agent support. Declared MCP consumers connect directly to the deployed message server's HTTP endpoint; unknown runtimes never receive a generic fallback.
 - Supported local agent targets are the dirextalk-connect agent providers, treated as peers: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
 - Do not reintroduce legacy local gateway installation flows or third-party chat platform wiring.
 - Do not hard-code one developer's home directory, shell, agent executable path, AWS region, domain, node id, token, or password.
@@ -21,7 +21,7 @@ Every deployer change must classify paths and commands by the platform that will
 - **Local bridge paths** are consumed by `dirextalk-connect` and the local agent process. On Windows they must be Windows-compatible paths, not `/mnt/c/...` or Git Bash-only `/c/...` paths.
 - **Documentation paths** must be portable examples using `$HOME`, `%USERPROFILE%`, `$env:USERPROFILE`, `<service_id>`, or `<domain>`, not machine-specific absolute paths.
 
-If a change writes a path into `state.json`, `credentials.json`, `env`, `dirextalk-connect/config.toml`, docs, or printed commands, verify which process will read that path and format it for that process.
+If a change writes a path into `state.json`, `credentials.json`, `mcp/env`, `dirextalk-connect/config.toml`, docs, or printed commands, verify which process will read that path and format it for that process.
 Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `scripts/lib/windows-paths.ps1` for PowerShell wrapper conversion. These helpers must lexically recognize `C:\Users\alice`, `C:/Users/alice`, `/mnt/c/Users/alice`, `/cygdrive/c/Users/alice`, and `/c/Users/alice` before calling shell-specific conversion tools.
 
 ## Entrypoints
@@ -49,8 +49,9 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 - S6 must create a Matrix session through `agent.matrix_session.create` using `agent_token`, not owner `access_token`, and require `@agent:<server>` for the bridge. Returning `@owner:<server>` is a server-side compatibility failure.
 - The generated dirextalk-connect config must contain one Matrix platform and must restrict sync/replies to the real `agent_room_id`.
 - The generated agent config must preserve the selected connect agent type and optional agent-specific TOML. Some providers require more than `cmd`; for example `reasonix` needs `serve_url`, `tmux` needs `session`, and generic `acp` may need command/args.
-- `DIREXTALK_AGENT_INSTALL=auto` is the default and installs `dirextalk-connect@latest` into the current service directory, not into the npm global prefix, unless an explicit binary/command override is set. It installs the service-scoped `dirextalk-connect` daemon. Generated MCP client snippets for all MCP-capable supported runtimes must point to the deployed message server's HTTP MCP endpoint with the service agent token; do not install or launch a local MCP CLI, daemon, proxy, or listening port.
-- `recommend` must only write files and print commands; `skip` writes credentials/env/config artifacts only.
+- `DIREXTALK_AGENT_INSTALL=auto` is the default and installs `dirextalk-connect@latest` into the current service directory, not into the npm global prefix, unless an explicit binary/command override is set. It installs the service-scoped `dirextalk-connect` daemon. The canonical MCP description points to the deployed message server HTTP MCP endpoint; do not install or launch a local MCP CLI, daemon, proxy, or listening port.
+- Keep the declarative MCP registry aligned with dirextalk-connect. OpenClaw and iFlow are `host-managed`; Pi and tmux are `conditional`; Devin and Reasonix are `unsupported`; unknown runtimes fail closed. Do not generate a generic JSON artifact.
+- `recommend` must only write files and print commands; `skip` writes credentials, connect config, and canonical MCP artifacts only. S6 must not recreate the retired service-level `env` file.
 - Do not pin old package versions in runtime defaults. Keep `@latest` defaults and preserve env overrides only for explicit debugging or rollback.
 
 ## Secrets And State

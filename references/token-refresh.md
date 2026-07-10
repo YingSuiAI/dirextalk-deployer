@@ -41,13 +41,13 @@ ssh -i <key.pem> ubuntu@<ip> 'sudo cat /var/dirextalk-message-server/p2p/bootstr
 {
   "profiles": {
     "default": {
+      "domain": "__DOMAIN__",
       "password": "<APP_INITIALIZATION_CODE>",
       "access_token": "<ACCESS_TOKEN>",
+      "agent_token": "<AGENT_TOKEN>",
       "agent_room_id": "__ROOM_ID__",
-      "dirextalk_domain": "https://__DOMAIN__",
-      "dirextalk_agent_token": "<AGENT_TOKEN>",
-      "dirextalk_agent_room_id": "__ROOM_ID__",
-      "dirextalk_agent_node_id": "<agent_node_id>"
+      "agent_node_id": "<agent_node_id>",
+      "mcp_url": "https://__DOMAIN__/mcp"
     }
   }
 }
@@ -62,10 +62,14 @@ chmod 600 ~/.dirextalk/nodes/<service_id>/credentials.json
 S6 也会写：
 
 ```text
-~/.dirextalk/nodes/<service_id>/env
+~/.dirextalk/nodes/<service_id>/mcp/env
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/matrix-session.json
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/config.toml
 ```
+
+服务级旧 `~/.dirextalk/nodes/<service_id>/env` 不再生成；S6 会清理遗留的
+`agent_env_file` state，但保留 `mcp/env` 作为手工检查远端 MCP endpoint 的
+canonical artifact。
 
 刷新后重新安装或重启本地 bridge：
 

@@ -45,7 +45,7 @@ install rule. Use a Git clone only for deployer development or local patching.
 ## Platform Law
 
 Classify every path by consumer before writing it to `state.json`,
-`credentials.json`, `env`, `dirextalk-connect/config.toml`, docs, or printed commands:
+`credentials.json`, `mcp/env`, `dirextalk-connect/config.toml`, docs, or printed commands:
 
 - Remote server paths are Linux paths consumed on EC2, such as `/var/dirextalk-message-server`.
 - Deployer execution paths may be POSIX paths inside Bash phases.
@@ -255,7 +255,6 @@ S6 writes service-scoped files under `~/.dirextalk/nodes/<service_id>/`:
 
 ```text
 credentials.json
-env
 dirextalk-connect/config.toml
 mcp/
 ```
@@ -276,19 +275,24 @@ DIREXTALK_AGENT_INSTALL_MODE=recommended
 
 `DIREXTALK_AGENT_INSTALL=auto` installs `dirextalk-connect@latest` into the
 current service directory, not into the npm global prefix, unless explicit
-binary/command overrides are set. S6 writes only the MCP snippet selected for the
-detected runtime: Codex, Cursor, OpenClaw, and Hermes have dedicated snippets;
-other MCP-capable supported runtimes use the generic `mcp-servers.json`.
-Generated MCP snippets point directly to the deployed message server's HTTP MCP
-endpoint with the service agent token; MCP does not need a local CLI, daemon,
-proxy, or listening port. S6 installs the
+binary/command overrides are set. MCP capability is declared independently from
+bridge-agent support. The registry is aligned with dirextalk-connect: session
+(`acp`, Claude Code, Codex, Copilot, Gemini, Kimi, OpenCode, Qoder, and Hermes),
+project (`antigravity`, Cursor), host-managed (OpenClaw, iFlow), conditional
+(Pi, tmux), and unsupported (Devin, Reasonix). Unknown runtimes fail closed.
+S6 never generates a generic fallback artifact. Dedicated manual artifacts are
+limited to registry entries that name one, while `mcp/env` remains the canonical
+HTTP endpoint artifact. MCP does not need a local CLI, daemon, proxy, or listening
+port. S6 installs the
 service-scoped `dirextalk-connect` daemon and records it as installed only after
 `daemon status` reports Running and recent logs show `dirextalk-connect is
 running`; logs that show agent CLI missing, login/trust failures, ACP startup
 failures, or agent offline state fail S6 so deploy does not report success
 prematurely. `recommend` writes files and prints commands only; `skip` writes
-credentials/env and configs only. OpenClaw
-and Hermes map to the generic ACP backend by default. Generated agent options
+credentials and configs only. S6 no longer writes the retired service-level
+`env` file. OpenClaw and Hermes map to the generic ACP bridge backend by default,
+but OpenClaw carries `mcp_capability = "host-managed"` and S6 never mutates its
+user-global MCP config. Generated agent options
 write `mode = "yolo"` by default unless an explicit `mode` is supplied.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
@@ -298,10 +302,10 @@ daemon. Explicit `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CURSOR_AGENT_COMMAND`,
 `DIREXTALK_CURSOR_MODE`, and
 `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides still win.
 
-State/report fields include `mcp_config_dir`, `mcp_selected_config_type`,
+State/report fields include `mcp_capability`, `mcp_config_dir`, `mcp_selected_config_type`,
 `mcp_selected_config`, selected runtime-specific fields such as
 `mcp_codex_config`, `mcp_cursor_config`, `mcp_openclaw_config`,
-`mcp_hermes_config`, or `mcp_json_config`, `mcp_transport`, `mcp_endpoint_url`,
+`mcp_hermes_config`, `mcp_transport`, `mcp_endpoint_url`,
 `credentials.status`, and `mcp.status`.
 Cursor MCP artifacts are generated as JSON for `.cursor/mcp.json` or
 `~/.cursor/mcp.json`, but the deployer does not write those locations by

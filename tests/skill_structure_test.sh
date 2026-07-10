@@ -5,6 +5,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
 required=(
+  .editorconfig
+  .github/workflows/ci.yml
   AGENTS.md
   package.json
   SKILL.md
@@ -39,6 +41,9 @@ required=(
   tests/local_paths_test.sh
   tests/windows_path_wrappers_test.sh
   tests/windows_path_wrappers_test.ps1
+  tests/windows_recommendation_test.ps1
+  tests/tracked_text_lf_test.sh
+  tests/s6_run_phase_failure_test.sh
   tests/orchestrate_status_recovery_test.sh
   tests/domain_route53_default_test.sh
   tests/update_reset_ops_test.sh
@@ -109,9 +114,13 @@ grep -q 'skill refresh --agent' SKILL.md
 grep -q 'Windows PowerShell' README.md
 grep -q 'Windows PowerShell' README_zh.md
 grep -q '.dirextalk-skill-install.json' references/agent-targets.md
-grep -q 'DIREXTALK_DOMAIN' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXTALK_AGENT_TOKEN' scripts/phases/s6_wire_local.sh
-grep -q 'DIREXTALK_AGENT_ROOM_ID' scripts/phases/s6_wire_local.sh
+grep -q 'mcp_agent_token' scripts/phases/s6_wire_local.sh
+grep -q 'agent_room_id' scripts/phases/s6_wire_local.sh
+grep -q 'mcp_capability' scripts/phases/s6_wire_local.sh
+if grep -q '_write_agent_env_file\|state_set agent_env_file' scripts/phases/s6_wire_local.sh; then
+  echo "S6 must not recreate the retired service env artifact" >&2
+  exit 1
+fi
 grep -q 'DIREXTALK_CONNECT_REPO' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXTALK_LOCAL_PATH_STYLE' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXTALK_MCP_URL' scripts/lib/mcp-client-adapters.sh

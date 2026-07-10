@@ -324,12 +324,11 @@ delivery_runtime_checks_summary() {
 }
 
 ensure_delivery_runtime_checks() {
-  if ! delivery_runtime_checks_strictly_passed; then
-    warn "Final delivery requires live runtime checks; running: verify runtime"
-    cmd_verify_runtime || true
-  fi
+  local verify_rc=0
+  warn "Final delivery requires live runtime checks; running: verify runtime"
+  cmd_verify_runtime || verify_rc=$?
 
-  if delivery_runtime_checks_strictly_passed; then
+  if [ "$verify_rc" -eq 0 ] && delivery_runtime_checks_strictly_passed; then
     return 0
   fi
 
@@ -339,7 +338,7 @@ ensure_delivery_runtime_checks() {
 }
 
 print_delivery() {
-  local domain password keyfile pubip iid region statejson envfile agent_room_id runtime install_policy install_mode install_status install_command
+  local domain password keyfile pubip iid region statejson agent_room_id runtime install_policy install_mode install_status install_command
   local cloud_provider cloud_label
   local agent_node_id agent_service_id agent_service_dir agent_cred cc_config cc_binary cc_agent cc_user cc_pkg
   local mcp_endpoint
@@ -359,7 +358,6 @@ print_delivery() {
   else
     cloud_label="EC2"
   fi
-  envfile=$(state_get agent_env_file)
   agent_node_id=$(state_get agent_node_id)
   agent_service_id=$(state_get agent_service_id)
   agent_service_dir=$(state_get agent_service_dir)
@@ -399,7 +397,6 @@ print_delivery() {
   echo "  install mode : policy=${install_policy:-recommend} mode=${install_mode:-dirextalk-connect} agent=${cc_agent:-codex} status=${install_status:-recommend}"
   [ -n "$install_command" ] && echo "  install cmd  : $install_command"
   echo "  daemon       : ${cc_binary:-dirextalk-connect} daemon status --service-name ${agent_service_id:-dirextalk-connect}"
-  echo "  env vars     : DIREXTALK_DOMAIN, DIREXTALK_AGENT_TOKEN, DIREXTALK_AGENT_ROOM_ID persisted${envfile:+ via $envfile}"
   echo "  AWS region   : $region"
   echo "  cloud        : ${cloud_provider:-ec2}"
   echo "  $cloud_label          : $iid ($pubip)"

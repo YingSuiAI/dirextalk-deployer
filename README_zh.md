@@ -1,6 +1,6 @@
 # Dirextalk Deployer
 
-`dirextalk-deployer` 是用于部署生产 Dirextalk message server 的通用 Agent Skill，并通过 Dirextalk 专用 Matrix 桥接把本地 agent room 接到当前 agent。当前本地桥接只支持 `dirextalk-connect`，安装包是 `dirextalk-connect`，源码仓库是 `YingSuiAI/dirextalk-connect`。S6 也会给 Codex、Cursor、OpenClaw、Hermes 这类支持 MCP 的宿主写入服务级 MCP 配置片段，直接连接已部署 message server 的 HTTP MCP endpoint。
+`dirextalk-deployer` 是用于部署生产 Dirextalk message server 的通用 Agent Skill，并通过 Dirextalk 专用 Matrix 桥接把本地 agent room 接到当前 agent。当前本地桥接只支持 `dirextalk-connect`，安装包是 `dirextalk-connect`，源码仓库是 `YingSuiAI/dirextalk-connect`。MCP capability 与 bridge agent 支持分开声明；S6 写入 canonical 远端 HTTP MCP 描述，不会假设每个 bridge agent 都能消费 MCP。
 
 ## 内容
 
@@ -187,18 +187,18 @@ S6 会在 `~/.dirextalk/nodes/<service_id>/` 下写入：
 
 ```text
 credentials.json
-env
 dirextalk-connect/config.toml
 dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
+mcp/env
+mcp/README.md
 mcp/codex.toml
+mcp/cursor.mcp.json
 mcp/openclaw.md
-mcp/openclaw-server.json
 mcp/hermes.mcp.json
-mcp/mcp-servers.json
 ```
 
-手动安装：
+POSIX Bash 手动安装：
 
 ```bash
 npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk-connect@latest
@@ -207,11 +207,23 @@ npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon logs --service-name <service_id> -n 120
 ```
 
+Windows PowerShell 手动安装：
+
+```powershell
+$serviceDir = Join-Path $env:USERPROFILE '.dirextalk\nodes\<service_id>'
+$runtimeDir = Join-Path $serviceDir 'dirextalk-connect'
+$connect = Join-Path $runtimeDir 'dirextalk-connect.cmd'
+npm install --prefix $runtimeDir dirextalk-connect@latest
+& $connect daemon install --config (Join-Path $runtimeDir 'config.toml') --service-name '<service_id>' --force
+& $connect daemon status --service-name '<service_id>'
+& $connect daemon logs --service-name '<service_id>' -n 120
+```
+
 默认 `DIREXTALK_AGENT_INSTALL=auto` 时，S6 会等待 daemon 状态为 `Running`，并在最近日志中看到 `dirextalk-connect is running` 后才把本地 wiring 标记完成。日志中如果出现 Cursor Agent CLI 未安装、未登录/认证失败、workspace trust、ACP 启动失败或 agent offline 等错误，S6 会失败并保留 `connect_install_status=install_failed`，不会直接报告部署成功。
 
-默认 `DIREXTALK_AGENT_INSTALL=auto` 时，S6 不再安装本地 MCP CLI。生成的 MCP client 片段会直接连接已部署 message server 的 HTTP MCP endpoint：`https://<domain>/mcp`，并使用当前服务的 agent token。这里不需要本地 MCP daemon、proxy 或监听端口。
+默认 `DIREXTALK_AGENT_INSTALL=auto` 时，S6 不安装本地 MCP CLI。canonical 配置直接连接 `https://<domain>/mcp` 并使用当前服务的 agent token；不需要本地 MCP daemon、proxy 或监听端口。S6 会记录 `session`、`project`、`host-managed`、`conditional` 或 `unsupported`，未声明的 runtime fail-closed。
 
-S6 只会写当前检测到的 runtime 对应的 MCP 片段：Codex 写 `mcp/codex.toml`，Cursor 写 `mcp/cursor.mcp.json`，OpenClaw 写 `mcp/openclaw.md` 和 `mcp/openclaw-server.json`，Hermes 写 `mcp/hermes.mcp.json`，其他支持 MCP 的 agent runtime 写 `mcp/mcp-servers.json`。Cursor 可读取项目级 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`，但 S6 默认不写这两个位置，因为配置里包含当前服务的 bearer token；添加片段后需要重启 Cursor，或在 Cursor MCP 设置里 reload/enable 该 server。OpenClaw 使用 `mcp/openclaw.md` 中生成的 `openclaw mcp set` 命令读取 `mcp/openclaw-server.json`；不要把 MCP JSON 直接粘贴到 `~/.openclaw/openclaw.json`。
+capability registry 与 dirextalk-connect 对齐：ACP、Claude Code、Codex、Copilot、Gemini、Kimi、OpenCode、Qoder、Hermes 为 `session`；Antigravity、Cursor 为 `project`；OpenClaw、iFlow 为 `host-managed`；Pi、tmux 为 `conditional`；Devin、Reasonix 为 `unsupported`。S6 不生成 generic JSON fallback。OpenClaw 只获得 `mcp/openclaw.md` host-managed 说明；S6 不改其全局配置、不生成含 bearer 的 server JSON，也不把 token 放入进程 argv。
 
 语音输入在配置 STT provider key 后可用。设置 `DIREXTALK_SPEECH_API_KEY` 或 `DIREXTALK_SPEECH_QWEN_API_KEY` 等 provider 专用变量后，S6 会在 `dirextalk-connect/config.toml` 写入 `[speech] enabled = true`。
 

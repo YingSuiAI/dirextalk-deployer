@@ -18,11 +18,10 @@ After deployment, S6 writes service-scoped files under:
     "default": {
       "password": "<eight-digit-app-initialization-code>",
       "access_token": "<owner-access-token>",
+      "agent_token": "<agent-token>",
       "agent_room_id": "__ROOM_ID__",
-      "dirextalk_domain": "https://__DOMAIN__",
-      "dirextalk_agent_token": "<agent-token>",
-      "dirextalk_agent_room_id": "__ROOM_ID__",
-      "dirextalk_agent_node_id": "__AGENT_NODE_ID__"
+      "agent_node_id": "__AGENT_NODE_ID__",
+      "mcp_url": "https://__DOMAIN__/mcp"
     }
   }
 }
@@ -30,14 +29,9 @@ After deployment, S6 writes service-scoped files under:
 
 Treat the synced `password` and owner `access_token` as one-time/volatile values. A successful App initialization or token exchange can reset them on the server. Before showing the eight-digit app initialization code or using an owner `access_token` for `/_p2p/command` or Matrix Client API calls, pull the current `/var/dirextalk-message-server/p2p/bootstrap.json` from the server and refresh local credentials instead of using older local output.
 
-`env` contains the same service-scoped environment values for shell usage:
-
-```bash
-DIREXTALK_DOMAIN=https://__DOMAIN__
-DIREXTALK_AGENT_TOKEN=<agent_token>
-DIREXTALK_AGENT_ROOM_ID=__ROOM_ID__
-DIREXTALK_AGENT_NODE_ID=__AGENT_NODE_ID__
-```
+The retired service-level `env` file is no longer generated. Existing
+`agent_env_file` state is scrubbed during S6 migration. `mcp/env` remains the
+canonical manual HTTP MCP artifact described below.
 
 ## MCP Tooling
 
@@ -51,19 +45,34 @@ Generated files:
 
 - `codex.toml`: Codex TOML snippet using `[mcp_servers."<server-name>"]`.
 - `cursor.mcp.json`: Cursor-compatible JSON snippet using `mcpServers`. Operators can merge it into project-level `.cursor/mcp.json` or global `~/.cursor/mcp.json`; S6 does not write those locations by default because they contain a bearer token for this service.
-- `openclaw.md` plus `openclaw-server.json`: OpenClaw CLI setup. It must use `openclaw mcp set`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
+- `openclaw.md`: host-managed guidance only. It contains no bearer token and no global mutation command.
 - `hermes.mcp.json`: Hermes JSON snippet using `mcpServers` with the remote HTTP MCP endpoint.
-- `mcp-servers.json`: generic JSON snippet for other MCP-capable supported runtimes.
 - `env`: shell exports for the selected HTTP MCP URL and agent node id.
 
-S6 writes only the snippet selected for the detected runtime. Dedicated snippets are used for Codex, Cursor, OpenClaw, and Hermes; other MCP-capable supported runtimes receive the generic `mcp-servers.json`. The selected snippet connects directly to the deployed message server's HTTP MCP endpoint and sets the equivalent of:
+MCP capability is declared separately from bridge-agent support:
+
+| Capability | Runtimes |
+| --- | --- |
+| `session` | ACP, Claude Code, Codex, Copilot, Gemini, Kimi, OpenCode, Qoder, Hermes |
+| `project` | Antigravity, Cursor |
+| `host-managed` | OpenClaw, iFlow |
+| `conditional` | Pi (`mcp_extension`), tmux (`mcp_consuming_wrapper`) |
+| `unsupported` | Devin, Reasonix |
+
+Unknown runtimes fail closed. S6 never writes a generic MCP JSON fallback.
+The canonical `mcp/env` artifact points directly to the deployed message server
+and sets the equivalent of:
 
 ```bash
 DIREXTALK_MCP_URL=https://<domain>/mcp
 DIREXTALK_AGENT_NODE_ID=__AGENT_NODE_ID__
 ```
 
-MCP uses the server HTTP endpoint and service agent token. S6 writes the selected client snippet and also writes the same MCP endpoint fields into `dirextalk-connect/config.toml` under `[projects.agent.options]`. Codex consumes those fields as native `mcp_servers` config, ACP consumes them as `mcpServers` session parameters, and other connect agents receive standard `DIREXTALK_MCP_*` environment variables.
+MCP uses the server HTTP endpoint and service agent token. S6 writes
+`mcp_url`, `mcp_server_name`, `mcp_agent_token`, `mcp_node_id`, and
+`mcp_capability` into `dirextalk-connect/config.toml`; dirextalk-connect owns the
+agent-specific injection. OpenClaw carries `mcp_capability = "host-managed"` so
+its ACP bridge cannot silently receive per-session MCP configuration.
 Generated MCP client snippets do not install or launch a local MCP CLI. MCP does not require a local daemon, proxy endpoint, or listening port.
 Cursor can load the generated MCP server after the snippet is added to `.cursor/mcp.json` or `~/.cursor/mcp.json`, but Cursor may require a full restart or MCP settings reload/enable before the server starts and tools appear.
 
@@ -147,13 +156,25 @@ Defaults:
 - `DIREXTALK_AGENT_INSTALL_MODE=recommended` maps every supported local runtime to `dirextalk-connect`.
 - Speech defaults to `DIREXTALK_SPEECH_PROVIDER=openai` and `DIREXTALK_SPEECH_LANGUAGE=zh`. Provider-specific keys are also accepted: `DIREXTALK_SPEECH_OPENAI_API_KEY` or `OPENAI_API_KEY`, `DIREXTALK_SPEECH_GROQ_API_KEY` or `GROQ_API_KEY`, `DIREXTALK_SPEECH_QWEN_API_KEY` or `DASHSCOPE_API_KEY`, and `DIREXTALK_SPEECH_GEMINI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`. Set `DIREXTALK_SPEECH_ENABLED=false` to suppress speech config generation even when a key exists.
 
-Manual command:
+POSIX Bash manual command:
 
 ```bash
 npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk-connect@latest
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon install --config ~/.dirextalk/nodes/<service_id>/dirextalk-connect/config.toml --service-name <service_id> --force
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon status --service-name <service_id>
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon logs --service-name <service_id> -n 120
+```
+
+Windows PowerShell manual command:
+
+```powershell
+$serviceDir = Join-Path $env:USERPROFILE '.dirextalk\nodes\<service_id>'
+$runtimeDir = Join-Path $serviceDir 'dirextalk-connect'
+$connect = Join-Path $runtimeDir 'dirextalk-connect.cmd'
+npm install --prefix $runtimeDir dirextalk-connect@latest
+& $connect daemon install --config (Join-Path $runtimeDir 'config.toml') --service-name '<service_id>' --force
+& $connect daemon status --service-name '<service_id>'
+& $connect daemon logs --service-name '<service_id>' -n 120
 ```
 
 Source fallback:
@@ -179,7 +200,6 @@ agent_node_id
 agent_service_id
 agent_service_dir
 agent_credentials_file
-agent_env_file
 agent_workspace
 agent_skill_install_path
 agent_global_skill_install_path
@@ -201,7 +221,9 @@ connect_matrix_device
 connect_matrix_homeserver
 connect_mcp_url
 connect_mcp_server_name
+connect_mcp_capability
 mcp_transport
+mcp_capability
 mcp_endpoint_url
 mcp_server_name
 mcp_config_dir
@@ -210,7 +232,6 @@ mcp_codex_config
 mcp_cursor_config
 mcp_openclaw_config
 mcp_hermes_config
-mcp_json_config
 mcp_env_file
 mcp_readme
 mcp_install_command

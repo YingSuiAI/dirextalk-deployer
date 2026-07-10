@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# S6 WIRE_LOCAL_CLIENT - write service-scoped credentials and dirextalk-connect env.
+# S6 WIRE_LOCAL_CLIENT - write service-scoped credentials and dirextalk-connect config.
 #
 #   ① ~/.dirextalk/nodes/<service_id>/credentials.json
-#   ② ~/.dirextalk/nodes/<service_id>/env
-#   ③ dirextalk-connect Matrix config and install guidance for the detected agent runtime
-#   ④ MCP client snippets for Codex/OpenClaw/Hermes under the service directory
+#   ② dirextalk-connect Matrix config and install guidance for the detected agent runtime
+#   ③ capability-specific MCP artifacts under the service directory
 #
-# Tokens change on every rebuild, so local credentials and dirextalk-connect env must be refreshed.
+# Tokens change on every rebuild, so local credentials and dirextalk-connect config must be refreshed.
 
 S6_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
@@ -67,12 +66,12 @@ source "$S6_DIR/../lib/mcp-client-adapters.sh"
 _detect_agent_runtime() {
   local active_runtime explicit_agent home_runtime
   if [ -n "${DIREXTALK_AGENT_PLATFORM:-}" ] && [ "${DIREXTALK_AGENT_PLATFORM:-}" != "auto" ]; then
-    _validate_agent_platform "$DIREXTALK_AGENT_PLATFORM"
+    _validate_agent_platform "$DIREXTALK_AGENT_PLATFORM" || return 1
     printf '%s\n' "$DIREXTALK_AGENT_PLATFORM"
     return 0
   fi
   if [ -n "${DIREXTALK_CONNECT_AGENT:-}" ]; then
-    explicit_agent=$(_validate_connect_agent "$DIREXTALK_CONNECT_AGENT")
+    explicit_agent=$(_validate_connect_agent "$DIREXTALK_CONNECT_AGENT") || return 1
     printf '%s\n' "$explicit_agent"
     return 0
   fi
@@ -657,8 +656,8 @@ EOF
 }
 
 _write_connect_config() {
-  local config_path=$1 data_dir=$2 project=$3 agent=$4 workspace=$5 homeserver=$6 matrix_token=$7 matrix_user=$8 room_id=$9 admin_from=${10:-} agent_cmd=${11:-} agent_options_toml=${12:-} mcp_url=${13:-} mcp_server_name=${14:-} mcp_agent_token=${15:-} mcp_node_id=${16:-}
-  local q_data q_project q_agent q_workspace q_homeserver q_token q_user q_room q_admin_from q_agent_cmd q_mcp_url q_mcp_server_name q_mcp_agent_token q_mcp_node_id speech_toml default_agent_options_toml display_toml
+  local config_path=$1 data_dir=$2 project=$3 agent=$4 workspace=$5 homeserver=$6 matrix_token=$7 matrix_user=$8 room_id=$9 admin_from=${10:-} agent_cmd=${11:-} agent_options_toml=${12:-} mcp_url=${13:-} mcp_server_name=${14:-} mcp_agent_token=${15:-} mcp_node_id=${16:-} mcp_capability=${17:-}
+  local q_data q_project q_agent q_workspace q_homeserver q_token q_user q_room q_admin_from q_agent_cmd q_mcp_url q_mcp_server_name q_mcp_agent_token q_mcp_node_id q_mcp_capability speech_toml default_agent_options_toml display_toml
   mkdir -p "$(dirname "$config_path")" "$data_dir"
   q_data=$(_toml_escape "$data_dir")
   q_project=$(_toml_escape "$project")
@@ -674,6 +673,7 @@ _write_connect_config() {
   q_mcp_server_name=$(_toml_escape "$mcp_server_name")
   q_mcp_agent_token=$(_toml_escape "$mcp_agent_token")
   q_mcp_node_id=$(_toml_escape "$mcp_node_id")
+  q_mcp_capability=$(_toml_escape "$mcp_capability")
   speech_toml=$(_connect_speech_config_toml)
   display_toml=$(_connect_display_config_toml)
   default_agent_options_toml=$(_connect_default_agent_options_toml "$agent" "$agent_options_toml")
@@ -706,6 +706,7 @@ mcp_url = "$q_mcp_url"
 mcp_server_name = "$q_mcp_server_name"
 mcp_agent_token = "$q_mcp_agent_token"
 mcp_node_id = "$q_mcp_node_id"
+mcp_capability = "$q_mcp_capability"
 EOF
   fi
   if [ -n "$agent_cmd" ]; then
@@ -739,12 +740,36 @@ EOF
 
 _connect_daemon_install_command() {
   local binary=$1 config=$2 service_name=$3 package_dir=${4:-}
+  local binary_local config_local package_dir_local package package_q binary_q config_q service_q package_dir_q
   [ -n "$service_name" ] || service_name=dirextalk-connect
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    binary_local=$(_local_connect_path "$binary")
+    config_local=$(_local_connect_path "$config")
+    package_dir_local=${package_dir:+$(_local_connect_path "$package_dir")}
+    package=$(_connect_npm_package)
+    binary_q=$(_powershell_single_quote "$binary_local")
+    config_q=$(_powershell_single_quote "$config_local")
+    service_q=$(_powershell_single_quote "$service_name")
+    package_q=$(_powershell_single_quote "$package")
+    if [ -n "$package_dir_local" ]; then
+      package_dir_q=$(_powershell_single_quote "$package_dir_local")
+      printf "if (Test-Path -LiteralPath '%s') { & '%s' daemon stop --service-name '%s'; if (\$LASTEXITCODE -ne 0) { Write-Warning 'dirextalk-connect daemon stop failed; continuing refresh' } }; npm install --prefix '%s' '%s'; if (\$LASTEXITCODE -ne 0) { throw 'dirextalk-connect npm install failed' }; & '%s' daemon install --config '%s' --service-name '%s' --force" \
+        "$binary_q" "$binary_q" "$service_q" "$package_dir_q" "$package_q" "$binary_q" "$config_q" "$service_q"
+    else
+      printf "if (-not (Get-Command '%s' -ErrorAction SilentlyContinue)) { npm install -g '%s'; if (\$LASTEXITCODE -ne 0) { throw 'dirextalk-connect npm install failed' } }; & '%s' daemon install --config '%s' --service-name '%s' --force" \
+        "$binary_q" "$package_q" "$binary_q" "$config_q" "$service_q"
+    fi
+    return 0
+  fi
   if [ -n "$package_dir" ]; then
     printf 'if [ -x %q ]; then %q daemon stop --service-name %q || true; fi; npm install --prefix %q %q && %q daemon install --config %q --service-name %q --force' "$binary" "$binary" "$service_name" "$package_dir" "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
   else
     printf 'if ! command -v %q >/dev/null 2>&1; then npm install -g %q; fi && %q daemon install --config %q --service-name %q --force' "$binary" "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
   fi
+}
+
+_powershell_single_quote() {
+  printf '%s' "$1" | sed "s/'/''/g"
 }
 
 _connect_binary_available() {
@@ -954,7 +979,7 @@ _connect_install_command() {
 }
 
 _print_runtime_install_summary() {
-  local runtime=$1 mode=$2 config_path=$3 binary=$4 cc_agent=$5 cc_agent_cmd=${6:-} service_name=${7:-}
+  local runtime=$1 mode=$2 config_path=$3 binary=$4 cc_agent=$5 cc_agent_cmd=${6:-} service_name=${7:-} install_command=${8:-}
   cat >&2 <<EOF
 Recommended dirextalk-connect install:
   runtime:        $runtime
@@ -964,26 +989,12 @@ Recommended dirextalk-connect install:
   service name:   $service_name
   config:         $config_path
   binary:         $binary
-  daemon install: $(_connect_daemon_install_command "$binary" "$config_path" "$service_name")
+  daemon install: $install_command
 EOF
 }
 
 _maybe_auto_install_agent() {
   _maybe_auto_install_connect "$@"
-}
-
-_write_agent_env_file() {
-  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$(_dirextalk_home)/env"} node_id=${6:-}
-  mkdir -p "$(dirname "$envfile")"
-  umask 077
-  {
-    [ -n "$node_id" ] && printf 'export DIREXTALK_AGENT_NODE_ID=%q\n' "$node_id"
-    printf 'export DIREXTALK_DOMAIN=%q\n' "$asurl"
-    printf 'export DIREXTALK_AGENT_TOKEN=%q\n' "$token"
-    printf 'export DIREXTALK_AGENT_ROOM_ID=%q\n' "$agent_room_id"
-  } > "$envfile"
-  chmod 600 "$envfile"
-  echo "$envfile"
 }
 
 _agent_node_id() {
@@ -1020,19 +1031,8 @@ _write_credentials_file() {
   chmod 600 "$cred"
 }
 
-_persist_agent_env() {
-  local asurl=$1 token=$2 access_token=$3 agent_room_id=$4 envfile=${5:-"$(_dirextalk_home)/env"} node_id=${6:-}
-  envfile=$(_write_agent_env_file "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id")
-  [ -n "$node_id" ] && export DIREXTALK_AGENT_NODE_ID="$node_id"
-  export DIREXTALK_DOMAIN="$asurl"
-  export DIREXTALK_AGENT_TOKEN="$token"
-  export DIREXTALK_AGENT_ROOM_ID="$agent_room_id"
-  ok "Persisted Dirextalk dirextalk-connect env vars via $envfile."
-  echo "$envfile"
-}
-
 _print_connect_guidance() {
-  local runtime=$1 asurl=$2 cred=$3 envfile=$4 policy=$5 mode=$6 install_command=$7 node_id=$8 cc_config=$9 cc_binary=${10} cc_agent=${11} cc_agent_cmd=${12:-} service_name=${13:-}
+  local runtime=$1 asurl=$2 cred=$3 policy=$4 mode=$5 install_command=$6 node_id=$7 cc_config=$8 cc_binary=$9 cc_agent=${10} cc_agent_cmd=${11:-} service_name=${12:-}
   local skill_path global_skill_path
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
@@ -1044,7 +1044,6 @@ _print_connect_guidance() {
   cat >&2 <<EOF
 Detected agent runtime: $runtime
 dirextalk-connect agent:       $cc_agent
-Local env file:         $envfile
 Credential file:        $cred
 dirextalk-connect config:      $cc_config
 dirextalk-connect binary:      $cc_binary
@@ -1053,18 +1052,17 @@ dirextalk-connect service:     $service_name
 Install command:        $install_command
 Project skill clone:    $skill_path
 Global skill fallback:  $global_skill_path
-Env keys:               DIREXTALK_DOMAIN, DIREXTALK_AGENT_TOKEN, DIREXTALK_AGENT_ROOM_ID, DIREXTALK_AGENT_NODE_ID
-
 dirextalk-connect will use Matrix Client-Server sync as @agent:<server> and is restricted to DIREXTALK_AGENT_ROOM_ID.
 It talks directly to the Dirextalk homeserver for the agents room conversation.
 EOF
-  _print_runtime_install_summary "$runtime" "$mode" "$cc_config" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_name"
+  _print_runtime_install_summary "$runtime" "$mode" "$cc_config" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_name" "$install_command"
 }
 
 _clear_mcp_daemon_state() {
   local key
   [ -n "${STATE_JSON:-}" ] && [ -f "$STATE_JSON" ] || return 0
   for key in \
+    agent_env_file \
     mcp_daemon_install_command \
     mcp_daemon_status_command \
     mcp_daemon_url \
@@ -1077,9 +1075,9 @@ _clear_mcp_daemon_state() {
 
 run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and dirextalk-connect Matrix bridge config"
-  local domain asurl token access_token password agent_room_id envfile runtime install_policy install_mode install_command
-  local node_id service_dir node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_config cc_config_local cc_data cc_data_local cc_binary cc_session cc_source cc_package_dir
-  local mcp_dir mcp_dir_local mcp_server_name mcp_endpoint_url mcp_install_command mcp_doctor_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
+  local domain asurl token access_token password agent_room_id runtime install_policy install_mode install_command
+  local node_id service_dir service_dir_local node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_runtime_dir_local cc_config cc_config_local cc_data cc_data_local cc_binary cc_binary_local cc_session cc_session_local cc_source cc_package_dir
+  local mcp_dir mcp_dir_local mcp_capability mcp_server_name mcp_endpoint_url mcp_install_command mcp_doctor_command mcp_codex_config mcp_cursor_config mcp_openclaw_config mcp_hermes_config mcp_json_config mcp_env_file mcp_readme
   local mcp_selected_config_type mcp_selected_config mcp_selected_config_local mcp_codex_config_local mcp_cursor_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_json_config_local mcp_env_file_local mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
   local connect_mcp_url connect_mcp_server_name connect_mcp_agent_token connect_mcp_node_id
@@ -1090,44 +1088,106 @@ run_phase() {
   access_token=$(state_get access_token)
   password=$(state_get password)
   agent_room_id=$(state_get agent_room_id)
-  [ -n "$domain" ] && [ -n "$asurl" ] && [ -n "$token" ] || { phase_set S6_WIRE_LOCAL failed "missing domain/as_url/token"; fail "state is missing domain/as_url/agent_token; complete S5 first."; }
-  [ -n "$access_token" ] && [ -n "$password" ] || { phase_set S6_WIRE_LOCAL failed "missing bootstrap credentials"; fail "state is missing password/access_token; complete S5 first."; }
-  _validate_real_agent_room_id "$agent_room_id"
+  [ -n "$domain" ] && [ -n "$asurl" ] && [ -n "$token" ] || { phase_set S6_WIRE_LOCAL failed "missing domain/as_url/token"; fail "state is missing domain/as_url/agent_token; complete S5 first."; return 1; }
+  [ -n "$access_token" ] && [ -n "$password" ] || { phase_set S6_WIRE_LOCAL failed "missing bootstrap credentials"; fail "state is missing password/access_token; complete S5 first."; return 1; }
+  if ! ( _validate_real_agent_room_id "$agent_room_id" ); then
+    phase_set S6_WIRE_LOCAL failed "invalid or missing agent room id"
+    return 1
+  fi
 
-  runtime=$(_detect_agent_runtime)
-  cc_agent=$(_connect_agent_type "$runtime")
-  cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime")
-  cc_agent_options_toml=$(_connect_agent_options_toml "$runtime" "$cc_agent")
-  node_id=$(_agent_node_id "$runtime" "$domain" "$agent_room_id")
-  service_id=$(_dirextalk_service_id "${asurl:-$domain}")
-  service_dir=$(_dirextalk_service_dir "${asurl:-$domain}")
+  if ! runtime=$(_detect_agent_runtime); then
+    phase_set S6_WIRE_LOCAL failed "invalid or ambiguous agent runtime"
+    return 1
+  fi
+  if ! cc_agent=$(_connect_agent_type "$runtime"); then
+    phase_set S6_WIRE_LOCAL failed "invalid or unsupported dirextalk-connect agent"
+    return 1
+  fi
+  if ! cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime"); then
+    phase_set S6_WIRE_LOCAL failed "invalid dirextalk-connect agent command"
+    return 1
+  fi
+  if ! cc_agent_options_toml=$(_connect_agent_options_toml "$runtime" "$cc_agent"); then
+    phase_set S6_WIRE_LOCAL failed "invalid dirextalk-connect agent options"
+    return 1
+  fi
+  if ! install_policy=$(_connect_install_policy); then
+    phase_set S6_WIRE_LOCAL failed "invalid dirextalk-connect install policy"
+    return 1
+  fi
+  if ! install_mode=$(_connect_install_mode "$runtime"); then
+    phase_set S6_WIRE_LOCAL failed "invalid dirextalk-connect install mode"
+    return 1
+  fi
+  if ! mcp_capability=$(_mcp_runtime_capability "$runtime"); then
+    phase_set S6_WIRE_LOCAL failed "MCP capability is undeclared for runtime=$runtime"
+    return 1
+  fi
+  if ! node_id=$(_agent_node_id "$runtime" "$domain" "$agent_room_id"); then
+    phase_set S6_WIRE_LOCAL failed "agent node id generation failed"
+    return 1
+  fi
+  if ! service_id=$(_dirextalk_service_id "${asurl:-$domain}") || [ -z "$service_id" ]; then
+    phase_set S6_WIRE_LOCAL failed "service id generation failed"
+    return 1
+  fi
+  if ! service_dir=$(_dirextalk_service_dir "${asurl:-$domain}") || [ -z "$service_dir" ]; then
+    phase_set S6_WIRE_LOCAL failed "service directory resolution failed"
+    return 1
+  fi
   node_cred="$service_dir/credentials.json"
-  envfile="$service_dir/env"
+  if ! rm -f "$service_dir/env"; then
+    phase_set S6_WIRE_LOCAL failed "legacy service env cleanup failed"
+    return 1
+  fi
+  service_dir_local=$(_local_connect_path "$service_dir")
   workspace=$(_agent_workspace "$service_dir")
   admin_from="@owner:$domain"
   cc_runtime_dir=$(_connect_runtime_dir "$service_dir")
+  cc_runtime_dir_local=$(_local_connect_path "$cc_runtime_dir")
   cc_config=$(_connect_config_path "$service_dir")
   cc_config_local=$(_local_connect_path "$cc_config")
   cc_data="$cc_runtime_dir/data"
   cc_data_local=$(_local_connect_path "$cc_data")
   cc_binary=$(_connect_binary_path "$service_dir")
+  cc_binary_local=$(_local_connect_path "$cc_binary")
   cc_package_dir=$(_connect_package_dir "$service_dir")
-  _ensure_connect_wrapper "$service_dir"
+  if ! _ensure_connect_wrapper "$service_dir"; then
+    phase_set S6_WIRE_LOCAL failed "dirextalk-connect wrapper generation failed"
+    return 1
+  fi
   cc_session="$cc_runtime_dir/matrix-session.json"
+  cc_session_local=$(_local_connect_path "$cc_session")
   cc_source=$(_connect_source_dir "$service_dir")
 
-  _write_credentials_file "$node_cred" "$domain" "$asurl" "$token" "$password" "$access_token" "$agent_room_id" "$node_id"
+  if ! _write_credentials_file "$node_cred" "$domain" "$asurl" "$token" "$password" "$access_token" "$agent_room_id" "$node_id"; then
+    phase_set S6_WIRE_LOCAL failed "service credential write failed"
+    return 1
+  fi
   ok "Wrote $node_cred (0600)."
   node_cred_local=$(_local_connect_path "$node_cred")
 
-  _write_mcp_config_artifacts "$service_id" "$service_dir" "$asurl" "$token" "$node_cred" "$node_id" "$runtime"
+  if ! _write_mcp_config_artifacts "$service_id" "$service_dir" "$asurl" "$token" "$node_cred" "$node_id" "$runtime"; then
+    phase_set S6_WIRE_LOCAL failed "MCP capability or artifact generation failed"
+    return 1
+  fi
   mcp_dir=$(_mcp_runtime_dir "$service_dir")
   mcp_dir_local=$(_local_connect_path "$mcp_dir")
   mcp_server_name=$(_mcp_server_name "$service_id")
   mcp_endpoint_url=$(_mcp_endpoint_url "$asurl")
-  mcp_selected_config_type=$(_mcp_config_type_for_runtime "$runtime")
-  mcp_selected_config=$(_mcp_selected_config_path "$service_dir" "$runtime")
-  mcp_selected_config_local=$(_local_connect_path "$mcp_selected_config")
+  if ! mcp_selected_config_type=$(_mcp_config_type_for_runtime "$runtime"); then
+    phase_set S6_WIRE_LOCAL failed "MCP capability is undeclared for runtime=$runtime"
+    return 1
+  fi
+  if ! mcp_selected_config=$(_mcp_selected_config_path "$service_dir" "$runtime"); then
+    phase_set S6_WIRE_LOCAL failed "MCP artifact selection failed for runtime=$runtime"
+    return 1
+  fi
+  if [ -n "$mcp_selected_config" ]; then
+    mcp_selected_config_local=$(_local_connect_path "$mcp_selected_config")
+  else
+    mcp_selected_config_local=
+  fi
   mcp_codex_config=$(_mcp_codex_config_path "$service_dir")
   mcp_cursor_config=$(_mcp_cursor_config_path "$service_dir")
   mcp_openclaw_config=$(_mcp_openclaw_config_path "$service_dir")
@@ -1152,11 +1212,6 @@ run_phase() {
   mcp_install_command=$(_mcp_install_command "$asurl" "$service_dir")
   mcp_doctor_command=$(_mcp_doctor_command "$asurl" "$node_cred" "$node_id" "$service_dir")
   ok "Wrote MCP config snippets under $mcp_dir."
-
-  if ! envfile=$(_persist_agent_env "$asurl" "$token" "$access_token" "$agent_room_id" "$envfile" "$node_id"); then
-    phase_set S6_WIRE_LOCAL failed "persistent env write failed"
-    fail "failed to persist Dirextalk dirextalk-connect env vars."
-  fi
 
   mkdir -p "$workspace"
   mkdir -p "$cc_runtime_dir"
@@ -1193,23 +1248,18 @@ run_phase() {
   connect_mcp_server_name=$mcp_server_name
   connect_mcp_agent_token=$token
   connect_mcp_node_id=$node_id
-  if [ "$runtime" = "openclaw" ]; then
-    # OpenClaw Gateway ACP rejects per-session MCP servers; S6 installs MCP
-    # through `openclaw mcp set` instead.
-    connect_mcp_url=
-    connect_mcp_server_name=
-    connect_mcp_agent_token=
-    connect_mcp_node_id=
+  if ! _write_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml" "$connect_mcp_url" "$connect_mcp_server_name" "$connect_mcp_agent_token" "$connect_mcp_node_id" "$mcp_capability"; then
+    phase_set S6_WIRE_LOCAL failed "dirextalk-connect config write failed"
+    return 1
   fi
-  _write_connect_config "$cc_config" "$cc_data_local" "$node_id" "$cc_agent" "$workspace_local" "$matrix_homeserver" "$matrix_token" "$matrix_user" "$agent_room_id" "$admin_from" "$cc_agent_cmd" "$cc_agent_options_toml" "$connect_mcp_url" "$connect_mcp_server_name" "$connect_mcp_agent_token" "$connect_mcp_node_id"
   ok "Wrote dirextalk-connect Matrix config $cc_config (0600)."
 
-  state_set agent_env_file "$envfile" 2>/dev/null || true
   state_set agent_node_id "$node_id" 2>/dev/null || true
   state_set agent_service_id "$service_id" 2>/dev/null || true
-  state_set agent_service_dir "$service_dir" 2>/dev/null || true
-  state_set agent_credentials_file "$node_cred" 2>/dev/null || true
+  state_set agent_service_dir "$service_dir_local" 2>/dev/null || true
+  state_set agent_credentials_file "$node_cred_local" 2>/dev/null || true
   state_set mcp_transport "http" 2>/dev/null || true
+  state_set mcp_capability "$mcp_capability" 2>/dev/null || true
   state_set mcp_endpoint_url "$mcp_endpoint_url" 2>/dev/null || true
   json_mutate "$STATE_JSON" delete mcp_npm_package 2>/dev/null || true
   json_mutate "$STATE_JSON" delete mcp_command 2>/dev/null || true
@@ -1229,11 +1279,12 @@ run_phase() {
   state_set mcp_install_command "$mcp_install_command" 2>/dev/null || true
   state_set mcp_doctor_command "$mcp_doctor_command" 2>/dev/null || true
   _clear_mcp_daemon_state
-  state_set agent_workspace "$workspace" 2>/dev/null || true
+  state_set agent_workspace "$workspace_local" 2>/dev/null || true
   state_set connect_agent "$cc_agent" 2>/dev/null || true
   state_set connect_agent_cmd "$cc_agent_cmd" 2>/dev/null || true
   state_set connect_mcp_url "$connect_mcp_url" 2>/dev/null || true
   state_set connect_mcp_server_name "$connect_mcp_server_name" 2>/dev/null || true
+  state_set connect_mcp_capability "$mcp_capability" 2>/dev/null || true
   if [ -n "$cc_agent_options_toml" ]; then
     state_set connect_agent_options_toml_present "true" 2>/dev/null || true
   else
@@ -1244,19 +1295,20 @@ run_phase() {
   state_set connect_ref "$(_connect_ref)" 2>/dev/null || true
   state_set connect_source_dir "$cc_source" 2>/dev/null || true
   state_set connect_package_dir "$(_local_connect_path "$cc_package_dir")" 2>/dev/null || true
-  state_set connect_runtime_dir "$cc_runtime_dir" 2>/dev/null || true
+  state_set connect_runtime_dir "$cc_runtime_dir_local" 2>/dev/null || true
   state_set connect_config "$cc_config_local" 2>/dev/null || true
-  state_set connect_binary "$cc_binary" 2>/dev/null || true
+  state_set connect_binary "$cc_binary_local" 2>/dev/null || true
   state_set connect_data_dir "$cc_data_local" 2>/dev/null || true
   state_set connect_admin_from "$admin_from" 2>/dev/null || true
-  state_set connect_matrix_session_file "$cc_session" 2>/dev/null || true
+  state_set connect_matrix_session_file "$cc_session_local" 2>/dev/null || true
   state_set connect_matrix_user "$matrix_user" 2>/dev/null || true
   state_set connect_matrix_device "$matrix_device" 2>/dev/null || true
   state_set connect_matrix_homeserver "$matrix_homeserver" 2>/dev/null || true
 
-  install_policy=$(_connect_install_policy)
-  install_mode=$(_connect_install_mode "$runtime")
-  install_command=$(_connect_install_command "$cc_binary" "$cc_config" "$service_id" "$service_dir")
+  if ! install_command=$(_connect_install_command "$cc_binary" "$cc_config" "$service_id" "$service_dir"); then
+    phase_set S6_WIRE_LOCAL failed "dirextalk-connect recommendation rendering failed"
+    return 1
+  fi
   skill_path=$(_agent_skill_install_path "$runtime")
   global_skill_path=$(_agent_global_skill_install_path "$runtime")
   state_set agent_runtime "$runtime" 2>/dev/null || true
@@ -1267,15 +1319,18 @@ run_phase() {
   state_set agent_skill_install_path "$skill_path" 2>/dev/null || true
   state_set agent_global_skill_install_path "$global_skill_path" 2>/dev/null || true
   state_set dirextalk_agent_bridge "dirextalk-connect" 2>/dev/null || true
-  _print_connect_guidance "$runtime" "$asurl" "$node_cred" "$envfile" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary" "$cc_agent" "$cc_agent_cmd" "$service_id"
+  _print_connect_guidance "$runtime" "$asurl" "$node_cred_local" "$install_policy" "$install_mode" "$install_command" "$node_id" "$cc_config_local" "$cc_binary_local" "$cc_agent" "$cc_agent_cmd" "$service_id"
   _print_mcp_guidance "$runtime" "$service_id" "$mcp_server_name" "$node_cred_local" "$mcp_dir_local" "$mcp_selected_config_type" "$mcp_selected_config_local" "$mcp_install_command" "$mcp_doctor_command" "$service_dir" "$mcp_endpoint_url"
   if ! _maybe_auto_install_agent "$install_policy" "$runtime" "$cc_agent" "$service_dir" "$cc_config" "$cc_binary" "$service_id"; then
     phase_set S6_WIRE_LOCAL failed "dirextalk-connect auto install/startup was not verified; check daemon logs"
-    warn "Run: $cc_binary daemon logs --service-name $service_id -n ${DIREXTALK_CONNECT_LOG_TAIL_LINES:-120}"
+    warn "Inspect the service-scoped daemon logs with the native path recorded in connect_binary and service name $service_id."
     return 1
   fi
-  _maybe_auto_install_mcp "$install_policy" "$runtime" "$mcp_server_name" "$node_cred" "$node_id" "$service_dir"
+  if ! _maybe_auto_install_mcp "$install_policy" "$runtime" "$mcp_server_name" "$node_cred" "$node_id" "$service_dir"; then
+    phase_set S6_WIRE_LOCAL failed "MCP enrollment or capability handling failed"
+    return 1
+  fi
 
-  phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;env_file=$envfile;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;connect_config=$cc_config;mcp_config_dir=$mcp_dir;connect_agent=$cc_agent"
+  phase_set S6_WIRE_LOCAL done "credentials.json written;node_id=$node_id;service_id=$service_id;runtime=$runtime;install_policy=$install_policy;install_mode=$install_mode;connect_config=$cc_config_local;mcp_config_dir=$mcp_dir_local;connect_agent=$cc_agent"
   return 0
 }

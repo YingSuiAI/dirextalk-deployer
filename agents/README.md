@@ -6,7 +6,7 @@ This skill is runtime-neutral. Claude, Codex/OpenAI, Gemini, Cursor, Copilot, Op
 SKILL.md
 ```
 
-When an agent runtime supports skill metadata, point it at `SKILL.md` and use `scripts/orchestrate.sh` as the deployment command. Read `references/agent-targets.md` before installing this skill or wiring the local `dirextalk-connect` bridge and HTTP MCP snippets for a runtime. S6 writes current Dirextalk bridge/MCP variables and records the detected runtime plus target paths. After deployment, ask the user before mutating the runtime-specific local bridge or MCP configuration.
+When an agent runtime supports skill metadata, point it at `SKILL.md`. POSIX hosts use `scripts/orchestrate.sh`; Windows hosts use `scripts/orchestrate.ps1`. Read `references/agent-targets.md` before installing this skill or wiring the local `dirextalk-connect` bridge. S6 records a capability independently from bridge-agent support and never falls back to generic MCP JSON. OpenClaw/iFlow are host-managed, Pi/tmux conditional, and Devin/Reasonix unsupported.
 
 Recognition keywords:
 
@@ -21,6 +21,6 @@ Recognition keywords:
 Required capabilities:
 
 - Read local files.
-- Run POSIX shell commands.
+- Run POSIX shell commands on Linux/macOS, or native PowerShell plus Git Bash on Windows.
 - Use `aws`, `ssh`, `scp`, `curl`, and Node.js for `scripts/json.mjs` after the user approves any missing installs.
 - Preserve secrets outside the repository.

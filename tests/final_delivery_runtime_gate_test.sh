@@ -113,6 +113,7 @@ json_build object \
   "connect_config=$config" \
   connect_binary=dirextalk-connect \
   phase=S7_VERIFY_E2E \
+  'runtime_checks={"summary":{"status":"passed"},"connect_daemon":{"status":"passed"},"mcp_doctor":{"status":"passed"},"mcp_tools":{"status":"passed"},"mcp_smoke":{"status":"passed"}}' \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
   'resources={"instance_id":"i-final","public_ip":"203.0.113.21","key_file":"/tmp/key.pem"}' > "$state"
 

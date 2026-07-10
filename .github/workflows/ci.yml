@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cross-platform:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify tracked text uses LF
+        shell: bash
+        run: bash tests/tracked_text_lf_test.sh
+
+      - name: Run deployer tests
+        shell: bash
+        run: npm test
+
+      - name: Check Bash syntax
+        shell: bash
+        run: find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+      - name: Check npm package contents
+        shell: bash
+        run: npm pack --dry-run
+
+      - name: Run native PowerShell tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & .\tests\windows_path_wrappers_test.ps1
+          & .\tests\windows_recommendation_test.ps1

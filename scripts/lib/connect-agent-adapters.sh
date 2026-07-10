@@ -7,7 +7,7 @@
 _connect_agent_type() {
   local runtime=$1 explicit=${DIREXTALK_CONNECT_AGENT:-}
   if [ -n "$explicit" ]; then
-    _validate_connect_agent "$explicit"
+    _validate_connect_agent "$explicit" || return 1
     return 0
   fi
   case "$runtime" in

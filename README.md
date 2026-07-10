@@ -2,7 +2,7 @@
 
 [简体中文](README_zh.md)
 
-`dirextalk-deployer` deploys a production Dirextalk message server and wires the local agent room through Dirextalk's Matrix bridge. The supported local bridge is `dirextalk-connect`, installed per service from the npm package `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`. S6 also writes service-scoped MCP snippets that connect MCP-capable supported runtimes directly to the deployed message server's HTTP MCP endpoint.
+`dirextalk-deployer` deploys a production Dirextalk message server and wires the local agent room through Dirextalk's Matrix bridge. The supported local bridge is `dirextalk-connect`, installed per service from the npm package `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`. MCP capability is declared separately from bridge-agent support; S6 writes the canonical remote HTTP MCP description and never assumes that every bridge agent can consume it.
 
 ## Contents
 
@@ -191,18 +191,18 @@ S6 writes these service-scoped files under `~/.dirextalk/nodes/<service_id>/`:
 
 ```text
 credentials.json
-env
 dirextalk-connect/config.toml
 dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
+mcp/env
+mcp/README.md
 mcp/codex.toml
+mcp/cursor.mcp.json
 mcp/openclaw.md
-mcp/openclaw-server.json
 mcp/hermes.mcp.json
-mcp/mcp-servers.json
 ```
 
-Manual install:
+POSIX Bash manual install:
 
 ```bash
 npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk-connect@latest
@@ -211,18 +211,36 @@ npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon logs --service-name <service_id> -n 120
 ```
 
+Windows PowerShell manual install:
+
+```powershell
+$serviceDir = Join-Path $env:USERPROFILE '.dirextalk\nodes\<service_id>'
+$runtimeDir = Join-Path $serviceDir 'dirextalk-connect'
+$connect = Join-Path $runtimeDir 'dirextalk-connect.cmd'
+npm install --prefix $runtimeDir dirextalk-connect@latest
+& $connect daemon install --config (Join-Path $runtimeDir 'config.toml') --service-name '<service_id>' --force
+& $connect daemon status --service-name '<service_id>'
+& $connect daemon logs --service-name '<service_id>' -n 120
+```
+
 With the default `DIREXTALK_AGENT_INSTALL=auto`, S6 waits for daemon status
 `Running` and a recent `dirextalk-connect is running` log before marking local
 wiring done. Agent startup errors in the logs, such as a missing Cursor Agent
 CLI, login/auth/trust failures, ACP startup failure, or agent offline state,
 fail S6 instead of reporting deployment success.
 
-MCP is not installed as a local CLI during S6. Generated MCP client snippets
-connect directly to the deployed message server's HTTP MCP endpoint at
+MCP is not installed as a local CLI during S6. The canonical config connects to
 `https://<domain>/mcp` using the service agent token. No local MCP CLI, daemon,
-proxy, or listening port is required.
+proxy, or listening port is required. S6 records one of `session`, `project`,
+`host-managed`, `conditional`, or `unsupported`; an undeclared runtime fails closed.
 
-S6 writes only the MCP snippet for the detected runtime: `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, `mcp/openclaw.md` plus `mcp/openclaw-server.json` for OpenClaw, `mcp/hermes.mcp.json` for Hermes, or `mcp/mcp-servers.json` for other MCP-capable supported runtimes. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain a bearer token for this service; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
+The capability registry matches dirextalk-connect: ACP, Claude Code, Codex,
+Copilot, Gemini, Kimi, OpenCode, Qoder, and Hermes are `session`; Antigravity
+and Cursor are `project`; OpenClaw and iFlow are `host-managed`; Pi and tmux are
+`conditional`; Devin and Reasonix are `unsupported`. S6 never generates a
+generic JSON fallback. OpenClaw receives only `mcp/openclaw.md` host-managed
+guidance: S6 does not mutate global OpenClaw config, generate a bearer-token
+server JSON, or place the token in process arguments.
 
 Voice input is supported when an STT provider key is available. Set `DIREXTALK_SPEECH_API_KEY` or provider-specific variables such as `DIREXTALK_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `dirextalk-connect/config.toml`.
 

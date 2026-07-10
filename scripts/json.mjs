@@ -278,16 +278,6 @@ function cmdBuild(args) {
       };
       break;
     }
-    case "mcp-http-openclaw-server-config":
-      data = {
-        url: required(args, 1, "url"),
-        transport: "streamable-http",
-        headers: {
-          Authorization: `Bearer ${required(args, 2, "agent_token")}`,
-          "DIREXTALK-Agent-Node-Id": args[3] || ""
-        }
-      };
-      break;
     case "mcp-jsonrpc-initialize":
       data = {
         jsonrpc: "2.0",
@@ -323,22 +313,23 @@ function cmdBuild(args) {
       };
       process.stdout.write(`${JSON.stringify(data)}\n`);
       return;
-    case "credentials-profile":
+    case "credentials-profile": {
+      const asUrl = required(args, 2, "as_url").replace(/\/+$/, "");
       data = {
         profiles: {
           default: {
             domain: required(args, 1, "domain"),
             password: required(args, 4, "password"),
             access_token: required(args, 5, "access_token"),
+            agent_token: required(args, 3, "agent_token"),
             agent_room_id: required(args, 6, "agent_room_id"),
-            dirextalk_domain: required(args, 2, "as_url"),
-            dirextalk_agent_token: required(args, 3, "agent_token"),
-            dirextalk_agent_room_id: required(args, 6, "agent_room_id"),
-            dirextalk_agent_node_id: required(args, 7, "node_id")
+            agent_node_id: required(args, 7, "node_id"),
+            mcp_url: `${asUrl}/mcp`
           }
         }
       };
       break;
+    }
     case "pricing-estimate":
       data = buildPricingEstimate(args.slice(1));
       break;
@@ -570,10 +561,13 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
     mcp: {
       status: localRefreshStatus,
       install_status: st.mcp_install_status || "",
+      capability: st.mcp_capability || "undeclared",
       transport: st.mcp_transport || "http",
       endpoint_url: st.mcp_endpoint_url || "",
       server_name: st.mcp_server_name || "",
       config_dir: st.mcp_config_dir || "",
+      selected_config_type: st.mcp_selected_config_type || "none",
+      selected_config: st.mcp_selected_config || "",
       codex: st.mcp_codex_config || "",
       openclaw: st.mcp_openclaw_config || "",
       hermes: st.mcp_hermes_config || "",

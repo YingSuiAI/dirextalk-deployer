@@ -1,6 +1,6 @@
 # Agent Targets
 
-Use this file when installing or updating this skill and when reviewing S6 local bridge output. Dirextalk no longer ships extra chat-platform adapters from this deployer; the only post-deploy local conversation bridge is `dirextalk-connect`. MCP-capable hosts can also use the generated HTTP MCP snippets.
+Use this file when installing or updating this skill and when reviewing S6 local bridge output. Dirextalk no longer ships extra chat-platform adapters from this deployer; the only post-deploy local conversation bridge is `dirextalk-connect`. Bridge-agent support does not imply MCP capability; the explicit registry below controls remote HTTP MCP handling.
 
 ## Npm Skill Installation
 
@@ -65,15 +65,15 @@ S6 writes service-specific files to `~/.dirextalk/nodes/<service_id>/`, where `s
 
 ```text
 credentials.json
-env
 dirextalk-connect/config.toml
 dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
+mcp/env
+mcp/README.md
 mcp/codex.toml
+mcp/cursor.mcp.json
 mcp/openclaw.md
-mcp/openclaw-server.json
 mcp/hermes.mcp.json
-mcp/mcp-servers.json
 ```
 
 The generated `dirextalk-connect/config.toml` contains exactly one Matrix platform and includes:
@@ -100,6 +100,7 @@ mcp_url = "https://<domain>/mcp"
 mcp_server_name = "dirextalk-<domain>"
 mcp_agent_token = "<service agent token>"
 mcp_node_id = "<agent-node-id>"
+mcp_capability = "<session|project|host-managed|conditional|unsupported>"
 
 [[projects.platforms]]
 type = "matrix"
@@ -120,18 +121,28 @@ The `[speech]` block is present only when S6 finds a speech-to-text API key from
 
 ## MCP Targets
 
-S6 writes one MCP artifact set under `~/.dirextalk/nodes/<service_id>/mcp/`, selected from the detected runtime. Codex gets `codex.toml`, Cursor gets `cursor.mcp.json`, OpenClaw gets `openclaw.md` plus `openclaw-server.json`, Hermes gets `hermes.mcp.json`, and other MCP-capable supported runtimes get `mcp-servers.json`. These artifacts point to the deployed message server's HTTP MCP endpoint at `https://<domain>/mcp` and include the service agent token for local MCP clients. Generated client snippets do not install or launch a local MCP CLI, daemon, proxy, or listening port.
+S6 always writes canonical `mcp/env` plus a README under the service directory.
+Standalone/manual client artifacts are created only when the declarative map names
+one: Codex `codex.toml`, Cursor `cursor.mcp.json`, OpenClaw `openclaw.md`
+(guidance only, no token), and Hermes `hermes.mcp.json`. No runtime receives a
+generic JSON fallback. The registry is: ACP/Claude Code/Codex/Copilot/Gemini/
+Kimi/OpenCode/Qoder/Hermes `session`; Antigravity/Cursor `project`; OpenClaw/
+iFlow `host-managed`; Pi/tmux `conditional`; Devin/Reasonix `unsupported`.
+Unknown runtimes fail closed.
 
 ```bash
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_doctor
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_tools
 ```
 
-Use the single MCP artifact selected for the detected runtime. For OpenClaw, use `mcp/openclaw.md`; it runs `openclaw mcp set` with `mcp/openclaw-server.json` so OpenClaw validates and writes its own `mcp.servers` config. Do not paste MCP JSON into `~/.openclaw/openclaw.json`. The deployer writes local artifacts only; it does not mutate each host application's global MCP config.
+For OpenClaw, `mcp/openclaw.md` identifies the endpoint, node id, and
+service-scoped credential location. OpenClaw is host-managed: S6 does not mutate
+its global config, generate a token-bearing server object, or put a bearer token
+in command arguments. Host enrollment is a separate explicit operator action.
 
 ## Installation Policy
 
-- `DIREXTALK_AGENT_INSTALL=skip`: write credentials/env and dirextalk-connect config only.
+- `DIREXTALK_AGENT_INSTALL=skip`: write credentials, canonical MCP artifacts, and dirextalk-connect config only.
 - `DIREXTALK_AGENT_INSTALL=recommend`: write files, record state, and print the install command.
 - `DIREXTALK_AGENT_INSTALL=auto` (default): refresh `dirextalk-connect@latest` under `~/.dirextalk/nodes/<service_id>/dirextalk-connect`, unless explicit binary/command overrides are set. S6 writes short wrappers at `dirextalk-connect/dirextalk-connect(.cmd)`, installs or refreshes the service-scoped `dirextalk-connect daemon install --config ~/.dirextalk/nodes/<service_id>/dirextalk-connect/config.toml --service-name <service_id> --force`, and records dirextalk-connect as installed only after `dirextalk-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs show `dirextalk-connect is running`. Logs that show agent CLI missing, login/auth/trust failures, ACP startup failures, or agent offline state make S6 fail with `connect_install_status=install_failed`; deploy does not continue to completion until the daemon startup is verified. MCP records `mcp_install_status=not_required` for the HTTP endpoint path.
 

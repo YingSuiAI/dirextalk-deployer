@@ -1,13 +1,13 @@
 display_name: Dirextalk Deployer
-short_description: Deploy, resume, verify, destroy, and wire the local dirextalk-connect bridge plus HTTP MCP snippets for a production Dirextalk message server on AWS.
+short_description: Deploy, resume, verify, destroy, and wire dirextalk-connect plus capability-driven remote HTTP MCP for a production Dirextalk message server on AWS.
 default_prompt: Deploy a Dirextalk message server using my production domain, following SKILL.md and scripts/orchestrate.sh.
 entrypoint: ../SKILL.md
 runtime_notes:
   - Read SKILL.md before running deployment commands.
   - When installing or updating this skill itself, read references/agent-targets.md and use the npm-managed global skill install by default.
   - Do not clone the GitHub repository to install or use the skill unless the user explicitly asks for deployer development, local patching, or a project-local install.
-  - Use scripts/orchestrate.sh from the repository root.
-  - Use scripts/destroy.sh for teardown.
-  - S6 writes DIREXTALK_DOMAIN, DIREXTALK_AGENT_TOKEN, and DIREXTALK_AGENT_ROOM_ID, then records runtime-specific skill, dirextalk-connect, HTTP MCP endpoint, and MCP config targets.
-  - Ask before mutating the current agent runtime's local bridge or MCP configuration.
+  - On POSIX use scripts/orchestrate.sh and scripts/destroy.sh; on Windows use the PowerShell wrappers.
+  - S6 writes service-scoped credentials, dirextalk-connect config, canonical mcp/env, and explicit MCP capability/artifact state; it does not write the retired service env file.
+  - OpenClaw and iFlow are host-managed, Pi and tmux conditional, and Devin and Reasonix unsupported. Unknown runtimes fail closed without a generic artifact.
+  - S6 never mutates OpenClaw's global MCP config.
   - The instructions are compatible with Claude, Codex/OpenAI, Gemini, Cursor, Copilot, OpenClaw, Hermes, and other shell-capable agent runtimes.

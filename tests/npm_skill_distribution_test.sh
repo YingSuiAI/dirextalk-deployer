@@ -6,6 +6,10 @@ cd "$ROOT"
 
 # shellcheck disable=SC1090
 source "$ROOT/scripts/lib/json.sh"
+# shellcheck disable=SC1090
+source "$ROOT/tests/lib/isolated_home.sh"
+: "${DIREXTALK_TEST_ROOT:?run this test through tests/lib/run_isolated.sh}"
+dirextalk_test_assert_isolated_homes "$DIREXTALK_TEST_ROOT"
 
 assert_file_exists() {
   [ -f "$1" ] || {
@@ -22,8 +26,11 @@ assert_contains() {
   }
 }
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "$DIREXTALK_TEST_ROOT/npm-skill-distribution.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
+export CODEX_HOME="$tmp/home/.codex"
+export GEMINI_HOME="$tmp/home2/.gemini"
+dirextalk_test_assert_isolated_homes "$DIREXTALK_TEST_ROOT"
 
 NODE_BIN=$(json_node)
 export PATH="$(dirname "$NODE_BIN"):$PATH"

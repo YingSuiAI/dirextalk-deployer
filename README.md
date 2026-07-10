@@ -196,10 +196,8 @@ dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
 mcp/env
 mcp/README.md
-mcp/codex.toml
-mcp/cursor.mcp.json
 mcp/openclaw.md
-mcp/hermes.mcp.json
+mcp/hermes.md
 ```
 
 POSIX Bash manual install:
@@ -234,13 +232,29 @@ MCP is not installed as a local CLI during S6. The canonical config connects to
 proxy, or listening port is required. S6 records one of `session`, `project`,
 `host-managed`, `conditional`, or `unsupported`; an undeclared runtime fails closed.
 
-The capability registry matches dirextalk-connect: ACP, Claude Code, Codex,
-Copilot, Gemini, Kimi, OpenCode, Qoder, and Hermes are `session`; Antigravity
-and Cursor are `project`; OpenClaw and iFlow are `host-managed`; Pi and tmux are
-`conditional`; Devin and Reasonix are `unsupported`. S6 never generates a
-generic JSON fallback. OpenClaw receives only `mcp/openclaw.md` host-managed
-guidance: S6 does not mutate global OpenClaw config, generate a bearer-token
-server JSON, or place the token in process arguments.
+The capability registry matches dirextalk-connect and follows the effective
+connect agent, while the detected host runtime selects reviewable artifacts.
+ACP, Claude Code, Codex, Copilot, Gemini, Kimi, OpenCode, and Qoder are
+`session`; Antigravity, Cursor, and iFlow are `host-managed`; Devin, Pi,
+Reasonix, and tmux are `unsupported`. Detected OpenClaw and Hermes hosts are
+always `host-managed` and require the ACP bridge; a non-ACP connect override is
+rejected. Their native registries own MCP while connect bridges conversation.
+Unsupported and unknown selections fail closed. The vocabulary retains `project` and `conditional`, but
+no current backend uses them. S6 never generates a generic JSON fallback.
+
+Host-managed selection retains its guidance artifact but omits the canonical
+MCP URL/token fields from `dirextalk-connect/config.toml`. In `auto` mode, S6
+waits before starting the bridge until the operator enrolls the host and reruns
+with `DIREXTALK_MCP_HOST_READY=1`. OpenClaw must then pass the secret-free
+`openclaw mcp probe <server-name> --json` check before the bridge starts;
+`OPENCLAW_CONFIG_PATH` and optional `DIREXTALK_OPENCLAW_PROFILE` select an
+isolated native registry/profile. Other host-managed backends without an
+official probe remain operator-confirmed and require later runtime verification.
+Hermes uses a service-scoped HERMES_HOME/profile, writes `mcp/hermes.md` instead
+of JSON, and must pass `hermes -p <profile> mcp test <server-name>` in that same
+scope before bridge startup.
+S6 never runs `mcp set`, mutates global host config, generates a bearer-token
+server JSON, or places the token in process arguments.
 
 Voice input is supported when an STT provider key is available. Set `DIREXTALK_SPEECH_API_KEY` or provider-specific variables such as `DIREXTALK_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `dirextalk-connect/config.toml`.
 

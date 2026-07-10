@@ -255,29 +255,10 @@ function cmdBuild(args) {
       data = {};
       for (const [key, value] of parsePairs(args.slice(1))) setPath(data, key, parseScalar(value));
       break;
-    case "mcp-messages-list":
-      data = { action: "mcp.messages.list", params: { room_id: required(args, 1, "room_id"), limit: 1 } };
-      process.stdout.write(`${JSON.stringify(data)}\n`);
-      return;
     case "matrix-session-create":
       data = { action: "agent.matrix_session.create", params: { device_id: required(args, 1, "device_id") } };
       process.stdout.write(`${JSON.stringify(data)}\n`);
       return;
-    case "mcp-http-json-config": {
-      const serverName = required(args, 1, "server_name");
-      data = {
-        mcpServers: {
-          [serverName]: {
-            url: required(args, 2, "url"),
-            headers: {
-              Authorization: `Bearer ${required(args, 3, "agent_token")}`,
-              "DIREXTALK-Agent-Node-Id": args[4] || ""
-            }
-          }
-        }
-      };
-      break;
-    }
     case "mcp-jsonrpc-initialize":
       data = {
         jsonrpc: "2.0",
@@ -407,7 +388,8 @@ function cmdMutate(args) {
         "mcp_daemon_install_command",
         "mcp_daemon_status_command",
         "mcp_daemon_url",
-        "mcp_daemon_proxy_command"
+        "mcp_daemon_proxy_command",
+        "mcp_host_probe_status"
       ]) {
         delete data[key];
       }
@@ -561,6 +543,7 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
     mcp: {
       status: localRefreshStatus,
       install_status: st.mcp_install_status || "",
+      host_probe_status: st.mcp_host_probe_status || "not_recorded",
       capability: st.mcp_capability || "undeclared",
       transport: st.mcp_transport || "http",
       endpoint_url: st.mcp_endpoint_url || "",
@@ -568,7 +551,6 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       config_dir: st.mcp_config_dir || "",
       selected_config_type: st.mcp_selected_config_type || "none",
       selected_config: st.mcp_selected_config || "",
-      codex: st.mcp_codex_config || "",
       openclaw: st.mcp_openclaw_config || "",
       hermes: st.mcp_hermes_config || "",
       doctor: st.mcp_doctor_command || ""

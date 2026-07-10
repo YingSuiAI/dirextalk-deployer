@@ -192,10 +192,8 @@ dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
 mcp/env
 mcp/README.md
-mcp/codex.toml
-mcp/cursor.mcp.json
 mcp/openclaw.md
-mcp/hermes.mcp.json
+mcp/hermes.md
 ```
 
 POSIX Bash 手动安装：
@@ -223,7 +221,9 @@ npm install --prefix $runtimeDir dirextalk-connect@latest
 
 默认 `DIREXTALK_AGENT_INSTALL=auto` 时，S6 不安装本地 MCP CLI。canonical 配置直接连接 `https://<domain>/mcp` 并使用当前服务的 agent token；不需要本地 MCP daemon、proxy 或监听端口。S6 会记录 `session`、`project`、`host-managed`、`conditional` 或 `unsupported`，未声明的 runtime fail-closed。
 
-capability registry 与 dirextalk-connect 对齐：ACP、Claude Code、Codex、Copilot、Gemini、Kimi、OpenCode、Qoder、Hermes 为 `session`；Antigravity、Cursor 为 `project`；OpenClaw、iFlow 为 `host-managed`；Pi、tmux 为 `conditional`；Devin、Reasonix 为 `unsupported`。S6 不生成 generic JSON fallback。OpenClaw 只获得 `mcp/openclaw.md` host-managed 说明；S6 不改其全局配置、不生成含 bearer 的 server JSON，也不把 token 放入进程 argv。
+capability registry 与 dirextalk-connect 对齐，并通常按实际选中的 connect agent 判定 capability；检测到 OpenClaw 或 Hermes 宿主时始终为 `host-managed`，且只允许 ACP bridge，非 ACP override 会失败关闭。MCP 分别归其原生 registry，connect 只负责会话桥接。ACP、Claude Code、Codex、Copilot、Gemini、Kimi、OpenCode、Qoder 为 `session`；Antigravity、Cursor、iFlow 为 `host-managed`；Devin、Pi、Reasonix、tmux 为 `unsupported`。`unsupported` 和未知选择都会失败关闭；协议词汇仍保留 `project` 与 `conditional`，但当前没有 backend 使用。S6 不生成 generic JSON fallback。
+
+host-managed 选择仍保留说明 artifact，但不会把 canonical MCP URL/token 字段写入 `dirextalk-connect/config.toml`。在 `auto` 模式下，S6 会在启动 bridge 前等待操作者完成宿主 enrollment，并以 `DIREXTALK_MCP_HOST_READY=1` 重跑。OpenClaw 必须通过不带秘密 argv 的 `openclaw mcp probe <server-name> --json`；Hermes 使用每节点独立 HERMES_HOME/profile，并在同一 scope 通过 `hermes -p <profile> mcp test <server-name>`。其他没有官方 probe 的 host-managed backend 明确记录为 operator-confirmed，并仍需后续 runtime verification。S6 从不自动修改宿主 registry，也不把 token 放入进程 argv。
 
 语音输入在配置 STT provider key 后可用。设置 `DIREXTALK_SPEECH_API_KEY` 或 `DIREXTALK_SPEECH_QWEN_API_KEY` 等 provider 专用变量后，S6 会在 `dirextalk-connect/config.toml` 写入 `[speech] enabled = true`。
 

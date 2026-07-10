@@ -18,7 +18,7 @@
     "scripts/"
   ],
   "scripts": {
-    "test": "bash tests/tracked_text_lf_test.sh && bash tests/npm_skill_distribution_test.sh && bash tests/skill_structure_test.sh && bash tests/local_paths_test.sh && bash tests/windows_path_wrappers_test.sh && bash tests/private_file_permissions_test.sh && bash tests/orchestrate_region_env_test.sh && bash tests/domain_route53_default_test.sh && bash tests/eip_preflight_test.sh && bash tests/s1_lightsail_availability_fallback_test.sh && bash tests/root_volume_size_test.sh && bash tests/s3_lightsail_provision_test.sh && bash tests/lightsail_static_ip_quota_test.sh && bash tests/destroy_lightsail_test.sh && bash tests/mcp_tools_runtime_check_test.sh && bash tests/s7_http_mcp_acceptance_test.sh && bash tests/runtime_summary_check_test.sh && bash tests/final_delivery_runtime_gate_test.sh && bash tests/s6_run_phase_failure_test.sh && bash tests/s6_wire_local_test.sh && bash tests/operation_report_test.sh && bash tests/render_userdata_remote_nodes_test.sh"
+    "test": "bash tests/lib/run_isolated.sh bash tests/npm_test_suite.sh"
   },
   "engines": {
     "node": ">=18"

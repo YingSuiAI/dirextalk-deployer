@@ -238,7 +238,7 @@ status_next_action() {
 }
 
 status_stop_loss() {
-  local domain billable
+  local domain billable command
   domain=$(state_get domain)
   billable=$(recorded_billable_resources)
   if [ -z "$billable" ]; then
@@ -246,10 +246,11 @@ status_stop_loss() {
   else
     echo "ask the agent to run destroy, or run:"
     if [ "${DIREXTALK_LOCAL_PATH_STYLE:-}" = "windows" ] || [ -n "${DIREXTALK_WINDOWS_HOME:-}" ]; then
-      echo "  \$env:DOMAIN = \"${domain:-__DOMAIN__}\"; .\\scripts\\destroy.ps1"
+      command=$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_render_env_command DOMAIN "${domain:-__DOMAIN__}" '.\scripts\destroy.ps1') || return 1
     else
-      echo "  DOMAIN=${domain:-__DOMAIN__} bash $HERE/destroy.sh"
+      command=$(dirextalk_render_env_command DOMAIN "${domain:-__DOMAIN__}" bash "$HERE/destroy.sh") || return 1
     fi
+    echo "  $command"
     echo "  Purchased domains, third-party DNS records, and retained hosted zones are not automatically removed."
   fi
 }
@@ -324,7 +325,7 @@ delivery_runtime_checks_summary() {
 }
 
 ensure_delivery_runtime_checks() {
-  local verify_rc=0
+  local verify_rc=0 retry_command
   warn "Final delivery requires live runtime checks; running: verify runtime"
   cmd_verify_runtime || verify_rc=$?
 
@@ -333,7 +334,12 @@ ensure_delivery_runtime_checks() {
   fi
 
   warn "Final delivery blocked because runtime checks did not all pass: $(delivery_runtime_checks_summary)"
-  warn "Fix the failed check, then rerun: DOMAIN=<DOMAIN> bash $0 verify runtime"
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    retry_command=$(dirextalk_render_env_command DOMAIN "$(state_get domain)" '.\scripts\orchestrate.ps1' verify runtime) || return 1
+  else
+    retry_command=$(dirextalk_render_env_command DOMAIN "$(state_get domain)" bash "$0" verify runtime) || return 1
+  fi
+  warn "Fix the failed check, then rerun: $retry_command"
   return 1
 }
 
@@ -342,7 +348,7 @@ print_delivery() {
   local cloud_provider cloud_label
   local agent_node_id agent_service_id agent_service_dir agent_cred cc_config cc_binary cc_agent cc_user cc_pkg
   local mcp_endpoint
-  local report_path runtime_summary app_gate real_chat_gate agent_runtime_gate
+  local report_path runtime_summary app_gate real_chat_gate agent_runtime_gate daemon_command ssh_command report_command
   domain=$(state_get domain)
   password=$(state_get password)
   if ! printf '%s' "$password" | grep -Eq '^[0-9]{8}$'; then
@@ -396,11 +402,13 @@ print_delivery() {
   echo "  agent runtime: ${runtime:-unknown}"
   echo "  install mode : policy=${install_policy:-recommend} mode=${install_mode:-dirextalk-connect} agent=${cc_agent:-codex} status=${install_status:-recommend}"
   [ -n "$install_command" ] && echo "  install cmd  : $install_command"
-  echo "  daemon       : ${cc_binary:-dirextalk-connect} daemon status --service-name ${agent_service_id:-dirextalk-connect}"
+  daemon_command=$(dirextalk_render_local_command "$(dirextalk_normalize_local_path "${cc_binary:-dirextalk-connect}")" daemon status --service-name "${agent_service_id:-dirextalk-connect}") || return 1
+  echo "  daemon       : $daemon_command"
   echo "  AWS region   : $region"
   echo "  cloud        : ${cloud_provider:-ec2}"
   echo "  $cloud_label          : $iid ($pubip)"
-  echo "  SSH          : ssh -i $keyfile ubuntu@$pubip"
+  ssh_command=$(dirextalk_render_local_command ssh -i "$(dirextalk_normalize_local_path "$keyfile")" "ubuntu@$pubip") || return 1
+  echo "  SSH          : $ssh_command"
   echo "  state.json   : $statejson"
   echo "  stop billing : ask the agent to destroy this node when finished"
   echo "  Note         : cloud instances, public IPv4/static IPs, storage, and Route53 resources can keep billing until destroy is run."
@@ -409,7 +417,12 @@ print_delivery() {
   if report_path=$(operation_report_write new_deploy automated_gates_complete_user_confirmation_pending "$STATE_JSON" 2>/dev/null); then
     echo "  report       : $report_path"
   else
-    echo "  report       : not written; run bash $0 report new_deploy"
+    if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+      report_command=$(dirextalk_render_local_command '.\scripts\orchestrate.ps1' report new_deploy) || return 1
+    else
+      report_command=$(dirextalk_render_local_command bash "$0" report new_deploy) || return 1
+    fi
+    echo "  report       : not written; run $report_command"
   fi
 }
 

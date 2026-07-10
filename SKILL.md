@@ -276,10 +276,15 @@ DIREXTALK_AGENT_INSTALL_MODE=recommended
 `DIREXTALK_AGENT_INSTALL=auto` installs `dirextalk-connect@latest` into the
 current service directory, not into the npm global prefix, unless explicit
 binary/command overrides are set. MCP capability is declared independently from
-bridge-agent support. The registry is aligned with dirextalk-connect: session
-(`acp`, Claude Code, Codex, Copilot, Gemini, Kimi, OpenCode, Qoder, and Hermes),
-project (`antigravity`, Cursor), host-managed (OpenClaw, iFlow), conditional
-(Pi, tmux), and unsupported (Devin, Reasonix). Unknown runtimes fail closed.
+bridge-agent support and follows the effective connect agent: session (`acp`,
+Claude Code, Codex, Copilot, Gemini, Kimi, OpenCode, and Qoder), host-managed
+(Antigravity, Cursor, and iFlow), and unsupported (Devin, Pi, Reasonix, and
+tmux). Detected OpenClaw and Hermes hosts are always host-managed because their
+native registries own MCP. They require the ACP bridge; a non-ACP
+`DIREXTALK_CONNECT_AGENT` override fails closed. To bridge directly to Codex,
+select `DIREXTALK_AGENT_PLATFORM=codex` instead.
+Unsupported and unknown effective agents fail closed. The protocol vocabulary
+retains `project` and `conditional`, but no current connect backend uses them.
 S6 never generates a generic fallback artifact. Dedicated manual artifacts are
 limited to registry entries that name one, while `mcp/env` remains the canonical
 HTTP endpoint artifact. MCP does not need a local CLI, daemon, proxy, or listening
@@ -290,28 +295,40 @@ running`; logs that show agent CLI missing, login/trust failures, ACP startup
 failures, or agent offline state fail S6 so deploy does not report success
 prematurely. `recommend` writes files and prints commands only; `skip` writes
 credentials and configs only. S6 no longer writes the retired service-level
-`env` file. OpenClaw and Hermes map to the generic ACP bridge backend by default,
-but OpenClaw carries `mcp_capability = "host-managed"` and S6 never mutates its
-user-global MCP config. Generated agent options
+`env` file. Host-runtime artifacts remain reviewable even when the effective
+connect agent differs. For host-managed MCP, S6 omits all canonical MCP fields
+from connect agent options and never mutates user-global host config. With
+`DIREXTALK_AGENT_INSTALL=auto`, S6 writes the artifact, records
+`mcp_install_status=host_action_required`, and waits before bridge startup.
+After the operator enrolls the remote endpoint in the host, rerun with
+`DIREXTALK_MCP_HOST_READY=1`. OpenClaw must then pass the secret-free official
+`openclaw mcp probe <server-name> --json` check before S6 starts the bridge and
+records `host_probe_passed`. `OPENCLAW_CONFIG_PATH` is inherited, and
+`DIREXTALK_OPENCLAW_PROFILE=<profile>` adds the native `--profile` selector for
+service isolation. S6 never runs `mcp set`. Other host-managed backends with no
+official probe record `operator_confirmed_host_managed` and still require later
+runtime verification. `recommend` and `skip` retain `host_action_required`
+until explicitly confirmed. Generated agent options
 write `mode = "yolo"` by default unless an explicit `mode` is supplied.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
 once; rerunning the deployer refreshes config and restarts the service-scoped
 daemon. Explicit `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CURSOR_AGENT_COMMAND`,
 `DIREXTALK_OPENCODE_COMMAND`, `DIREXTALK_CONNECT_AGENT_CMD`,
-`DIREXTALK_CURSOR_MODE`, and
-`DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides still win.
+`DIREXTALK_CURSOR_MODE`, and `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides
+still win except where a host-owned OpenClaw/Hermes scope would be bypassed.
+Hermes writes `mcp/hermes.md`, creates an empty per-service HERMES_HOME, and
+uses the same profile/home in ACP args/env and the secret-free
+`hermes -p <profile> mcp test <server-name>` gate. The operator must first
+create/clone that profile and enroll native `mcp_servers`; S6 never writes a
+generic Hermes JSON file or touches the real user Hermes home.
 
 State/report fields include `mcp_capability`, `mcp_config_dir`, `mcp_selected_config_type`,
-`mcp_selected_config`, selected runtime-specific fields such as
-`mcp_codex_config`, `mcp_cursor_config`, `mcp_openclaw_config`,
-`mcp_hermes_config`, `mcp_transport`, `mcp_endpoint_url`,
+`mcp_selected_config`, token-free host-guidance fields such as
+`mcp_openclaw_config` and `mcp_hermes_config`, `mcp_transport`, `mcp_endpoint_url`,
 `credentials.status`, and `mcp.status`.
-Cursor MCP artifacts are generated as JSON for `.cursor/mcp.json` or
-`~/.cursor/mcp.json`, but the deployer does not write those locations by
-default because they contain machine-local credential paths. Cursor may require
-a full restart or MCP settings reload/enable after the operator adds the
-generated snippet.
+Codex and Cursor do not receive standalone token-bearing MCP artifacts. Session
+injection is owned by dirextalk-connect; Cursor remains host-managed.
 
 ## Product Gates
 

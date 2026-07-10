@@ -9,6 +9,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 export DIREXTALK_WORKDIR="$tmp/work"
 export AWS_DEFAULT_REGION=us-west-2
 export DIREXTALK_ORCHESTRATE_LIB_ONLY=1

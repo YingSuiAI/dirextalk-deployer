@@ -59,7 +59,7 @@ The bridge agent type is selected independently from the host operating system. 
 acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode pi qoder reasonix tmux
 ```
 
-`DIREXTALK_AGENT_PLATFORM=auto` is a convenience detector. If it detects OpenClaw or Hermes, S6 wires `dirextalk-connect` through the generic `acp` agent. OpenClaw writes `cmd = "openclaw"` and requires the current agent/operator to provide the real Gateway URL, token-file, and ACP session. Hermes writes `cmd = "dirextalk-connect"` with `args = ["hermes-acp-adapter", "--", "hermes", "acp"]` so the Dirextalk ACP compatibility layer can buffer and clean Hermes output before it reaches the Matrix room. OpenClaw and Hermes are not native dirextalk-connect agent types. If detection is ambiguous or the detected host runtime should use a different connect backend, set `DIREXTALK_CONNECT_AGENT` explicitly.
+`DIREXTALK_AGENT_PLATFORM=auto` is a convenience detector. If it detects OpenClaw or Hermes, S6 wires `dirextalk-connect` through the generic `acp` agent and rejects a non-ACP override. OpenClaw writes `cmd = "openclaw"` and keeps an explicit profile/config path aligned between its ACP process and native MCP probe. Hermes writes `cmd = "dirextalk-connect"` with service-scoped `HERMES_HOME` and `args = ["hermes-acp-adapter", "--", "hermes", "-p", "<service-profile>", "acp"]`. The adapter can buffer and clean Hermes output before it reaches the Matrix room. To bridge directly to another backend, select that backend as `DIREXTALK_AGENT_PLATFORM` instead of overriding an OpenClaw/Hermes host.
 
 S6 writes service-specific files to `~/.dirextalk/nodes/<service_id>/`, where `service_id` is derived from the deployed domain:
 
@@ -70,10 +70,8 @@ dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
 mcp/env
 mcp/README.md
-mcp/codex.toml
-mcp/cursor.mcp.json
 mcp/openclaw.md
-mcp/hermes.mcp.json
+mcp/hermes.md
 ```
 
 The generated `dirextalk-connect/config.toml` contains exactly one Matrix platform and includes:
@@ -122,23 +120,40 @@ The `[speech]` block is present only when S6 finds a speech-to-text API key from
 ## MCP Targets
 
 S6 always writes canonical `mcp/env` plus a README under the service directory.
-Standalone/manual client artifacts are created only when the declarative map names
-one: Codex `codex.toml`, Cursor `cursor.mcp.json`, OpenClaw `openclaw.md`
-(guidance only, no token), and Hermes `hermes.mcp.json`. No runtime receives a
-generic JSON fallback. The registry is: ACP/Claude Code/Codex/Copilot/Gemini/
-Kimi/OpenCode/Qoder/Hermes `session`; Antigravity/Cursor `project`; OpenClaw/
-iFlow `host-managed`; Pi/tmux `conditional`; Devin/Reasonix `unsupported`.
-Unknown runtimes fail closed.
+Standalone artifacts are limited to token-free OpenClaw `openclaw.md` and
+Hermes `hermes.md` host guidance. Session agents receive canonical MCP data
+through dirextalk-connect; no runtime receives a generic JSON fallback.
+Capability follows the effective connect agent:
+ACP/Claude Code/Codex/Copilot/Gemini/Kimi/OpenCode/Qoder `session`;
+Antigravity/Cursor/iFlow `host-managed`; Devin/Pi/Reasonix/tmux `unsupported`.
+Detected OpenClaw and Hermes hosts are always `host-managed`, require the ACP
+bridge, and reject non-ACP connect overrides. Connect owns only conversation;
+their native registries own MCP. Unsupported and unknown selections fail closed.
+No current backend uses the retained `project` or `conditional` vocabulary entries.
 
 ```bash
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_doctor
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_tools
 ```
 
-For OpenClaw, `mcp/openclaw.md` identifies the endpoint, node id, and
-service-scoped credential location. OpenClaw is host-managed: S6 does not mutate
-its global config, generate a token-bearing server object, or put a bearer token
-in command arguments. Host enrollment is a separate explicit operator action.
+For host-managed selection, the host-specific artifact identifies the endpoint,
+node id, and service-scoped credential location. S6 omits `mcp_url`,
+`mcp_server_name`, `mcp_agent_token`, `mcp_node_id`, and `mcp_capability` from
+the connect agent options; it does not mutate global host config, generate a
+token-bearing server object, or put a bearer token in command arguments. With
+`auto`, complete host enrollment first and rerun with
+`DIREXTALK_MCP_HOST_READY=1`; only then does S6 start and verify the bridge.
+For OpenClaw, S6 additionally requires `openclaw mcp probe <server-name> --json`
+to pass without secret argv. `OPENCLAW_CONFIG_PATH` is inherited;
+`DIREXTALK_OPENCLAW_PROFILE=<profile>` adds `--profile <profile>` for service
+isolation. S6 never runs `mcp set`. Other host-managed backends with no official
+probe record operator confirmation, which does not replace runtime MCP checks.
+Hermes receives an empty service-isolated HERMES_HOME plus `hermes.md` guidance.
+The operator must create/clone the named profile with the installed Hermes
+version's official workflow, enroll the server in native `mcp_servers`, and let
+S6 pass `hermes -p <profile> mcp test <server-name>` in that same HERMES_HOME.
+With `recommend` or `skip`, output generation completes but
+`mcp_install_status=host_action_required` remains explicit until confirmation.
 
 ## Installation Policy
 

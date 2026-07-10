@@ -5,9 +5,14 @@
 # behind the small interface S6 needs.
 
 _connect_agent_type() {
-  local runtime=$1 explicit=${DIREXTALK_CONNECT_AGENT:-}
+  local runtime=$1 explicit=${DIREXTALK_CONNECT_AGENT:-} validated
   if [ -n "$explicit" ]; then
-    _validate_connect_agent "$explicit" || return 1
+    validated=$(_validate_connect_agent "$explicit") || return 1
+    if _mcp_host_registry_owner "$runtime" >/dev/null 2>&1 && [ "$validated" != "acp" ]; then
+      fail "runtime=$runtime owns its MCP registry and requires DIREXTALK_CONNECT_AGENT=acp. To bridge directly to $validated, set DIREXTALK_AGENT_PLATFORM=$validated instead."
+      return 1
+    fi
+    printf '%s\n' "$validated"
     return 0
   fi
   case "$runtime" in
@@ -124,8 +129,14 @@ _cursor_agent_prepare_windows() {
 }
 
 _connect_agent_options_toml() {
-  local runtime=${1:-} agent=${2:-} args_toml q_display
+  local runtime=${1:-} agent=${2:-} service_dir=${3:-} server_name=${4:-} args_toml q_display q_home q_config
   if [ -n "${DIREXTALK_CONNECT_AGENT_OPTIONS_TOML:-}" ]; then
+    case "$runtime" in
+      openclaw|hermes)
+        fail "DIREXTALK_CONNECT_AGENT_OPTIONS_TOML cannot safely override host-owned MCP scope for runtime=$runtime; use the runtime-specific profile and ACP variables."
+        return 1
+        ;;
+    esac
     printf '%s\n' "$DIREXTALK_CONNECT_AGENT_OPTIONS_TOML"
     return 0
   fi
@@ -137,21 +148,33 @@ _connect_agent_options_toml() {
       args_toml=$(_openclaw_acp_args_toml) || return 1
       q_display=$(_toml_escape "OpenClaw ACP")
       printf 'args = %s\n' "$args_toml"
+      if [ -n "${OPENCLAW_CONFIG_PATH:-}" ]; then
+        q_config=$(_toml_escape "$(dirextalk_normalize_local_path "$OPENCLAW_CONFIG_PATH")") || return 1
+        printf 'env = { OPENCLAW_CONFIG_PATH = "%s" }\n' "$q_config"
+      fi
       printf 'display_name = "%s"\n' "$q_display"
       ;;
     hermes:acp)
-      args_toml=$(_hermes_acp_args_toml)
+      [ -n "$service_dir" ] && [ -n "$server_name" ] || return 1
+      args_toml=$(_hermes_acp_args_toml "$service_dir" "$server_name") || return 1
       q_display=$(_toml_escape "Hermes ACP")
+      q_home=$(_toml_escape "$(dirextalk_normalize_local_path "$(_mcp_hermes_home "$service_dir")")") || return 1
       printf 'args = %s\n' "$args_toml"
+      printf 'env = { HERMES_HOME = "%s" }\n' "$q_home"
       printf 'display_name = "%s"\n' "$q_display"
       ;;
   esac
 }
 
 _openclaw_acp_args_toml() {
-  local url token_file session missing=
+  local url token_file session profile missing=
+  profile=${DIREXTALK_OPENCLAW_PROFILE:-}
   if [ -n "${DIREXTALK_OPENCLAW_ACP_ARGS_TOML:-}" ]; then
-    printf '%s\n' "$DIREXTALK_OPENCLAW_ACP_ARGS_TOML"
+    if [ -n "$profile" ]; then
+      _toml_array_prepend "$DIREXTALK_OPENCLAW_ACP_ARGS_TOML" --profile "$profile"
+    else
+      printf '%s\n' "$DIREXTALK_OPENCLAW_ACP_ARGS_TOML"
+    fi
     return 0
   fi
   url=${DIREXTALK_OPENCLAW_ACP_URL:-}
@@ -159,7 +182,11 @@ _openclaw_acp_args_toml() {
   session=${DIREXTALK_OPENCLAW_ACP_SESSION:-}
   if [ -n "$url" ] && [ -n "$token_file" ] && [ -n "$session" ]; then
     token_file=$(dirextalk_normalize_local_path "$token_file")
-    _toml_array acp --url "$url" --token-file "$token_file" --session "$session"
+    if [ -n "$profile" ]; then
+      _toml_array --profile "$profile" acp --url "$url" --token-file "$token_file" --session "$session"
+    else
+      _toml_array acp --url "$url" --token-file "$token_file" --session "$session"
+    fi
     return 0
   fi
   if [ -n "$url" ] || [ -n "$token_file" ]; then
@@ -171,18 +198,23 @@ _openclaw_acp_args_toml() {
   fi
   # Fallback: OpenClaw acp auto-discovers gateway from ~/.openclaw/openclaw.json.
   warn "OpenClaw ACP Gateway settings were not provided; generated config will let 'openclaw acp' auto-detect the Gateway from local OpenClaw config."
-  _toml_array acp --session "${session:-agent:main:main}"
+  if [ -n "$profile" ]; then
+    _toml_array --profile "$profile" acp --session "${session:-agent:main:main}"
+  else
+    _toml_array acp --session "${session:-agent:main:main}"
+  fi
 }
 
 _hermes_acp_args_toml() {
-  local hermes_cmd
+  local service_dir=$1 server_name=$2 hermes_cmd profile
   hermes_cmd=${DIREXTALK_HERMES_COMMAND:-hermes}
   hermes_cmd=$(dirextalk_normalize_local_path "$hermes_cmd")
+  profile=$(_mcp_hermes_profile "$server_name") || return 1
   if [ -n "${DIREXTALK_HERMES_ACP_ARGS_TOML:-}" ]; then
-    _toml_array_prepend "$DIREXTALK_HERMES_ACP_ARGS_TOML" hermes-acp-adapter -- "$hermes_cmd"
+    _toml_array_prepend "$DIREXTALK_HERMES_ACP_ARGS_TOML" hermes-acp-adapter -- "$hermes_cmd" -p "$profile"
     return 0
   fi
-  _toml_array hermes-acp-adapter -- "$hermes_cmd" acp
+  _toml_array hermes-acp-adapter -- "$hermes_cmd" -p "$profile" acp
 }
 
 _toml_array() {

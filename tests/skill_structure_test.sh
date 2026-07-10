@@ -21,6 +21,7 @@ required=(
   scripts/destroy.sh
   scripts/destroy.ps1
   scripts/json.mjs
+  scripts/lib/atomic-write.sh
   scripts/update.sh
   scripts/reset-app-data.sh
   scripts/pricing-estimate.sh
@@ -34,6 +35,11 @@ required=(
   scripts/lib/mcp-client-adapters.sh
   scripts/phases/s6_wire_local.sh
   tests/json_helper_test.sh
+  tests/atomic_write_test.sh
+  tests/lib/isolated_home.sh
+  tests/lib/isolated-homes.ps1
+  tests/lib/run_isolated.sh
+  tests/npm_test_suite.sh
   tests/lib/json_test.sh
   tests/operation_report_test.sh
   tests/npm_skill_distribution_test.sh
@@ -42,6 +48,7 @@ required=(
   tests/windows_path_wrappers_test.sh
   tests/windows_path_wrappers_test.ps1
   tests/windows_recommendation_test.ps1
+  tests/windows_orchestrate_status_smoke_test.ps1
   tests/tracked_text_lf_test.sh
   tests/s6_run_phase_failure_test.sh
   tests/orchestrate_status_recovery_test.sh
@@ -117,6 +124,23 @@ grep -q '.dirextalk-skill-install.json' references/agent-targets.md
 grep -q 'mcp_agent_token' scripts/phases/s6_wire_local.sh
 grep -q 'agent_room_id' scripts/phases/s6_wire_local.sh
 grep -q 'mcp_capability' scripts/phases/s6_wire_local.sh
+grep -q 'DIREXTALK_MCP_HOST_READY=1' SKILL.md
+grep -q 'operator_confirmed_host_managed' references/runtime-wiring.md
+grep -q '^antigravity|host-managed|none$' scripts/lib/mcp-client-adapters.sh
+grep -q '^pi|unsupported|none$' scripts/lib/mcp-client-adapters.sh
+grep -q '^tmux|unsupported|none$' scripts/lib/mcp-client-adapters.sh
+grep -q '^hermes|host-managed|hermes$' scripts/lib/mcp-client-adapters.sh
+grep -q '^codex|session|none$' scripts/lib/mcp-client-adapters.sh
+grep -q '^cursor|host-managed|none$' scripts/lib/mcp-client-adapters.sh
+grep -q '^hermes|hermes.mcp_servers$' scripts/lib/mcp-client-adapters.sh
+if grep -q '_write_mcp_json_config "$hermes_config"' scripts/lib/mcp-client-adapters.sh; then
+  echo "Hermes must use native host guidance, not a generated generic MCP JSON artifact" >&2
+  exit 1
+fi
+if grep -q 'Codex TOML\|Cursor JSON\|mcp-http-json-config' scripts/lib/mcp-client-adapters.sh scripts/json.mjs; then
+  echo "active deployer code must not generate token-bearing standalone Codex/Cursor artifacts" >&2
+  exit 1
+fi
 if grep -q '_write_agent_env_file\|state_set agent_env_file' scripts/phases/s6_wire_local.sh; then
   echo "S6 must not recreate the retired service env artifact" >&2
   exit 1
@@ -137,8 +161,6 @@ grep -q 'destroy.ps1' references/deployment-workflow.md
 grep -q 'destroy.ps1' references/windows-deployment-notes.md
 grep -q 'dirextalk-connect' SKILL.md
 grep -q 'mcp_config_dir' SKILL.md
-grep -q 'mcp_codex_config' references/runtime-wiring.md
-grep -q 'mcp_cursor_config' references/runtime-wiring.md
 if grep -R '@dirextalk/agent-plugins' SKILL.md scripts README.md README_zh.md references >/dev/null; then
   echo "current docs/scripts must not reference legacy agent plugin packages" >&2
   exit 1
@@ -200,8 +222,8 @@ if grep -RE 'fixed order.*\.codex.*\.hermes|\.codex.*checked before.*\.hermes' S
   exit 1
 fi
 
-if grep -R 'dirextalk-mcp@0\.1\.[0-9]' SKILL.md references scripts README.md README_zh.md >/dev/null; then
-  echo "published docs/scripts must not reference stale dirextalk-mcp versions" >&2
+if grep -RE 'dirextalk-mcp|127\.0\.0\.1:19757|localhost:19757|serve-http' AGENTS.md SKILL.md README.md README_zh.md agents references scripts package.json .github >/dev/null; then
+  echo "active docs/scripts must not reference the retired local dirextalk-mcp CLI, daemon, proxy, or port" >&2
   exit 1
 fi
 

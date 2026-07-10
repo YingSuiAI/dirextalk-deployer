@@ -4,11 +4,12 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck disable=SC1090
 source "$ROOT/tests/lib/json_test.sh"
+# shellcheck disable=SC1090
+source "$ROOT/tests/lib/isolated_home.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-export HOME="$tmp/home"
-mkdir -p "$HOME"
+dirextalk_test_isolate_homes "$tmp"
 
 assert_contains() {
   local haystack=$1 needle=$2
@@ -52,7 +53,7 @@ pre_resource_output=$(DIREXTALK_WORKDIR="$pre_resource_workdir" bash "$ROOT/scri
 
 assert_contains "$pre_resource_output" "Recovery summary"
 assert_contains "$pre_resource_output" "Where it is blocked: S2_DOMAIN"
-assert_contains "$pre_resource_output" "Billing impact: no EC2, public IPv4, or EBS resource is recorded yet"
+assert_contains "$pre_resource_output" "Billing impact: no cloud instance, public IPv4, or storage resource is recorded yet"
 assert_contains "$pre_resource_output" "Resume safety: safe to rerun the same command after the next action is complete"
 assert_contains "$pre_resource_output" "Next action: confirm the long-lived domain, DNS authority, and irreversible Matrix server_name binding"
 assert_contains "$pre_resource_output" "Stop-loss: no recorded cloud resources need destroy from this state"
@@ -68,6 +69,8 @@ assert_contains "$billable_output" "Resume safety: do not reset state; fix the i
 assert_contains "$billable_output" "Next action: inspect cloud-init, Docker, Caddy/TLS, and message-server logs over SSH"
 assert_contains "$billable_output" "Stop-loss: ask the agent to run destroy, or run:"
 assert_contains "$billable_output" "destroy.sh"
+windows_billable_output=$(DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_WORKDIR="$billable_workdir" bash "$ROOT/scripts/orchestrate.sh" status)
+assert_contains "$windows_billable_output" "\$env:DOMAIN = 'status.example.test'; & '.\\scripts\\destroy.ps1'"
 
 refresh_workdir="$tmp/refresh-pending"
 write_state "$refresh_workdir" "S4_BOOTSTRAP_STACK" "pending" '{"instance_id":"i-refresh","root_volume_id":"vol-refresh-root","public_ip":"203.0.113.20"}'

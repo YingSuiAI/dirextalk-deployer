@@ -48,3 +48,4 @@ jobs:
         run: |
           & .\tests\windows_path_wrappers_test.ps1
           & .\tests\windows_recommendation_test.ps1
+          & .\tests\windows_orchestrate_status_smoke_test.ps1

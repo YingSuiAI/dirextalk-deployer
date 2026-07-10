@@ -8,6 +8,7 @@ tmp=$(mktemp -d "$ROOT/.tmp-runtime-summary.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 mkdir -p "$HOME"
 
 fakebin="$tmp/bin"

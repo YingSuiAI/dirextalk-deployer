@@ -4,22 +4,16 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck disable=SC1090
 source "$ROOT/tests/lib/json_test.sh"
+# shellcheck disable=SC1090
+source "$ROOT/tests/lib/isolated_home.sh"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-export HOME="$tmp/home"
-export USERPROFILE="$tmp/userprofile"
-export HOMEDRIVE="$tmp/homedrive"
-export HOMEPATH=/homepath
-export APPDATA="$tmp/appdata"
-export LOCALAPPDATA="$tmp/localappdata"
-export XDG_CONFIG_HOME="$tmp/xdg"
-export DIREXTALK_HOME="$tmp/dirextalk"
+dirextalk_test_isolate_homes "$tmp"
 export DIREXTALK_AGENT_DETECT_PROCESS=0
 export DIREXTALK_LOCAL_PATH_STYLE=posix
 export DIREXTALK_SPEECH_ENABLED=false
-mkdir -p "$HOME" "$USERPROFILE" "$HOMEDRIVE$HOMEPATH" "$APPDATA" "$LOCALAPPDATA" "$XDG_CONFIG_HOME" "$DIREXTALK_HOME"
 
 # shellcheck disable=SC1090
 source "$ROOT/scripts/phases/s6_wire_local.sh"
@@ -65,6 +59,9 @@ _print_mcp_guidance() { :; }
 run_failure_case() {
   local name=$1 case_dir="$tmp/$1"
   mkdir -p "$case_dir"
+  DIREXTALK_HOME="$case_dir/dirextalk"
+  export DIREXTALK_HOME
+  dirextalk_test_assert_isolated_homes "$tmp"
   PHASE_CALLS="$case_dir/phases.log"
   STATE_CALLS="$case_dir/state.log"
   STATE_JSON="$case_dir/state.json"
@@ -105,10 +102,26 @@ run_failure_case() {
       DIREXTALK_AGENT_PLATFORM=codex
       DIREXTALK_AGENT_INSTALL_MODE=invalid
       ;;
+    host_openclaw_override)
+      DIREXTALK_AGENT_PLATFORM=openclaw
+      DIREXTALK_CONNECT_AGENT=codex
+      ;;
+    host_hermes_override)
+      DIREXTALK_AGENT_PLATFORM=hermes
+      DIREXTALK_CONNECT_AGENT=codex
+      ;;
     mcp_enrollment)
       DIREXTALK_AGENT_PLATFORM=codex
       DIREXTALK_AGENT_INSTALL=auto
       _maybe_auto_install_mcp() { return 1; }
+      ;;
+    artifact_path_directory)
+      DIREXTALK_AGENT_PLATFORM=codex
+      mkdir -p "$DIREXTALK_HOME/nodes/service.example.test/mcp/codex.toml"
+      ;;
+    connect_config_path_directory)
+      DIREXTALK_AGENT_PLATFORM=codex
+      mkdir -p "$DIREXTALK_HOME/nodes/service.example.test/dirextalk-connect/config.toml"
       ;;
     *)
       echo "unknown case: $name" >&2
@@ -137,7 +150,7 @@ run_failure_case() {
   fi
 }
 
-for failure_case in invalid_runtime invalid_agent invalid_options invalid_policy invalid_mode mcp_enrollment; do
+for failure_case in invalid_runtime invalid_agent invalid_options invalid_policy invalid_mode host_openclaw_override host_hermes_override mcp_enrollment artifact_path_directory connect_config_path_directory; do
   run_failure_case "$failure_case"
 done
 
@@ -151,11 +164,17 @@ export PHASE_CALLS STATE_CALLS STATE_JSON
 : > "$STATE_CALLS"
 json_build object \
   agent_env_file=/legacy/service/env \
+  mcp_json_config=/legacy/service/mcp/mcp-servers.json \
+  mcp_codex_config=/legacy/service/mcp/codex.toml \
+  mcp_cursor_config=/legacy/service/mcp/cursor.mcp.json \
   mcp_env_file=/canonical/mcp/env \
   mcp_daemon_install_command=legacy-command > "$STATE_JSON"
 unset -f _maybe_auto_install_mcp 2>/dev/null || true
 # shellcheck disable=SC1090
 source "$ROOT/scripts/lib/mcp-client-adapters.sh"
+DIREXTALK_HOME="$tmp/dirextalk"
+export DIREXTALK_HOME
+dirextalk_test_assert_isolated_homes "$tmp"
 export DIREXTALK_AGENT_PLATFORM=codex
 unset DIREXTALK_CONNECT_AGENT DIREXTALK_CONNECT_AGENT_OPTIONS_TOML
 export DIREXTALK_AGENT_INSTALL=skip
@@ -180,7 +199,164 @@ if grep -q '^agent_env_file=' "$STATE_CALLS"; then
 fi
 grep -q '^mcp_env_file=' "$STATE_CALLS"
 grep -q '^mcp_capability=session$' "$STATE_CALLS"
-json_test_check "$STATE_JSON" "!('agent_env_file' in data) && !('mcp_daemon_install_command' in data) && data.mcp_env_file === '/canonical/mcp/env'"
+json_test_check "$STATE_JSON" "!('agent_env_file' in data) && !('mcp_json_config' in data) && !('mcp_codex_config' in data) && !('mcp_cursor_config' in data) && !('mcp_daemon_install_command' in data) && data.mcp_env_file === '/canonical/mcp/env'"
+
+run_capability_case() {
+  local name=$1 runtime=$2 agent=$3 expected_capability=$4 expect_connect_mcp=$5 expected_result=${6:-done}
+  local case_dir="$tmp/capability-$name" config_path rc
+  mkdir -p "$case_dir"
+  DIREXTALK_HOME="$case_dir/dirextalk"
+  PHASE_CALLS="$case_dir/phases.log"
+  STATE_CALLS="$case_dir/state.log"
+  STATE_JSON="$case_dir/state.json"
+  export DIREXTALK_HOME PHASE_CALLS STATE_CALLS STATE_JSON
+  dirextalk_test_assert_isolated_homes "$tmp"
+  : > "$PHASE_CALLS"
+  : > "$STATE_CALLS"
+  json_build object > "$STATE_JSON"
+
+  export DIREXTALK_AGENT_PLATFORM="$runtime"
+  if [ -n "$agent" ]; then
+    export DIREXTALK_CONNECT_AGENT="$agent"
+  else
+    unset DIREXTALK_CONNECT_AGENT
+  fi
+  unset DIREXTALK_CONNECT_AGENT_OPTIONS_TOML
+  unset DIREXTALK_OPENCLAW_ACP_URL DIREXTALK_OPENCLAW_ACP_TOKEN_FILE DIREXTALK_OPENCLAW_ACP_SESSION
+  unset DIREXTALK_MCP_HOST_READY
+  export DIREXTALK_AGENT_INSTALL=skip
+  export DIREXTALK_AGENT_INSTALL_MODE=recommended
+
+  set +e
+  run_phase > "$case_dir/stdout.log" 2> "$case_dir/stderr.log"
+  rc=$?
+  set -e
+  if [ "$expected_result" = "done" ]; then
+    [ "$rc" -eq 0 ] || {
+      echo "$name: expected run_phase success, got rc=$rc" >&2
+      return 1
+    }
+    grep -q '^S6_WIRE_LOCAL|done|' "$PHASE_CALLS"
+  else
+    [ "$rc" -ne 0 ] || {
+      echo "$name: conditional/unsupported capability must fail closed" >&2
+      return 1
+    }
+    grep -q '^S6_WIRE_LOCAL|failed|' "$PHASE_CALLS"
+    grep -q "^mcp_install_status=$expected_capability$" "$STATE_CALLS"
+  fi
+  grep -q "^mcp_capability=$expected_capability$" "$STATE_CALLS"
+  grep -q "^connect_mcp_capability=$expected_capability$" "$STATE_CALLS"
+
+  config_path="$DIREXTALK_HOME/nodes/service.example.test/dirextalk-connect/config.toml"
+  if [ "$runtime" = "openclaw" ]; then
+    grep -q "^Effective connect-agent MCP capability: $expected_capability$" "$DIREXTALK_HOME/nodes/service.example.test/mcp/openclaw.md"
+  fi
+  if [ "$runtime" = "hermes" ]; then
+    grep -q '^mcp_hermes_home=.*/nodes/service.example.test/hermes$' "$STATE_CALLS"
+    grep -q '^mcp_hermes_profile=dirextalk-service_example_test$' "$STATE_CALLS"
+    grep -q 'args = \["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-service_example_test", "acp"\]' "$config_path"
+    grep -q 'env = { HERMES_HOME = ".*/nodes/service.example.test/hermes" }' "$config_path"
+  fi
+  if [ "$expect_connect_mcp" = "true" ]; then
+    grep -q '^mcp_url = "https://service.example.test/mcp"' "$config_path"
+    grep -q "^mcp_capability = \"$expected_capability\"" "$config_path"
+  else
+    if grep -q '^mcp_url = \|^mcp_agent_token = \|^mcp_capability = ' "$config_path"; then
+      echo "$name: host-managed connect config must not enable canonical MCP" >&2
+      return 1
+    fi
+  fi
+}
+
+run_capability_case openclaw-acp openclaw "" host-managed false
+run_capability_case hermes-acp hermes "" host-managed false
+run_capability_case codex-iflow codex iflow host-managed false
+run_capability_case iflow-default iflow "" host-managed false
+run_capability_case codex-antigravity codex antigravity host-managed false
+run_capability_case codex-cursor codex cursor host-managed false
+run_capability_case codex-pi codex pi unsupported true failed
+run_capability_case codex-tmux codex tmux unsupported true failed
+run_capability_case codex-reasonix codex reasonix unsupported true failed
+
+run_host_managed_auto_case() {
+  local ready=$1 probe_exit=$2 expected_phase=$3 expected_status=$4 case_dir="$tmp/host-managed-auto-$1-$2" rc
+  mkdir -p "$case_dir"
+  DIREXTALK_HOME="$case_dir/dirextalk"
+  PHASE_CALLS="$case_dir/phases.log"
+  STATE_CALLS="$case_dir/state.log"
+  STATE_JSON="$case_dir/state.json"
+  CONNECT_START_CALLS="$case_dir/connect-start.log"
+  OPENCLAW_PROBE_CALLS="$case_dir/openclaw-probe.log"
+  export DIREXTALK_HOME PHASE_CALLS STATE_CALLS STATE_JSON CONNECT_START_CALLS OPENCLAW_PROBE_CALLS
+  dirextalk_test_assert_isolated_homes "$tmp"
+  : > "$PHASE_CALLS"
+  : > "$STATE_CALLS"
+  : > "$CONNECT_START_CALLS"
+  : > "$OPENCLAW_PROBE_CALLS"
+  json_build object > "$STATE_JSON"
+  mkdir -p "$case_dir/bin"
+  cat > "$case_dir/bin/openclaw" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "$OPENCLAW_PROBE_CALLS"
+exit "${OPENCLAW_PROBE_EXIT:-0}"
+EOF
+  chmod 700 "$case_dir/bin/openclaw"
+
+  export DIREXTALK_AGENT_PLATFORM=openclaw
+  unset DIREXTALK_CONNECT_AGENT DIREXTALK_CONNECT_AGENT_OPTIONS_TOML
+  unset DIREXTALK_OPENCLAW_ACP_URL DIREXTALK_OPENCLAW_ACP_TOKEN_FILE DIREXTALK_OPENCLAW_ACP_SESSION
+  export DIREXTALK_AGENT_INSTALL=auto
+  export DIREXTALK_AGENT_INSTALL_MODE=recommended
+  export DIREXTALK_OPENCLAW_COMMAND="$case_dir/bin/openclaw"
+  export OPENCLAW_PROBE_EXIT="$probe_exit"
+  if [ "$ready" = "1" ]; then
+    export DIREXTALK_MCP_HOST_READY=1
+  else
+    unset DIREXTALK_MCP_HOST_READY
+  fi
+  _maybe_auto_install_agent() {
+    printf 'started\n' >> "$CONNECT_START_CALLS"
+  }
+
+  set +e
+  run_phase > "$case_dir/stdout.log" 2> "$case_dir/stderr.log"
+  rc=$?
+  set -e
+
+  grep -q "^S6_WIRE_LOCAL|$expected_phase|" "$PHASE_CALLS"
+  grep -q "^mcp_install_status=$expected_status$" "$STATE_CALLS"
+  [ -s "$DIREXTALK_HOME/nodes/service.example.test/mcp/openclaw.md" ]
+  if grep -q '^mcp_url = \|^mcp_agent_token = \|^mcp_capability = ' "$DIREXTALK_HOME/nodes/service.example.test/dirextalk-connect/config.toml"; then
+    echo "host-managed auto case must not enable canonical MCP in connect options" >&2
+    return 1
+  fi
+  if [ "$expected_phase" = "done" ]; then
+    [ "$rc" -eq 0 ]
+    grep -q '^started$' "$CONNECT_START_CALLS"
+  else
+    [ "$rc" -eq 2 ]
+    [ ! -s "$CONNECT_START_CALLS" ] || {
+      echo "host-managed bridge must not start before explicit host enrollment confirmation" >&2
+      return 1
+    }
+  fi
+  if [ "$ready" = "1" ]; then
+    [ "$(sed -n '1p' "$OPENCLAW_PROBE_CALLS")" = "mcp" ]
+    [ "$(sed -n '2p' "$OPENCLAW_PROBE_CALLS")" = "probe" ]
+    [ "$(sed -n '3p' "$OPENCLAW_PROBE_CALLS")" = "dirextalk-service_example_test" ]
+    [ "$(sed -n '4p' "$OPENCLAW_PROBE_CALLS")" = "--json" ]
+    [ "$(wc -l < "$OPENCLAW_PROBE_CALLS" | tr -d ' ')" = "4" ]
+    ! grep -q 'agent-token\|Authorization\|Bearer' "$OPENCLAW_PROBE_CALLS"
+  else
+    [ ! -s "$OPENCLAW_PROBE_CALLS" ]
+  fi
+}
+
+run_host_managed_auto_case 0 0 waiting_user host_action_required
+run_host_managed_auto_case 1 0 done host_probe_passed
+run_host_managed_auto_case 1 1 waiting_user host_probe_failed
 
 find "$tmp" -type f -print | while IFS= read -r written; do
   case "$written" in

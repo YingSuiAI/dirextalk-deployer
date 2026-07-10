@@ -47,4 +47,13 @@ $JSON mutate "$tmp/state.json" set-string resources.public_ip 203.0.113.10
 $JSON mutate "$tmp/state.json" set-json runtime_checks.summary '{"status":"failed","checks":{"mcp":"failed"}}'
 [ "$($JSON get "$tmp/state.json" runtime_checks.summary.status)" = "failed" ]
 
+if $JSON build mcp-messages-list '!room:im.test' > "$tmp/legacy-mcp-action.json" 2>/dev/null; then
+  echo "retired mcp-messages-list body action must not be generated" >&2
+  exit 1
+fi
+if $JSON build mcp-http-json-config server https://service.example.test/mcp token > "$tmp/legacy-mcp-config.json" 2>/dev/null; then
+  echo "retired token-bearing standalone MCP config action must not be generated" >&2
+  exit 1
+fi
+
 echo "json helper ok"

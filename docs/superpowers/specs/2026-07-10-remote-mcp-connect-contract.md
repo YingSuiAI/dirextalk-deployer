@@ -29,7 +29,9 @@ gateway.
 - deploys and verifies the remote message server;
 - creates the Matrix agent session and service-scoped credentials;
 - writes the canonical MCP URL, server name, agent token, and node id into
-  `dirextalk-connect/config.toml`;
+  `dirextalk-connect/config.toml` only for non-host-managed capability;
+- retains host guidance/artifacts but omits canonical MCP fields from
+  host-managed connect options;
 - installs, starts, and verifies the service-scoped connect daemon;
 - reports a runtime as MCP-capable only when the selected connect backend has
   an explicit capability entry;
@@ -68,12 +70,26 @@ No unknown backend falls back to a generic JSON file.
 
 ### Known capability exceptions
 
-- OpenClaw ACP rejects per-session `mcpServers`; it is `host-managed`.
+- OpenClaw ACP rejects per-session `mcpServers`; every detected OpenClaw host is
+  `host-managed`. Hermes does not advertise usable HTTP MCP capability during
+  ACP initialization, so every detected Hermes host is also `host-managed`.
+  Both require the ACP bridge and reject non-ACP overrides. Connect only owns
+  conversation; their native registries own MCP.
   Automatic host enrollment requires a separate explicit opt-in and must not
   place bearer tokens in process arguments.
-- Pi has no built-in MCP client; it is `conditional` on a supported extension.
-- tmux is a terminal transport, not an MCP client; it is `conditional` on a
-  declared MCP-consuming wrapper/init command.
+- After explicit enrollment, OpenClaw must pass the official secret-free
+  `openclaw mcp probe <server-name> --json` check before bridge startup. The
+  deployer never runs `mcp set` or mutates OpenClaw's registry.
+- Hermes uses a per-service HERMES_HOME/profile in both bridge startup and the
+  secret-free `hermes -p <profile> mcp test <server-name>` gate. The deployer
+  writes guidance, not a generic Hermes JSON file, and never mutates the real
+  user Hermes home.
+- Antigravity, Cursor, and iFlow are `host-managed` because their safe MCP
+  enrollment is outside the selected connect session.
+- Pi has no built-in MCP client and is `unsupported` until a separately
+  reviewed extension contract exists.
+- tmux is a terminal transport, not an MCP client, and is `unsupported` until
+  a separately reviewed MCP-consuming wrapper contract exists.
 - Reasonix HTTP service mode is not allowed to rely on a local `.mcp.json` that
   the remote service cannot see.
 - ACP backends send the standard `mcpServers` field only after the agent
@@ -146,3 +162,8 @@ root are unchanged.
   external release actions and require explicit execution approval.
 - The local clone is removed only after active code paths and migration needs
   are resolved.
+
+Implementation record (2026-07-10): the user manually removed the local clone.
+Because the clone was already absent, the repository-local tombstone task was
+skipped. npm deprecation, tombstone publishing, and GitHub archival remain
+unexecuted external release actions requiring separate approval.

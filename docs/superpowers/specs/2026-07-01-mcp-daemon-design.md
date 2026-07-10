@@ -1,5 +1,11 @@
 # MCP Daemon Design
 
+> [!WARNING]
+> **Superseded on 2026-07-10** by
+> [Remote MCP Connect Contract](2026-07-10-remote-mcp-connect-contract.md).
+> This historical local-daemon design must not be implemented or used for
+> current Dirextalk wiring.
+
 ## Problem
 
 Hermes and other MCP hosts commonly launch MCP through a stdio child process.

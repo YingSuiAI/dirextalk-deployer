@@ -8,6 +8,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 export DOMAIN="timeout.example.test"
 mkdir -p "$HOME" "$tmp/bin"
 

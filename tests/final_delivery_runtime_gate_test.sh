@@ -4,11 +4,14 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck disable=SC1090
 source "$ROOT/tests/lib/json_test.sh"
+# shellcheck disable=SC1090
+source "$ROOT/tests/lib/isolated_home.sh"
+# shellcheck disable=SC1090
+source "$ROOT/scripts/lib/local-paths.sh"
 tmp=$(mktemp -d "$ROOT/.tmp-final-delivery-runtime.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
-export HOME="$tmp/home"
-mkdir -p "$HOME"
+dirextalk_test_isolate_homes "$tmp"
 
 fakebin="$tmp/bin"
 mkdir -p "$fakebin"
@@ -20,7 +23,9 @@ EOF
   chmod 700 "$fakebin/$tool"
 done
 
-cat > "$fakebin/dirextalk-connect" <<'EOF'
+connect_binary="$tmp/Agent O'Brien/bin/dirextalk-connect"
+mkdir -p "$(dirname "$connect_binary")"
+cat > "$connect_binary" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 [ "${1:-}" = "daemon" ]
@@ -35,7 +40,7 @@ dirextalk-connect daemon status
   WorkDir:   ${CONNECT_WORK_DIR:-}
 STATUS
 EOF
-chmod 700 "$fakebin/dirextalk-connect"
+chmod 700 "$connect_binary"
 
 cat > "$fakebin/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -94,6 +99,7 @@ mkdir -p "$runtime_dir"
 config="$runtime_dir/config.toml"
 : > "$config"
 state="$service_dir/state.json"
+keyfile="$tmp/SSH Key O'Brien.pem"
 json_build object \
   run_id=final-delivery-runtime-test \
   region=eu-west-2 \
@@ -111,14 +117,14 @@ json_build object \
   agent_service_id=final-delivery.example.test \
   "agent_service_dir=$service_dir" \
   "connect_config=$config" \
-  connect_binary=dirextalk-connect \
+  "connect_binary=$connect_binary" \
   phase=S7_VERIFY_E2E \
   'runtime_checks={"summary":{"status":"passed"},"connect_daemon":{"status":"passed"},"mcp_doctor":{"status":"passed"},"mcp_tools":{"status":"passed"},"mcp_smoke":{"status":"passed"}}' \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
-  'resources={"instance_id":"i-final","public_ip":"203.0.113.21","key_file":"/tmp/key.pem"}' > "$state"
+  "resources={\"instance_id\":\"i-final\",\"public_ip\":\"203.0.113.21\",\"key_file\":\"$keyfile\"}" > "$state"
 
 set +e
-DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" > "$tmp/fail.out" 2>&1
+DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" > "$tmp/fail.out" 2>&1
 fail_rc=$?
 set -e
 [ "$fail_rc" -ne 0 ] || {
@@ -126,14 +132,30 @@ set -e
   exit 1
 }
 grep -q 'Final delivery blocked because runtime checks did not all pass' "$tmp/fail.out"
+grep -Fq "\$env:DOMAIN = 'final-delivery.example.test'; & '.\\scripts\\orchestrate.ps1' 'verify' 'runtime'" "$tmp/fail.out" || {
+  echo "Windows delivery recovery must render a PowerShell verify command" >&2
+  exit 1
+}
 if grep -q 'Automated Deployment Gates Passed' "$tmp/fail.out"; then
   echo "final delivery must not print success when runtime checks fail" >&2
   exit 1
 fi
 json_test_check "$state" "data.runtime_checks.summary.status === 'failed' && data.runtime_checks.connect_daemon.status === 'failed'"
 
-pass_output=$(DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$runtime_dir" bash "$ROOT/scripts/orchestrate.sh")
+pass_output=$(DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$runtime_dir" bash "$ROOT/scripts/orchestrate.sh")
 printf '%s\n' "$pass_output" | grep -q 'Automated Deployment Gates Passed'
+connect_windows=$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_normalize_local_path "$connect_binary")
+keyfile_windows=$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_normalize_local_path "$keyfile")
+connect_quoted=$(printf '%s' "$connect_windows" | sed "s/'/''/g")
+keyfile_quoted=$(printf '%s' "$keyfile_windows" | sed "s/'/''/g")
+printf '%s\n' "$pass_output" | grep -Fq "  daemon       : & '$connect_quoted' 'daemon' 'status' '--service-name' 'final-delivery.example.test'" || {
+  echo "Windows final delivery must render the daemon status command with PowerShell quoting" >&2
+  exit 1
+}
+printf '%s\n' "$pass_output" | grep -Fq "  SSH          : & 'ssh' '-i' '$keyfile_quoted' 'ubuntu@203.0.113.21'" || {
+  echo "Windows final delivery must render the SSH command with PowerShell quoting" >&2
+  exit 1
+}
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.connect_daemon.status === 'passed' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"
 
 echo "final delivery runtime gate ok"

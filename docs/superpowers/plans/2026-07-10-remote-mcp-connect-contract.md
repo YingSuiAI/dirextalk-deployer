@@ -72,9 +72,9 @@ one migration cycle. Do not modify unrelated `dirextalk-plugins/.idea/`.
    advertise `dirextalk-mcp@latest`.
 2. Add regression tests scanning all relevant vendored scripts, not only the
    orchestrator entrypoint.
-3. Replace `dirextalk-mcp` user documentation with a tombstone and
-   Windows/macOS/Linux daemon/config cleanup guidance. Do not publish,
-   deprecate, archive, or delete the clone in this task.
+3. [x] The user manually deleted the local clone on 2026-07-10. Because the
+   clone was absent, the repository-local tombstone and cleanup-guidance task
+   was skipped. No npm publish/deprecation or GitHub archival was performed.
 4. Remove the old project from active parent project/command/status/skill
    routing and mark historical design documents superseded.
 

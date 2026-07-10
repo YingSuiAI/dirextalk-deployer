@@ -8,6 +8,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 mkdir -p "$HOME"
 
 fakebin="$tmp/bin"
@@ -66,6 +67,7 @@ write_state() {
     "mcp_hermes_config=$service_dir/mcp/hermes.mcp.json" \
     "mcp_doctor_command=legacy local MCP doctor command" \
     mcp_install_status=installed \
+    mcp_host_probe_status=passed \
     mcp_daemon_install_status=installed \
     'mcp_daemon_install_command=legacy local MCP daemon install command' \
     'mcp_daemon_status_command=legacy local MCP daemon status command' \
@@ -170,7 +172,7 @@ assert_contains "$reset_calls" 'dirextalk-connect daemon status --service-name o
 assert_contains "$reset_calls" 'dirextalk-connect daemon stop --service-name ops\.example\.test'
 assert_not_contains "$reset_calls" 'caddy-data|caddy-config|down -v'
 
-json_test_check "$state" "!(data.password || data.access_token || data.agent_token || data.agent_room_id) && data.connect_install_status === 'refresh_pending' && data.mcp_install_status === 'refresh_pending' && !('mcp_daemon_install_status' in data) && !('mcp_daemon_install_command' in data) && !('mcp_daemon_status_command' in data) && !('mcp_daemon_url' in data) && !('mcp_daemon_proxy_command' in data) && data.phases.S5_INIT_TOKENS.status === 'pending' && data.phases.S6_WIRE_LOCAL.status === 'pending' && data.phases.S7_VERIFY_E2E.status === 'pending' && !data.user_confirmations && !data.runtime_checks"
+json_test_check "$state" "!(data.password || data.access_token || data.agent_token || data.agent_room_id) && data.connect_install_status === 'refresh_pending' && data.mcp_install_status === 'refresh_pending' && !('mcp_host_probe_status' in data) && !('mcp_daemon_install_status' in data) && !('mcp_daemon_install_command' in data) && !('mcp_daemon_status_command' in data) && !('mcp_daemon_url' in data) && !('mcp_daemon_proxy_command' in data) && data.phases.S5_INIT_TOKENS.status === 'pending' && data.phases.S6_WIRE_LOCAL.status === 'pending' && data.phases.S7_VERIFY_E2E.status === 'pending' && !data.user_confirmations && !data.runtime_checks"
 
 reset_report="$service_dir/operation-report.json"
 assert_file_exists "$reset_report"

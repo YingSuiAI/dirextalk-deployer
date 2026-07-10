@@ -9,6 +9,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 export DIREXTALK_WORKDIR="$tmp/work"
 export DOMAIN=route53-default.test
 export CONFIRM_DOMAIN_BINDING=1

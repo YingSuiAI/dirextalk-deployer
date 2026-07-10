@@ -7,6 +7,7 @@ if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
 
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'scripts\lib\windows-paths.ps1')
+. (Join-Path $root 'tests\lib\isolated-homes.ps1')
 
 function Quote-BashArg([string] $Value) {
   return "'" + ($Value -replace "'", "'\''") + "'"
@@ -29,23 +30,26 @@ if (-not $gitBash) {
 }
 
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("dirextalk-windows-recommendation-" + [Guid]::NewGuid().ToString('N'))
-$envNames = @('HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'DIREXTALK_HOME', 'DIREXTALK_LOCAL_PATH_STYLE', 'PATH')
+$sentinelRoot = Join-Path ([IO.Path]::GetTempPath()) ('dirextalk-user-sentinel-' + [Guid]::NewGuid().ToString('N'))
+$envNames = @($script:DirextalkTestHomeEnvironmentNames + @('DIREXTALK_LOCAL_PATH_STYLE', 'PATH') | Select-Object -Unique)
 $savedEnv = @{}
 foreach ($name in $envNames) {
   $savedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 
 try {
-  $testHome = Join-Path $temp 'home'
+  New-Item -ItemType Directory -Force -Path $temp, $sentinelRoot | Out-Null
+  Set-DirextalkTestHomes $temp
+  $testHome = $env:USERPROFILE
   $fakeBin = Join-Path $temp 'fake-bin'
   $serviceDir = Join-Path $testHome '.dirextalk\nodes\service.example.test'
   $runtimeDir = Join-Path $serviceDir 'dirextalk-connect'
   $connect = Join-Path $runtimeDir 'dirextalk-connect.cmd'
   $config = Join-Path $runtimeDir 'config.toml'
   $callLog = Join-Path $temp 'calls.log'
-  $sentinel = Join-Path $temp 'sentinel-user-config\openclaw.json'
+  $sentinel = Join-Path $sentinelRoot 'openclaw.json'
 
-  New-Item -ItemType Directory -Force -Path $testHome, $fakeBin, $runtimeDir, (Split-Path -Parent $sentinel) | Out-Null
+  New-Item -ItemType Directory -Force -Path $fakeBin, $runtimeDir | Out-Null
   Set-Content -LiteralPath $config -Value '# fake config' -Encoding utf8NoBOM
   Set-Content -LiteralPath $sentinel -Value '{"keep":true}' -Encoding utf8NoBOM
   $sentinelBefore = (Get-FileHash -Algorithm SHA256 -LiteralPath $sentinel).Hash
@@ -62,16 +66,9 @@ try {
     'exit /b 0'
   )
 
-  $env:HOME = $testHome
-  $env:USERPROFILE = $testHome
-  $env:HOMEDRIVE = [IO.Path]::GetPathRoot($testHome).TrimEnd('\')
-  $env:HOMEPATH = $testHome.Substring([IO.Path]::GetPathRoot($testHome).Length - 1)
-  $env:APPDATA = Join-Path $temp 'appdata'
-  $env:LOCALAPPDATA = Join-Path $temp 'localappdata'
-  $env:XDG_CONFIG_HOME = Join-Path $temp 'xdg'
-  $env:DIREXTALK_HOME = Join-Path $testHome '.dirextalk'
   $env:DIREXTALK_LOCAL_PATH_STYLE = 'windows'
   $env:PATH = "$fakeBin;$($savedEnv['PATH'])"
+  Assert-DirextalkTestHomes $temp
 
   $rootBash = ConvertTo-GitBashPath $root
   $connectBash = ConvertTo-GitBashPath $connect
@@ -112,11 +109,13 @@ finally {
   foreach ($name in $envNames) {
     [Environment]::SetEnvironmentVariable($name, $savedEnv[$name], 'Process')
   }
-  $resolvedTemp = [IO.Path]::GetFullPath($temp)
-  $resolvedSystemTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-  if ($resolvedTemp.StartsWith($resolvedSystemTemp, [StringComparison]::OrdinalIgnoreCase) -and
-      (Split-Path -Leaf $resolvedTemp).StartsWith('dirextalk-windows-recommendation-', [StringComparison]::OrdinalIgnoreCase)) {
-    Remove-Item -LiteralPath $resolvedTemp -Recurse -Force -ErrorAction SilentlyContinue
+  foreach ($candidate in @($temp, $sentinelRoot)) {
+    $resolved = [IO.Path]::GetFullPath($candidate)
+    $resolvedSystemTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if ($resolved.StartsWith($resolvedSystemTemp, [StringComparison]::OrdinalIgnoreCase) -and
+        (Split-Path -Leaf $resolved) -match '^dirextalk-(windows-recommendation|user-sentinel)') {
+      Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue
+    }
   }
 }
 

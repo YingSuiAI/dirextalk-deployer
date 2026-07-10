@@ -32,12 +32,12 @@ $bash = Find-GitBash
 
 $windowsDirextalkHome = Resolve-WindowsDirextalkHome
 $env:DIREXTALK_WINDOWS_HOME = $windowsDirextalkHome
-$env:DIREXTALK_HOME = ConvertTo-GitBashPath $windowsDirextalkHome
+$env:DIREXTALK_HOME = $windowsDirextalkHome.Replace('\', '/')
 $env:DIREXTALK_LOCAL_PATH_STYLE = 'windows'
 
 if ($env:DIREXTALK_WORKDIR) {
   $env:DIREXTALK_WORKDIR_WINDOWS = $env:DIREXTALK_WORKDIR
-  $env:DIREXTALK_WORKDIR = ConvertTo-GitBashPath $env:DIREXTALK_WORKDIR
+  $env:DIREXTALK_WORKDIR = ([IO.Path]::GetFullPath($env:DIREXTALK_WORKDIR)).Replace('\', '/')
 }
 
 $repoRootForBash = ConvertTo-GitBashPath $RepoRoot

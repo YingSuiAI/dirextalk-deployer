@@ -77,6 +77,45 @@ dirextalk_paths_equal() {
   esac
 }
 
+dirextalk_quote_powershell() {
+  printf '%s' "$1" | sed "s/'/''/g"
+}
+
+dirextalk_render_local_command() {
+  local first=1 argument quoted
+  [ "$#" -gt 0 ] || return 1
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    printf '&'
+    for argument in "$@"; do
+      quoted=$(dirextalk_quote_powershell "$argument") || return 1
+      printf " '%s'" "$quoted" || return 1
+    done
+    return 0
+  fi
+  for argument in "$@"; do
+    [ "$first" -eq 1 ] || printf ' ' || return 1
+    printf '%q' "$argument" || return 1
+    first=0
+  done
+}
+
+dirextalk_render_env_command() {
+  local name=$1 value=$2 quoted
+  shift 2
+  case "$name" in
+    ""|[!A-Za-z_]*|*[!A-Za-z0-9_]*) return 1 ;;
+    *) ;;
+  esac
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    quoted=$(dirextalk_quote_powershell "$value") || return 1
+    printf "\$env:%s = '%s'; " "$name" "$quoted" || return 1
+  else
+    printf '%s=' "$name" || return 1
+    printf '%q ' "$value" || return 1
+  fi
+  dirextalk_render_local_command "$@"
+}
+
 _dirextalk_upper_drive() {
   printf '%s' "$1" | tr '[:lower:]' '[:upper:]'
 }

@@ -43,23 +43,26 @@ S6 writes MCP snippets under the same service directory:
 
 Generated files:
 
-- `codex.toml`: Codex TOML snippet using `[mcp_servers."<server-name>"]`.
-- `cursor.mcp.json`: Cursor-compatible JSON snippet using `mcpServers`. Operators can merge it into project-level `.cursor/mcp.json` or global `~/.cursor/mcp.json`; S6 does not write those locations by default because they contain a bearer token for this service.
 - `openclaw.md`: host-managed guidance only. It contains no bearer token and no global mutation command.
-- `hermes.mcp.json`: Hermes JSON snippet using `mcpServers` with the remote HTTP MCP endpoint.
+- `hermes.md`: Hermes native-registry/profile guidance only; no token-bearing generic JSON is generated.
 - `env`: shell exports for the selected HTTP MCP URL and agent node id.
 
 MCP capability is declared separately from bridge-agent support:
 
 | Capability | Runtimes |
 | --- | --- |
-| `session` | ACP, Claude Code, Codex, Copilot, Gemini, Kimi, OpenCode, Qoder, Hermes |
-| `project` | Antigravity, Cursor |
-| `host-managed` | OpenClaw, iFlow |
-| `conditional` | Pi (`mcp_extension`), tmux (`mcp_consuming_wrapper`) |
-| `unsupported` | Devin, Reasonix |
+| `session` | ACP, Claude Code, Codex, Copilot, Gemini, Kimi, OpenCode, Qoder |
+| `project` | No current backend |
+| `host-managed` | Antigravity, Cursor, iFlow; every detected OpenClaw or Hermes host |
+| `conditional` | No current backend |
+| `unsupported` | Devin, Pi, Reasonix, tmux |
 
-Unknown runtimes fail closed. S6 never writes a generic MCP JSON fallback.
+Capability is normally resolved from the effective connect agent. Detected
+OpenClaw and Hermes hosts are always `host-managed`, require ACP bridging, and
+reject non-ACP overrides. Their native registries own MCP. Unsupported and
+unknown selections fail closed. The host
+runtime still selects any standalone artifact. S6 never writes a
+generic MCP JSON fallback.
 The canonical `mcp/env` artifact points directly to the deployed message server
 and sets the equivalent of:
 
@@ -68,13 +71,26 @@ DIREXTALK_MCP_URL=https://<domain>/mcp
 DIREXTALK_AGENT_NODE_ID=__AGENT_NODE_ID__
 ```
 
-MCP uses the server HTTP endpoint and service agent token. S6 writes
-`mcp_url`, `mcp_server_name`, `mcp_agent_token`, `mcp_node_id`, and
-`mcp_capability` into `dirextalk-connect/config.toml`; dirextalk-connect owns the
-agent-specific injection. OpenClaw carries `mcp_capability = "host-managed"` so
-its ACP bridge cannot silently receive per-session MCP configuration.
+MCP uses the server HTTP endpoint and service agent token. For non-host-managed
+selection, S6 writes `mcp_url`, `mcp_server_name`, `mcp_agent_token`,
+`mcp_node_id`, and `mcp_capability` into `dirextalk-connect/config.toml`;
+dirextalk-connect owns agent-specific injection. Conditional and unsupported
+selection then blocks S6 before bridge startup. For host-managed selection, S6
+retains the host guidance/artifact but omits all five canonical fields from
+connect options. In `auto`, it records `host_action_required` and returns
+`waiting_user` before starting the bridge. After explicit host enrollment,
+rerun with `DIREXTALK_MCP_HOST_READY=1`; the
+OpenClaw path must then pass `openclaw mcp probe <server-name> --json` before
+bridge startup and records `host_probe_passed`. The probe receives no bearer
+token or credential path in argv. `OPENCLAW_CONFIG_PATH` is inherited, and
+`DIREXTALK_OPENCLAW_PROFILE=<profile>` adds `--profile <profile>` for service
+isolation. S6 never runs `mcp set`. Other host-managed backends with no official
+probe record `operator_confirmed_host_managed`, which is not automated proof.
+Hermes uses a generated per-service HERMES_HOME and profile in both the ACP
+bridge args/env and `hermes -p <profile> mcp test <server-name>` probe. S6 only
+creates the empty home and guidance; the operator creates/clones the profile and
+enrolls native `mcp_servers` before setting the ready flag.
 Generated MCP client snippets do not install or launch a local MCP CLI. MCP does not require a local daemon, proxy endpoint, or listening port.
-Cursor can load the generated MCP server after the snippet is added to `.cursor/mcp.json` or `~/.cursor/mcp.json`, but Cursor may require a full restart or MCP settings reload/enable before the server starts and tools appear.
 
 Check MCP through the deployer runtime checks:
 
@@ -143,7 +159,7 @@ DIREXTALK_SPEECH_LANGUAGE=zh
 Defaults:
 
 - `DIREXTALK_CONNECT_AGENT` is the preferred explicit selector. It accepts every dirextalk-connect agent: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
-- `DIREXTALK_AGENT_PLATFORM=auto` detects the local agent runtime and maps it to a `dirextalk-connect` agent type only when it can identify one unambiguously. OpenClaw and Hermes map to the generic `acp` connect agent. OpenClaw uses `openclaw acp --session agent:main:main` by default and lets OpenClaw discover its Gateway config; Hermes uses the `dirextalk-connect hermes-acp-adapter -- hermes acp` compatibility wrapper by default.
+- `DIREXTALK_AGENT_PLATFORM=auto` detects the local agent runtime and maps it to a `dirextalk-connect` agent type only when it can identify one unambiguously. OpenClaw and Hermes map exclusively to the generic `acp` connect agent. OpenClaw uses the same optional `--profile`/`OPENCLAW_CONFIG_PATH` scope for ACP and its native MCP probe. Hermes uses `dirextalk-connect hermes-acp-adapter -- hermes -p <service-profile> acp` with the same service HERMES_HOME as its native MCP test.
 - `DIREXTALK_LOCAL_PATH_STYLE=windows` writes Windows-compatible `data_dir`, `work_dir`, config paths, and install commands. `scripts/orchestrate.ps1` sets this automatically. Linux, macOS, and WSL Bash runs should leave the default `posix` style. Windows Git Bash/MSYS2 users who run `scripts/orchestrate.sh` directly must set `DIREXTALK_LOCAL_PATH_STYLE=windows` when the local bridge is a Windows process.
 - `DIREXTALK_CONNECT_AGENT_CMD` writes `cmd = "<path>"` into `[projects.agent.options]`. Agent-specific forms such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_CLAUDE_CODE_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, `DIREXTALK_OPENCODE_COMMAND`, `DIREXTALK_QODERCLI_COMMAND`, and `DIREXTALK_OPENCLAW_COMMAND` are also accepted. For Hermes, `DIREXTALK_HERMES_COMMAND` selects the child Hermes executable behind the adapter, while `DIREXTALK_HERMES_ACP_ADAPTER_COMMAND` overrides the adapter command itself.
 - S6 writes `mode = "yolo"` by default under `[projects.agent.options]` for generated agent configs. A `mode` supplied through `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` or `DIREXTALK_CURSOR_MODE` overrides this default.
@@ -228,10 +244,11 @@ mcp_endpoint_url
 mcp_server_name
 mcp_config_dir
 mcp_credentials_file
-mcp_codex_config
-mcp_cursor_config
 mcp_openclaw_config
 mcp_hermes_config
+mcp_hermes_home
+mcp_hermes_profile
+mcp_host_probe_status
 mcp_env_file
 mcp_readme
 mcp_install_command

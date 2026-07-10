@@ -93,6 +93,8 @@ fi
 
 grep -q '^User=root$' "$main_unit"
 grep -q '^Group=root$' "$main_unit"
+grep -q '^After=network-online.target docker.service$' "$main_unit"
+grep -q '^Wants=network-online.target docker.service$' "$main_unit"
 grep -q '^RuntimeDirectory=dirextalk-updater$' "$main_unit"
 grep -q '^RuntimeDirectoryMode=0755$' "$main_unit"
 grep -q '^RuntimeDirectoryPreserve=yes$' "$main_unit"
@@ -100,6 +102,7 @@ grep -q '^StateDirectory=dirextalk-updater$' "$main_unit"
 grep -q '^StateDirectoryMode=0700$' "$main_unit"
 grep -q '^ConfigurationDirectory=dirextalk-updater$' "$main_unit"
 grep -q '^ConfigurationDirectoryMode=0700$' "$main_unit"
+grep -F -q '^ReadWritePaths=/var/lib/dirextalk-updater /run/dirextalk-updater /var/dirextalk-message-server$' "$main_unit"
 
 grep -q '^OnCalendar=\*-\*-\* 03:00:00$' "$timer"
 grep -q '^RandomizedDelaySec=45m$' "$timer"

@@ -1,3 +1,4 @@
 .codegraph/
 .idea
 .dirextalk-connect/
+node_modules/

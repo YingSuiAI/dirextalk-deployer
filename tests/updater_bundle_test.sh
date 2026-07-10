@@ -102,7 +102,7 @@ grep -q '^StateDirectory=dirextalk-updater$' "$main_unit"
 grep -q '^StateDirectoryMode=0700$' "$main_unit"
 grep -q '^ConfigurationDirectory=dirextalk-updater$' "$main_unit"
 grep -q '^ConfigurationDirectoryMode=0700$' "$main_unit"
-grep -F -q '^ReadWritePaths=/var/lib/dirextalk-updater /run/dirextalk-updater /var/dirextalk-message-server$' "$main_unit"
+grep -q '^ReadWritePaths=/var/lib/dirextalk-updater /run/dirextalk-updater /var/dirextalk-message-server$' "$main_unit"
 
 grep -q '^OnCalendar=\*-\*-\* 03:00:00$' "$timer"
 grep -q '^RandomizedDelaySec=45m$' "$timer"

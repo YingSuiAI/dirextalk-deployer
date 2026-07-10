@@ -558,6 +558,15 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       image_ref: st.server_release?.image_ref || "",
       manifest_digest: st.server_release?.manifest_digest || ""
     },
+    updater_release: {
+      version: st.updater_release?.version || "",
+      commit: st.updater_release?.commit || "",
+      sha256: st.updater_release?.sha256 || "",
+      asset: st.updater_release?.asset || "",
+      os: st.updater_release?.os || "",
+      arch: st.updater_release?.arch || "",
+      ubuntu_version: st.updater_release?.ubuntu_version || ""
+    },
     mcp: {
       status: localRefreshStatus,
       install_status: st.mcp_install_status || "",

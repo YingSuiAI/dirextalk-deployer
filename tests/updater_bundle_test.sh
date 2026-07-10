@@ -13,7 +13,6 @@ bash "$ROOT/scripts/render/render-userdata.sh" \
   --domain service.example.test \
   --acme ops@example.test \
   --message-server-image 'dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
-  --updater-binary "$fake_updater" \
   > "$tmp/user-data.yaml"
 
 awk '/encoding: b64/ { getline; sub(/^    content: /, ""); print; exit }' "$tmp/user-data.yaml" \
@@ -24,6 +23,7 @@ tar -xzf "$tmp/bundle.tar.gz" -C "$tmp/bundle"
 for path in \
   updater/install.sh \
   updater/bootstrap-host.sh \
+  updater/release.env \
   updater/config.json \
   updater/dirextalk-updater.service \
   updater/dirextalk-updater-discovery.service \
@@ -31,7 +31,7 @@ for path in \
   [ -f "$tmp/bundle/$path" ] || { echo "missing updater bundle file: $path" >&2; exit 1; }
 done
 if [ -e "$tmp/bundle/dirextalk-updater" ]; then
-  echo "the updater ELF must be transferred separately, not embedded in size-limited user-data" >&2
+  echo "the updater ELF must be downloaded from the pinned independent Release, not embedded in user-data" >&2
   exit 1
 fi
 [ "$(wc -c < "$tmp/user-data.yaml")" -lt 16384 ] || {
@@ -131,6 +131,8 @@ grep -q 'chown root:root' "$tmp/bundle/updater/install.sh"
 grep -q 'systemctl start dirextalk-updater-discovery.service' "$tmp/bundle/updater/install.sh"
 grep -q 'flock' "$tmp/bundle/updater/bootstrap-host.sh"
 grep -q 'docker compose --env-file .env up -d' "$tmp/bundle/updater/bootstrap-host.sh"
+grep -F -q 'github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.0/dirextalk-updater-linux-amd64' "$tmp/bundle/updater/release.env"
+grep -F -q 'd54b786c30b9b866341a89b6496b574b0d29cc48f26bf4787b7686faf4c1f0f1' "$tmp/bundle/updater/release.env"
 if grep -q 'latest/meta-data/public-ipv4\|api.ipify.org\|ifconfig.me' "$tmp/user-data.yaml"; then
   echo "cloud-init must not persist a temporary pre-EIP public address" >&2
   exit 1

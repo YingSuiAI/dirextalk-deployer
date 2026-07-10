@@ -14,6 +14,7 @@ chmod 0755 "$tmp/updater"
 cat > "$tmp/bin/scp" <<'EOF'
 #!/usr/bin/env bash
 printf 'scp\n' >> "$CALLS"
+exit 97
 EOF
 cat > "$tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
@@ -51,7 +52,7 @@ invalid_ips=(
 )
 for ip in "${invalid_ips[@]}"; do
   : > "$CALLS"
-  if _upload_updater_binary "$ip" "$tmp/key.pem" "$tmp/updater" >/dev/null 2>&1; then
+  if _resume_host_bootstrap "$ip" "$tmp/key.pem" >/dev/null 2>&1; then
     echo "invalid public IP reached uploader: [$ip]" >&2
     exit 1
   fi
@@ -71,9 +72,9 @@ for ip in '203.0.113.044' '999.0.0.1' $'203.0.113.44\nssh'; do
 done
 
 : > "$CALLS"
-_upload_updater_binary 203.0.113.44 "$tmp/key.pem" "$tmp/updater"
-[ "$(grep -c '^scp$' "$CALLS")" = 2 ]
+_resume_host_bootstrap 203.0.113.44 "$tmp/key.pem"
+[ "$(grep -c '^scp$' "$CALLS")" = 0 ]
 [ "$(grep -c '^ssh$' "$CALLS")" = 1 ]
-grep -F -q "bootstrap-host '203.0.113.44'" "$REMOTE_COMMAND"
+grep -F -q "/var/dirextalk-message-server/updater/bootstrap-host.sh '203.0.113.44'" "$REMOTE_COMMAND"
 
 echo "s3 public IP validation ok"

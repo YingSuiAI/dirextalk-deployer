@@ -7,8 +7,13 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 root="$tmp/root"
 calls="$tmp/calls"
-mkdir -p "$root/var/dirextalk-message-server/updater" "$tmp/bin"
+mkdir -p "$root/var/dirextalk-message-server/updater" "$root/etc" "$tmp/bin"
 : > "$calls"
+cp "$ROOT/scripts/updater/release.env" "$root/var/dirextalk-message-server/updater/release.env"
+cat > "$root/etc/os-release" <<'EOF'
+ID=ubuntu
+VERSION_ID="24.04"
+EOF
 
 if DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRAP_TIMEOUT=0 bash "$script" >"$tmp/timeout.out" 2>&1; then
   echo "bootstrap without uploaded prerequisites must time out" >&2
@@ -43,9 +48,25 @@ printf 'docker' >> "$BOOTSTRAP_CALLS"
 printf ' %s' "$@" >> "$BOOTSTRAP_CALLS"
 printf '\n' >> "$BOOTSTRAP_CALLS"
 EOF
+cat > "$tmp/bin/uname" <<'EOF'
+#!/usr/bin/env bash
+printf 'x86_64\n'
+EOF
+cat > "$tmp/bin/sha256sum" <<'EOF'
+#!/usr/bin/env bash
+printf '%s  %s\n' "$PIN_SHA" "$1"
+EOF
+cat > "$tmp/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+echo "matching updater binary should not be downloaded" >&2
+exit 99
+EOF
 chmod 0755 "$tmp/bin/docker"
+chmod 0755 "$tmp/bin/uname" "$tmp/bin/sha256sum" "$tmp/bin/curl"
 
 export BOOTSTRAP_CALLS="$calls" BOOTSTRAP_ENV="$root/var/dirextalk-message-server/.env"
+source "$ROOT/scripts/updater/release.env"
+export PIN_SHA="$UPDATER_PIN_SHA256"
 export PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRAP_TIMEOUT=2
 bash "$script" 203.0.113.20 &
 first_pid=$!

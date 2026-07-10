@@ -35,7 +35,7 @@ ready() {
     && [ -f "$base/docker-compose.yml" ] \
     && [ -x "$base/init-tokens.sh" ] \
     && [ -x "$base/updater/install.sh" ] \
-    && [ -x "$base/dirextalk-updater" ]
+    && [ -f "$base/updater/release.env" ]
 }
 
 deadline=$(($(date +%s) + timeout))
@@ -55,6 +55,48 @@ flock 9
 ready || { echo "deployment prerequisites disappeared while waiting for bootstrap lock" >&2; exit 1; }
 stable_ip=$(cat "$base/stable-public-ip")
 valid_public_ip "$stable_ip" || { echo "invalid recorded stable public IP" >&2; exit 1; }
+
+arch=$(uname -m)
+os_release="$root/etc/os-release"
+[ "$arch" = x86_64 ] || { echo "unsupported host architecture: v1 requires x86_64" >&2; exit 1; }
+[ -f "$os_release" ] || { echo "cannot identify supported Ubuntu 24.04 host" >&2; exit 1; }
+os_id=$(sed -n 's/^ID=//p' "$os_release" | tr -d '"' | head -n 1)
+os_version=$(sed -n 's/^VERSION_ID=//p' "$os_release" | tr -d '"' | head -n 1)
+[ "$os_id" = ubuntu ] && [ "$os_version" = 24.04 ] || {
+  echo "unsupported host distribution: v1 requires Ubuntu 24.04" >&2
+  exit 1
+}
+
+# shellcheck disable=SC1091
+source "$base/updater/release.env"
+printf '%s\n' "$UPDATER_PIN_VERSION" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || { echo "invalid updater version pin" >&2; exit 1; }
+printf '%s\n' "$UPDATER_PIN_COMMIT" | grep -Eq '^[0-9a-f]{40}$' || { echo "invalid updater commit pin" >&2; exit 1; }
+printf '%s\n' "$UPDATER_PIN_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "invalid updater SHA-256 pin" >&2; exit 1; }
+[ "$UPDATER_PIN_OS/$UPDATER_PIN_ARCH/$UPDATER_PIN_UBUNTU_VERSION" = linux/amd64/24.04 ] || { echo "unsupported updater platform pin" >&2; exit 1; }
+[ "$UPDATER_PIN_ASSET" = dirextalk-updater-linux-amd64 ] || { echo "invalid updater asset pin" >&2; exit 1; }
+[ "$UPDATER_PIN_URL" = "https://github.com/YingSuiAI/dirextalk-updater/releases/download/$UPDATER_PIN_VERSION/$UPDATER_PIN_ASSET" ] || { echo "invalid updater URL pin" >&2; exit 1; }
+
+updater_binary="$base/dirextalk-updater"
+current_sha=""
+if [ -f "$updater_binary" ]; then
+  current_sha=$(sha256sum "$updater_binary" | awk '{print $1}')
+fi
+if [ "$current_sha" != "$UPDATER_PIN_SHA256" ]; then
+  updater_tmp=$(mktemp "$base/.dirextalk-updater.download.XXXXXX")
+  cleanup_updater_tmp() { rm -f "$updater_tmp"; }
+  trap cleanup_updater_tmp EXIT
+  curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+    --output "$updater_tmp" "$UPDATER_PIN_URL"
+  downloaded_sha=$(sha256sum "$updater_tmp" | awk '{print $1}')
+  [ "$downloaded_sha" = "$UPDATER_PIN_SHA256" ] || { echo "downloaded updater SHA-256 does not match deployer pin" >&2; exit 1; }
+  chmod 0755 "$updater_tmp"
+  sync -f "$updater_tmp"
+  mv -f "$updater_tmp" "$updater_binary"
+  sync -f "$base"
+  trap - EXIT
+fi
+chmod 0755 "$updater_binary"
+[ -x "$updater_binary" ] || { echo "verified updater binary is not executable" >&2; exit 1; }
 
 first_nonempty_env_value() {
   local key=$1
@@ -88,7 +130,7 @@ printf 'P2P_PORTAL_PASSWORD=%s\n' "$p2p_portal_password" >> "$env_tmp"
 chmod 0600 "$env_tmp"
 mv -f "$env_tmp" "$base/.env"
 
-bash "$base/updater/install.sh" "$base/dirextalk-updater"
+bash "$base/updater/install.sh" "$updater_binary"
 mkdir -p "$base/p2p"
 chmod 0700 "$base"
 cd "$base"

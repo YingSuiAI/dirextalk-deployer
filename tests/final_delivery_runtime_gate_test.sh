@@ -15,7 +15,7 @@ dirextalk_test_isolate_homes "$tmp"
 
 fakebin="$tmp/bin"
 mkdir -p "$fakebin"
-for tool in aws ssh scp; do
+for tool in aws ssh; do
   cat > "$fakebin/$tool" <<'EOF'
 #!/usr/bin/env bash
 exit 0

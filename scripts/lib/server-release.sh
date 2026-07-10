@@ -25,56 +25,6 @@ server_release_image_is_safe() {
   printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$'
 }
 
-server_release_updater_binary() {
-  local output temporary
-  if [ -n "${DIREXTALK_UPDATER_BINARY:-}" ]; then
-    [ -x "$DIREXTALK_UPDATER_BINARY" ] || {
-      warn "DIREXTALK_UPDATER_BINARY is not executable: $DIREXTALK_UPDATER_BINARY"
-      return 1
-    }
-    printf '%s\n' "$DIREXTALK_UPDATER_BINARY"
-    return 0
-  fi
-  : "${DIREXTALK_WORKDIR:?DIREXTALK_WORKDIR is required to build the updater}"
-  output="$DIREXTALK_WORKDIR/dirextalk-updater-linux-${DIREXTALK_UPDATER_GOARCH:-amd64}"
-  temporary=$(mktemp "$DIREXTALK_WORKDIR/.dirextalk-updater-linux-XXXXXX") || return 1
-  if ! bash "$SERVER_RELEASE_SCRIPTS_DIR/updater/build.sh" --output "$temporary" --arch "${DIREXTALK_UPDATER_GOARCH:-amd64}"; then
-    rm -f "$temporary"
-    return 1
-  fi
-  [ -x "$temporary" ] || { rm -f "$temporary"; warn "Updater build did not produce an executable binary."; return 1; }
-  mv -f "$temporary" "$output" || { rm -f "$temporary"; return 1; }
-  printf '%s\n' "$output"
-}
-
-server_release_resolver_binary() {
-  local output host_os host_arch extension="" seed temporary
-  if [ -n "${DIREXTALK_UPDATER_RESOLVER_BINARY:-}" ]; then
-    [ -x "$DIREXTALK_UPDATER_RESOLVER_BINARY" ] || {
-      warn "DIREXTALK_UPDATER_RESOLVER_BINARY is not executable: $DIREXTALK_UPDATER_RESOLVER_BINARY"
-      return 1
-    }
-    printf '%s\n' "$DIREXTALK_UPDATER_RESOLVER_BINARY"
-    return 0
-  fi
-  : "${DIREXTALK_WORKDIR:?DIREXTALK_WORKDIR is required to build the release resolver}"
-  command -v go >/dev/null 2>&1 || { warn "Go is required to build the release resolver"; return 1; }
-  host_os=$(go env GOOS)
-  host_arch=$(go env GOARCH)
-  [ "$host_os" = "windows" ] && extension=.exe
-  output="$DIREXTALK_WORKDIR/dirextalk-updater-resolver-$host_os-$host_arch$extension"
-  seed=$(mktemp "$DIREXTALK_WORKDIR/.dirextalk-updater-resolver-XXXXXX") || return 1
-  rm -f "$seed"
-  temporary="$seed$extension"
-  if ! bash "$SERVER_RELEASE_SCRIPTS_DIR/updater/build.sh" --output "$temporary" --os "$host_os" --arch "$host_arch"; then
-    rm -f "$temporary"
-    return 1
-  fi
-  [ -x "$temporary" ] || { rm -f "$temporary"; warn "Release resolver build did not produce an executable binary."; return 1; }
-  mv -f "$temporary" "$output" || { rm -f "$temporary"; return 1; }
-  printf '%s\n' "$output"
-}
-
 server_release_state_is_formal() {
   local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
   [ "$source" = "github_release" ] \
@@ -97,7 +47,7 @@ server_release_state_is_debug() {
 
 server_release_prepare_state() {
   server_release_validate_override || return 1
-  local source version image digest image_ref manifest_digest binary resolved_file resolved_json instance_id
+  local source version image digest image_ref manifest_digest node_binary resolver_script resolved_file resolved_json instance_id
 
   source=$(state_get server_release.source)
   version=$(state_get server_release.version)
@@ -142,9 +92,11 @@ server_release_prepare_state() {
     return 0
   fi
 
-  binary=$(server_release_resolver_binary) || return 1
+  node_binary=$(json_node) || { warn "Node.js is required to resolve the formal server Release."; return 1; }
+  resolver_script="$SERVER_RELEASE_SCRIPTS_DIR/lib/server-release-resolver.mjs"
+  [ -f "$resolver_script" ] || { warn "Server Release resolver is missing: $resolver_script"; return 1; }
   resolved_file=$(mktemp)
-  if ! "$binary" resolve-release > "$resolved_file"; then
+  if ! "$node_binary" "$resolver_script" resolve-release > "$resolved_file"; then
     rm -f "$resolved_file"
     warn "No usable formal Dirextalk message-server GitHub Release is available."
     return 1

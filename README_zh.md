@@ -103,8 +103,10 @@ bash scripts/orchestrate.sh
 ```
 
 正常部署会解析最新已发布的稳定 GitHub Release，校验 manifest checksum，并把不可变的
-version、镜像 digest、image reference 和 manifest digest 写入 `state.json`。在发布包提供
-预构建 updater 二进制前，本机需要 Go 来构建并打包 Linux host updater。
+version、镜像 digest、image reference 和 manifest digest 写入 `state.json`。宿主 updater
+由独立的 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release 提供：
+Ubuntu 24.04 x86_64 宿主直接下载 deployer 固定的 `v1.0.0` 资产，使用 deployer 内固定的
+SHA-256 校验后原子安装。本机不需要 Go，S3 也不会再通过 SSH 复制 updater 二进制。
 
 `DIREXTALK_CLOUD_PROVIDER=lightsail` 可省略，因为 Lightsail 是默认选择。如需保留的 EC2 部署路径，添加 `DIREXTALK_CLOUD_PROVIDER=ec2`。EC2 可继续设置 `INSTANCE_TYPE=t3.small` 或更大的显式规格，并默认使用 50 GiB gp3 root EBS 卷。如果默认 Lightsail 在当前 region 没有可用套餐或可用区，S1 会记录 EC2 费用估算，但不会自动切换到 EC2；请选择其他 Lightsail 可用 region/zone，或显式用 `DIREXTALK_CLOUD_PROVIDER=ec2` 重新运行。如果未配置 region，非交互式运行会使用本机时区推荐；可用 `DIREXTALK_DEFAULT_REGION` 或标准 AWS region 设置覆盖。除非在排查 AWS 返回值，否则让 S1 自动检测 Lightsail 可用性；安全的手工命令是 `aws lightsail get-regions --include-availability-zones --output json`。
 

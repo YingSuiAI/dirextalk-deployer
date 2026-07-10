@@ -5,6 +5,7 @@
 ## Product Scope
 
 - Deploy, resume, verify, destroy, and locally wire a production Dirextalk message server.
+- Install the independently released `YingSuiAI/dirextalk-updater` host binary from the deployer-owned immutable version/commit/SHA pin. The deployer does not embed or build updater Go source.
 - Treat `SKILL.md` as the compact agent-facing entrypoint. Detailed runbooks belong in `references/`; `scripts/` are the stable implementation entrypoints.
 - The supported local conversation bridge is `dirextalk-connect`, installed from `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`.
 - MCP support is capability-driven and is separate from bridge-agent support. Declared MCP consumers connect directly to the deployed message server's HTTP endpoint; unknown runtimes never receive a generic fallback.
@@ -39,6 +40,7 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 - Prefer small helpers for platform conversion, command discovery, and output formatting. Do not scatter OS-specific path rewrites across phase bodies.
 - Use `scripts/json.mjs` through `scripts/lib/json.sh` for JSON reads/writes. Do not reintroduce legacy external JSON CLI dependencies.
 - Remote server commands may assume Linux because the EC2 host is Linux. Local commands must not assume Linux.
+- Version 1 cloud hosts are Ubuntu 24.04 x86_64 only. Bootstrap must verify that platform before downloading the pinned updater or starting Compose.
 - Use PowerShell for Windows-native process and path behavior when the consumer is Windows-local, especially `dirextalk-connect.exe`, local agent executables, Windows user profile paths, or npm global binaries.
 - When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXTALK_CONNECT_AGENT`, `DIREXTALK_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, or `DIREXTALK_CLAUDE_CODE_COMMAND`. Host-owned OpenClaw/Hermes bridges reject generic child command/args overrides.
 - Do not make Codex, Claude, Gemini, Cursor, or any other provider the semantic default for an unknown runtime. Unknown or ambiguous detection should require an explicit `DIREXTALK_CONNECT_AGENT`.

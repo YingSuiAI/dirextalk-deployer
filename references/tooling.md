@@ -1,12 +1,12 @@
 # Tooling By OS
 
-Prepare `bash`, `node`, `aws`, `ssh`, `scp`, `curl`, and at least one DNS lookup
+Prepare `bash`, `node`, `aws`, `ssh`, `curl`, and at least one DNS lookup
 tool. Always inspect first, then ask before installing or downloading.
 
 ## Detect
 
 ```bash
-command -v bash node aws ssh scp curl
+command -v bash node aws ssh curl
 command -v dig nslookup getent
 node --version
 aws --version
@@ -15,7 +15,7 @@ aws --version
 On Windows PowerShell:
 
 ```powershell
-Get-Command "C:\Program Files\Git\bin\bash.exe","C:\Program Files\Git\usr\bin\bash.exe",node,aws,ssh,scp,curl,nslookup,Resolve-DnsName -ErrorAction SilentlyContinue
+Get-Command "C:\Program Files\Git\bin\bash.exe","C:\Program Files\Git\usr\bin\bash.exe",node,aws,ssh,curl,nslookup,Resolve-DnsName -ErrorAction SilentlyContinue
 ```
 
 ## Windows
@@ -64,7 +64,7 @@ brew install node awscli
 ```
 
 If Homebrew is unavailable, ask before using the official AWS CLI pkg installer.
-macOS already includes `ssh`, `scp`, `curl`, and `dig`.
+macOS already includes `ssh`, `curl`, and `dig`.
 
 ## Linux
 

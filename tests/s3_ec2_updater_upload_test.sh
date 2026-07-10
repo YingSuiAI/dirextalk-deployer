@@ -39,26 +39,21 @@ case "${1:-} ${2:-}" in
   *) echo "unexpected aws command: $*" >&2; exit 1 ;;
 esac
 EOF
-cat > "$tmp/bin/dirextalk-updater" <<'EOF'
+cat > "$tmp/bin/scp" <<'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
-[ "${1:-}" = resolve-release ] || exit 90
-printf '%s\n' '{"source":"github_release","version":"v1.1.0","image":"dirextalk/message-server:v1.1.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+printf 'scp-called\n' >> "$CALLS"
+exit 97
 EOF
-for command_name in scp ssh; do
-  cat > "$tmp/bin/$command_name" <<'EOF'
+cat > "$tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 EOF
-done
 chmod 0700 "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH"
 export EC2_ATTACHED="$tmp/ec2.attached"
-export DIREXTALK_UPDATER_BINARY="$tmp/bin/dirextalk-updater"
-export DIREXTALK_UPDATER_RESOLVER_BINARY="$tmp/bin/dirextalk-updater"
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
@@ -66,6 +61,7 @@ state_init >/dev/null 2>&1
 state_set region us-east-1
 state_set domain ec2.example.test
 state_set domain_mode user
+state_set_raw server_release '{"source":"github_release","version":"v1.1.0","image":"dirextalk/message-server:v1.1.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
 res_set ami_id ami-test
 res_set vpc_id vpc-test
 
@@ -79,15 +75,18 @@ domain_resolves_to_ip() {
 }
 
 run_phase > "$tmp/s3.out" 2>&1 || { cat "$tmp/s3.out" >&2; exit 1; }
-json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.server_release.digest === 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'"
-grep -q '^scp .*ubuntu@203\.0\.113\.155:/tmp/dirextalk-updater' "$CALLS"
-grep -q '^scp .*bootstrap-host\.sh.*ubuntu@203\.0\.113\.155:/tmp/dirextalk-bootstrap-host' "$CALLS"
-grep -q '^ssh .*ubuntu@203\.0\.113\.155.*\/usr\/local\/libexec\/dirextalk-bootstrap-host.*203\.0\.113\.155' "$CALLS"
+json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.server_release.digest === 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' && data.updater_release.version === 'v1.0.0' && data.updater_release.commit === '6d4d33a1cd4baad2b490f25e57124675c74771d1' && data.updater_release.sha256 === 'd54b786c30b9b866341a89b6496b574b0d29cc48f26bf4787b7686faf4c1f0f1'"
+if grep -q '^scp-called$\|^scp ' "$CALLS"; then
+  echo "S3 must not SCP updater artifacts" >&2
+  cat "$CALLS" >&2
+  exit 1
+fi
+grep -q '^ssh .*ubuntu@203\.0\.113\.155.*\/var\/dirextalk-message-server\/updater\/bootstrap-host\.sh.*203\.0\.113\.155' "$CALLS"
 address_line=$(grep -n '^aws ec2 describe-addresses' "$CALLS" | cut -d: -f1 | head -n1)
-upload_line=$(grep -n '^scp ' "$CALLS" | cut -d: -f1 | head -n1)
+upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)
 [ "$address_line" -lt "$upload_line" ] && [ "$upload_line" -lt "$dns_line" ] || {
-  echo "EC2 updater upload must use the EIP and complete before DNS gating" >&2
+  echo "EC2 bootstrap resume must use the EIP and complete before DNS gating" >&2
   cat "$CALLS" >&2
   exit 1
 }

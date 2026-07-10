@@ -7,17 +7,22 @@
 S3_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 source "$S3_PHASE_DIR/lib/domain.sh"
 source "$S3_PHASE_DIR/lib/server-release.sh"
+source "$S3_PHASE_DIR/lib/updater-release.sh"
 
 DIREXTALK_ROOT_VOLUME_GB=${DIREXTALK_ROOT_VOLUME_GB:-50}
 DIREXTALK_ROOT_DEVICE_NAME=${DIREXTALK_ROOT_DEVICE_NAME:-/dev/sda1}
 DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
-DEFAULT_LIGHTSAIL_BLUEPRINT_ID=${DEFAULT_LIGHTSAIL_BLUEPRINT_ID:-ubuntu_22_04}
+DEFAULT_LIGHTSAIL_BLUEPRINT_ID=${DEFAULT_LIGHTSAIL_BLUEPRINT_ID:-ubuntu_24_04}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
 DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
 
 run_phase() {
   aws_env_prep
+  if ! updater_release_record_state; then
+    phase_set S3_PROVISION failed "pinned updater release metadata is invalid"
+    return 1
+  fi
   if ! server_release_prepare_state; then
     phase_set S3_PROVISION failed "formal server release resolution failed"
     return 1
@@ -76,9 +81,8 @@ _run_phase_ec2() {
   fi
   ami=$(res_get ami_id)
   vpc=$(res_get vpc_id)
-  local message_server_image updater_binary
+  local message_server_image
   message_server_image=$(state_get server_release.image_ref)
-  updater_binary=$(server_release_updater_binary) || return 1
   local scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
 
   # 1) Key pair (idempotent).
@@ -130,7 +134,6 @@ _run_phase_ec2() {
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
-    --updater-binary "$updater_binary" \
     > "$userdata"
   local userdata_aws="$userdata"
   if command -v cygpath >/dev/null 2>&1; then
@@ -190,8 +193,8 @@ _run_phase_ec2() {
     return 1
   }
   res_set public_ip "$pubip"
-  if ! _upload_updater_binary "$pubip" "$keyfile" "$updater_binary"; then
-    phase_set S3_PROVISION failed "failed to upload host updater to EC2"
+  if ! _resume_host_bootstrap "$pubip" "$keyfile"; then
+    phase_set S3_PROVISION failed "failed to resume host bootstrap on EC2"
     return 1
   fi
   log "Public IP = $pubip; domain = $(state_get domain)"
@@ -213,7 +216,7 @@ _run_phase_ec2() {
 _run_phase_lightsail() {
   phase_set S3_PROVISION in_progress "provisioning Lightsail"
 
-  local name region bundle blueprint zone keyfile domain_mode domain message_server_image updater_binary scripts_dir userdata userdata_aws
+  local name region bundle blueprint zone keyfile domain_mode domain message_server_image scripts_dir userdata userdata_aws
   local instance_name static_ip_name pubip
   name=$(state_get run_id)
   region=$(state_get region)
@@ -255,7 +258,6 @@ _run_phase_lightsail() {
     return 2
   fi
   message_server_image=$(state_get server_release.image_ref)
-  updater_binary=$(server_release_updater_binary) || return 1
   scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
 
   keyfile="$DIREXTALK_WORKDIR/${name}.pem"
@@ -281,7 +283,6 @@ _run_phase_lightsail() {
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
-    --updater-binary "$updater_binary" \
     > "$userdata"
   userdata_aws="$userdata"
   if command -v cygpath >/dev/null 2>&1; then
@@ -334,8 +335,8 @@ _run_phase_lightsail() {
   }
   res_set public_ip "$pubip"
   res_set static_ip_name "$static_ip_name"
-  if ! _upload_updater_binary "$pubip" "$keyfile" "$updater_binary"; then
-    phase_set S3_PROVISION failed "failed to upload host updater to Lightsail"
+  if ! _resume_host_bootstrap "$pubip" "$keyfile"; then
+    phase_set S3_PROVISION failed "failed to resume host bootstrap on Lightsail"
     return 1
   fi
   log "Public IP = $pubip; domain = $(state_get domain)"
@@ -416,47 +417,34 @@ _is_canonical_ipv4() {
   done
 }
 
-_upload_updater_binary() {
-  local public_ip=$1 keyfile=$2 binary=$3
-  local known_hosts="$DIREXTALK_WORKDIR/known_hosts" remote_tmp=/tmp/dirextalk-updater remote_bootstrap=/tmp/dirextalk-bootstrap-host attempt
-  local bootstrap="$S3_PHASE_DIR/updater/bootstrap-host.sh"
+_resume_host_bootstrap() {
+  local public_ip=$1 keyfile=$2
+  local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt
   _is_canonical_ipv4 "$public_ip" || {
-    warn "Updater upload rejected a non-canonical public IPv4 address."
+    warn "Host bootstrap resume rejected a non-canonical public IPv4 address."
     return 1
   }
-  [ -n "$public_ip" ] && [ -f "$keyfile" ] && [ -x "$binary" ] && [ -f "$bootstrap" ] || {
-    warn "Updater upload requires a stable public IP, the recorded SSH key, and executable updater/bootstrap files."
+  [ -n "$public_ip" ] && [ -f "$keyfile" ] || {
+    warn "Host bootstrap resume requires a stable public IP and the recorded SSH key."
     return 1
   }
-  log "Uploading the host updater through the node's stable public IP before DNS gating..."
+  log "Resuming the user-data bundled host bootstrap through the stable public IP before DNS gating..."
   attempt=1
   while [ "$attempt" -le 60 ]; do
-    if scp -q -i "$keyfile" \
-      -o BatchMode=yes \
-      -o ConnectTimeout=10 \
-      -o StrictHostKeyChecking=accept-new \
-      -o "UserKnownHostsFile=$known_hosts" \
-      "$binary" "ubuntu@$public_ip:$remote_tmp" \
-      && scp -q -i "$keyfile" \
-        -o BatchMode=yes \
-        -o ConnectTimeout=10 \
-        -o StrictHostKeyChecking=accept-new \
-        -o "UserKnownHostsFile=$known_hosts" \
-        "$bootstrap" "ubuntu@$public_ip:$remote_bootstrap" \
-      && ssh -T -i "$keyfile" \
+    if ssh -T -i "$keyfile" \
         -o BatchMode=yes \
         -o ConnectTimeout=10 \
         -o StrictHostKeyChecking=accept-new \
         -o "UserKnownHostsFile=$known_hosts" \
         "ubuntu@$public_ip" \
-        "sudo install -d -m 0755 /var/dirextalk-message-server /usr/local/libexec && sudo install -m 0755 $remote_tmp /var/dirextalk-message-server/dirextalk-updater && sudo install -m 0755 $remote_bootstrap /usr/local/libexec/dirextalk-bootstrap-host && rm -f $remote_tmp $remote_bootstrap && sudo /usr/local/libexec/dirextalk-bootstrap-host '$public_ip'"; then
+        "sudo bash /var/dirextalk-message-server/updater/bootstrap-host.sh '$public_ip'"; then
       return 0
     fi
-    warn "SSH is not ready for updater upload (attempt $attempt/60); retrying in 5s."
+    warn "SSH/user-data bootstrap is not ready (attempt $attempt/60); retrying in 5s."
     attempt=$((attempt + 1))
     sleep 5
   done
-  warn "Timed out uploading dirextalk-updater through $public_ip. Rerun S3 to retry the idempotent transfer."
+  warn "Timed out resuming host bootstrap through $public_ip. Rerun S3 to retry the idempotent bootstrap."
   return 1
 }
 

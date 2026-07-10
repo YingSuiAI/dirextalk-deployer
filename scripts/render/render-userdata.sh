@@ -9,15 +9,15 @@
 # clone repos.
 #
 # Usage:
-#   render-userdata.sh --domain <domain> --acme <email> --message-server-image <img> --updater-binary <path> > user-data.yaml
-#   render-userdata.sh --format shell --domain <domain> --acme <email> --message-server-image <img> --updater-binary <path> > user-data.sh
+#   render-userdata.sh --domain <domain> --acme <email> --message-server-image <img> > user-data.yaml
+#   render-userdata.sh --format shell --domain <domain> --acme <email> --message-server-image <img> > user-data.sh
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 CI="$HERE/cloud-init"
 source "$HERE/lib/domain.sh"
 
-DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; UPDATER_BINARY=""; FORMAT="cloud-config"
+DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; FORMAT="cloud-config"
 while [ $# -gt 0 ]; do
   case "$1" in
     --format) FORMAT=$2; shift 2;;
@@ -25,12 +25,10 @@ while [ $# -gt 0 ]; do
     --acme) ACME=$2; shift 2;;
     --message-server-image) MESSAGE_SERVER_IMAGE=$2; shift 2;;
     --as-image) MESSAGE_SERVER_IMAGE=$2; shift 2;;
-    --updater-binary) UPDATER_BINARY=$2; shift 2;;
     *) echo "unknown arg: $1" >&2; exit 1;;
   esac
 done
 [ -n "$MESSAGE_SERVER_IMAGE" ] || { echo "--message-server-image required" >&2; exit 1; }
-[ -n "$UPDATER_BINARY" ] || { echo "--updater-binary required" >&2; exit 1; }
 [ -n "$DOMAIN" ] || { echo "--domain required; production deployments require a real domain" >&2; exit 1; }
 DOMAIN=$(domain_normalize "$DOMAIN")
 [ "$DOMAIN" != "PLACEHOLDER" ] || { echo "PLACEHOLDER/sslip.io domains are not accepted in the production renderer" >&2; exit 1; }
@@ -46,16 +44,15 @@ sed_replacement_escape() { printf '%s' "$1" | sed 's/[\\&#]/\\&/g'; }
 # Build a deterministic tar.gz bundle with fixed permissions and no extra attrs.
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-[ -f "$UPDATER_BINARY" ] || { echo "updater binary not found: $UPDATER_BINARY" >&2; exit 1; }
 cp "$CI/docker-compose.yml" "$WORK/docker-compose.yml"
 cp "$CI/Caddyfile"          "$WORK/Caddyfile"
 tr -d '\r' < "$CI/init-tokens.sh" > "$WORK/init-tokens.sh"
 mkdir -p "$WORK/updater"
-for updater_file in install.sh bootstrap-host.sh config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do
+for updater_file in install.sh bootstrap-host.sh release.env config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do
   tr -d '\r' < "$HERE/updater/$updater_file" > "$WORK/updater/$updater_file"
 done
 chmod 0644 "$WORK/docker-compose.yml" "$WORK/Caddyfile"
-chmod 0644 "$WORK/updater/config.json" "$WORK/updater/"*.service "$WORK/updater/"*.timer
+chmod 0644 "$WORK/updater/release.env" "$WORK/updater/config.json" "$WORK/updater/"*.service "$WORK/updater/"*.timer
 chmod 0755 "$WORK/init-tokens.sh" "$WORK/updater/install.sh" "$WORK/updater/bootstrap-host.sh"
 find "$WORK" -name '._*' -delete
 # -C creates a flat archive. Explicit gzip avoids macOS tar stdout quirks.

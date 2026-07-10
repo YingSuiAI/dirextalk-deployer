@@ -60,7 +60,7 @@ phase_file() {
 # Dependency check.
 check_deps() {
   local b missing=""
-  for b in aws ssh scp curl; do
+  for b in aws ssh curl; do
     command -v "$b" >/dev/null 2>&1 || missing="$missing $b"
   done
   [ -z "$missing" ] && return 0

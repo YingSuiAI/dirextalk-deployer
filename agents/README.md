@@ -22,5 +22,5 @@ Required capabilities:
 
 - Read local files.
 - Run POSIX shell commands on Linux/macOS, or native PowerShell plus Git Bash on Windows.
-- Use `aws`, `ssh`, `scp`, `curl`, and Node.js for `scripts/json.mjs` after the user approves any missing installs.
+- Use `aws`, `ssh`, `curl`, and Node.js for `scripts/json.mjs` after the user approves any missing installs. Go and SCP are not deployment prerequisites; the Ubuntu host downloads the pinned independent updater Release itself.
 - Preserve secrets outside the repository.

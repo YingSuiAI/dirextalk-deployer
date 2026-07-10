@@ -141,7 +141,10 @@ bash scripts/orchestrate.sh
 S3 resolves the latest published stable GitHub Release, verifies the manifest
 checksum, and persists `server_release.version/image/digest/image_ref/manifest_digest`
 before provisioning. The rendered Compose runtime uses the immutable image ref.
-Go is required locally to build the bundled Linux updater binary.
+It also records the deployer-owned independent updater version, commit, and
+SHA-256 pin. User-data on the verified Ubuntu 24.04 x86_64 host downloads that
+fixed Release asset, verifies the local pin, and atomically installs it; no
+local Go toolchain or updater SCP step is required.
 
 For EC2, replace `DIREXTALK_CLOUD_PROVIDER=lightsail` with `DIREXTALK_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
 

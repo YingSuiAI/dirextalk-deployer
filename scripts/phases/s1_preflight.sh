@@ -82,10 +82,10 @@ _preflight_ec2() {
   ami=$(aws_lookup_ubuntu_ami)
   if [ "$ami" = "None" ] || [ -z "$ami" ]; then
     phase_set S1_PREFLIGHT failed "failed to resolve Ubuntu AMI"
-    fail "Could not resolve Ubuntu 22.04 amd64 AMI (SSM parameter unavailable)."
+    fail "Could not resolve Ubuntu 24.04 amd64 AMI (SSM parameter unavailable)."
   fi
   res_set ami_id "$ami"
-  log "AMI = $ami (Ubuntu 22.04 amd64/x86, user=ubuntu)"
+  log "AMI = $ami (Ubuntu 24.04 amd64/x86_64, user=ubuntu)"
 
   phase_set S1_PREFLIGHT done "cloud_provider=ec2 vpc=$vpc quota=$quota ami=$ami"
   return 0

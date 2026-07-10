@@ -45,7 +45,7 @@ Use a POSIX shell that actually runs the deployment scripts:
 
 ```powershell
 Get-Command bash.exe -All
-bash -lc 'echo ok; command -v node; command -v aws; command -v ssh; command -v scp; command -v curl'
+bash -lc 'echo ok; command -v node; command -v aws; command -v ssh; command -v curl'
 ```
 
 If `bash` prints the Windows Subsystem for Linux installation prompt or exits
@@ -57,7 +57,7 @@ The orchestrator uses the repository's Node.js JSON helper for local JSON
 processing, so the POSIX shell that runs deployment scripts must be able to run
 `node` against the same path style it passes to the scripts.
 
-Prefer the `ssh`/`scp` that belongs to the same POSIX environment used for
+Prefer the `ssh` that belongs to the same POSIX environment used for
 `bash`. Windows OpenSSH can reject EC2 private keys because inherited ACLs make
 the `.pem` look too open, even when Git/MSYS OpenSSH accepts it. If using Windows
 OpenSSH directly, fix the key ACL instead of disabling SSH checks.

@@ -231,8 +231,10 @@ DIREXTALK_CLOUD_PROVIDER=lightsail
 Normal server selection resolves the latest published stable GitHub Release and
 persists its immutable digest in deployment state. `MESSAGE_SERVER_IMAGE` is
 disabled unless `DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1` explicitly
-marks a debug/legacy deployment. Go is currently required to build the bundled
-Linux updater binary.
+marks a debug/legacy deployment. The independent `YingSuiAI/dirextalk-updater`
+host binary is downloaded only on a verified Ubuntu 24.04 x86_64 server from
+the deployer-pinned Release URL and must match the deployer-pinned SHA-256.
+The local deployer host does not need Go and does not SCP updater artifacts.
 
 Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
 `route53` only when the current AWS account contains a matching public hosted

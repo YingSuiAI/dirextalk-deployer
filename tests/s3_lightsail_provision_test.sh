@@ -55,32 +55,25 @@ case "${1:-} ${2:-}" in
 esac
 EOF
 chmod 700 "$fakebin/aws"
-cat > "$fakebin/dirextalk-updater" <<'EOF'
+cat > "$fakebin/scp" <<'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
-[ "${1:-}" = "resolve-release" ] || exit 90
-cat <<'JSON'
-{"source":"github_release","version":"v1.1.0","image":"dirextalk/message-server:v1.1.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
-JSON
+printf 'scp-called\n' >> "$CALLS"
+exit 97
 EOF
-chmod 700 "$fakebin/dirextalk-updater"
-for command_name in scp ssh; do
-  cat > "$fakebin/$command_name" <<'EOF'
+chmod 700 "$fakebin/scp"
+cat > "$fakebin/ssh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 EOF
-  chmod 700 "$fakebin/$command_name"
-done
+chmod 700 "$fakebin/ssh"
 export PATH="$fakebin:$PATH"
 export CALLS="$tmp/aws.calls"
 export TMPDIR="$tmp"
 export AWS_DEFAULT_REGION=us-east-1
 export DIREXTALK_CLOUD_PROVIDER=lightsail
-export DIREXTALK_UPDATER_BINARY="$fakebin/dirextalk-updater"
-export DIREXTALK_UPDATER_RESOLVER_BINARY="$fakebin/dirextalk-updater"
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
@@ -88,6 +81,7 @@ state_init >/dev/null 2>&1
 state_set region us-east-1
 state_set domain lightsail.example.test
 state_set domain_mode user
+state_set_raw server_release '{"source":"github_release","version":"v1.1.0","image":"dirextalk/message-server:v1.1.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/aws.sh"
@@ -103,7 +97,7 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'github_release' && data.server_release.digest === 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' && data.server_release.image_ref.endsWith('@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')"
+json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'github_release' && data.server_release.digest === 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' && data.server_release.image_ref.endsWith('@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') && data.updater_release.version === 'v1.0.0' && data.updater_release.sha256 === 'd54b786c30b9b866341a89b6496b574b0d29cc48f26bf4787b7686faf4c1f0f1'"
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
 grep -q '^#!/usr/bin/env bash' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
@@ -125,21 +119,20 @@ grep -q 'lightsail get-instance' "$CALLS" || {
 grep -q -- '--availability-zone us-east-1b' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail allocate-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail attach-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-grep -q '^scp .*dirextalk-updater.*ubuntu@203\.0\.113\.144:/tmp/dirextalk-updater' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-grep -q '^scp .*bootstrap-host\.sh.*ubuntu@203\.0\.113\.144:/tmp/dirextalk-bootstrap-host' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-grep -q '^ssh .*ubuntu@203\.0\.113\.144.*\/usr\/local\/libexec\/dirextalk-bootstrap-host.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+if grep -q '^scp-called$\|^scp ' "$CALLS"; then echo "S3 must not SCP updater artifacts" >&2; cat "$CALLS" >&2; exit 1; fi
+grep -q '^ssh .*ubuntu@203\.0\.113\.144.*\/var\/dirextalk-message-server\/updater\/bootstrap-host\.sh.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
-upload_line=$(grep -n '^scp ' "$CALLS" | cut -d: -f1 | head -n1)
+upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)
 [ "$static_ip_line" -lt "$upload_line" ] && [ "$upload_line" -lt "$dns_line" ] || {
   echo "Lightsail updater upload must use the static IP and complete before DNS gating" >&2
   cat "$CALLS" >&2
   exit 1
 }
-before=$(grep -c '^scp ' "$CALLS")
-_upload_updater_binary 203.0.113.144 "$(res_get key_file)" "$DIREXTALK_UPDATER_BINARY"
-after=$(grep -c '^scp ' "$CALLS")
-[ "$after" -eq $((before + 2)) ] || { echo "updater and bootstrap upload must be idempotently retryable" >&2; exit 1; }
+before=$(grep -c '^ssh ' "$CALLS")
+_resume_host_bootstrap 203.0.113.144 "$(res_get key_file)"
+after=$(grep -c '^ssh ' "$CALLS")
+[ "$after" -eq $((before + 1)) ] || { echo "host bootstrap resume must be idempotently retryable" >&2; exit 1; }
 grep -q 'fromPort=49160\\,toPort=49200\\,protocol=udp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 if grep -q '^aws ec2 ' "$CALLS"; then
   echo "Lightsail provisioning must not call EC2 APIs" >&2

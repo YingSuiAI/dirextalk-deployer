@@ -53,19 +53,10 @@ case "${1:-} ${2:-}" in
 esac
 EOF
 chmod 700 "$fakebin/aws"
-cat > "$fakebin/dirextalk-updater" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-[ "${1:-}" = resolve-release ] || exit 90
-printf '%s\n' '{"source":"github_release","version":"v1.1.0","image":"dirextalk/message-server:v1.1.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
-EOF
-chmod 700 "$fakebin/dirextalk-updater"
 export PATH="$fakebin:$PATH"
 export CALLS="$tmp/aws.calls"
 export AWS_DEFAULT_REGION=us-east-1
 export DIREXTALK_CLOUD_PROVIDER=lightsail
-export DIREXTALK_UPDATER_BINARY="$fakebin/dirextalk-updater"
-export DIREXTALK_UPDATER_RESOLVER_BINARY="$fakebin/dirextalk-updater"
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
@@ -73,6 +64,7 @@ state_init >/dev/null 2>&1
 state_set region us-east-1
 state_set domain quota.example.test
 state_set domain_mode user
+state_set_raw server_release '{"source":"github_release","version":"v1.1.0","image":"dirextalk/message-server:v1.1.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/aws.sh"

@@ -48,11 +48,14 @@ npm pack --dry-run --json > "$tmp/pack.json"
 const fs = require("node:fs");
 const pack = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))[0];
 const files = pack.files.map((entry) => entry.path);
-for (const required of ["SKILL.md", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh"]) {
+for (const required of ["SKILL.md", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh", "scripts/updater/release.env", "scripts/lib/server-release-resolver.mjs"]) {
   if (!files.includes(required)) throw new Error(`missing package file: ${required}`);
 }
 if (files.some((file) => file === "tests" || file.startsWith("tests/"))) {
   throw new Error("npm package must not include tests/");
+}
+if (files.some((file) => file === "updater" || file.startsWith("updater/")) || files.includes("scripts/updater/build.sh")) {
+  throw new Error("deployer package must not embed updater Go source/build logic");
 }
 NODE
 

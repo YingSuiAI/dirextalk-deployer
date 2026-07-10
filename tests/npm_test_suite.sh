@@ -28,6 +28,7 @@ tests=(
   tests/eip_preflight_test.sh
   tests/s1_lightsail_availability_fallback_test.sh
   tests/root_volume_size_test.sh
+  tests/updater_platform_contract_test.sh
   tests/s3_lightsail_provision_test.sh
   tests/s3_ec2_updater_upload_test.sh
   tests/s3_stable_ip_reconcile_test.sh
@@ -43,9 +44,11 @@ tests=(
   tests/operation_report_test.sh
   tests/render_userdata_remote_nodes_test.sh
   tests/server_release_test.sh
+  tests/server_release_resolver_test.sh
+  tests/updater_release_pin_test.sh
   tests/updater_bundle_test.sh
-  tests/updater_binary_rebuild_test.sh
   tests/updater_bootstrap_resume_test.sh
+  tests/updater_release_download_test.sh
 )
 
 for test_file in "${tests[@]}"; do

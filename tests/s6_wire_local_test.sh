@@ -310,6 +310,7 @@ _write_mcp_config_artifacts "openclaw.example.test" "$openclaw_service_dir" "htt
 [ ! -e "$openclaw_service_dir/mcp/mcp-servers.json" ]
 json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.url === 'https://openclaw.example.test/mcp'"
 json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.headers.Authorization === 'Bearer OPENCLAW_TOKEN'"
+json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.transport === 'streamable-http'"
 json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "!('command' in data)"
 if json_check "$openclaw_service_dir/mcp/openclaw-server.json" "'mcp' in data || 'mcpServers' in data" >/dev/null; then
   echo "OpenClaw server object must not be a root openclaw.json or mcpServers snippet" >&2

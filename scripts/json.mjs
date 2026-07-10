@@ -281,6 +281,7 @@ function cmdBuild(args) {
     case "mcp-http-openclaw-server-config":
       data = {
         url: required(args, 1, "url"),
+        transport: "streamable-http",
         headers: {
           Authorization: `Bearer ${required(args, 2, "agent_token")}`,
           "DIREXTALK-Agent-Node-Id": args[3] || ""

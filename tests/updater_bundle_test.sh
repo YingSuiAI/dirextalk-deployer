@@ -61,6 +61,12 @@ if grep -F -q 'handle /_dirextalk/updater/v1/*' "$caddy" || grep -q '/control/' 
   echo "Caddy must expose only public updater job paths, never the control namespace" >&2
   exit 1
 fi
+for private_path in control/status control/desired-state; do
+  if grep -F -q "/_dirextalk/updater/v1/$private_path" "$caddy"; then
+    echo "Caddy exposed private updater endpoint: $private_path" >&2
+    exit 1
+  fi
+done
 
 extract_service() {
   local name=$1 file=$2

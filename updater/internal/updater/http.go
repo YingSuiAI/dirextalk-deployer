@@ -18,13 +18,15 @@ import (
 )
 
 const (
-	apiPrefix            = "/_dirextalk/updater/v1/"
-	controlJobsPath      = apiPrefix + "control/jobs"
-	controlDiscoveryPath = apiPrefix + "control/discovery"
-	publicJobsPrefix     = apiPrefix + "jobs/"
-	controlTokenHeader   = "X-Dirextalk-Control-Token"
-	applyConfirmation    = "apply_release_change"
-	maxRequestBytes      = 64 * 1024
+	apiPrefix               = "/_dirextalk/updater/v1/"
+	controlJobsPath         = apiPrefix + "control/jobs"
+	controlDiscoveryPath    = apiPrefix + "control/discovery"
+	controlStatusPath       = apiPrefix + "control/status"
+	controlDesiredStatePath = apiPrefix + "control/desired-state"
+	publicJobsPrefix        = apiPrefix + "jobs/"
+	controlTokenHeader      = "X-Dirextalk-Control-Token"
+	applyConfirmation       = "apply_release_change"
+	maxRequestBytes         = 64 * 1024
 )
 
 type Service struct {
@@ -116,6 +118,18 @@ func (service *Service) serveHTTP(response http.ResponseWriter, request *http.Re
 			return
 		}
 		service.createJob(response, request)
+	case request.URL.Path == controlStatusPath:
+		if request.Method != http.MethodPost {
+			writeAPIError(response, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		service.getStatus(response, request)
+	case request.URL.Path == controlDesiredStatePath:
+		if request.Method != http.MethodPost {
+			writeAPIError(response, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		service.setDesiredState(response, request)
 	case strings.HasPrefix(request.URL.Path, publicJobsPrefix):
 		if request.Method != http.MethodGet {
 			writeAPIError(response, http.StatusMethodNotAllowed, "method_not_allowed")

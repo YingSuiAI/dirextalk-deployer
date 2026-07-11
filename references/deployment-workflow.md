@@ -54,12 +54,14 @@ DIREXTALK_EXISTING_STATE_ACTION=destroy
 DOMAIN=<different-domain>
 ```
 
-For first-time credentials, prefer a dedicated least-privilege deployment
-profile or role. Accept a root access key only when the operator explicitly
-chooses it after a security warning; never present it as the default path.
-Save credential files securely, never paste or commit them, and rotate or
-delete temporary/root credentials after use. Import the selected AWS
-access-key CSV and verify the identity before provisioning:
+For first-time credentials, offer the operator two paths before provisioning:
+root access key or dedicated IAM deployment user. The root path is the fastest
+because it uses the account owner identity directly, but it is highly
+privileged; tell the operator to save the CSV securely, never paste or commit
+it, and rotate or delete the root key after deployment. The dedicated
+`DirextalkDeployer` IAM user path is safer because it avoids root keys, but it
+requires more AWS console steps. Import the selected AWS access-key CSV and
+verify the identity before provisioning:
 
 ```bash
 bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv dirextalk-deployer <region>
@@ -91,10 +93,13 @@ instance type is known. Lightsail estimates include the default $12 bundle and
 Route53 hosted-zone cost when applicable; EC2 estimates include EC2, gp3
 storage, public IPv4, and Route53 hosted-zone cost when applicable. Estimates
 exclude data transfer beyond included bundle allowances, TURN relay traffic,
-domain registration, taxes, and account-specific discounts. Do not infer
-credits or trials from memory. Ask the operator to verify current AWS Pricing
-and Billing data, and set an AWS Budget or billing alert before leaving the
-node running.
+domain registration, taxes, and AWS credits. Do not query AWS Free Tier or
+credit usage. Tell the user that new AWS customer accounts generally receive
+100-200 USD in free credits, and that users who have not used Lightsail
+generally receive three months of free Lightsail usage. Credit and bundle-trial
+coverage is account-specific; record the credit/trial reminder, AWS Billing
+Console verification reminder, and that AWS official real-time policy prevails.
+Set an AWS Budget or billing alert before leaving the node running.
 
 ## Destroy
 

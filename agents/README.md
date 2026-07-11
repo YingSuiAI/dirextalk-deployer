@@ -6,7 +6,7 @@ This skill is runtime-neutral. Claude, Codex/OpenAI, Gemini, Cursor, Copilot, Op
 SKILL.md
 ```
 
-When an agent runtime supports skill metadata, point it at `SKILL.md`. POSIX hosts use `scripts/orchestrate.sh`; Windows hosts use `scripts/orchestrate.ps1`. Read `references/agent-targets.md` only for explicit skill installation or local bridge targeting, and `references/runtime-wiring.md` for current capability details. Capability is explicit and never falls back to generic MCP configuration.
+When an agent runtime supports skill metadata, point it at `SKILL.md`. POSIX hosts use `scripts/orchestrate.sh`; Windows hosts use `scripts/orchestrate.ps1`. Read `references/agent-targets.md` before installing this skill or wiring the local `dirextalk-connect` bridge. S6 normally records capability from the effective connect agent and never falls back to generic MCP JSON. Antigravity/Cursor/iFlow and every detected OpenClaw/Hermes host are host-managed; Devin/Pi/Reasonix/tmux are unsupported and fail closed. OpenClaw and Hermes require native secret-free probes before bridge startup.
 
 Recognition keywords:
 

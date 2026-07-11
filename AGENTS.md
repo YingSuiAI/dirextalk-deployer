@@ -7,6 +7,7 @@
 - Deploy, resume, verify, destroy, and locally wire a production Dirextalk message server.
 - Install the independently released `YingSuiAI/dirextalk-updater` host binary from the deployer-owned immutable version/commit/SHA pin. The deployer does not embed or build updater Go source.
 - Treat `SKILL.md` as the compact agent-facing entrypoint. Detailed runbooks belong in `references/`; `scripts/` are the stable implementation entrypoints.
+- `SKILL.md` is a user-facing runbook that must remain usable by less capable models. Its Freshness Gate, step-by-step onboarding, exact confirmation language, AWS promotional/billing reminders, and repeated safety guidance are intentional product behavior; preserve them unless the product owner explicitly changes that onboarding contract.
 - The supported local conversation bridge is `dirextalk-connect`, installed from `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`.
 - MCP support is capability-driven and is separate from bridge-agent support. Declared MCP consumers connect directly to the deployed message server's HTTP endpoint; unknown runtimes never receive a generic fallback.
 - Supported local agent targets are the dirextalk-connect agent providers, treated as peers: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.

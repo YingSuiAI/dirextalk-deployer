@@ -1,15 +1,11 @@
 display_name: Dirextalk Deployer
-short_description: Deploy, resume, verify, destroy, and wire dirextalk-connect plus capability-driven remote HTTP MCP for a production Dirextalk message server on AWS.
-default_prompt: Deploy a Dirextalk message server using my production domain, following SKILL.md and scripts/orchestrate.sh.
+short_description: Operate, verify, recover, or destroy a production Dirextalk AWS node and its local bridge.
+default_prompt: Use $dirextalk-deployer for this Dirextalk deployment operation.
 entrypoint: ../SKILL.md
 runtime_notes:
-  - Read SKILL.md before running deployment commands.
-  - When installing or updating this skill itself, read references/agent-targets.md and use the npm-managed global skill install by default.
-  - Do not clone the GitHub repository to install or use the skill unless the user explicitly asks for deployer development, local patching, or a project-local install.
-  - On POSIX use scripts/orchestrate.sh and scripts/destroy.sh; on Windows use the PowerShell wrappers.
-  - Version 1 cloud hosts may be Ubuntu 22.04 or 24.04 x86_64; new hosts default to 24.04. The host downloads the independent pinned dirextalk-updater Release and verifies the deployer-pinned SHA-256; do not build it locally or transfer its binary from the deployer.
-  - S6 writes service-scoped credentials, dirextalk-connect config, and explicit MCP capability/artifact state; it does not write retired or unconsumed env files.
-  - Antigravity, Cursor, iFlow, and every detected OpenClaw or Hermes host are host-managed; Devin, Pi, Reasonix, and tmux are unsupported. Unknown runtimes fail closed without a generic artifact.
-  - OpenClaw and Hermes keep MCP in native registries and must pass service-scoped secret-free live probes before the ACP bridge starts; never mutate their real user config automatically.
-  - S6 never mutates OpenClaw's global MCP config.
-  - The instructions are compatible with Claude, Codex/OpenAI, Gemini, Cursor, Copilot, OpenClaw, Hermes, and other shell-capable agent runtimes.
+  - Use this skill for operations, not ordinary repository development or review.
+  - Keep the installed package and execution source unchanged during an operation unless the user explicitly requests an update.
+  - Use POSIX scripts on POSIX hosts and PowerShell wrappers on Windows; treat WSL as a separate POSIX runtime.
+  - Install only the pinned independent updater and immutable stable message-server image selected by the deployer.
+  - Dirextalk MCP is the deployed server's bearer-authenticated HTTP endpoint; do not create a local MCP service or generic fallback.
+  - Read only the reference required by the selected deployment, runtime-wiring, verification, recovery, or destroy phase.

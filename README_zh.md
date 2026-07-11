@@ -12,8 +12,8 @@
 ## 部署前准备
 
 - 准备 AWS 账号、AWS access key CSV 或 profile，以及真实长期域名或子域名。当前 AWS 账号存在匹配的公共 Route53 Hosted Zone 时，deployer 会自动使用 Route53；否则会在取得固定公网 IP 后才提示添加外部 DNS A 记录。
-- deployer 创建的 AWS 资源在销毁前可能持续计费。新部署默认优先使用 Lightsail 12 美元/月 Linux 套餐。未使用过 Lightsail 的用户一般会有三个月免费额度；新用户注册 AWS 一般有 100-200 美元的免费额度。一切以 AWS 官方实时政策为准。如果没有配置 region，deployer 会根据本机时区推荐默认 AWS region，并且非交互式运行也会使用该推荐；可用 `AWS_DEFAULT_REGION`、`AWS_REGION`、AWS profile region 或 `DIREXTALK_DEFAULT_REGION` 覆盖。S1 会在确认前查询 Lightsail 套餐和可用区；如果要手工查可用区，使用 `aws lightsail get-regions --include-availability-zones --output json`，裸 `get-regions` 可能不返回可用区明细。如果所选 region 没有可用 Lightsail 资源，S1 不会自动切换到 EC2；它会记录 EC2 费用估算，并等待操作者选择其他 Lightsail 可用 region/zone，或显式设置 `DIREXTALK_CLOUD_PROVIDER=ec2`。新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
-- `SKILL.md` 是给智能体看的运行手册，详细部署规则、确认门禁、运行时 wiring 和恢复流程都放在那里。
+- deployer 创建的 AWS 资源在销毁前可能持续计费。确认前请结合 `scripts/pricing-estimate.sh` 与 AWS 当前 Pricing/Billing 数据，不要假设历史价格、免费额度或试用仍然有效。如果没有配置 region，deployer 会根据本机时区推荐默认 AWS region；可用 `AWS_DEFAULT_REGION`、`AWS_REGION`、AWS profile region 或 `DIREXTALK_DEFAULT_REGION` 覆盖。S1 会查询 Lightsail 套餐和可用区；没有可用资源时只记录 EC2 估算并等待显式选择，不会静默切换。新建 EC2 默认使用 50 GiB gp3 root EBS 卷。
+- `SKILL.md` 是给智能体看的精简入口；它只选择操作与安全门禁，再按阶段指向对应 reference。
 
 ## Skill 安装和更新
 
@@ -76,9 +76,8 @@ dirextalk-deployer skill update --agent codex
 - **是否已经有 AWS 账号？** 如果没有，先在 AWS 注册账号，完成邮箱/手机验证、绑定支付方式、选择 Basic support plan，等待账号激活，然后创建 AWS Budget 或账单告警。
 - **是否已经有可控域名或子域名？** 如果没有，先注册或准备域名。不要询问 DNS 在哪里管理：deployer 会自动查询当前 AWS 账号中匹配的公共 Route53 Hosted Zone；查不到时继续按外部 DNS 部署，并在固定公网 IP 创建后提示需要添加的 A 记录。
 
-从 AWS CSV 导入并验证一个部署 profile。root access key 是首次部署最快路径，
-但权限极高；请安全保存 CSV，部署后轮换或删除密钥。临时
-`DirextalkDeployer` IAM 用户更安全，但 AWS 控制台步骤更多：
+从 AWS CSV 导入并验证一个最小权限部署 profile。只有操作者明确选择时才接受
+root access key；它权限极高，使用后应轮换或删除：
 
 ```bash
 bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv dirextalk-deployer us-east-1

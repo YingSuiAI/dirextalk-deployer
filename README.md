@@ -14,8 +14,8 @@
 ## Before Deployment
 
 - Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain. The deployer automatically uses Route53 when the current AWS account has a matching public hosted zone; otherwise it asks for an external A record only after allocating the fixed public IP.
-- AWS resources created by this deployer can bill until they are destroyed. New deployments prefer the Lightsail $12/month Linux bundle by default. Users who have not used Lightsail generally receive three months of free Lightsail usage. New AWS customer accounts generally receive 100-200 USD in free credits. AWS official real-time policy prevails. If no region is configured, the deployer recommends a default AWS region from the local timezone and uses it in non-interactive runs; set `AWS_DEFAULT_REGION`, `AWS_REGION`, AWS profile region, or `DIREXTALK_DEFAULT_REGION` to override. S1 checks Lightsail bundle and availability-zone availability before confirmation; for manual zone checks, use `aws lightsail get-regions --include-availability-zones --output json` because plain `get-regions` can omit zone details. If Lightsail has no usable resource in the selected region, S1 does not automatically switch to EC2; it records an EC2 estimate and waits for the operator to choose another Lightsail-capable region/zone or explicitly set `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 uses a 50 GiB gp3 root EBS volume by default.
-- Use `SKILL.md` as the agent-facing runbook. It contains the detailed deployment rules, confirmation gates, runtime wiring behavior, and recovery procedures.
+- AWS resources can bill until they are destroyed. Use `scripts/pricing-estimate.sh` plus current AWS pricing/Billing data before confirmation; do not assume credits, trials, or historical prices. If no region is configured, the deployer recommends one from the local timezone; set `AWS_DEFAULT_REGION`, `AWS_REGION`, the AWS profile region, or `DIREXTALK_DEFAULT_REGION` to override. S1 checks Lightsail bundle and availability-zone availability. If no usable Lightsail resource exists, it records an EC2 estimate and waits for an explicit provider/region choice rather than switching silently. EC2 uses a 50 GiB gp3 root EBS volume by default.
+- Use `SKILL.md` as the compact agent-facing entrypoint. It selects the operation and safety gates, then points to the phase-specific reference.
 
 ## Skill Installation And Updates
 
@@ -78,10 +78,9 @@ Before importing credentials, answer:
 - **Do you already have an AWS account?** If not, register at AWS, complete email/phone verification, add a billing card, choose the Basic support plan, wait for activation, then create an AWS Budget or billing alert.
 - **Do you already have a domain or subdomain you control?** If not, register or prepare one first. Do not ask where its DNS is managed: the deployer checks the current AWS account for a matching public Route53 hosted zone. When none exists, it continues with external DNS and prints the required A record after the fixed public IP is allocated.
 
-Import and verify an AWS deployment profile from an AWS CSV. Root access keys
-are the fastest first-deploy path but are highly privileged; save the CSV
-securely and rotate or delete the key after deployment. A temporary
-`DirextalkDeployer` IAM user is safer but takes more AWS console steps:
+Import and verify a least-privilege AWS deployment profile from an AWS CSV.
+Root access keys are accepted only when the operator explicitly chooses them;
+they are highly privileged and should be rotated or deleted after use:
 
 ```bash
 bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv dirextalk-deployer us-east-1

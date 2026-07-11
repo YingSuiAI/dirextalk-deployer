@@ -148,10 +148,9 @@ if [ ! -d "$target" ]; then
   trap cleanup_stage EXIT
   : > "$stage/.env"
   if [ -f "$physical_source/.env" ]; then
-    awk '$0 !~ /^MESSAGE_SERVER_IMAGE=/' "$physical_source/.env" > "$stage/.env"
-  else
-    printf 'DOMAIN=%s\n' "$legacy_domain" > "$stage/.env"
+    awk '$0 !~ /^(MESSAGE_SERVER_IMAGE|DOMAIN)=/' "$physical_source/.env" > "$stage/.env"
   fi
+  printf 'DOMAIN=%s\n' "$legacy_domain" >> "$stage/.env"
   printf 'MESSAGE_SERVER_IMAGE=%s\n' "$fixed_image" >> "$stage/.env"
   chmod 0600 "$stage/.env"
   install -m 0600 "$template_dir/legacy-adopt-compose.yml" "$stage/docker-compose.yml"
@@ -176,6 +175,13 @@ else
     echo "existing updater layout does not match the completed legacy adoption" >&2
     exit 1
   }
+  if [ "$(grep -F -x -c "DOMAIN=$legacy_domain" "$target/.env" 2>/dev/null || true)" != 1 ]; then
+    env_tmp=$(mktemp "$target/.env.adopt.XXXXXX")
+    awk '$0 !~ /^DOMAIN=/' "$target/.env" > "$env_tmp"
+    printf 'DOMAIN=%s\n' "$legacy_domain" >> "$env_tmp"
+    chmod 0600 "$env_tmp"
+    mv "$env_tmp" "$target/.env"
+  fi
 fi
 
 caddy_tmp=$(mktemp "$root/etc/caddy/.Caddyfile.adopt.XXXXXX")

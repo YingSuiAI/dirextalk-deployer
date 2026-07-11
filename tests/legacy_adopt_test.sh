@@ -138,10 +138,12 @@ dropin="$host/etc/systemd/system/dirextalk-updater.service.d/legacy-systemd-cadd
 grep -F -q 'chgrp caddy /run/dirextalk-updater/http.sock' "$dropin"
 
 # Repeating the confirmed host commit is idempotent and does not rotate backups.
+sed -i '/^DOMAIN=/d' "$target/.env"
 PATH="$tmp/bin:$PATH" DIREXTALK_LEGACY_ADOPT_ROOT="$host" \
   DIREXTALK_LEGACY_ADOPT_ALLOW_NON_ROOT_TEST=1 \
   bash "$ROOT/scripts/updater/adopt-legacy-host.sh" commit \
     /root/dirextalk/dirextalk-message-server "$ROOT/scripts/updater"
+grep -F -x -q 'DOMAIN=d1.example.test' "$target/.env"
 [ "$(grep -F -c 'handle /_dirextalk/updater/v1/jobs/* {' "$host/etc/caddy/Caddyfile")" = 1 ]
 [ "$(find "$host/etc/caddy" -maxdepth 1 -name 'Caddyfile.dirextalk-legacy-adopt.bak*' | wc -l | tr -d ' ')" = 1 ]
 

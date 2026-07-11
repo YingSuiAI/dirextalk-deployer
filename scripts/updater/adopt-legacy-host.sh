@@ -90,6 +90,14 @@ caddyfile="$root/etc/caddy/Caddyfile"
   echo "legacy host Caddyfile must contain one message-server proxy" >&2
   exit 1
 }
+legacy_domain=$(awk '
+  /^[^[:space:]][A-Za-z0-9.-]*[[:space:]]*\{/ { domain=$1 }
+  /reverse_proxy 127\.0\.0\.1:8008/ { print domain }
+' "$caddyfile")
+printf '%s\n' "$legacy_domain" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$' || {
+  echo "legacy message-server Caddy domain is invalid or ambiguous" >&2
+  exit 1
+}
 if grep -F -q '/_dirextalk/updater/v1/control' "$caddyfile"; then
   echo "legacy host Caddyfile exposes a forbidden updater control route" >&2
   exit 1
@@ -141,6 +149,8 @@ if [ ! -d "$target" ]; then
   : > "$stage/.env"
   if [ -f "$physical_source/.env" ]; then
     awk '$0 !~ /^MESSAGE_SERVER_IMAGE=/' "$physical_source/.env" > "$stage/.env"
+  else
+    printf 'DOMAIN=%s\n' "$legacy_domain" > "$stage/.env"
   fi
   printf 'MESSAGE_SERVER_IMAGE=%s\n' "$fixed_image" >> "$stage/.env"
   chmod 0600 "$stage/.env"

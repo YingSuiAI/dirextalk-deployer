@@ -128,6 +128,7 @@ cmp "$target/docker-compose.yml" "$ROOT/scripts/updater/legacy-adopt-compose.yml
 grep -F -x -q \
   'MESSAGE_SERVER_IMAGE=dirextalk/message-server:v0.15.2@sha256:d57a0b7830f7248e29fe7c45c0848cb1167454709fd33effe07ff074415f571c' \
   "$target/.env"
+grep -F -x -q 'DOMAIN=d1.example.test' "$target/.env"
 [ "$(grep -c '^MESSAGE_SERVER_IMAGE=' "$target/.env")" = 1 ]
 grep -F -q '"legacy":true' "$target/p2p/bootstrap.json"
 grep -F -q 'handle /_dirextalk/updater/v1/jobs/* {' "$host/etc/caddy/Caddyfile"

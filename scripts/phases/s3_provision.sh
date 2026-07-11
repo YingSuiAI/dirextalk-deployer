@@ -442,6 +442,7 @@ _resume_host_bootstrap() {
       updater/set-desired-state.sh \
       updater/release.env \
       updater/config.json \
+      updater/config.legacy-compose-caddy.json \
       updater/config.legacy-systemd-caddy.json \
       updater/dirextalk-updater.service \
       updater/dirextalk-updater-discovery.service \

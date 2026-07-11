@@ -193,7 +193,7 @@ cat >/dev/null
 if [[ "$command" == *'adopt-legacy-host.sh'* && "$command" == *' probe '* ]]; then
   printf 'legacy_adoptable\tv0.15.2\tdirextalk/message-server:v0.15.2@sha256:d57a0b7830f7248e29fe7c45c0848cb1167454709fd33effe07ff074415f571c\t/root/dirextalk/dirextalk-message-server\tdocker-compose.p2p.yml\tsystemd_caddy\n'
 elif [[ "$command" == *'reconcile-host.sh'* ]]; then
-  printf 'v1.0.4\t42f334642aacf5bf9977ece2a961668c373a1c63\t3715ad2b4b6fbb8ac15cc941c5a91ebc61b169d1a33ed6829e105288657acec9\n'
+  printf 'v1.0.6\t586f5ee82f1697269cfd764545198d88707734b8\tfc25f8ff811313dfc18c2b4e0f01b46802697385b24395f9c78e634e5ac426e4\n'
 else
   echo "unexpected ssh command: $command" >&2
   exit 94
@@ -241,7 +241,7 @@ DIREXTALK_LEGACY_ADOPT_SOURCE_DIR=/root/dirextalk/dirextalk-message-server \
 [ "$(state_get server_release.source)" = legacy_adopted ]
 [ "$(state_get server_release.version)" = v0.15.2 ]
 [ "$(state_get server_release.digest)" = sha256:d57a0b7830f7248e29fe7c45c0848cb1167454709fd33effe07ff074415f571c ]
-[ "$(state_get updater_release.version)" = v1.0.4 ]
+[ "$(state_get updater_release.version)" = v1.0.6 ]
 grep -F -q 'reconcile-host.sh' "$calls"
 grep -F -q '/root/dirextalk/dirextalk-message-server' "$calls"
 # shellcheck disable=SC1091

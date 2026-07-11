@@ -21,7 +21,7 @@ cat > "$tmp/bin/ssh" <<'EOF'
 printf 'ssh\n' >> "$CALLS"
 printf '%s\n' "${!#}" > "$REMOTE_COMMAND"
 cat >/dev/null
-printf 'v1.0.4\t42f334642aacf5bf9977ece2a961668c373a1c63\t3715ad2b4b6fbb8ac15cc941c5a91ebc61b169d1a33ed6829e105288657acec9\n'
+printf 'v1.0.6\t586f5ee82f1697269cfd764545198d88707734b8\tfc25f8ff811313dfc18c2b4e0f01b46802697385b24395f9c78e634e5ac426e4\n'
 EOF
 cat > "$tmp/bin/aws" <<'EOF'
 #!/usr/bin/env bash

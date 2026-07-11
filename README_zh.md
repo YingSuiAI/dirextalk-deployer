@@ -105,7 +105,7 @@ bash scripts/orchestrate.sh
 正常部署会解析最新已发布的稳定 GitHub Release，校验 manifest checksum，并把不可变的
 version、镜像 digest、image reference 和 manifest digest 写入 `state.json`。宿主 updater
 由独立的 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release 提供：
-Ubuntu 24.04 x86_64 宿主直接下载 deployer 固定的 `v1.0.0` 资产，使用 deployer 内固定的
+Ubuntu 22.04 或 24.04 x86_64 宿主直接下载 deployer 固定的 updater 资产，使用 deployer 内固定的
 SHA-256 校验后原子安装。本机不需要 Go，S3 也不会再通过 SSH 复制 updater 二进制。
 deployer 的 Node selector 使用固定版本的成熟 `semver` 包严格解析每条 `upgrade_from`，
 并拒绝包含目标版本的约束；接受/拒绝语料覆盖 canonical Go validator 使用的约束形式。

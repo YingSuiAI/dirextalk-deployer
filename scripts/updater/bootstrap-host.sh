@@ -61,11 +61,11 @@ valid_public_ip "$stable_ip" || { echo "invalid recorded stable public IP" >&2; 
 arch=$(uname -m)
 os_release="$root/etc/os-release"
 [ "$arch" = x86_64 ] || { echo "unsupported host architecture: v1 requires x86_64" >&2; exit 1; }
-[ -f "$os_release" ] || { echo "cannot identify supported Ubuntu 24.04 host" >&2; exit 1; }
+[ -f "$os_release" ] || { echo "cannot identify supported Ubuntu 22.04 or 24.04 host" >&2; exit 1; }
 os_id=$(sed -n 's/^ID=//p' "$os_release" | tr -d '"' | head -n 1)
 os_version=$(sed -n 's/^VERSION_ID=//p' "$os_release" | tr -d '"' | head -n 1)
-[ "$os_id" = ubuntu ] && [ "$os_version" = 24.04 ] || {
-  echo "unsupported host distribution: v1 requires Ubuntu 24.04" >&2
+[ "$os_id" = ubuntu ] && { [ "$os_version" = 22.04 ] || [ "$os_version" = 24.04 ]; } || {
+  echo "unsupported host distribution: v1 requires Ubuntu 22.04 or 24.04" >&2
   exit 1
 }
 

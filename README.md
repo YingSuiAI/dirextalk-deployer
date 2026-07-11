@@ -109,7 +109,7 @@ Normal deployment resolves the latest published stable GitHub Release, verifies
 its manifest checksum, and records an immutable version, image digest, image
 reference, and manifest digest in `state.json`. The host updater is a separate
 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release:
-the Ubuntu 24.04 x86_64 host downloads the deployer-pinned `v1.0.0` asset and
+the supported Ubuntu 22.04 or 24.04 x86_64 host downloads the deployer-pinned updater asset and
 verifies the deployer-pinned SHA-256 before atomic installation. The local
 machine does not need Go, and S3 never copies an updater binary over SSH.
 The deployer-side Node selector validates every `upgrade_from` entry with the

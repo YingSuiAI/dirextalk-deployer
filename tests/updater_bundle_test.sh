@@ -138,8 +138,8 @@ grep -q 'chown root:root' "$tmp/bundle/updater/install.sh"
 grep -q 'systemctl start dirextalk-updater-discovery.service' "$tmp/bundle/updater/install.sh"
 grep -q 'flock' "$tmp/bundle/updater/bootstrap-host.sh"
 grep -q 'docker compose --env-file .env up -d' "$tmp/bundle/updater/bootstrap-host.sh"
-grep -F -q 'github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.3/dirextalk-updater-linux-amd64' "$tmp/bundle/updater/release.env"
-grep -F -q '54314636ef00e2ffa4187e651cf06e58ce013d8d96b024b2dcc9906e26720cd8' "$tmp/bundle/updater/release.env"
+grep -F -q 'github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.4/dirextalk-updater-linux-amd64' "$tmp/bundle/updater/release.env"
+grep -F -q '3715ad2b4b6fbb8ac15cc941c5a91ebc61b169d1a33ed6829e105288657acec9' "$tmp/bundle/updater/release.env"
 if grep -q 'latest/meta-data/public-ipv4\|api.ipify.org\|ifconfig.me' "$tmp/user-data.yaml"; then
   echo "cloud-init must not persist a temporary pre-EIP public address" >&2
   exit 1

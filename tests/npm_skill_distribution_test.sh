@@ -128,7 +128,7 @@ if [ -e "$tmp/home2/.gemini" ]; then
   exit 1
 fi
 
-assert_contains "$ROOT/agents/openai.yaml" 'Ubuntu 24.04 x86_64'
+assert_contains "$ROOT/agents/openai.yaml" 'Ubuntu 22.04 or 24.04 x86_64'
 assert_contains "$ROOT/agents/openai.yaml" 'pinned'
 assert_contains "$ROOT/agents/openai.yaml" 'dirextalk-updater'
 

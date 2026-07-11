@@ -94,13 +94,18 @@ DOWNLOAD_MODE=bad bash "$script" 203.0.113.20 >"$tmp/bad.out" 2>&1 && {
 
 sed -i 's/24\.04/22.04/' "$root/etc/os-release"
 : > "$calls"
-if DOWNLOAD_MODE=good bash "$script" 203.0.113.20 >"$tmp/ubuntu22.out" 2>&1; then
-  echo "Ubuntu 22.04 host was accepted" >&2
+DOWNLOAD_MODE=good bash "$script" 203.0.113.20
+grep -q 'docker compose --env-file .env up -d' "$calls"
+
+sed -i 's/22\.04/20.04/' "$root/etc/os-release"
+: > "$calls"
+if DOWNLOAD_MODE=good bash "$script" 203.0.113.20 >"$tmp/ubuntu20.out" 2>&1; then
+  echo "Ubuntu 20.04 host was accepted" >&2
   exit 1
 fi
 [ ! -s "$calls" ] || { echo "unsupported Ubuntu reached download/Compose" >&2; cat "$calls" >&2; exit 1; }
 
-sed -i 's/22\.04/24.04/' "$root/etc/os-release"
+sed -i 's/20.04/24.04/' "$root/etc/os-release"
 printf 'aarch64\n' > "$tmp/uname.value"
 : > "$calls"
 if DOWNLOAD_MODE=good bash "$script" 203.0.113.20 >"$tmp/arm64.out" 2>&1; then

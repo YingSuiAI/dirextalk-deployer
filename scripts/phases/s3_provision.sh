@@ -18,7 +18,6 @@ DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
 
 run_phase() {
-  aws_env_prep
   if ! updater_release_validate_pin; then
     phase_set S3_PROVISION failed "pinned updater release metadata is invalid"
     return 1
@@ -27,6 +26,9 @@ run_phase() {
     phase_set S3_PROVISION failed "formal server release resolution failed"
     return 1
   fi
+  # Release resolution may need the operator's GitHub proxy. Restrict AWS
+  # proxy bypass to the cloud calls that follow the immutable release choice.
+  aws_env_prep
   local cloud_provider
   cloud_provider=$(_resolve_cloud_provider)
   state_set cloud_provider "$cloud_provider"

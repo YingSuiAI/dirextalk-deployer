@@ -76,6 +76,8 @@ export CALLS="$tmp/aws.calls"
 export TMPDIR="$tmp"
 export AWS_DEFAULT_REGION=us-east-1
 export DIREXTALK_CLOUD_PROVIDER=lightsail
+export HTTP_PROXY=http://release-proxy.example.test:8080
+export HTTPS_PROXY=http://release-proxy.example.test:8080
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
@@ -89,6 +91,17 @@ state_set_raw server_release '{"source":"github_release","version":"v1.1.0","ima
 source "$ROOT/scripts/lib/aws.sh"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/phases/s3_provision.sh"
+server_release_prepare_state() {
+  [ "${HTTP_PROXY:-}" = "http://release-proxy.example.test:8080" ] || {
+    echo "formal release resolution must retain the configured HTTP proxy" >&2
+    return 1
+  }
+  [ "${HTTPS_PROXY:-}" = "http://release-proxy.example.test:8080" ] || {
+    echo "formal release resolution must retain the configured HTTPS proxy" >&2
+    return 1
+  }
+  return 0
+}
 domain_resolves_to_ip() {
   printf 'dns-check %s %s\n' "$1" "$2" >> "$CALLS"
   return 0

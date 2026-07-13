@@ -52,6 +52,9 @@ const files = pack.files.map((entry) => entry.path);
 for (const required of ["SKILL.md", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh", "scripts/updater/release.env", "scripts/lib/server-release-resolver.mjs"]) {
   if (!files.includes(required)) throw new Error(`missing package file: ${required}`);
 }
+if (files.includes("README_zh.md")) {
+  throw new Error("npm package must not include the removed Chinese README");
+}
 if (files.some((file) => file === "tests" || file.startsWith("tests/"))) {
   throw new Error("npm package must not include tests/");
 }
@@ -121,7 +124,7 @@ fi
 
 "$NODE_BIN" bin/dirextalk-deployer.mjs skill install --agent gemini --home "$tmp/home2" --dry-run > "$tmp/dry-run.out"
 assert_contains "$tmp/dry-run.out" '"dryRun": true'
-assert_contains "$tmp/dry-run.out" '"fileCount": 10'
+assert_contains "$tmp/dry-run.out" '"fileCount": 9'
 assert_contains "$tmp/dry-run.out" '.gemini'
 if [ -e "$tmp/home2/.gemini" ]; then
   echo "dry-run should not create global target directories" >&2

@@ -69,7 +69,7 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 
 ## Documentation Rules
 
-- Keep `README.md`, `README_zh.md`, `SKILL.md`, `AGENTS.md`, `agents/README.md`, `agents/openai.yaml`, and `references/*` synchronized when changing deployment contracts, local bridge behavior, install commands, or platform support.
+- Keep `README.md`, `SKILL.md`, `AGENTS.md`, `agents/README.md`, `agents/openai.yaml`, and `references/*` synchronized when changing deployment contracts, local bridge behavior, install commands, or platform support.
 - Keep user-facing docs focused on operating the deployer. Put implementation details and edge cases in `references/`.
 - Document Windows and POSIX examples separately when commands differ.
 - Avoid saying "run bash" as the universal answer. Say which host runtime is intended and why.

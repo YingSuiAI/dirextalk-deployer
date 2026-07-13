@@ -11,7 +11,6 @@ required=(
   package.json
   SKILL.md
   README.md
-  README_zh.md
   agents/README.md
   agents/openai.yaml
   bin/dirextalk-deployer.mjs
@@ -92,9 +91,9 @@ done
 
 legacy_json_cli_name=$(printf '\152\161')
 legacy_json_cli_pattern="(^|[^[:alnum:]_])${legacy_json_cli_name}([^[:alnum:]_]|$)|${legacy_json_cli_name}\\.exe"
-if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md README_zh.md SKILL.md references AGENTS.md agents package.json docs >/dev/null; then
+if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md SKILL.md references AGENTS.md agents package.json docs >/dev/null; then
   echo "current docs/scripts/tests must use scripts/json.mjs instead of the legacy external JSON CLI" >&2
-  grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md README_zh.md SKILL.md references AGENTS.md agents package.json docs >&2
+  grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md SKILL.md references AGENTS.md agents package.json docs >&2
   exit 1
 fi
 
@@ -121,10 +120,8 @@ grep -q 'connect_install_status' SKILL.md
 grep -q 'connect_install_status' scripts/phases/s6_wire_local.sh
 grep -q 'connect_install_status' scripts/orchestrate.sh
 grep -q 'skill install --agent' README.md
-grep -q 'skill update --agent' README_zh.md
 grep -q 'skill refresh --agent' SKILL.md
 grep -q 'Windows PowerShell' README.md
-grep -q 'Windows PowerShell' README_zh.md
 grep -q '.dirextalk-skill-install.json' references/agent-targets.md
 grep -q 'mcp_agent_token' scripts/phases/s6_wire_local.sh
 grep -q 'agent_room_id' scripts/phases/s6_wire_local.sh
@@ -163,31 +160,28 @@ grep -q 'YingSuiAI/dirextalk-connect.git' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXTALK_CONNECT_AGENT' scripts/phases/s6_wire_local.sh
 grep -q 'orchestrate.ps1' README.md
 grep -q 'destroy.ps1' README.md
-grep -q 'destroy.ps1' README_zh.md
 grep -q 'destroy.ps1' SKILL.md
 grep -q 'destroy.ps1' references/deployment-workflow.md
 grep -q 'destroy.ps1' references/windows-deployment-notes.md
 grep -q 'dirextalk-connect' SKILL.md
 grep -q 'mcp_config_dir' SKILL.md
-if grep -R '@dirextalk/agent-plugins' SKILL.md scripts README.md README_zh.md references >/dev/null; then
+if grep -R '@dirextalk/agent-plugins' SKILL.md scripts README.md references >/dev/null; then
   echo "current docs/scripts must not reference legacy agent plugin packages" >&2
   exit 1
 fi
 legacy_agent_install_prefix=$(printf 'agent_%s' 'install')
-if grep -R -n "${legacy_agent_install_prefix}_status\\|${legacy_agent_install_prefix}_policy\\|${legacy_agent_install_prefix}_mode\\|${legacy_agent_install_prefix}_command" SKILL.md scripts README.md README_zh.md references AGENTS.md agents tests/*.sh >/dev/null; then
+if grep -R -n "${legacy_agent_install_prefix}_status\\|${legacy_agent_install_prefix}_policy\\|${legacy_agent_install_prefix}_mode\\|${legacy_agent_install_prefix}_command" SKILL.md scripts README.md references AGENTS.md agents tests/*.sh >/dev/null; then
   echo "connect daemon install state must use connect_install_* fields, not stale agent_install_* fields" >&2
-  grep -R -n "${legacy_agent_install_prefix}_status\\|${legacy_agent_install_prefix}_policy\\|${legacy_agent_install_prefix}_mode\\|${legacy_agent_install_prefix}_command" SKILL.md scripts README.md README_zh.md references AGENTS.md agents tests/*.sh >&2
+  grep -R -n "${legacy_agent_install_prefix}_status\\|${legacy_agent_install_prefix}_policy\\|${legacy_agent_install_prefix}_mode\\|${legacy_agent_install_prefix}_command" SKILL.md scripts README.md references AGENTS.md agents tests/*.sh >&2
   exit 1
 fi
 legacy_plugin_word=plugin
 legacy_mcp_plugin_pattern="MCP/${legacy_plugin_word}|agent ${legacy_plugin_word}s|${legacy_plugin_word} access|${legacy_plugin_word} configuration|wire Dirextalk MCP/${legacy_plugin_word}|runtime-specific ${legacy_plugin_word}"
-if grep -R -n -E "$legacy_mcp_plugin_pattern" AGENTS.md agents SKILL.md README.md README_zh.md references >/dev/null; then
+if grep -R -n -E "$legacy_mcp_plugin_pattern" AGENTS.md agents SKILL.md README.md references >/dev/null; then
   echo "current docs and agent metadata must not use stale combined MCP and extension wording" >&2
-  grep -R -n -E "$legacy_mcp_plugin_pattern" AGENTS.md agents SKILL.md README.md README_zh.md references >&2
+  grep -R -n -E "$legacy_mcp_plugin_pattern" AGENTS.md agents SKILL.md README.md references >&2
   exit 1
 fi
-grep -q '简体中文](README_zh.md)' README.md
-grep -q '通用 Agent Skill' README_zh.md
 grep -q 'PROJECT_ROOT/.cursor/skills/dirextalk-deployer' references/agent-targets.md
 grep -q 'dirextalk-connect' references/agent-targets.md
 grep -q 'dirextalk-connect daemon install' references/agent-targets.md
@@ -195,22 +189,31 @@ grep -q 'acp antigravity claudecode codex copilot cursor devin gemini iflow kimi
 
 legacy_cc_repo=$(printf 'cc-%s' 'connect')
 wrong_connect_repo=$(printf 'dirextalk-%s' 'connext')
-if grep -R "YingSuiAI/${legacy_cc_repo}\\|github.com/YingSuiAI/${legacy_cc_repo}\\|YingSuiAI/${wrong_connect_repo}\\|github.com/YingSuiAI/${wrong_connect_repo}" SKILL.md scripts README.md README_zh.md references AGENTS.md >/dev/null; then
+if grep -R "YingSuiAI/${legacy_cc_repo}\\|github.com/YingSuiAI/${legacy_cc_repo}\\|YingSuiAI/${wrong_connect_repo}\\|github.com/YingSuiAI/${wrong_connect_repo}" SKILL.md scripts README.md references AGENTS.md >/dev/null; then
   echo "current docs/scripts must use YingSuiAI/dirextalk-connect, not stale bridge repository names" >&2
   exit 1
 fi
 
-if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*example\.com([^[:alnum:]_]|$)' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*example\.com([^[:alnum:]_]|$)' SKILL.md references scripts README.md >/dev/null; then
   echo "published docs/scripts must use placeholders such as __DOMAIN__, not example.com-style domains" >&2
   exit 1
 fi
 
-if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*dirextalk\.ai([^[:alnum:]_]|$)' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*dirextalk\.ai([^[:alnum:]_]|$)' SKILL.md references scripts >/dev/null; then
   echo "published docs/scripts must use placeholders such as __DOMAIN__, not real Dirextalk-owned domains" >&2
   exit 1
 fi
 
-if grep -RE 'agentp2p\.im|54\.161\.73\.211' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+grep -Fq 'https://deployer.dirextalk.ai/' README.md
+grep -Fq 'https://github.com/YingSuiAI/dirextalk-deployer' README.md
+grep -Fq 'https://dirextalk.ai/' README.md
+grep -Fq 'does **not** install or configure `dirextalk-connect` or link any agent' README.md
+if grep -Fq 'brew install dirextalk-connect' README.md; then
+  echo "README must not advertise an unpublished Homebrew install" >&2
+  exit 1
+fi
+
+if grep -RE 'agentp2p\.im|54\.161\.73\.211' SKILL.md references scripts README.md >/dev/null; then
   echo "published docs/scripts must use placeholders such as __DOMAIN__ and __EIP__, not session-specific domains or IPs" >&2
   exit 1
 fi
@@ -225,22 +228,22 @@ if awk '/_print_connect_guidance\(\)/,/^}/' scripts/phases/s6_wire_local.sh | gr
   exit 1
 fi
 
-if grep -RE 'fixed order.*\.codex.*\.hermes|\.codex.*checked before.*\.hermes' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+if grep -RE 'fixed order.*\.codex.*\.hermes|\.codex.*checked before.*\.hermes' SKILL.md references scripts README.md >/dev/null; then
   echo "published docs/scripts must not describe stale Codex-before-Hermes runtime detection" >&2
   exit 1
 fi
 
-if grep -RE 'dirextalk-mcp|127\.0\.0\.1:19757|localhost:19757|serve-http' AGENTS.md SKILL.md README.md README_zh.md agents references scripts package.json .github >/dev/null; then
+if grep -RE 'dirextalk-mcp|127\.0\.0\.1:19757|localhost:19757|serve-http' AGENTS.md SKILL.md README.md agents references scripts package.json .github >/dev/null; then
   echo "active docs/scripts must not reference the retired local dirextalk-mcp CLI, daemon, proxy, or port" >&2
   exit 1
 fi
 
-if grep -R 'dirextalk-connect@1\.' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+if grep -R 'dirextalk-connect@1\.' SKILL.md references scripts README.md >/dev/null; then
   echo "published docs/scripts must not pin dirextalk-connect by default" >&2
   exit 1
 fi
 
-if grep -RE 'Elastic IP.*attached.*free|attached.*Elastic IP.*free' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+if grep -RE 'Elastic IP.*attached.*free|attached.*Elastic IP.*free' SKILL.md references scripts README.md >/dev/null; then
   echo "published docs/scripts must not say attached Elastic IP or public IPv4 is free" >&2
   exit 1
 fi
@@ -277,12 +280,12 @@ fi
 
 grep -q 'Root access keys are allowed when the operator explicitly chooses them' SKILL.md
 
-if grep -RE 'S3 reuses or creates the hosted zone|deployer can create the hosted zone|部署器创建 hosted zone' SKILL.md references README.md README_zh.md >/dev/null; then
+if grep -RE 'S3 reuses or creates the hosted zone|deployer can create the hosted zone|部署器创建 hosted zone' SKILL.md references README.md >/dev/null; then
   echo "published docs must not claim that deployment creates Route53 hosted zones" >&2
   exit 1
 fi
 
-if grep -R 'IM passwords\|login password\|login form\|登录密码\|IM 地址' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+if grep -R 'IM passwords\|login password\|login form\|登录密码\|IM 地址' SKILL.md references scripts README.md >/dev/null; then
   echo "published docs/scripts must call the user-facing field an initialization code, not a login password" >&2
   exit 1
 fi
@@ -310,7 +313,6 @@ grep -q 'First question: do you already have an AWS account' scripts/phases/s0_p
 grep -q 'automatically checks the current AWS account' scripts/phases/s2_domain.sh
 grep -q 'not hosted in the current AWS account' scripts/phases/s2_domain.sh
 grep -q 'automatically uses Route53' README.md
-grep -q '自动使用 Route53' README_zh.md
 grep -q 'highly privileged, must be saved securely' SKILL.md
 grep -q 'safer because it avoids root keys' SKILL.md
 grep -q 'Destroy uses the same AWS identity boundary as deployment' SKILL.md
@@ -350,7 +352,7 @@ grep -q 'scripts/pricing-estimate.sh' SKILL.md
 grep -q 'pricing-estimate.sh --state' references/deployment-workflow.md
 grep -q 'cost_estimate' SKILL.md
 grep -q 'cost_estimate' references/deployment-workflow.md
-if grep -R 'aws freetier' SKILL.md references scripts README.md README_zh.md >/dev/null; then
+if grep -R 'aws freetier' SKILL.md references scripts README.md >/dev/null; then
   echo "published docs/scripts must not instruct agents to query AWS Free Tier" >&2
   exit 1
 fi
@@ -360,16 +362,11 @@ grep -q '100-200 USD' README.md
 grep -q 'three months of free Lightsail usage' SKILL.md
 grep -q 'three months of free Lightsail usage' references/deployment-workflow.md
 grep -q 'three months of free Lightsail usage' README.md
-grep -q '三个月免费额度' README_zh.md
-grep -q '100-200 美元' README_zh.md
 grep -q 'AWS official real-time policy prevails' SKILL.md
 grep -q 'AWS official real-time policy prevails' README.md
 grep -q 'AWS official real-time policy prevails' references/deployment-workflow.md
-grep -q '一切以 AWS 官方实时政策为准' README_zh.md
 grep -q 'Read https://github.com/YingSuiAI/dirextalk-deployer README and follow its npm install rule' README.md
-grep -q '请阅读 https://github.com/YingSuiAI/dirextalk-deployer 的 README，并按其中 npm 安装规则安装 skill' README_zh.md
 grep -q 'should run the npm install commands below' README.md
-grep -q '应执行下方 npm 安装命令' README_zh.md
 grep -q 'do not use a generic GitHub skill installer' SKILL.md
 grep -q 'Read https://github.com/YingSuiAI/dirextalk-deployer README and follow its npm install rule' references/agent-targets.md
 grep -q 'DIREXTALK_CLOUD_PROVIDER=lightsail' SKILL.md
@@ -377,7 +374,6 @@ grep -q 'DIREXTALK_CLOUD_PROVIDER=ec2' SKILL.md
 grep -q 'DIREXTALK_DEFAULT_REGION' SKILL.md
 grep -q 'timezone' references/deployment-workflow.md
 grep -q 'does not automatically switch to EC2' README.md
-grep -q '不会自动切换到 EC2' README_zh.md
 grep -q 'EC2-VPC Elastic IP quota' SKILL.md
 grep -q 'EC2-VPC Elastic IP quota' references/deployment-workflow.md
 grep -q 'orchestrate.sh confirm app_initialization' SKILL.md
@@ -408,7 +404,6 @@ grep -q 'AWS Budget' references/deployment-workflow.md
 grep -q 'AWS Billing Console' SKILL.md
 grep -q 'aws lightsail get-regions --include-availability-zones' SKILL.md
 grep -q 'aws lightsail get-regions --include-availability-zones' README.md
-grep -q 'aws lightsail get-regions --include-availability-zones' README_zh.md
 grep -q 'aws lightsail get-regions --include-availability-zones' references/deployment-workflow.md
 grep -q 'AWS credit/Lightsail trial reminder' SKILL.md
 grep -q 'AWS credit/Lightsail trial reminder' references/deployment-workflow.md
@@ -447,7 +442,7 @@ grep -q 'clears old credentials, user confirmations, runtime checks, bridge inst
 grep -q 'stops only the matching service-scoped dirextalk-connect daemon' references/deployment-optimization-audit.md
 grep -q 'Lightsail default path is implemented' references/deployment-optimization-audit.md
 
-if grep -RE 'DOMAIN_MODE=lightsail' SKILL.md README.md README_zh.md references scripts >/dev/null; then
+if grep -RE 'DOMAIN_MODE=lightsail' SKILL.md README.md references scripts >/dev/null; then
   echo "cloud provider selection must not be documented as DOMAIN_MODE=lightsail" >&2
   exit 1
 fi

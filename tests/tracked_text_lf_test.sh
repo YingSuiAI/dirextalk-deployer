@@ -18,6 +18,7 @@ check_tracked_text_lf() {
         failed=1
         ;;
     esac
+    [ -e "$repo/$path" ] || continue
     if LC_ALL=C grep -q $'\r' "$repo/$path"; then
       printf 'raw CR byte\t%s\n' "$path" >&2
       failed=1

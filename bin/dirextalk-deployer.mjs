@@ -19,7 +19,6 @@ const skillFiles = [
   "AGENTS.md",
   "LICENSE",
   "README.md",
-  "README_zh.md",
   "SKILL.md",
   "agents",
   "bin",

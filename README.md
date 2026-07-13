@@ -1,7 +1,5 @@
 # Dirextalk Deployer
 
-[简体中文](README_zh.md)
-
 `dirextalk-deployer` deploys a production Dirextalk message server and wires the local agent room through Dirextalk's Matrix bridge. The supported local bridge is `dirextalk-connect`, installed per service from the npm package `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`. MCP capability is declared separately from bridge-agent support; S6 writes the canonical remote HTTP MCP description and never assumes that every bridge agent can consume it.
 
 ## Contents
@@ -10,6 +8,12 @@
 - `scripts/`: State machine, AWS Lightsail/EC2/DNS/user-data/verification/destroy scripts.
 - `references/`: Tooling, deployment resume flow, dirextalk-connect wiring, state machine, architecture, troubleshooting, and recovery notes.
 - `agents/`: Runtime metadata and recognition notes for agent hosts.
+
+## Web Deployment Console
+
+The [Dirextalk web deployment console](https://deployer.dirextalk.ai/) provides a browser workflow for backend-only AWS deployment. It provisions, resumes, verifies, and destroys the cloud message-server resources, but it does **not** install or configure `dirextalk-connect` or link any agent on your local machine.
+
+For local agent-room wiring, use this npm-installed [dirextalk-deployer skill](https://github.com/YingSuiAI/dirextalk-deployer) instead. Visit [dirextalk.ai](https://dirextalk.ai/) for the product website.
 
 ## Before Deployment
 
@@ -280,12 +284,6 @@ S6 never runs `mcp set`, mutates global host config, generates a bearer-token
 server JSON, or places the token in process arguments.
 
 Voice input is supported when an STT provider key is available. Set `DIREXTALK_SPEECH_API_KEY` or provider-specific variables such as `DIREXTALK_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `dirextalk-connect/config.toml`.
-
-Homebrew documentation should use:
-
-```bash
-brew install dirextalk-connect
-```
 
 Source builds use:
 

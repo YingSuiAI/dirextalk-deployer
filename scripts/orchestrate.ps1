@@ -112,7 +112,8 @@ $env:DIREXTALK_HOME = $windowsDirextalkHome.Replace('\', '/')
 $env:DIREXTALK_LOCAL_PATH_STYLE = 'windows'
 
 if (-not $env:DIREXTALK_AGENT_WORKSPACE) {
-  $env:DIREXTALK_AGENT_WORKSPACE_WINDOWS = (Get-Location).ProviderPath
+  # Clear the caller-directory handoff left by older wrappers so S6 can use its service-scoped default.
+  $env:DIREXTALK_AGENT_WORKSPACE_WINDOWS = $null
 }
 
 if ($env:DIREXTALK_WORKDIR) {

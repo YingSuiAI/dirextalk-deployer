@@ -7,10 +7,20 @@ if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
 
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'tests\lib\isolated-homes.ps1')
+. (Join-Path $root 'scripts\lib\windows-bash.ps1')
+$bashCommand = Resolve-DirextalkBashCommand
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("dirextalk-windows-status O'Brien-" + [Guid]::NewGuid().ToString('N'))
 $sentinelRoot = Join-Path ([IO.Path]::GetTempPath()) ('dirextalk-user-sentinel-' + [Guid]::NewGuid().ToString('N'))
-$extraEnvNames = @('DIREXTALK_WORKDIR', 'DIREXTALK_WORKDIR_WINDOWS', 'DIREXTALK_LOCAL_PATH_STYLE')
+$extraEnvNames = @(
+  'DIREXTALK_WORKDIR',
+  'DIREXTALK_WORKDIR_WINDOWS',
+  'DIREXTALK_LOCAL_PATH_STYLE',
+  'DIREXTALK_BASH_COMMAND',
+  'DIREXTALK_AGENT_WORKSPACE',
+  'DIREXTALK_AGENT_WORKSPACE_WINDOWS'
+)
 $envNames = @($script:DirextalkTestHomeEnvironmentNames + $extraEnvNames | Select-Object -Unique)
 $savedEnv = @{}
 foreach ($name in $envNames) {
@@ -23,7 +33,7 @@ try {
   $workdir = Join-Path $temp "state O'Brien"
   New-Item -ItemType Directory -Force -Path $workdir | Out-Null
   $sentinel = Join-Path $sentinelRoot 'openclaw.json'
-  Set-Content -LiteralPath $sentinel -Value '{"keep":true}' -Encoding utf8NoBOM
+  [IO.File]::WriteAllText($sentinel, '{"keep":true}', $utf8NoBom)
   $sentinelBefore = (Get-FileHash -Algorithm SHA256 -LiteralPath $sentinel).Hash
 
   $state = @{
@@ -42,12 +52,18 @@ try {
     }
     resources = @{ instance_id = 'i-windows-smoke' }
   }
-  $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $workdir 'state.json') -Encoding utf8NoBOM
+  [IO.File]::WriteAllText((Join-Path $workdir 'state.json'), ($state | ConvertTo-Json -Depth 8), $utf8NoBom)
   $env:DIREXTALK_WORKDIR = $workdir
+  $env:DIREXTALK_BASH_COMMAND = $bashCommand
+  $env:DIREXTALK_AGENT_WORKSPACE = $null
+  $env:DIREXTALK_AGENT_WORKSPACE_WINDOWS = Join-Path $temp 'legacy implicit workspace'
   Assert-DirextalkTestHomes $temp
 
   $output = (& (Join-Path $root 'scripts\orchestrate.ps1') status 2>&1 | Out-String)
   if ($LASTEXITCODE -ne 0) { throw "orchestrate.ps1 status failed with exit code $LASTEXITCODE`n$output" }
+  if ($env:DIREXTALK_AGENT_WORKSPACE_WINDOWS) {
+    throw "orchestrate.ps1 must not use the caller's current directory as the implicit agent workspace; got '$env:DIREXTALK_AGENT_WORKSPACE_WINDOWS'"
+  }
   $expected = "`$env:DOMAIN = 'status.example.test'; & '.\scripts\destroy.ps1'"
   if (-not $output.Contains($expected)) {
     throw "Windows recovery output must use the PowerShell renderer; expected '$expected'`n$output"
@@ -57,6 +73,17 @@ try {
   }
   $sentinelAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath $sentinel).Hash
   if ($sentinelAfter -ne $sentinelBefore) { throw 'orchestrate.ps1 status modified the external user-config sentinel' }
+
+  $explicitWorkspace = Join-Path $temp 'explicit agent workspace'
+  $env:DIREXTALK_AGENT_WORKSPACE = $explicitWorkspace
+  $explicitOutput = (& (Join-Path $root 'scripts\orchestrate.ps1') status 2>&1 | Out-String)
+  if ($LASTEXITCODE -ne 0) { throw "orchestrate.ps1 status with explicit workspace failed with exit code $LASTEXITCODE`n$explicitOutput" }
+  if ($env:DIREXTALK_AGENT_WORKSPACE -ne $explicitWorkspace) {
+    throw 'orchestrate.ps1 must preserve an explicit DIREXTALK_AGENT_WORKSPACE override'
+  }
+  if ($env:DIREXTALK_AGENT_WORKSPACE_WINDOWS) {
+    throw 'orchestrate.ps1 must not synthesize DIREXTALK_AGENT_WORKSPACE_WINDOWS when an explicit workspace is set'
+  }
 }
 finally {
   foreach ($name in $envNames) {

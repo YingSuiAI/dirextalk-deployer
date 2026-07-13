@@ -10,9 +10,15 @@ trap 'rm -rf "$tmp"' EXIT
 export DIREXTALK_WORKDIR="$tmp/work"
 export RUN_ID=ticket3-release-test
 export AWS_DEFAULT_REGION=us-east-1
+export HTTP_PROXY=http://release-proxy.example.test:8080
+export HTTPS_PROXY=http://release-proxy.example.test:8080
+export NO_PROXY=localhost,127.0.0.1
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/aws.sh"
+aws_env_prep
 
 mkdir -p "$tmp/bin"
 export REAL_NODE=$(json_node)
@@ -22,6 +28,18 @@ set -euo pipefail
 if [ "${1##*/}" != server-release-resolver.mjs ] || [ "${2:-}" != resolve-release ]; then
   exec "$REAL_NODE" "$@"
 fi
+[ "${HTTP_PROXY:-}" = "http://release-proxy.example.test:8080" ] || {
+  echo "release resolver must receive the original HTTP proxy" >&2
+  exit 97
+}
+[ "${HTTPS_PROXY:-}" = "http://release-proxy.example.test:8080" ] || {
+  echo "release resolver must receive the original HTTPS proxy" >&2
+  exit 97
+}
+[ "${NO_PROXY:-}" = "localhost,127.0.0.1" ] || {
+  echo "release resolver must receive the original NO_PROXY value" >&2
+  exit 97
+}
 cat <<'JSON'
 {
   "source": "github_release",

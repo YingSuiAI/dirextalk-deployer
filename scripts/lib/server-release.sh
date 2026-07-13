@@ -25,6 +25,18 @@ server_release_image_is_safe() {
   printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$'
 }
 
+server_release_resolver_with_network_env() {
+  (
+    export HTTP_PROXY="${DIREXTALK_RELEASE_HTTP_PROXY-${HTTP_PROXY-}}"
+    export HTTPS_PROXY="${DIREXTALK_RELEASE_HTTPS_PROXY-${HTTPS_PROXY-}}"
+    export http_proxy="${DIREXTALK_RELEASE_http_proxy-${http_proxy-}}"
+    export https_proxy="${DIREXTALK_RELEASE_https_proxy-${https_proxy-}}"
+    export NO_PROXY="${DIREXTALK_RELEASE_NO_PROXY-${NO_PROXY-}}"
+    export no_proxy="${DIREXTALK_RELEASE_no_proxy-${no_proxy-}}"
+    "$@"
+  )
+}
+
 server_release_state_is_formal() {
   local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
   [ "$source" = "github_release" ] \
@@ -113,7 +125,7 @@ server_release_prepare_state() {
   resolver_script="$SERVER_RELEASE_SCRIPTS_DIR/lib/server-release-resolver.mjs"
   [ -f "$resolver_script" ] || { warn "Server Release resolver is missing: $resolver_script"; return 1; }
   resolved_file=$(mktemp)
-  if ! "$node_binary" "$resolver_script" resolve-release > "$resolved_file"; then
+  if ! server_release_resolver_with_network_env "$node_binary" "$resolver_script" resolve-release > "$resolved_file"; then
     rm -f "$resolved_file"
     warn "No usable formal Dirextalk message-server GitHub Release is available."
     return 1

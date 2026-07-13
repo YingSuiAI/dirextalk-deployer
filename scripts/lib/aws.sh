@@ -8,6 +8,19 @@ AWS_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
 source "$AWS_LIB_DIR/json.sh"
 
+# Preserve the caller's release-download network settings before AWS phases
+# force direct AWS API access. These shell-only values are never persisted or
+# logged; server-release.sh restores them only in its resolver subprocess.
+if [ "${DIREXTALK_RELEASE_NETWORK_CAPTURED:-0}" != "1" ]; then
+  DIREXTALK_RELEASE_HTTP_PROXY=${HTTP_PROXY-}
+  DIREXTALK_RELEASE_HTTPS_PROXY=${HTTPS_PROXY-}
+  DIREXTALK_RELEASE_http_proxy=${http_proxy-}
+  DIREXTALK_RELEASE_https_proxy=${https_proxy-}
+  DIREXTALK_RELEASE_NO_PROXY=${NO_PROXY-}
+  DIREXTALK_RELEASE_no_proxy=${no_proxy-}
+  DIREXTALK_RELEASE_NETWORK_CAPTURED=1
+fi
+
 aws_env_prep() {
   local region=${AWS_DEFAULT_REGION:-${AWS_REGION:-}}
   if [ -n "${STATE_JSON:-}" ] && [ -f "$STATE_JSON" ]; then

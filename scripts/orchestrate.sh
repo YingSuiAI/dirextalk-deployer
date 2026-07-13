@@ -784,7 +784,7 @@ cmd_verify_mcp_doctor() {
     return 1
   fi
 
-  out=$(mktemp)
+  out=$(mktemp "$DIREXTALK_WORKDIR/.mcp-doctor.XXXXXX")
   headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
   payload=$(json_build mcp-jsonrpc-initialize)
   code=$(curl -sk -o "$out" -w '%{http_code}' \
@@ -831,7 +831,7 @@ cmd_verify_mcp_smoke() {
     return 1
   fi
 
-  body=$(mktemp)
+  body=$(mktemp "$DIREXTALK_WORKDIR/.mcp-smoke.XXXXXX")
   node_id=$(json_get "$STATE_JSON" agent_node_id)
   headers=$(dirextalk_curl_secret_headers "$(dirname "$body")" "$token" "$node_id") || return 1
   payload=$(json_build mcp-jsonrpc-messages-list-call "$room_id")
@@ -885,7 +885,7 @@ cmd_verify_mcp_tools() {
     return 1
   fi
 
-  out=$(mktemp)
+  out=$(mktemp "$DIREXTALK_WORKDIR/.mcp-tools.XXXXXX")
   headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
   payload=$(json_build mcp-jsonrpc-tools-list)
   code=$(curl -sk -o "$out" -w '%{http_code}' \

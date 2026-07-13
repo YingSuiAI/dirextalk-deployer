@@ -9,21 +9,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 . (Join-Path $ScriptDir 'lib\windows-paths.ps1')
 . (Join-Path $ScriptDir 'lib\windows-network-env.ps1')
-
-function Find-GitBash {
-  $candidates = @(
-    "$env:ProgramFiles\Git\bin\bash.exe",
-    "$env:ProgramFiles\Git\usr\bin\bash.exe",
-    "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe",
-    "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe"
-  )
-  foreach ($candidate in $candidates) {
-    if ($candidate -and (Test-Path $candidate)) {
-      return $candidate
-    }
-  }
-  throw "Git Bash was not found. Install Git for Windows or run scripts/orchestrate.sh from a POSIX shell."
-}
+. (Join-Path $ScriptDir 'lib\windows-bash.ps1')
 
 function Quote-BashArg([string] $Value) {
   return "'" + ($Value -replace "'", "'\''") + "'"
@@ -118,7 +104,7 @@ function Set-OpenCodeCommandIfMissing {
   }
 }
 
-$bash = Find-GitBash
+$bash = Resolve-DirextalkBashCommand
 
 $windowsDirextalkHome = Resolve-WindowsDirextalkHome
 $env:DIREXTALK_WINDOWS_HOME = $windowsDirextalkHome

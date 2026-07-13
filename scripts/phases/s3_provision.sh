@@ -435,6 +435,7 @@ _resume_host_bootstrap() {
   }
   integration_bundle=$(mktemp "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz") || return 1
   if ! tar -C "$S3_PHASE_DIR" -cf - \
+      cloud-init/init-tokens.sh \
       updater/bootstrap-host.sh \
       updater/install.sh \
       updater/reconcile-host.sh \

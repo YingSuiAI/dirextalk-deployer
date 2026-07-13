@@ -133,6 +133,8 @@ and existing formal release state are rejected.
 
 On Windows, use the PowerShell entrypoint so the deployer selects Git Bash for the cloud phases while writing Windows-compatible local `dirextalk-connect` paths:
 
+The wrapper accepts Git for Windows or MSYS2 Bash from `PATH`; for a custom installation, set `DIREXTALK_BASH_COMMAND` to the working Bash executable. It does not silently select the Windows WSL alias.
+
 ```powershell
 $env:AWS_DEFAULT_REGION = "us-east-1"
 $env:DOMAIN = "__DOMAIN__"

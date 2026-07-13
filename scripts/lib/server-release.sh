@@ -76,7 +76,7 @@ server_release_state_is_legacy_adopted() {
 
 server_release_prepare_state() {
   server_release_validate_override || return 1
-  local source version image digest image_ref manifest_digest node_binary resolver_script resolved_file resolved_json instance_id
+  local source version image digest image_ref manifest_digest node_binary resolver_script resolved_json instance_id
 
   source=$(state_get server_release.source)
   version=$(state_get server_release.version)
@@ -131,35 +131,25 @@ server_release_prepare_state() {
   node_binary=$(json_node) || { warn "Node.js is required to resolve the formal server Release."; return 1; }
   resolver_script="$SERVER_RELEASE_SCRIPTS_DIR/lib/server-release-resolver.mjs"
   [ -f "$resolver_script" ] || { warn "Server Release resolver is missing: $resolver_script"; return 1; }
-  resolved_file=$(mktemp)
-  if ! server_release_resolver_with_network_env "$node_binary" "$resolver_script" resolve-release > "$resolved_file"; then
-    rm -f "$resolved_file"
+  if ! resolved_json=$(server_release_resolver_with_network_env "$node_binary" "$resolver_script" resolve-release); then
     warn "No usable formal Dirextalk message-server GitHub Release is available."
     return 1
   fi
-  if ! json_valid "$resolved_file"; then
-    rm -f "$resolved_file"
-    warn "The release resolver returned invalid JSON."
-    return 1
-  fi
-  source=$(json_get "$resolved_file" source)
-  version=$(json_get "$resolved_file" version)
-  image=$(json_get "$resolved_file" image)
-  digest=$(json_get "$resolved_file" digest)
-  image_ref=$(json_get "$resolved_file" image_ref)
-  manifest_digest=$(json_get "$resolved_file" manifest_digest)
+  source=$(printf '%s\n' "$resolved_json" | json_stdin_get source 2>/dev/null) || source=
+  version=$(printf '%s\n' "$resolved_json" | json_stdin_get version 2>/dev/null) || version=
+  image=$(printf '%s\n' "$resolved_json" | json_stdin_get image 2>/dev/null) || image=
+  digest=$(printf '%s\n' "$resolved_json" | json_stdin_get digest 2>/dev/null) || digest=
+  image_ref=$(printf '%s\n' "$resolved_json" | json_stdin_get image_ref 2>/dev/null) || image_ref=
+  manifest_digest=$(printf '%s\n' "$resolved_json" | json_stdin_get manifest_digest 2>/dev/null) || manifest_digest=
   if [ "$source" != "github_release" ] \
     || ! server_release_is_version "$version" \
     || [ "$image" != "dirextalk/message-server:$version" ] \
     || ! server_release_is_digest "$digest" \
     || [ "$image_ref" != "$image@$digest" ] \
     || ! server_release_is_digest "$manifest_digest"; then
-    rm -f "$resolved_file"
     warn "The release resolver returned an inconsistent immutable target."
     return 1
   fi
-  resolved_json=$(cat "$resolved_file")
-  rm -f "$resolved_file"
   state_set_raw server_release "$resolved_json"
 }
 

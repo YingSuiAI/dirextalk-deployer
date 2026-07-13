@@ -49,6 +49,7 @@ caddy="$tmp/bundle/Caddyfile"
 main_unit="$tmp/bundle/updater/dirextalk-updater.service"
 discovery_unit="$tmp/bundle/updater/dirextalk-updater-discovery.service"
 timer="$tmp/bundle/updater/dirextalk-updater-discovery.timer"
+grep -F -q '"compose_project": "dirextalk-message-server"' "$tmp/bundle/updater/config.json"
 
 awk '
   /^  caddy:/ { in_service=1; next }

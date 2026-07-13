@@ -61,6 +61,8 @@ if [ "${DIREXTALK_UPDATER_SKIP_SYSTEMD:-0}" != "1" ] && [ -z "$root" ]; then
   else
     systemctl enable --now dirextalk-updater.service
   fi
-  systemctl start dirextalk-updater-discovery.service
+  if ! systemctl start dirextalk-updater-discovery.service; then
+    echo "dirextalk updater initial release discovery failed; the timer will retry." >&2
+  fi
   systemctl enable --now dirextalk-updater-discovery.timer
 fi

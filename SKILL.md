@@ -59,6 +59,9 @@ Windows PowerShell. These wrappers may use Git Bash internally, but must set
 `DIREXTALK_LOCAL_PATH_STYLE=windows`. POSIX users run `bash scripts/orchestrate.sh`
 and `bash scripts/destroy.sh`. Do not tell Windows users to use WSL unless they
 explicitly choose WSL as the host runtime.
+The Windows wrappers accept a working Git for Windows or MSYS2 Bash from
+`PATH`; `DIREXTALK_BASH_COMMAND` selects a custom executable. They reject the
+implicit Windows WSL aliases so local path ownership cannot change silently.
 
 ## Prerequisites And Confirmation
 

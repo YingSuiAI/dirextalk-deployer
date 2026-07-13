@@ -88,6 +88,10 @@ bootstrap_has_real_agent_room() {
 
 bootstrap_portal() {
   local password tmp
+  if bootstrap_file_ready && bootstrap_has_core_credentials "$BOOTSTRAP_FILE"; then
+    log "portal bootstrap credentials are already present."
+    return 0
+  fi
   password=${P2P_PORTAL_PASSWORD:-}
   [ -n "$password" ] || password=$(env_string P2P_PORTAL_PASSWORD)
   if [ -z "$password" ]; then
@@ -97,6 +101,11 @@ bootstrap_portal() {
   tmp=$(mktemp)
   if container_post_json "/_p2p/command" "{\"action\":\"portal.bootstrap\",\"params\":{\"password\":\"${password}\"}}" > "$tmp" 2>/dev/null; then
     log "portal.bootstrap accepted."
+    rm -f "$tmp"
+    return 0
+  fi
+  if bootstrap_file_ready && bootstrap_has_core_credentials "$BOOTSTRAP_FILE"; then
+    log "portal bootstrap completed concurrently."
     rm -f "$tmp"
     return 0
   fi

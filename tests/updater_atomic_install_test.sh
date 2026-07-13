@@ -82,5 +82,7 @@ grep -F -q 'systemctl daemon-reload' "$install_script"
 grep -F -q 'systemctl is-active --quiet dirextalk-updater.service' "$install_script"
 grep -F -q 'systemctl restart dirextalk-updater.service' "$install_script"
 grep -F -q 'systemctl enable --now dirextalk-updater.service' "$install_script"
+grep -F -q 'if ! systemctl start dirextalk-updater-discovery.service; then' "$install_script"
+grep -F -q 'the timer will retry' "$install_script"
 
 echo "updater atomic final install ok"

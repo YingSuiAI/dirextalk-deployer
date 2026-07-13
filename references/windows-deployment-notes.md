@@ -12,7 +12,7 @@ Use the PowerShell wrapper from the repository root:
 .\scripts\destroy.ps1
 ```
 
-The wrappers find Git for Windows Bash and use it for the Bash state machine, but set `DIREXTALK_LOCAL_PATH_STYLE=windows` so S6 stores Windows-compatible consumer paths and renders recommendation commands as valid PowerShell. POSIX hosts receive Bash recommendations. Use these PowerShell entrypoints on Windows instead of WSL Bash unless you intentionally deployed from WSL and want WSL-owned local paths.
+The wrappers find a working Git for Windows or MSYS2 Bash on `PATH` and use it for the Bash state machine, but set `DIREXTALK_LOCAL_PATH_STYLE=windows` so S6 stores Windows-compatible consumer paths and renders recommendation commands as valid PowerShell. Set `DIREXTALK_BASH_COMMAND` for a custom executable location. The wrappers reject implicit Windows WSL aliases; use WSL Bash directly only when you intentionally want WSL-owned local paths. POSIX hosts receive Bash recommendations.
 
 Destroy can use `DOMAIN` or an explicit Windows state path:
 

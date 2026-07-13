@@ -43,6 +43,7 @@ _resume_host_bootstrap 203.0.113.44 "$tmp/key.pem"
 
 tar -tzf "$REMOTE_BUNDLE" > "$tmp/bundle.list"
 for path in \
+  cloud-init/init-tokens.sh \
   updater/bootstrap-host.sh \
   updater/install.sh \
   updater/reconcile-host.sh \
@@ -65,6 +66,7 @@ grep -F -q 'reconcile-host.sh' "$REMOTE_COMMAND"
 grep -F -q 'systemctl is-active' "$tmp/old-remote/updater/reconcile-host.sh"
 grep -F -q '/usr/local/bin/dirextalk-updater version' "$tmp/old-remote/updater/reconcile-host.sh"
 grep -F -q 'sha256sum /usr/local/bin/dirextalk-updater' "$tmp/old-remote/updater/reconcile-host.sh"
+grep -F -q 'init-tokens.sh' "$tmp/old-remote/updater/reconcile-host.sh"
 [ "$(json_get "$STATE_JSON" updater_release.version)" = v1.0.6 ]
 [ "$(json_get "$STATE_JSON" updater_release.commit)" = 586f5ee82f1697269cfd764545198d88707734b8 ]
 

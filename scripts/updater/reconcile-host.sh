@@ -15,6 +15,11 @@ if [ -n "$legacy_source" ]; then
     [ -f "$source_dir/$file" ] || { echo "legacy integration file is missing: $file" >&2; exit 1; }
   done
 fi
+init_tokens_source="$source_dir/../cloud-init/init-tokens.sh"
+if [ -z "$legacy_source" ] && [ ! -f "$init_tokens_source" ]; then
+  echo "current init-tokens integration file is missing" >&2
+  exit 1
+fi
 
 if [ -n "$legacy_source" ]; then
   bash "$source_dir/adopt-legacy-host.sh" commit "$legacy_source" "$source_dir"
@@ -28,6 +33,9 @@ done
 for file in release.env config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do
   install -m 0644 "$source_dir/$file" "$integration_dir/$file"
 done
+if [ -z "$legacy_source" ]; then
+  install -m 0755 "$init_tokens_source" "$base/init-tokens.sh"
+fi
 if [ -n "$legacy_source" ]; then
   install -m 0600 "$source_dir/config.legacy-systemd-caddy.json" "$integration_dir/config.json"
   for file in legacy-d1-compose.p2p.yml legacy-adopt-compose.yml; do

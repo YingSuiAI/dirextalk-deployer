@@ -34,6 +34,7 @@ tests=(
   tests/s3_stable_ip_reconcile_test.sh
   tests/s3_public_ip_validation_test.sh
   tests/s3_updater_integration_migration_test.sh
+  tests/s5_init_tokens_test.sh
   tests/legacy_adopt_test.sh
   tests/lightsail_static_ip_quota_test.sh
   tests/destroy_lightsail_test.sh
@@ -46,6 +47,7 @@ tests=(
   tests/operation_report_test.sh
   tests/render_userdata_remote_nodes_test.sh
   tests/server_release_test.sh
+  tests/init_tokens_resume_test.sh
   tests/server_release_resolver_test.sh
   tests/updater_release_pin_test.sh
   tests/updater_bundle_test.sh

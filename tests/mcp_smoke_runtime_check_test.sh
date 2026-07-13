@@ -76,6 +76,13 @@ fi
 [ "$write_code" -eq 1 ] && printf '200'
 EOF
 chmod 700 "$fakebin/curl"
+cat > "$fakebin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$#" -gt 0 ] || { echo "runtime checks must not use the shell default temp directory" >&2; exit 98; }
+exec /usr/bin/mktemp "$@"
+EOF
+chmod 700 "$fakebin/mktemp"
 
 service_dir="$HOME/.dirextalk/nodes/mcp-smoke.example.test"
 mkdir -p "$service_dir"

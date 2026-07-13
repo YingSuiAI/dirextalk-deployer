@@ -62,6 +62,11 @@ cat > "$tmp/bin/go" <<'EOF'
 echo "server release resolution must not require local Go" >&2
 exit 99
 EOF
+cat > "$tmp/bin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+echo "server release resolution must not depend on a shell temp path" >&2
+exit 98
+EOF
 chmod 0755 "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH"
 

@@ -14,7 +14,7 @@ run_phase() {
   pubip=$(res_get public_ip)
   keyfile=$(res_get key_file)
   local out="$DIREXTALK_WORKDIR/outputs.json" raw
-  raw=$(mktemp)
+  raw=$(mktemp "$DIREXTALK_WORKDIR/.bootstrap-output.XXXXXX")
   trap 'rm -f "${raw:-}"; trap - RETURN' RETURN
 
   log "Fetching ${DIREXTALK_REMOTE_BOOTSTRAP_FILE} ..."
@@ -100,7 +100,7 @@ _read_remote_bootstrap() {
 _normalize_bootstrap_output() {
   local domain=$1 src=$2 out=$3
   local tmp
-  tmp=$(mktemp)
+  tmp=$(mktemp "$DIREXTALK_WORKDIR/.outputs.XXXXXX")
   if ! json_build bootstrap-normalized "$src" "$domain" > "$tmp"; then
     rm -f "$tmp"
     return 1

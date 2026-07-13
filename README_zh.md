@@ -125,6 +125,8 @@ Release 状态一律拒绝。
 
 Windows 用户使用 PowerShell 入口。它会选择 Git Bash 执行云端 phase，同时给本地 `dirextalk-connect` 写入 Windows 可直接使用的路径：
 
+包装器支持从 `PATH` 发现 Git for Windows 或 MSYS2 Bash；自定义安装位置可通过 `DIREXTALK_BASH_COMMAND` 指向可用的 Bash 可执行文件。它不会静默选择 Windows 的 WSL 别名。
+
 ```powershell
 $env:AWS_DEFAULT_REGION = "us-east-1"
 $env:DOMAIN = "__DOMAIN__"

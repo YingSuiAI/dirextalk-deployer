@@ -33,6 +33,13 @@ server_release_resolver_with_network_env() {
     export https_proxy="${DIREXTALK_RELEASE_https_proxy-${https_proxy-}}"
     export NO_PROXY="${DIREXTALK_RELEASE_NO_PROXY-${NO_PROXY-}}"
     export no_proxy="${DIREXTALK_RELEASE_no_proxy-${no_proxy-}}"
+    if [ -n "${HTTP_PROXY:-}${HTTPS_PROXY:-}${http_proxy:-}${https_proxy:-}" ] && [ -z "${NODE_USE_ENV_PROXY+x}" ]; then
+      export NODE_USE_ENV_PROXY=1
+    fi
+    unset DIREXTALK_RELEASE_NETWORK_CAPTURED DIREXTALK_RELEASE_HTTP_PROXY \
+      DIREXTALK_RELEASE_HTTPS_PROXY DIREXTALK_RELEASE_http_proxy \
+      DIREXTALK_RELEASE_https_proxy DIREXTALK_RELEASE_NO_PROXY \
+      DIREXTALK_RELEASE_no_proxy
     "$@"
   )
 }

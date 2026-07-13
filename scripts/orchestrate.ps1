@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 . (Join-Path $ScriptDir 'lib\windows-paths.ps1')
+. (Join-Path $ScriptDir 'lib\windows-network-env.ps1')
 
 function Find-GitBash {
   $candidates = @(
@@ -155,5 +156,14 @@ $repoRootForBash = ConvertTo-GitBashPath $RepoRoot
 $quotedArgs = ($OrchestrateArgs | ForEach-Object { Quote-BashArg $_ }) -join ' '
 $command = "cd $(Quote-BashArg $repoRootForBash) && ./scripts/orchestrate.sh $quotedArgs"
 
-& $bash -lc $command
-exit $LASTEXITCODE
+$releaseNetworkSnapshot = Get-DirextalkReleaseNetworkInputSnapshot
+$exitCode = 1
+try {
+  Set-DirextalkReleaseNetworkInputs
+  & $bash -lc $command
+  $exitCode = $LASTEXITCODE
+}
+finally {
+  Restore-DirextalkReleaseNetworkInputSnapshot $releaseNetworkSnapshot
+}
+exit $exitCode

@@ -10,9 +10,11 @@ trap 'rm -rf "$tmp"' EXIT
 export DIREXTALK_WORKDIR="$tmp/work"
 export RUN_ID=ticket3-release-test
 export AWS_DEFAULT_REGION=us-east-1
-export HTTP_PROXY=http://release-proxy.example.test:8080
-export HTTPS_PROXY=http://release-proxy.example.test:8080
-export NO_PROXY=localhost,127.0.0.1
+unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy
+unset NODE_USE_ENV_PROXY
+export DIREXTALK_RELEASE_HTTP_PROXY_INPUT=http://release-proxy.example.test:8080
+export DIREXTALK_RELEASE_HTTPS_PROXY_INPUT=http://release-proxy.example.test:8080
+export DIREXTALK_RELEASE_NO_PROXY_INPUT=localhost,127.0.0.1
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null
@@ -38,6 +40,10 @@ fi
 }
 [ "${NO_PROXY:-}" = "localhost,127.0.0.1" ] || {
   echo "release resolver must receive the original NO_PROXY value" >&2
+  exit 97
+}
+[ "${NODE_USE_ENV_PROXY:-}" = "1" ] || {
+  echo "release resolver must enable Node proxy support when a proxy is configured" >&2
   exit 97
 }
 cat <<'JSON'

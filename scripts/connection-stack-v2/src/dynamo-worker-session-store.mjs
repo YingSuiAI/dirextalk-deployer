@@ -27,6 +27,11 @@ const AVAILABILITY_ZONE_PATTERN = /^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[
 const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const SESSION_STATES = new Set(["issued", "bound", "active"]);
 const MAX_EVENT_JSON_BYTES = 16 * 1024;
+// An active Worker renews its short bearer lease regularly. Keep the durable
+// session record for a bounded period after the last lease so reconnects can
+// be distinguished from a never-claimed bootstrap session without retaining
+// abandoned records indefinitely.
+const WORKER_SESSION_ACTIVE_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 function fail(code, message, statusCode = 409) {
   throw new ConnectionStackV2Error(code, message, statusCode);
@@ -66,6 +71,19 @@ function parseCanonicalInstant(value, field, code = "worker_session_invalid", st
     fail(code, `${field} is invalid`, statusCode);
   }
   return milliseconds;
+}
+
+function bootstrapTTLSeconds(expiresAt) {
+  return Math.ceil(Date.parse(expiresAt) / 1000);
+}
+
+function activeTTLSeconds(leaseExpiresAt) {
+  return Math.ceil((Date.parse(leaseExpiresAt) + WORKER_SESSION_ACTIVE_RETENTION_MS) / 1000);
+}
+
+function activeSessionCanRecover(session, nowMs) {
+  return session.state === "active" && typeof session.lease_expires_at === "string"
+    && Date.parse(session.lease_expires_at) + WORKER_SESSION_ACTIVE_RETENTION_MS > nowMs;
 }
 
 function requireHttpsEndpoint(value) {
@@ -194,9 +212,6 @@ function parseStoredSession(item, expectedSessionId) {
   requireStoredSessionFields(item, state);
   const expiresAt = storedInstant(item, "expires_at");
   const ttlEpochSeconds = storedPositiveInteger(item, "ttl_epoch_seconds");
-  if (ttlEpochSeconds !== Math.ceil(Date.parse(expiresAt) / 1000)) {
-    fail("worker_session_store_invalid", "stored worker session ttl is invalid", 500);
-  }
   const session = {
     bootstrap_session_id: bootstrapSessionId,
     connection_id: storedString(item, "connection_id", ID_PATTERN),
@@ -238,6 +253,9 @@ function parseStoredSession(item, expectedSessionId) {
       || lastEventJSON !== undefined || lastEventAt !== undefined) {
       fail("worker_session_store_invalid", "stored issued worker session is invalid", 500);
     }
+    if (ttlEpochSeconds !== bootstrapTTLSeconds(expiresAt)) {
+      fail("worker_session_store_invalid", "stored worker session ttl is invalid", 500);
+    }
     return session;
   }
 
@@ -251,6 +269,9 @@ function parseStoredSession(item, expectedSessionId) {
       || tokenSHA256 !== undefined || lastEventSHA256 !== undefined || lastEventJSON !== undefined || lastEventAt !== undefined) {
       fail("worker_session_store_invalid", "stored bound worker session is invalid", 500);
     }
+    if (ttlEpochSeconds !== bootstrapTTLSeconds(expiresAt)) {
+      fail("worker_session_store_invalid", "stored worker session ttl is invalid", 500);
+    }
     return session;
   }
 
@@ -258,8 +279,11 @@ function parseStoredSession(item, expectedSessionId) {
     fail("worker_session_store_invalid", "stored active worker session is invalid", 500);
   }
   storedInstant(item, "bound_at");
-  storedInstant(item, "claimed_at");
-  if (Date.parse(leaseExpiresAt) > Date.parse(session.expires_at)) {
+  const claimedAt = storedInstant(item, "claimed_at");
+  const claimedAtMs = Date.parse(claimedAt);
+  const leaseExpiresAtMs = Date.parse(leaseExpiresAt);
+  if (leaseExpiresAtMs <= claimedAtMs || leaseExpiresAtMs - claimedAtMs > WORKER_SESSION_MAX_LEASE_LIFETIME_MS
+    || ttlEpochSeconds !== activeTTLSeconds(leaseExpiresAt)) {
     fail("worker_session_store_invalid", "stored worker lease is invalid", 500);
   }
   if (session.last_sequence === 0) {
@@ -347,8 +371,10 @@ function validateClaimInput(input, nowMs, session) {
     lease_expires_at: input.lease_expires_at,
   };
   const leaseExpiresAtMs = parseCanonicalInstant(normalized.lease_expires_at, "lease_expires_at");
-  if (leaseExpiresAtMs <= nowMs || leaseExpiresAtMs > Date.parse(session.expires_at)) {
-    fail("worker_session_expired", "worker session lease is outside the bootstrap session lifetime", 409);
+  if (leaseExpiresAtMs <= nowMs || leaseExpiresAtMs - nowMs > WORKER_SESSION_MAX_LEASE_LIFETIME_MS
+    || (session.state !== "active" && leaseExpiresAtMs > Date.parse(session.expires_at))
+    || (session.state === "active" && !activeSessionCanRecover(session, nowMs))) {
+    fail("worker_session_expired", "worker session lease is outside its allowed lifetime", 409);
   }
   return normalized;
 }
@@ -409,7 +435,7 @@ function issueItem(input, now) {
     expected_security_group_id: { S: input.expected_security_group_id },
     state: { S: "issued" },
     expires_at: { S: input.expires_at },
-    ttl_epoch_seconds: { N: String(Math.ceil(Date.parse(input.expires_at) / 1000)) },
+    ttl_epoch_seconds: { N: String(bootstrapTTLSeconds(input.expires_at)) },
     issued_at: { S: now },
     updated_at: { S: now },
     lease_epoch: { N: "0" },
@@ -483,7 +509,7 @@ export class DynamoWorkerSessionStore {
       return {
         ...normalized,
         state: "issued",
-        ttl_epoch_seconds: Math.ceil(Date.parse(normalized.expires_at) / 1000),
+        ttl_epoch_seconds: bootstrapTTLSeconds(normalized.expires_at),
         issued_at: now,
         updated_at: now,
         lease_epoch: 0,
@@ -559,8 +585,8 @@ export class DynamoWorkerSessionStore {
       const output = await this.client.send(new this.UpdateItemCommand({
         TableName: this.workerSessionsTableName,
         Key: sessionKey(normalized.session_id),
-        ConditionExpression: "expected_instance_id = :instance_id AND #state IN (:bound, :active) AND expires_at > :now",
-        UpdateExpression: "SET #state = :active, lease_epoch = lease_epoch + :one, lease_expires_at = :lease_expires_at, token_sha256 = :token_sha256, last_sequence = :zero, claimed_at = :now, updated_at = :now REMOVE last_event_sha256, last_event_json, last_event_at",
+        ConditionExpression: "expected_instance_id = :instance_id AND ((#state = :active AND lease_expires_at > :active_recovery_cutoff) OR (#state = :bound AND expires_at > :now))",
+        UpdateExpression: "SET #state = :active, lease_epoch = lease_epoch + :one, lease_expires_at = :lease_expires_at, token_sha256 = :token_sha256, ttl_epoch_seconds = :ttl_epoch_seconds, last_sequence = :zero, claimed_at = :now, updated_at = :now REMOVE last_event_sha256, last_event_json, last_event_at",
         ExpressionAttributeNames: { "#state": "state" },
         ExpressionAttributeValues: {
           ":instance_id": { S: normalized.instance_id },
@@ -570,6 +596,8 @@ export class DynamoWorkerSessionStore {
           ":one": { N: "1" },
           ":lease_expires_at": { S: normalized.lease_expires_at },
           ":token_sha256": { S: normalized.token_sha256 },
+          ":ttl_epoch_seconds": { N: String(activeTTLSeconds(normalized.lease_expires_at)) },
+          ":active_recovery_cutoff": { S: new Date(Date.parse(now) - WORKER_SESSION_ACTIVE_RETENTION_MS).toISOString() },
           ":now": { S: now },
         },
         ReturnValues: "ALL_NEW",
@@ -582,8 +610,11 @@ export class DynamoWorkerSessionStore {
     }
     const existing = await this.#read(normalized.session_id);
     if (!existing) fail("worker_session_unavailable", "worker session storage could not reconcile its conditional write", 503);
-    if (Date.parse(existing.expires_at) <= Date.parse(now)) {
+    if (existing.state !== "active" && Date.parse(existing.expires_at) <= Date.parse(now)) {
       fail("worker_session_expired", "worker bootstrap session has expired", 409);
+    }
+    if (existing.state === "active" && !activeSessionCanRecover(existing, Date.parse(now))) {
+      fail("worker_session_expired", "worker session recovery retention has expired", 409);
     }
     if (existing.expected_instance_id !== normalized.instance_id || !["bound", "active"].includes(existing.state)) {
       fail("worker_session_claim_conflict", "Worker instance does not match its bootstrap session", 409);
@@ -623,7 +654,7 @@ export class DynamoWorkerSessionStore {
     }
     const existing = await this.#read(normalized.session_id);
     if (!existing) fail("worker_session_unavailable", "worker session storage could not reconcile its conditional write", 503);
-    if (Date.parse(existing.expires_at) <= Date.parse(now) || (existing.lease_expires_at !== undefined && Date.parse(existing.lease_expires_at) <= Date.parse(now))) {
+    if (existing.lease_expires_at !== undefined && Date.parse(existing.lease_expires_at) <= Date.parse(now)) {
       fail("worker_session_expired", "worker session lease has expired", 409);
     }
     if (existing.connection_id !== normalized.connection_id || existing.deployment_id !== normalized.deployment_id

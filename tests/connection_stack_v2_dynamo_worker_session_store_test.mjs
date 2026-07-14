@@ -26,6 +26,7 @@ const SESSION_ID = "worker-session-v2-001";
 const REQUEST_SHA256 = "a".repeat(64);
 const TOKEN_ONE_SHA256 = "b".repeat(64);
 const TOKEN_TWO_SHA256 = "c".repeat(64);
+const TOKEN_THREE_SHA256 = "d".repeat(64);
 
 function conditionalFailure() {
   return Object.assign(new Error("conditional write failed"), { name: "ConditionalCheckFailedException" });
@@ -118,11 +119,13 @@ class SessionDynamo {
     if (command.input.UpdateExpression.includes("lease_epoch")) {
       if (this.item.expected_instance_id?.S !== values[":instance_id"].S
         || !["bound", "active"].includes(this.item.state?.S)
-        || this.item.expires_at?.S <= values[":now"].S) throw conditionalFailure();
+        || (this.item.state?.S === "bound" && this.item.expires_at?.S <= values[":now"].S)
+        || (this.item.state?.S === "active" && this.item.lease_expires_at?.S <= values[":active_recovery_cutoff"].S)) throw conditionalFailure();
       this.item.state = values[":active"];
       this.item.lease_epoch = { N: String(Number(this.item.lease_epoch?.N ?? "0") + 1) };
       this.item.lease_expires_at = values[":lease_expires_at"];
       this.item.token_sha256 = values[":token_sha256"];
+      this.item.ttl_epoch_seconds = values[":ttl_epoch_seconds"];
       this.item.last_sequence = values[":zero"];
       delete this.item.last_event_sha256;
       delete this.item.last_event_json;
@@ -196,6 +199,11 @@ assert.equal(claimed.lease_epoch, 1);
 assert.equal(claimed.token_sha256, TOKEN_ONE_SHA256);
 assert.equal(client.updates.at(-1).ConditionExpression.includes("token_sha256"), false, "claim replaces a bearer hash only after the IID-bound session is proven");
 assert.equal(client.updates.at(-1).ReturnValues, "ALL_NEW");
+assert.equal(
+  claimed.ttl_epoch_seconds,
+  Math.ceil((Date.parse(claimed.lease_expires_at) + 24 * 60 * 60 * 1000) / 1000),
+  "an active Worker record outlives its bearer lease only by the bounded reconnect retention",
+);
 
 assert.deepEqual(
   await sessions.recordEvent({
@@ -279,10 +287,39 @@ assert.equal(
   sessionInput().expires_at,
   "a same-binding Worker bootstrap retry must reuse its original expiry",
 );
+currentNow = Date.parse("2026-07-15T01:11:00.000Z");
+const recoveredAfterBootstrapExpiry = await sessions.claim({
+  session_id: SESSION_ID,
+  instance_id: "i-0123456789abcdef0",
+  token_sha256: TOKEN_THREE_SHA256,
+  lease_expires_at: "2026-07-15T01:16:00.000Z",
+});
+assert.equal(recoveredAfterBootstrapExpiry.state, "active");
+assert.equal(recoveredAfterBootstrapExpiry.lease_epoch, 3, "an active session may rotate its bearer after bootstrap expiry");
+assert.equal(recoveredAfterBootstrapExpiry.token_sha256, TOKEN_THREE_SHA256);
+assert.equal(
+  recoveredAfterBootstrapExpiry.ttl_epoch_seconds,
+  Math.ceil((Date.parse(recoveredAfterBootstrapExpiry.lease_expires_at) + 24 * 60 * 60 * 1000) / 1000),
+  "reauthentication extends durable retention from the new bearer lease",
+);
 await assert.rejects(
-  () => sessions.issue(sessionInput({ artifact_manifest_digest: `sha256:${"1".repeat(64)}` })),
+  () => sessions.issue(sessionInput({
+    artifact_manifest_digest: `sha256:${"1".repeat(64)}`,
+    expires_at: "2026-07-15T01:20:00.000Z",
+  })),
   (error) => error?.code === "worker_session_conflict",
   "a bootstrap session id cannot be rebound to a different artifact",
+);
+currentNow = Date.parse("2026-07-16T01:16:00.000Z");
+await assert.rejects(
+  () => sessions.claim({
+    session_id: SESSION_ID,
+    instance_id: "i-0123456789abcdef0",
+    token_sha256: "8".repeat(64),
+    lease_expires_at: "2026-07-16T01:21:00.000Z",
+  }),
+  (error) => error?.code === "worker_session_expired",
+  "Dynamo TTL deletion lag cannot revive an abandoned active Worker after its bounded recovery retention",
 );
 
 const expiredClient = new SessionDynamo();
@@ -291,6 +328,29 @@ await assert.rejects(
   () => expiredStore.issue(sessionInput()),
   (error) => error?.code === "worker_session_expired",
   "a bootstrap session cannot be issued after its own expiry",
+);
+
+const unclaimedClient = new SessionDynamo();
+let unclaimedNow = NOW;
+const unclaimedStore = store(unclaimedClient, () => unclaimedNow);
+const unclaimedSession = sessionInput({ bootstrap_session_id: "worker-session-v2-003" });
+await unclaimedStore.issue(unclaimedSession);
+await unclaimedStore.bind({
+  session_id: unclaimedSession.bootstrap_session_id,
+  request_sha256: REQUEST_SHA256,
+  instance_id: "i-0123456789abcdef0",
+  security_group_id: "sg-0123456789abcdef0",
+});
+unclaimedNow = Date.parse("2026-07-15T01:11:00.000Z");
+await assert.rejects(
+  () => unclaimedStore.claim({
+    session_id: unclaimedSession.bootstrap_session_id,
+    instance_id: "i-0123456789abcdef0",
+    token_sha256: "9".repeat(64),
+    lease_expires_at: "2026-07-15T01:16:00.000Z",
+  }),
+  (error) => error?.code === "worker_session_expired",
+  "a never-claimed bound session cannot be revived after its bootstrap window",
 );
 
 console.log("connection stack v2 Dynamo Worker session store boundary ok");

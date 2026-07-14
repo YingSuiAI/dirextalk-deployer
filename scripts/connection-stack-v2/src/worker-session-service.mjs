@@ -117,6 +117,7 @@ function validateSession(session, {
   claim,
   nowMs,
   requireActive = false,
+  allowExpiredActive = false,
 } = {}) {
   if (!session || typeof session !== "object" || Array.isArray(session)) {
     fail("worker_session_invalid", "worker session is invalid", 409);
@@ -136,12 +137,12 @@ function validateSession(session, {
   ))) {
     fail("worker_session_invalid", "worker session does not bind this request", 409);
   }
-  if (expiresAtMs <= nowMs) {
-    fail("worker_session_expired", "worker session has expired", 401);
-  }
   const allowedStates = requireActive ? new Set(["active"]) : new Set(["bound", "active"]);
   if (!allowedStates.has(session.state)) {
     fail("worker_session_invalid", "worker session is not bound to an EC2 instance", 409);
+  }
+  if (expiresAtMs <= nowMs && !(allowExpiredActive && session.state === "active")) {
+    fail("worker_session_expired", "worker session has expired", 401);
   }
   const expectedInstanceID = requireString(session.expected_instance_id, "expected_instance_id", INSTANCE_ID_PATTERN);
   const leaseEpoch = session.lease_epoch ?? 0;
@@ -235,13 +236,20 @@ export class WorkerSessionService {
       fail("worker_session_invalid", "worker session path does not match the claim", 409);
     }
     const nowMs = requireSafeMilliseconds(this.nowMs(), "clock");
-    const current = validateSession(await callStore(() => this.store.get(sessionId)), { sessionId, claim, nowMs });
+    const current = validateSession(await callStore(() => this.store.get(sessionId)), {
+      sessionId,
+      claim,
+      nowMs,
+      allowExpiredActive: true,
+    });
     const identity = await verifyIdentity(this.identityVerifier, claim, current);
     if (!identity || identity.instance_id !== current.expected_instance_id) {
       fail("worker_identity_invalid", "worker identity does not match its issued session", 401);
     }
     const token = opaqueToken(this.createAccessToken());
-    const leaseExpiresAtMs = Math.min(nowMs + this.leaseDurationMs, current.expires_at_ms);
+    const leaseExpiresAtMs = current.state === "active"
+      ? nowMs + this.leaseDurationMs
+      : Math.min(nowMs + this.leaseDurationMs, current.expires_at_ms);
     if (leaseExpiresAtMs <= nowMs) {
       fail("worker_session_expired", "worker session has expired", 401);
     }
@@ -254,7 +262,13 @@ export class WorkerSessionService {
       lease_expires_at: leaseExpiresAt,
       now_ms: nowMs,
     }));
-    const normalized = validateSession(claimed, { sessionId, claim, nowMs, requireActive: true });
+    const normalized = validateSession(claimed, {
+      sessionId,
+      claim,
+      nowMs,
+      requireActive: true,
+      allowExpiredActive: true,
+    });
     if (normalized.expected_instance_id !== current.expected_instance_id || normalized.lease_expires_at !== leaseExpiresAt
       || !sameHash(normalized.token_sha256, tokenSHA256) || !Number.isSafeInteger(normalized.lease_epoch) || normalized.lease_epoch < 1) {
       fail("worker_session_invalid", "worker session claim storage result is invalid", 500);
@@ -268,7 +282,12 @@ export class WorkerSessionService {
       fail("worker_session_invalid", "worker session path does not match the event", 409);
     }
     const nowMs = requireSafeMilliseconds(this.nowMs(), "clock");
-    const current = validateSession(await callStore(() => this.store.get(sessionId)), { sessionId, nowMs, requireActive: true });
+    const current = validateSession(await callStore(() => this.store.get(sessionId)), {
+      sessionId,
+      nowMs,
+      requireActive: true,
+      allowExpiredActive: true,
+    });
     if (event.connection_id !== current.connection_id || event.deployment_id !== current.deployment_id || event.lease_epoch !== current.lease_epoch) {
       fail("worker_session_unauthorized", "worker event does not bind the active session lease", 401);
     }

@@ -18,10 +18,10 @@ isolated Worker instance.
 
 It has no generic AWS API, IAM/PassRole, SSH/key-pair, instance-profile,
 user-data, secret-read, public-ingress, or public-IP capability. It does not
-yet grant Recipe command execution, service health evidence, a renewable
-long-running Worker lease, or lifecycle mutation such as stop, start, observe,
-or destroy. Its Worker path is limited to an initial verified bootstrap claim
-and bounded event channel.
+yet grant Recipe command execution, service health evidence, or lifecycle
+mutation such as stop, start, observe, or destroy. Its Worker path is limited
+to an initial verified bootstrap claim, a bounded reauthentication lease, and
+an event channel.
 
 ## Bootstrap boundary
 
@@ -332,14 +332,19 @@ empty or invalid value keeps fresh EC2 creation and Worker claims fail closed.
 The successful claim returns a short bearer only in that HTTPS response. The
 session table stores its SHA-256 hash only; events use a monotonic lease epoch
 and sequence plus a canonical event hash, so an exact retry is idempotent and
-a reordered or old-token event is rejected. Worker event state is deliberately
-limited to checkpoint/report metadata. This boundary does not execute a
-Recipe, read a service secret, proxy arbitrary commands, declare a service
-ready, open ingress, stop/destroy EC2, or treat a Worker log as independent
-health evidence. The bootstrap expiry is at most ten minutes and is not a
-renewable long-running service identity: do not enable this executor for
-OpenClaw, knowledge nodes, model serving, training, or continuous monitoring
-until a separately reviewed renewal/recovery protocol is in place.
+a reordered or old-token event is rejected. The first claim remains limited by
+the at-most-ten-minute bootstrap expiry. Once the Stack has independently
+verified and activated that exact EC2 instance, a reconnect must send a fresh
+IID proof and receives a rotated bearer and lease epoch; a never-claimed
+session cannot be revived after its bootstrap expiry. The active durable record
+has a 24-hour recovery-retention fence after its last lease, enforced by the
+application rather than DynamoDB TTL deletion timing. Worker event state is
+deliberately limited to checkpoint/report metadata. This boundary does not
+execute a Recipe, read a service secret, proxy arbitrary commands, declare a
+service ready, open ingress, stop/destroy EC2, or treat a Worker log as
+independent health evidence. Do not enable this executor for OpenClaw,
+knowledge nodes, model serving, training, or continuous monitoring until the
+separately reviewed executor, health, and lifecycle protocols are in place.
 
 ## Offline verification
 

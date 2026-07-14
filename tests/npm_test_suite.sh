@@ -10,6 +10,8 @@ cd "$ROOT"
 source "$ROOT/tests/lib/isolated_home.sh"
 : "${DIREXTALK_TEST_ROOT:?run this suite through tests/lib/run_isolated.sh}"
 dirextalk_test_assert_isolated_homes "$DIREXTALK_TEST_ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/json.sh"
 
 mode=${1:-quick}
 case "$mode" in
@@ -22,6 +24,7 @@ esac
 # local path/permission boundaries, persisted JSON, and atomic updater replacement.
 quick_tests=(
   tests/tracked_text_lf_test.sh
+  tests/test_runner_entry_test.mjs
   tests/npm_skill_distribution_test.sh
   tests/connection_stack_v2_test.sh
   tests/skill_structure_test.sh
@@ -87,6 +90,9 @@ case "$mode" in
 esac
 
 for test_file in "${tests[@]}"; do
+  case "$test_file" in
+    *.mjs) "$(json_node)" "$test_file"; continue ;;
+  esac
   if { [ "$mode" = extended ] || [ "$mode" = extended-only ]; } && [ "$test_file" = tests/s6_run_phase_failure_test.sh ]; then
     bash "$test_file" --extended
   else

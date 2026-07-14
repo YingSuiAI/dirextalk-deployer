@@ -303,3 +303,8 @@ npm run test:extended
 find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
 git diff --check
 ```
+
+On Windows these `npm` test commands may be launched directly from PowerShell,
+Command Prompt, or Git Bash. The test launcher finds Git for Windows Bash and
+runs the Bash-only suite there; lifecycle deployment commands themselves still
+run from Git Bash.

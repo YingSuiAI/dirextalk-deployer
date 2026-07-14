@@ -17,9 +17,9 @@
     "scripts/"
   ],
   "scripts": {
-    "test": "bash tests/lib/run_isolated.sh bash tests/npm_test_suite.sh",
-    "test:extended": "bash tests/lib/run_isolated.sh bash tests/npm_test_suite.sh extended",
-    "test:extended-only": "bash tests/lib/run_isolated.sh bash tests/npm_test_suite.sh extended-only"
+    "test": "node scripts/run-tests.mjs",
+    "test:extended": "node scripts/run-tests.mjs extended",
+    "test:extended-only": "node scripts/run-tests.mjs extended-only"
   },
   "engines": {
     "node": ">=18"

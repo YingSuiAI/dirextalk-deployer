@@ -182,7 +182,7 @@ async function productionHandler() {
       const {
         DynamoDBClient,
         GetItemCommand,
-        PutItemCommand,
+        UpdateItemCommand,
         TransactWriteItemsCommand,
       } = await import("@aws-sdk/client-dynamodb");
       const {
@@ -217,6 +217,7 @@ async function productionHandler() {
         challengesTableName: requiredEnvironment("APPROVAL_CHALLENGES_TABLE"),
         approvalProofsTableName: requiredEnvironment("APPROVAL_PROOFS_TABLE"),
         issuedQuotesTableName: requiredEnvironment("ISSUED_QUOTES_TABLE"),
+        deploymentReceiptsTableName: requiredEnvironment("DEPLOYMENT_RECEIPTS_TABLE"),
         countersTableName: requiredEnvironment("CONNECTION_COUNTERS_TABLE"),
         GetItemCommand,
         TransactWriteItemsCommand,
@@ -227,7 +228,7 @@ async function productionHandler() {
         issuedQuotesTableName: requiredEnvironment("ISSUED_QUOTES_TABLE"),
         deploymentReceiptsTableName: requiredEnvironment("DEPLOYMENT_RECEIPTS_TABLE"),
         GetItemCommand,
-        PutItemCommand,
+        UpdateItemCommand,
         nowMs: Date.now,
       });
       const deploymentProvisioner = new Ec2DedicatedWorkerProvisioner({

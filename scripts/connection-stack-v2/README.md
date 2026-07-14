@@ -198,21 +198,24 @@ transaction:
   counter advance.
 - For a challenge request: write the one-time challenge with the receipt. For a
   `deployment.create`: conditionally write the one-time `ApprovalV1` proof
-  reference (`connection_id`, `approval_id`, proof-payload digest, expiry) with
-  that counter advance and receipt write. The legacy challenge form remains
-  only for its pre-existing actions.
+  reference (`connection_id`, `approval_id`, proof-payload digest, expiry) and
+  reserve `(connection_id, deployment_id) -> request_sha256` with that same
+  counter advance and receipt write. A different signed request for that
+  deployment id is rejected before the handler can invoke EC2. The legacy
+  challenge form remains only for its pre-existing actions.
 
 If a conditional command response is lost or ambiguous, the Broker performs a
 consistent receipt read and returns that exact receipt only when its signed
 request identity matches. For an accepted `deployment.create`, the typed
-provisioner first reads the immutable deployment receipt, then the durable
-quote, and uses the command digest as EC2 `ClientToken`. This covers retries
-without a second worker purchase. A same-id mismatch, stale counter, expired
-fresh request, expired/replayed proof, quote mismatch, or unavailable durable
-store fails closed.
+provisioner treats the accepted reservation as non-receipt, then reads the
+durable quote, uses the command digest as EC2 `ClientToken`, and conditionally
+promotes only that same-request reservation to the immutable deployment
+receipt. This covers retries without a second worker purchase. A same-id
+mismatch, stale counter, expired fresh request, expired/replayed proof, quote
+mismatch, or unavailable durable store fails closed.
 
 The Lambda role has scoped DynamoDB reads/conditional transactions and a direct
-write only for deployment receipts. Its EC2 surface is closed to descriptions,
+conditional update only for deployment receipt promotion. Its EC2 surface is closed to descriptions,
 `CreateSecurityGroup`, `RevokeSecurityGroupEgress`,
 `AuthorizeSecurityGroupEgress`, `RunInstances`, and creation-time tagging in
 the Stack Region. It has no `PassRole`, instance profile, key-pair, public-IP,

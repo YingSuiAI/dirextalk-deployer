@@ -140,8 +140,13 @@ assert.equal(broker.Properties.Timeout, 30, "typed EC2 creation must retain a bo
 
 const rolePolicy = template.Resources.BrokerContractRole.Properties.Policies[0].PolicyDocument.Statement;
 assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:GetItem"));
-assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:TransactWriteItems"));
-assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:PutItem"), "only the private deployment receipt needs a direct DynamoDB write");
+const receiptTransaction = rolePolicy.find((statement) => statement.Action === "dynamodb:TransactWriteItems");
+assert.ok(receiptTransaction);
+assert.ok(
+  receiptTransaction.Resource.some((resource) => resource["Fn::GetAtt"]?.[0] === "DeploymentReceiptsTable"),
+  "deployment-id reservation must be written in the same receipt acceptance transaction",
+);
+assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:UpdateItem"), "only a same-request reservation may be promoted to a private deployment receipt");
 assert.deepEqual(
   rolePolicy.find((statement) => statement.Action === "pricing:GetProducts"),
   {
@@ -173,7 +178,7 @@ assert.deepEqual(
   "instance capacity lookup must remain read-only",
 );
 const providerPolicy = JSON.stringify(rolePolicy);
-assert.doesNotMatch(providerPolicy, /dynamodb:(?:UpdateItem|DeleteItem|Scan|Query|BatchWriteItem)/);
+assert.doesNotMatch(providerPolicy, /dynamodb:(?:PutItem|DeleteItem|Scan|Query|BatchWriteItem)/);
 assert.doesNotMatch(JSON.stringify(rolePolicy), /pricing:\*|ec2:\*/i);
 const typedWorkerStatement = rolePolicy.find((statement) => statement.Sid === "CreateDedicatedWorkerOnly");
 assert.deepEqual(typedWorkerStatement.Action, [
@@ -219,6 +224,7 @@ assert.match(handlerText, /@aws-sdk\/client-pricing/);
 assert.match(handlerText, /AwsOnDemandQuoteProvider/);
 assert.match(handlerText, /registrationRuntimeContext/);
 assert.match(handlerText, /DynamoDeploymentStore/);
+assert.match(handlerText, /UpdateItemCommand/);
 assert.match(handlerText, /Ec2DedicatedWorkerProvisioner/);
 assert.match(handlerText, /RunInstancesCommand/);
 assert.doesNotMatch(handlerText, /@aws-sdk\/client-(?:s3|iam|secrets-manager)/);

@@ -17,9 +17,10 @@ class TransactWriteItemsCommand {
 }
 
 class ScriptedDynamo {
-  constructor({ receiptItem = undefined, receiptItems = undefined, transactionError = undefined } = {}) {
+  constructor({ receiptItem = undefined, receiptItems = undefined, deploymentItem = undefined, transactionError = undefined } = {}) {
     this.receiptItem = receiptItem;
     this.receiptItems = receiptItems ? [...receiptItems] : undefined;
+    this.deploymentItem = deploymentItem;
     this.transactionError = transactionError;
     this.gets = [];
     this.transactions = [];
@@ -32,6 +33,7 @@ class ScriptedDynamo {
         const item = this.receiptItems?.length ? this.receiptItems.shift() : this.receiptItem;
         return { Item: item };
       }
+      if (command.input.TableName === "deployments") return { Item: this.deploymentItem };
       return {};
     }
     if (command instanceof TransactWriteItemsCommand) {
@@ -93,6 +95,24 @@ function approvalProof() {
     approval_id: "approval-proof-v2-01",
     payload_sha256: "d".repeat(64),
     expires_at: "2026-07-14T07:04:00.000Z",
+  };
+}
+
+function deploymentReservation(deploymentId = "deployment-v2-001") {
+  return { deployment_id: deploymentId };
+}
+
+function reservedDeploymentItem({
+  deploymentId = "deployment-v2-001",
+  requestSHA256 = REQUEST_SHA256,
+} = {}) {
+  return {
+    connection_id: { S: CONNECTION_ID },
+    deployment_id: { S: deploymentId },
+    request_sha256: { S: requestSHA256 },
+    command_id: { S: "command-v2-reserved-001" },
+    reservation_state: { S: "accepted" },
+    reserved_at: { S: "2026-07-14T07:00:00.000Z" },
   };
 }
 
@@ -207,6 +227,7 @@ function store(client) {
     challengesTableName: "challenges",
     approvalProofsTableName: "approval-proofs",
     issuedQuotesTableName: "issued-quotes",
+    deploymentReceiptsTableName: "deployments",
     countersTableName: "counters",
     GetItemCommand,
     TransactWriteItemsCommand,
@@ -335,6 +356,7 @@ await store(consumeClient).commit(request({
   command_id: "command-v2-00002",
   node_counter: 12,
   challenge_to_issue: undefined,
+  deployment_reservation: deploymentReservation(),
   approval_challenge: {
     schema: "dirextalk.aws.approval-challenge/v2",
     connection_id: CONNECTION_ID,
@@ -344,10 +366,11 @@ await store(consumeClient).commit(request({
   },
 }));
 const consumeTransaction = consumeClient.transactions[0].TransactItems;
-assert.equal(consumeTransaction.length, 3, "challenge consume, counter, and receipt must be one transaction");
+assert.equal(consumeTransaction.length, 4, "challenge consume, deployment-id reservation, counter, and receipt must be one transaction");
 assert.equal(consumeTransaction[0].Update.TableName, "challenges");
 assert.match(consumeTransaction[0].Update.ConditionExpression, /consumed/);
-assert.equal(consumeTransaction[2].Put.TableName, "receipts");
+assert.equal(consumeTransaction.find((item) => item.Put?.TableName === "deployments").Put.Item.deployment_id.S, "deployment-v2-001");
+assert.equal(consumeTransaction.find((item) => item.Put?.TableName === "receipts").Put.TableName, "receipts");
 
 const proofClient = new ScriptedDynamo();
 await store(proofClient).commit(request({
@@ -355,13 +378,50 @@ await store(proofClient).commit(request({
   command_id: "command-v2-proof-01",
   node_counter: 13,
   challenge_to_issue: undefined,
+  deployment_reservation: deploymentReservation(),
   approval_proof: approvalProof(),
 }));
 const proofTransaction = proofClient.transactions[0].TransactItems;
-assert.equal(proofTransaction.length, 3, "ApprovalV1 proof consume, counter, and immutable command receipt must commit together");
+assert.equal(proofTransaction.length, 4, "ApprovalV1 proof, deployment-id reservation, counter, and immutable command receipt must commit together");
 assert.equal(proofTransaction[0].Put.TableName, "approval-proofs");
 assert.equal(proofTransaction[0].Put.Item.approval_id.S, "approval-proof-v2-01");
 assert.equal(proofTransaction[0].Put.Item.payload_sha256.S, "d".repeat(64));
-assert.equal(proofTransaction[2].Put.TableName, "receipts");
+const deploymentReservationWrite = proofTransaction.find((item) => item.Put?.TableName === "deployments");
+assert.ok(deploymentReservationWrite, "the deployment id must be reserved in the command acceptance transaction before EC2 can run");
+assert.equal(deploymentReservationWrite.Put.ConditionExpression, "attribute_not_exists(connection_id) AND attribute_not_exists(deployment_id)");
+assert.deepEqual(deploymentReservationWrite.Put.Item, {
+  connection_id: { S: CONNECTION_ID },
+  deployment_id: { S: "deployment-v2-001" },
+  request_sha256: { S: REQUEST_SHA256 },
+  command_id: { S: "command-v2-proof-01" },
+  reservation_state: { S: "accepted" },
+  reserved_at: { S: "2026-07-14T07:00:00.000Z" },
+});
+assert.equal(proofTransaction.find((item) => item.Put?.TableName === "receipts").Put.TableName, "receipts");
+
+const deploymentReservationConflict = new Error("simulated DynamoDB deployment reservation conflict");
+deploymentReservationConflict.name = "TransactionCanceledException";
+const deploymentConflictClient = new ScriptedDynamo({
+  deploymentItem: reservedDeploymentItem({ requestSHA256: "f".repeat(64) }),
+  transactionError: deploymentReservationConflict,
+});
+await assert.rejects(
+  () => store(deploymentConflictClient).commit(request({
+    action: "deployment.create",
+    command_id: "command-v2-deployment-conflict",
+    node_counter: 14,
+    challenge_to_issue: undefined,
+    approval_proof: approvalProof(),
+    deployment_reservation: deploymentReservation(),
+  })),
+  (error) => error?.code === "deployment_id_conflict",
+  "a different request for a reserved deployment id must fail in the acceptance transaction",
+);
+assert.equal(deploymentConflictClient.transactions.length, 1, "the conflicting request must be stopped by Dynamo before any provider step can follow");
+assert.equal(
+  deploymentConflictClient.gets.find((input) => input.TableName === "deployments")?.ConsistentRead,
+  true,
+  "the rejected reservation must be read back consistently before classifying the conflict",
+);
 
 console.log("connection stack v2 Dynamo receipt store boundary ok");

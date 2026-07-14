@@ -180,6 +180,7 @@ function createFakeReceiptStore({ connectionId, generation }) {
   const receipts = new Map();
   const challenges = new Map();
   const approvalProofs = new Map();
+  const deploymentReservations = new Map();
   let highestNodeCounter = -1;
 
   function fail(code, message) {
@@ -192,6 +193,10 @@ function createFakeReceiptStore({ connectionId, generation }) {
 
   function challengeKey(challenge) {
     return `${challenge.connection_id}:${challenge.challenge_id}`;
+  }
+
+  function deploymentKey(reservation) {
+    return `${reservation.connection_id}:${reservation.deployment_id}`;
   }
 
   function sameRequest(receipt, request) {
@@ -252,6 +257,7 @@ function createFakeReceiptStore({ connectionId, generation }) {
         consumedChallenge = { ...stored, consumed: true, consumed_by_command_id: request.command_id };
       }
 
+      let consumedApprovalProof;
       if (request.approval_proof) {
         const proof = request.approval_proof;
         assert.equal(proof.schema, "dirextalk.aws.approval-proof-reference/v1");
@@ -260,7 +266,22 @@ function createFakeReceiptStore({ connectionId, generation }) {
         assert.match(proof.payload_sha256, /^[0-9a-f]{64}$/);
         assert.equal(typeof proof.expires_at, "string");
         if (approvalProofs.has(proof.approval_id)) fail("approval_replayed", "approval proof was already consumed");
-        approvalProofs.set(proof.approval_id, { ...proof, consumed_by_command_id: request.command_id });
+        consumedApprovalProof = { ...proof, consumed_by_command_id: request.command_id };
+      }
+
+      let deploymentReservation;
+      if (request.action === "deployment.create") {
+        assert.deepEqual(Object.keys(request.deployment_reservation ?? {}), ["deployment_id"], "a deployment create must carry the one-key private reservation");
+        assert.equal(typeof request.deployment_reservation.deployment_id, "string");
+        deploymentReservation = {
+          connection_id: request.connection_id,
+          deployment_id: request.deployment_reservation.deployment_id,
+          request_sha256: request.request_sha256,
+        };
+        const existingReservation = deploymentReservations.get(deploymentKey(deploymentReservation));
+        if (existingReservation && existingReservation.request_sha256 !== deploymentReservation.request_sha256) {
+          fail("deployment_id_conflict", "deployment id is already bound to another request");
+        }
       }
 
       const quote = request.action === "quote.request"
@@ -283,6 +304,8 @@ function createFakeReceiptStore({ connectionId, generation }) {
       };
       if (issuedChallenge) challenges.set(challengeKey(issuedChallenge), issuedChallenge);
       if (consumedChallenge) challenges.set(challengeKey(consumedChallenge), consumedChallenge);
+      if (consumedApprovalProof) approvalProofs.set(consumedApprovalProof.approval_id, consumedApprovalProof);
+      if (deploymentReservation) deploymentReservations.set(deploymentKey(deploymentReservation), deploymentReservation);
       receipts.set(key, receipt);
       highestNodeCounter = request.node_counter;
       return receipt;
@@ -477,6 +500,20 @@ await assert.rejects(
   () => challengeService.accept(conflictingCommand),
   (error) => error instanceof ConnectionStackV2Error && error.code === "command_id_conflict",
   "a command id must never be rebound to a different signed request",
+);
+
+const conflictingDeploymentId = signedCommand("deployment.create", deploymentPayload("deployment-v2-001", createBinding), {
+  command_id: "command-v2-deployment-id-conflict",
+  node_counter: 14,
+  approval_proof: approvalProof(createBinding, {
+    approval_id: "approval-proof-v2-deployment-id-conflict",
+    challenge_id: "challenge-v2-deployment-id-conflict",
+  }),
+});
+await assert.rejects(
+  () => challengeService.accept(conflictingDeploymentId),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "deployment_id_conflict",
+  "a different signed command must be rejected when it reuses an accepted deployment id",
 );
 
 const counterRollback = signedCommand("deployment.observe", {

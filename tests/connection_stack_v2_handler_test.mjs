@@ -173,6 +173,24 @@ assert.deepEqual(JSON.parse(deploymentResponse.body), {
 assert.equal(provisionedCommands.length, 1, "only the typed deployment command reaches the EC2 provisioner");
 assert.doesNotMatch(deploymentResponse.body, /user_data|worker_token|secret_ref|approval_proof/);
 
+let rejectedDeploymentProvisionerCalls = 0;
+const deploymentConflictHandler = createV2BrokerHandler({
+  async accept() {
+    throw new ConnectionStackV2Error("deployment_id_conflict", "deployment id is already reserved", 409);
+  },
+}, {
+  deploymentProvisioner: {
+    async ensure() {
+      rejectedDeploymentProvisionerCalls += 1;
+      return deployment;
+    },
+  },
+});
+const deploymentConflictResponse = await deploymentConflictHandler({ body: JSON.stringify(command) });
+assert.equal(deploymentConflictResponse.statusCode, 409);
+assert.deepEqual(JSON.parse(deploymentConflictResponse.body), { error: { code: "deployment_id_conflict" } });
+assert.equal(rejectedDeploymentProvisionerCalls, 0, "a deployment-id reservation conflict must be rejected before any EC2 provider call");
+
 const replayDeploymentHandler = createV2BrokerHandler({
   async accept() {
     return {

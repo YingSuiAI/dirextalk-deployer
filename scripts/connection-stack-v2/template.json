@@ -349,13 +349,14 @@
                     { "Fn::GetAtt": ["ApprovalChallengesTable", "Arn"] },
                     { "Fn::GetAtt": ["ApprovalProofsTable", "Arn"] },
                     { "Fn::GetAtt": ["IssuedQuotesTable", "Arn"] },
+                    { "Fn::GetAtt": ["DeploymentReceiptsTable", "Arn"] },
                     { "Fn::GetAtt": ["ConnectionCountersTable", "Arn"] }
                   ]
                 },
                 {
-                  "Sid": "WritePrivateDeploymentReceipt",
+                  "Sid": "PromoteReservedDeploymentReceipt",
                   "Effect": "Allow",
-                  "Action": "dynamodb:PutItem",
+                  "Action": "dynamodb:UpdateItem",
                   "Resource": { "Fn::GetAtt": ["DeploymentReceiptsTable", "Arn"] }
                 },
                 {

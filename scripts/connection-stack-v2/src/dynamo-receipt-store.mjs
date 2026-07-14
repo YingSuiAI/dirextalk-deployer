@@ -15,6 +15,8 @@ const RECEIPT_COMMIT_SCHEMA = "dirextalk.aws.receipt-commit/v2";
 const RECEIPT_SCHEMA = "dirextalk.aws.command-receipt/v2";
 const CHALLENGE_SCHEMA = "dirextalk.aws.approval-challenge/v2";
 const APPROVAL_PROOF_SCHEMA = "dirextalk.aws.approval-proof-reference/v1";
+const DEPLOYMENT_CREATE_ACTION = "deployment.create";
+const DEPLOYMENT_RESERVATION_STATE = "accepted";
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -79,6 +81,13 @@ function approvalProofKey(connectionId, approvalId) {
   };
 }
 
+function deploymentKey(connectionId, deploymentId) {
+  return {
+    connection_id: { S: connectionId },
+    deployment_id: { S: deploymentId },
+  };
+}
+
 function validateChallengeToIssue(challenge, request) {
   if (!isRecord(challenge) || challenge.schema !== CHALLENGE_SCHEMA) {
     fail("receipt_store_invalid", "challenge to issue is invalid", 500);
@@ -118,6 +127,19 @@ function validateApprovalProof(proof, request) {
   requireString(proof, "payload_sha256", SHA256_PATTERN);
   requireCanonicalInstant(proof.expires_at, "approval proof expires_at");
   return proof;
+}
+
+function validateDeploymentReservation(reservation) {
+  if (!isRecord(reservation)) {
+    fail("receipt_store_invalid", "deployment_reservation is invalid", 500);
+  }
+  const keys = Object.keys(reservation);
+  if (keys.length !== 1 || keys[0] !== "deployment_id") {
+    fail("receipt_store_invalid", "deployment_reservation is invalid", 500);
+  }
+  return {
+    deployment_id: requireString(reservation, "deployment_id", ID_PATTERN),
+  };
 }
 
 function validateRequest(request) {
@@ -170,6 +192,14 @@ function validateRequest(request) {
   if (request.challenge_to_issue !== undefined) validateChallengeToIssue(request.challenge_to_issue, request);
   if (request.approval_challenge !== undefined) validateApprovalChallenge(request.approval_challenge, request);
   if (request.approval_proof !== undefined) validateApprovalProof(request.approval_proof, request);
+  if (request.action === DEPLOYMENT_CREATE_ACTION) {
+    if (request.deployment_reservation === undefined) {
+      fail("receipt_store_invalid", "deployment_reservation is required for deployment create", 500);
+    }
+    request.deployment_reservation = validateDeploymentReservation(request.deployment_reservation);
+  } else if (request.deployment_reservation !== undefined) {
+    fail("receipt_store_invalid", "deployment_reservation is only valid for deployment create", 500);
+  }
   if (request.challenge_to_issue !== undefined && (request.approval_challenge !== undefined || request.approval_proof !== undefined)) {
     fail("receipt_store_invalid", "a command cannot issue and consume a challenge", 500);
   }
@@ -269,11 +299,12 @@ export class DynamoV2ReceiptStore {
     challengesTableName,
     approvalProofsTableName,
     issuedQuotesTableName,
+    deploymentReceiptsTableName,
     countersTableName,
     GetItemCommand,
     TransactWriteItemsCommand,
   }) {
-    if (!client?.send || !receiptsTableName || !challengesTableName || !approvalProofsTableName || !issuedQuotesTableName || !countersTableName
+    if (!client?.send || !receiptsTableName || !challengesTableName || !approvalProofsTableName || !issuedQuotesTableName || !deploymentReceiptsTableName || !countersTableName
       || !GetItemCommand || !TransactWriteItemsCommand) {
       throw new TypeError("DynamoDB client, table names, and command constructors are required");
     }
@@ -282,6 +313,7 @@ export class DynamoV2ReceiptStore {
     this.challengesTableName = challengesTableName;
     this.approvalProofsTableName = approvalProofsTableName;
     this.issuedQuotesTableName = issuedQuotesTableName;
+    this.deploymentReceiptsTableName = deploymentReceiptsTableName;
     this.countersTableName = countersTableName;
     this.GetItemCommand = GetItemCommand;
     this.TransactWriteItemsCommand = TransactWriteItemsCommand;
@@ -356,6 +388,22 @@ export class DynamoV2ReceiptStore {
             expires_at: { S: proof.expires_at },
             consumed_by_command_id: { S: request.command_id },
             consumed_at: { S: new Date(request.now_ms).toISOString() },
+          },
+        },
+      });
+    }
+    if (request.deployment_reservation) {
+      const reservation = request.deployment_reservation;
+      items.push({
+        Put: {
+          TableName: this.deploymentReceiptsTableName,
+          ConditionExpression: "attribute_not_exists(connection_id) AND attribute_not_exists(deployment_id)",
+          Item: {
+            ...deploymentKey(request.connection_id, reservation.deployment_id),
+            request_sha256: { S: request.request_sha256 },
+            command_id: { S: request.command_id },
+            reservation_state: { S: DEPLOYMENT_RESERVATION_STATE },
+            reserved_at: { S: new Date(request.now_ms).toISOString() },
           },
         },
       });
@@ -472,7 +520,33 @@ export class DynamoV2ReceiptStore {
     }
   }
 
+  async #readDeploymentReservation(connectionId, deploymentId) {
+    try {
+      const output = await this.client.send(new this.GetItemCommand({
+        TableName: this.deploymentReceiptsTableName,
+        ConsistentRead: true,
+        Key: deploymentKey(connectionId, deploymentId),
+      }));
+      return output?.Item;
+    } catch {
+      fail("connection_stack_store_unavailable", "Connection Stack receipt storage is unavailable", 503);
+    }
+  }
+
   async #classifyCanceledTransaction(request) {
+    if (request.deployment_reservation) {
+      const expected = request.deployment_reservation;
+      const stored = await this.#readDeploymentReservation(request.connection_id, expected.deployment_id);
+      if (stored) {
+        if (storedString(stored, "connection_id", ID_PATTERN) !== request.connection_id
+          || storedString(stored, "deployment_id", ID_PATTERN) !== expected.deployment_id) {
+          fail("receipt_store_invalid", "stored deployment reservation is invalid", 500);
+        }
+        if (storedString(stored, "request_sha256", SHA256_PATTERN) !== request.request_sha256) {
+          fail("deployment_id_conflict", "deployment id is already bound to another request");
+        }
+      }
+    }
     if (request.approval_challenge) {
       const expected = request.approval_challenge;
       const stored = await this.#readChallenge(request.connection_id, expected.challenge_id);

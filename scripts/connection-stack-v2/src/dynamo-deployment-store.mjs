@@ -10,6 +10,8 @@ import {
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const NAMED_SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const DEPLOYMENT_RESERVATION_STATE = "accepted";
 
 function fail(code, message, statusCode = 409) {
   throw new ConnectionStackV2Error(code, message, statusCode);
@@ -88,28 +90,57 @@ function conditionalFailure(error) {
   return error?.name === "ConditionalCheckFailedException";
 }
 
+function parseStoredDeployment(item, { connectionId, deploymentId }) {
+  if (storedString(item, "connection_id", ID_PATTERN) !== connectionId
+    || storedString(item, "deployment_id", ID_PATTERN) !== deploymentId) {
+    fail("deployment_store_invalid", "stored deployment key is invalid", 500);
+  }
+  const requestSHA256 = storedString(item, "request_sha256", SHA256_PATTERN);
+  if (item?.reservation_state !== undefined) {
+    if (item.reservation_state?.S !== DEPLOYMENT_RESERVATION_STATE
+      || item.receipt_json !== undefined
+      || item.resource_status !== undefined
+      || item.instance_id !== undefined) {
+      fail("deployment_store_invalid", "stored deployment reservation is invalid", 500);
+    }
+    storedString(item, "command_id", ID_PATTERN);
+    storedString(item, "reserved_at", ISO_INSTANT_PATTERN);
+    return { kind: "reservation", request_sha256: requestSHA256 };
+  }
+  return {
+    kind: "receipt",
+    request_sha256: requestSHA256,
+    receipt: validateDeploymentReceipt(parseJSON(storedString(item, "receipt_json", /^.+$/), "receipt_json"), {
+      connectionId,
+      deploymentId,
+      requestSHA256,
+    }),
+  };
+}
+
 // DynamoDeploymentStore is the private lifecycle ledger for isolated EC2
 // deployments. It reads immutable quote records issued by DynamoV2ReceiptStore
-// and persists only the closed deployment receipt. It never handles Worker
-// credentials, user data, secret references, or arbitrary provider requests.
+// and promotes that store's same-request deployment reservation to the closed
+// receipt. It never handles Worker credentials, user data, secret references,
+// or arbitrary provider requests.
 export class DynamoDeploymentStore {
   constructor({
     client,
     issuedQuotesTableName,
     deploymentReceiptsTableName,
     GetItemCommand,
-    PutItemCommand,
+    UpdateItemCommand,
     nowMs,
   }) {
     if (!client?.send || !issuedQuotesTableName || !deploymentReceiptsTableName
-      || !GetItemCommand || !PutItemCommand || typeof nowMs !== "function") {
+      || !GetItemCommand || !UpdateItemCommand || typeof nowMs !== "function") {
       throw new TypeError("DynamoDB client, deployment table names, commands, and clock are required");
     }
     this.client = client;
     this.issuedQuotesTableName = issuedQuotesTableName;
     this.deploymentReceiptsTableName = deploymentReceiptsTableName;
     this.GetItemCommand = GetItemCommand;
-    this.PutItemCommand = PutItemCommand;
+    this.UpdateItemCommand = UpdateItemCommand;
     this.nowMs = nowMs;
   }
 
@@ -157,6 +188,11 @@ export class DynamoDeploymentStore {
   async getDeployment({ connection_id: connectionId, deployment_id: deploymentId }) {
     requireString(connectionId, "connection_id", ID_PATTERN, "deployment_store_invalid");
     requireString(deploymentId, "deployment_id", ID_PATTERN, "deployment_store_invalid");
+    const stored = await this.#readDeployment(connectionId, deploymentId);
+    return stored?.kind === "receipt" ? stored.receipt : undefined;
+  }
+
+  async #readDeployment(connectionId, deploymentId) {
     let output;
     try {
       output = await this.client.send(new this.GetItemCommand({
@@ -168,16 +204,7 @@ export class DynamoDeploymentStore {
       fail("deployment_store_unavailable", "deployment storage is unavailable", 503);
     }
     if (!output?.Item) return undefined;
-    const item = output.Item;
-    if (storedString(item, "connection_id", ID_PATTERN) !== connectionId
-      || storedString(item, "deployment_id", ID_PATTERN) !== deploymentId) {
-      fail("deployment_store_invalid", "stored deployment key is invalid", 500);
-    }
-    return validateDeploymentReceipt(parseJSON(storedString(item, "receipt_json", /^.+$/), "receipt_json"), {
-      connectionId,
-      deploymentId,
-      requestSHA256: storedString(item, "request_sha256", SHA256_PATTERN),
-    });
+    return parseStoredDeployment(output.Item, { connectionId, deploymentId });
   }
 
   async putDeployment(receipt) {
@@ -187,16 +214,18 @@ export class DynamoDeploymentStore {
       fail("deployment_store_invalid", "clock is invalid", 500);
     }
     try {
-      await this.client.send(new this.PutItemCommand({
+      await this.client.send(new this.UpdateItemCommand({
         TableName: this.deploymentReceiptsTableName,
-        ConditionExpression: "attribute_not_exists(connection_id) AND attribute_not_exists(deployment_id)",
-        Item: {
-          ...deploymentKey(normalized.connection_id, normalized.deployment_id),
-          request_sha256: { S: normalized.request_sha256 },
-          resource_status: { S: normalized.resource_status },
-          instance_id: { S: normalized.instance_id },
-          receipt_json: { S: JSON.stringify(normalized) },
-          recorded_at: { S: new Date(nowMs).toISOString() },
+        Key: deploymentKey(normalized.connection_id, normalized.deployment_id),
+        ConditionExpression: "request_sha256 = :request_sha256 AND reservation_state = :reservation_state",
+        UpdateExpression: "SET resource_status = :resource_status, instance_id = :instance_id, receipt_json = :receipt_json, recorded_at = :recorded_at REMOVE reservation_state, command_id, reserved_at",
+        ExpressionAttributeValues: {
+          ":request_sha256": { S: normalized.request_sha256 },
+          ":reservation_state": { S: DEPLOYMENT_RESERVATION_STATE },
+          ":resource_status": { S: normalized.resource_status },
+          ":instance_id": { S: normalized.instance_id },
+          ":receipt_json": { S: JSON.stringify(normalized) },
+          ":recorded_at": { S: new Date(nowMs).toISOString() },
         },
       }));
       return normalized;
@@ -205,14 +234,14 @@ export class DynamoDeploymentStore {
         fail("deployment_store_unavailable", "deployment storage is unavailable", 503);
       }
     }
-    const existing = await this.getDeployment({
-      connection_id: normalized.connection_id,
-      deployment_id: normalized.deployment_id,
-    });
+    const existing = await this.#readDeployment(normalized.connection_id, normalized.deployment_id);
     if (!existing) fail("deployment_store_unavailable", "deployment storage could not reconcile its conditional write", 503);
     if (existing.request_sha256 !== normalized.request_sha256) {
       fail("deployment_id_conflict", "deployment id is already bound to another request", 409);
     }
-    return existing;
+    if (existing.kind === "reservation") {
+      fail("deployment_store_unavailable", "deployment reservation could not be promoted", 503);
+    }
+    return existing.receipt;
   }
 }

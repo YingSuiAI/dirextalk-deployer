@@ -11,7 +11,7 @@ class GetItemCommand {
   constructor(input) { this.input = input; }
 }
 
-class PutItemCommand {
+class UpdateItemCommand {
   constructor(input) { this.input = input; }
 }
 
@@ -108,13 +108,24 @@ function deploymentItem(value = receipt()) {
   };
 }
 
+function reservedDeploymentItem(requestSHA256 = REQUEST_SHA256) {
+  return {
+    connection_id: { S: CONNECTION_ID },
+    deployment_id: { S: DEPLOYMENT_ID },
+    request_sha256: { S: requestSHA256 },
+    command_id: { S: "command-v2-deployment-001" },
+    reservation_state: { S: "accepted" },
+    reserved_at: { S: "2026-07-14T07:00:00.000Z" },
+  };
+}
+
 class ScriptedDynamo {
-  constructor({ quote = quoteItem(), deployment = undefined, putError = undefined } = {}) {
+  constructor({ quote = quoteItem(), deployment = undefined, updateError = undefined } = {}) {
     this.quote = quote;
     this.deployment = deployment;
-    this.putError = putError;
+    this.updateError = updateError;
     this.gets = [];
-    this.puts = [];
+    this.updates = [];
   }
 
   async send(command) {
@@ -124,10 +135,18 @@ class ScriptedDynamo {
       if (command.input.TableName === "deployments") return { Item: this.deployment };
       throw new Error("unexpected table");
     }
-    if (command instanceof PutItemCommand) {
-      this.puts.push(command.input);
-      if (this.putError) throw this.putError;
-      this.deployment = command.input.Item;
+    if (command instanceof UpdateItemCommand) {
+      this.updates.push(command.input);
+      if (this.updateError) throw this.updateError;
+      const values = command.input.ExpressionAttributeValues;
+      this.deployment = {
+        ...command.input.Key,
+        request_sha256: values[":request_sha256"],
+        resource_status: values[":resource_status"],
+        instance_id: values[":instance_id"],
+        receipt_json: values[":receipt_json"],
+        recorded_at: values[":recorded_at"],
+      };
       return {};
     }
     throw new Error("unexpected command");
@@ -140,7 +159,7 @@ function store(client) {
     issuedQuotesTableName: "issued-quotes",
     deploymentReceiptsTableName: "deployments",
     GetItemCommand,
-    PutItemCommand,
+    UpdateItemCommand,
     nowMs: () => NOW,
   });
 }
@@ -152,25 +171,52 @@ assert.match(durableQuote.quote_digest, /^sha256:[0-9a-f]{64}$/);
 assert.equal(quoteClient.gets[0].ConsistentRead, true);
 for (const field of ["user_data", "worker_token", "secret_ref"]) assert.equal(Object.hasOwn(durableQuote, field), false);
 
-const createClient = new ScriptedDynamo();
+const reservationClient = new ScriptedDynamo({ deployment: reservedDeploymentItem() });
+assert.equal(
+  await store(reservationClient).getDeployment({ connection_id: CONNECTION_ID, deployment_id: DEPLOYMENT_ID }),
+  undefined,
+  "a same-request reservation must not masquerade as a completed EC2 receipt before the provisioner runs",
+);
+assert.equal(reservationClient.gets.at(-1).ConsistentRead, true);
+
+const createClient = new ScriptedDynamo({ deployment: reservedDeploymentItem() });
 const persisted = await store(createClient).putDeployment(receipt());
 assert.deepEqual(persisted, receipt());
-assert.equal(createClient.puts.length, 1);
-const write = createClient.puts[0];
+assert.equal(createClient.updates.length, 1);
+const write = createClient.updates[0];
 assert.equal(write.TableName, "deployments");
-assert.equal(write.ConditionExpression, "attribute_not_exists(connection_id) AND attribute_not_exists(deployment_id)");
-assert.equal(write.Item.receipt_json.S, JSON.stringify(receipt()));
-for (const field of ["user_data", "worker_token", "secret_ref"]) assert.equal(Object.hasOwn(write.Item, field), false);
+assert.equal(write.ConditionExpression, "request_sha256 = :request_sha256 AND reservation_state = :reservation_state");
+assert.match(write.UpdateExpression, /REMOVE reservation_state, command_id, reserved_at$/);
+assert.equal(write.ExpressionAttributeValues[":reservation_state"].S, "accepted");
+assert.equal(write.ExpressionAttributeValues[":receipt_json"].S, JSON.stringify(receipt()));
+for (const field of ["user_data", "worker_token", "secret_ref"]) assert.equal(Object.hasOwn(write.ExpressionAttributeValues, `:${field}`), false);
 
 const conditional = new Error("existing");
 conditional.name = "ConditionalCheckFailedException";
-const replayClient = new ScriptedDynamo({ deployment: deploymentItem(), putError: conditional });
+const replayClient = new ScriptedDynamo({ deployment: deploymentItem(), updateError: conditional });
 assert.deepEqual(await store(replayClient).putDeployment(receipt()), receipt(), "conditional replay must resolve to the immutable same-request receipt");
 
-const conflictClient = new ScriptedDynamo({ deployment: deploymentItem(receipt("d".repeat(64))), putError: conditional });
+const conflictClient = new ScriptedDynamo({ deployment: deploymentItem(receipt("d".repeat(64))), updateError: conditional });
 await assert.rejects(
   () => store(conflictClient).putDeployment(receipt()),
   (error) => error?.code === "deployment_id_conflict",
+);
+
+const reservationConflictClient = new ScriptedDynamo({
+  deployment: reservedDeploymentItem("d".repeat(64)),
+  updateError: conditional,
+});
+await assert.rejects(
+  () => store(reservationConflictClient).putDeployment(receipt()),
+  (error) => error?.code === "deployment_id_conflict",
+  "a final receipt must not overwrite another request's accepted deployment reservation",
+);
+
+const missingReservationClient = new ScriptedDynamo({ updateError: conditional });
+await assert.rejects(
+  () => store(missingReservationClient).putDeployment(receipt()),
+  (error) => error?.code === "deployment_store_unavailable",
+  "a deployment receipt must fail closed when no accepted reservation exists",
 );
 
 console.log("connection stack v2 Dynamo deployment store boundary ok");

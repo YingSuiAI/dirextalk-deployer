@@ -582,7 +582,16 @@ function buildReceiptCommit(authenticated, nowMs, { challengeToIssue, registrati
       ? { approval_challenge: approvalChallengeReference(authenticated) }
       : {}),
     ...(authenticated.action === DEPLOYMENT_CREATE_ACTION
-      ? { approval_proof: approvalProofReference(authenticated) }
+      ? {
+        approval_proof: approvalProofReference(authenticated),
+        // This is an internal receipt-store input, derived only after the
+        // signed payload and ApprovalV1 proof have been authenticated. The
+        // Dynamo transaction uses it to fence the deployment id before the
+        // handler can reach the EC2 provisioner.
+        deployment_reservation: {
+          deployment_id: authenticated.payload.deployment_id,
+        },
+      }
       : {}),
   };
 }

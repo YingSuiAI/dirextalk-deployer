@@ -19,9 +19,9 @@ isolated Worker instance.
 It has no generic AWS API, IAM/PassRole, SSH/key-pair, instance-profile,
 user-data, secret-read, public-ingress, or public-IP capability. It does not
 yet grant Recipe command execution, service health evidence, or lifecycle
-mutation such as stop, start, observe, or destroy. Its Worker path is limited
-to an initial verified bootstrap claim, a bounded reauthentication lease, and
-an event channel.
+mutation such as stop, start, or destroy. Its Worker path is limited to an
+initial verified bootstrap claim, a bounded reauthentication lease, an event
+channel, and a signed read-only bootstrap observation.
 
 ## Bootstrap boundary
 
@@ -76,6 +76,29 @@ network = { vpc_id, subnet_id, availability_zone }
 The Stack requires the artifact, resource-manifest digest, and network object
 to exactly equal its private registered Worker configuration. It derives the
 instance type and gp3 volume size solely from the durable quote candidate.
+
+`deployment.observe` is a signed read-only command. After the durable command
+receipt fence accepts either a fresh request or an exact idempotent replay, the
+Broker reads the deployment receipt and its receipt-bound Worker session again.
+It returns `dirextalk.aws.deployment-observation/v1` only to the private
+Orchestrator path:
+
+```text
+schema
+deployment_id
+resource = { status, instance_id }
+worker = { bootstrap_session_state, lease_epoch, lease_expires_at,
+           last_sequence, last_event_at }
+observed_at
+```
+
+The first bootstrap-observation contract accepts only the fixed Provisioner
+receipt status `provisioning`; it never upgrades that status based on a Worker
+report. A bound Worker has null lease/event times. An active Worker must have a
+future Stack-issued lease, while `last_event_at` remains null until its first
+accepted event. The response never contains a bootstrap session id, Worker
+bearer or hash, endpoint, raw event, identity document, log, secret, volume
+id, or ENI. The action cannot claim a Worker, record an event, or invoke EC2.
 
 ## Stack-derived registration attestation
 

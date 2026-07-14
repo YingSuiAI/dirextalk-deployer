@@ -13,6 +13,7 @@ source "$ROOT/scripts/lib/json.sh"
 "$(json_node)" tests/connection_stack_v2_dynamo_store_test.mjs
 "$(json_node)" tests/connection_stack_v2_dynamo_deployment_store_test.mjs
 "$(json_node)" tests/connection_stack_v2_deployment_provisioner_test.mjs
+"$(json_node)" tests/connection_stack_v2_deployment_observer_test.mjs
 "$(json_node)" tests/connection_stack_v2_handler_test.mjs
 "$(json_node)" tests/connection_stack_v2_template_test.mjs
 "$(json_node)" tests/connection_stack_v2_worker_session_contract_test.mjs
@@ -26,6 +27,7 @@ for source in \
   scripts/connection-stack-v2/src/dynamo-deployment-store.mjs \
   scripts/connection-stack-v2/src/dynamo-worker-session-store.mjs \
   scripts/connection-stack-v2/src/deployment-provisioner.mjs \
+  scripts/connection-stack-v2/src/deployment-observer.mjs \
   scripts/connection-stack-v2/src/handler.mjs \
   scripts/connection-stack-v2/src/worker-bootstrap-user-data.mjs \
   scripts/connection-stack-v2/src/worker-identity-verifier.mjs \

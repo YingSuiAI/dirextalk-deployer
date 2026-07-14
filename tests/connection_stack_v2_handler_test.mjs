@@ -255,6 +255,84 @@ const replayDeploymentResponse = await replayDeploymentHandler({ body: JSON.stri
 assert.equal(replayDeploymentResponse.statusCode, 200, "an expired/replayed command must still reconcile the EC2 receipt without a second approval");
 assert.equal(JSON.parse(replayDeploymentResponse.body).status, "idempotent");
 
+const deploymentObservation = {
+  schema: "dirextalk.aws.deployment-observation/v1",
+  deployment_id: deployment.deployment_id,
+  resource: {
+    status: "provisioning",
+    instance_id: deployment.instance_id,
+  },
+  worker: {
+    bootstrap_session_state: "active",
+    lease_epoch: 1,
+    lease_expires_at: "2026-07-15T01:05:00.000Z",
+    last_sequence: 0,
+    last_event_at: null,
+  },
+  observed_at: "2026-07-15T01:00:00.000Z",
+};
+const observeCommand = {
+  action: "deployment.observe",
+  connection_id: deployment.connection_id,
+  request_sha256: "c".repeat(64),
+  payload: { deployment_id: deployment.deployment_id },
+};
+const observedCommands = [];
+let observerProvisionerCalls = 0;
+const observeHandler = createV2BrokerHandler({
+  async accept() {
+    return {
+      status: "read_only_validated",
+      receipt: { ...receipt, action: "deployment.observe" },
+      command: observeCommand,
+    };
+  },
+}, {
+  deploymentObserver: {
+    async observe(commandToObserve) {
+      observedCommands.push(commandToObserve);
+      return deploymentObservation;
+    },
+  },
+  deploymentProvisioner: {
+    async ensure() {
+      observerProvisionerCalls += 1;
+      throw new Error("deployment.observe must not provision or mutate EC2");
+    },
+  },
+});
+const observeResponse = await observeHandler({ body: JSON.stringify(command) });
+assert.equal(observeResponse.statusCode, 200);
+assert.deepEqual(JSON.parse(observeResponse.body), {
+  status: "deployment_observed",
+  receipt: { ...receipt, action: "deployment.observe" },
+  observation: deploymentObservation,
+});
+assert.deepEqual(observedCommands, [observeCommand], "the signed observe command reaches only the read-only observer after receipt acceptance");
+assert.equal(observerProvisionerCalls, 0, "deployment.observe must not reach the EC2 provisioner");
+assert.doesNotMatch(observeResponse.body, /bootstrap_session_id|access_token|token_sha256|bootstrap_endpoint|last_event_json/);
+
+const replayObserveHandler = createV2BrokerHandler({
+  async accept() {
+    return {
+      status: "idempotent",
+      receipt: { ...receipt, action: "deployment.observe", disposition: "idempotent" },
+      command: observeCommand,
+    };
+  },
+}, {
+  deploymentObserver: {
+    async observe() { return deploymentObservation; },
+  },
+});
+const replayObserveResponse = await replayObserveHandler({ body: JSON.stringify(command) });
+assert.equal(replayObserveResponse.statusCode, 200, "an expired signed observe replay must return fresh read-only evidence");
+assert.deepEqual(JSON.parse(replayObserveResponse.body), {
+  status: "idempotent",
+  receipt: { ...receipt, action: "deployment.observe", disposition: "idempotent" },
+  observation: deploymentObservation,
+});
+
 const denied = createV2BrokerHandler({
   async accept() {
     throw new ConnectionStackV2Error("invalid_node_signature", "internal detail must not leave the broker", 401);

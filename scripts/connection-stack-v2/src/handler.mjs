@@ -19,6 +19,10 @@ import {
   Ec2DedicatedWorkerProvisioner,
 } from "./deployment-provisioner.mjs";
 import {
+  DeploymentWorkerBootstrapObserver,
+  validateDeploymentObservation,
+} from "./deployment-observer.mjs";
+import {
   validateDeploymentReceipt,
 } from "./deployment-contract.mjs";
 import {
@@ -124,6 +128,7 @@ function resultStatusCode(status) {
   if (status === "challenge_issued") return 201;
   if (status === "quote_issued") return 200;
   if (status === "connection_registered") return 200;
+  if (status === "deployment_observed") return 200;
   if (status === "idempotent") return 200;
   if (status === "deployment_created" || status === "read_only_validated" || status === "approval_consumed") return 202;
   throw new ConnectionStackV2Error("receipt_store_invalid", "receipt store returned an invalid result", 500);
@@ -139,6 +144,9 @@ function publicResult(result) {
   if (result.status === "deployment_created" && !result.deployment) {
     throw new ConnectionStackV2Error("receipt_store_invalid", "deployment creation result is missing its receipt", 500);
   }
+  if (result.status === "deployment_observed" && !result.observation) {
+    throw new ConnectionStackV2Error("receipt_store_invalid", "deployment observation result is missing its observation", 500);
+  }
   return {
     status: result.status,
     receipt,
@@ -146,6 +154,7 @@ function publicResult(result) {
     ...(result.quote ? { quote: result.quote } : {}),
     ...(result.registration ? { registration: result.registration } : {}),
     ...(result.deployment ? { deployment: validateDeploymentReceipt(result.deployment) } : {}),
+    ...(result.observation ? { observation: validateDeploymentObservation(result.observation) } : {}),
   };
 }
 
@@ -226,6 +235,7 @@ function configuredIdentityVerifier({ ec2Client, DescribeInstancesCommand }) {
 export function createV2BrokerHandler(service, {
   registrationConfig,
   deploymentProvisioner,
+  deploymentObserver,
   workerSessionService,
 } = {}) {
   if (!service || typeof service.accept !== "function") {
@@ -259,6 +269,17 @@ export function createV2BrokerHandler(service, {
           ...result,
           status: result.status === "idempotent" ? "idempotent" : "deployment_created",
           deployment,
+        };
+      }
+      if (result?.command?.action === "deployment.observe") {
+        if (!deploymentObserver || typeof deploymentObserver.observe !== "function") {
+          throw new ConnectionStackV2Error("deployment_observer_unavailable", "the Worker deployment observer is unavailable", 503);
+        }
+        const observation = await deploymentObserver.observe(result.command);
+        result = {
+          ...result,
+          status: result.status === "idempotent" ? "idempotent" : "deployment_observed",
+          observation,
         };
       }
       return response(resultStatusCode(result.status), publicResult(result));
@@ -405,6 +426,11 @@ async function productionHandler() {
         workerBootstrapEnabled: Boolean(workerSessionsTableName && identity.enabled),
         nowMs: Date.now,
       });
+      const deploymentObserver = new DeploymentWorkerBootstrapObserver({
+        deploymentStore,
+        workerSessionStore,
+        nowMs: Date.now,
+      });
       const service = createV2ChallengeApprovalService({
         clock: Date.now,
         createChallengeId: () => `challenge-${randomUUID()}`,
@@ -421,6 +447,7 @@ async function productionHandler() {
       return createV2BrokerHandler(service, {
         registrationConfig,
         deploymentProvisioner,
+        deploymentObserver,
         workerSessionService,
       });
     })();

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dirextalk:schema:worker-bootstrap:v1",
+  "title": "Dirextalk isolated worker bootstrap manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "connection_id",
+    "deployment_id",
+    "bootstrap_session_id",
+    "bootstrap_endpoint",
+    "worker_image_digest",
+    "artifact_manifest_digest",
+    "expires_at"
+  ],
+  "properties": {
+    "schema": { "const": "dirextalk.worker-bootstrap/v1" },
+    "connection_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$" },
+    "deployment_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$" },
+    "bootstrap_session_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$" },
+    "bootstrap_endpoint": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "worker_image_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "artifact_manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "expires_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" }
+  }
+}

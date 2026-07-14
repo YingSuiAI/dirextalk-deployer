@@ -1,0 +1,463 @@
+import assert from "node:assert/strict";
+import {
+  createHash,
+  generateKeyPairSync,
+  sign,
+} from "node:crypto";
+
+import {
+  BROKER_V2_ACTIONS,
+  ConnectionStackV2Error,
+  buildApprovalSignatureBase,
+  buildNodeSignatureBase,
+  canonicalApprovalBindingDigest,
+  createV2ChallengeApprovalService,
+  validateAndAuthenticateV2Command,
+  validateBootstrapIdentity,
+} from "../scripts/connection-stack-v2/src/command-contract.mjs";
+import {
+  validateWorkerBootstrapManifest,
+} from "../scripts/connection-stack-v2/src/worker-contract.mjs";
+
+const NOW = Date.parse("2026-07-14T07:00:00.000Z");
+const CONNECTION_ID = "connection-v2-0001";
+const NODE_KEY_ID = "node-key-v2";
+const DEVICE_KEY_ID = "flutter-device-v2";
+const DIGEST = (char) => `sha256:${char.repeat(64)}`;
+
+const { privateKey: nodePrivateKey, publicKey: nodePublicKey } = generateKeyPairSync("ed25519");
+const { privateKey: devicePrivateKey, publicKey: devicePublicKey } = generateKeyPairSync("ed25519");
+const nodePublicKeySpkiBase64 = nodePublicKey.export({ type: "spki", format: "der" }).toString("base64");
+const devicePublicKeySpkiBase64 = devicePublicKey.export({ type: "spki", format: "der" }).toString("base64");
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function binding(overrides = {}) {
+  return {
+    schema: "dirextalk.aws.approval-binding/v2",
+    connection_id: CONNECTION_ID,
+    plan_hash: DIGEST("a"),
+    plan_revision: 7,
+    quote_id: "quote-v2-00001",
+    recipe_digest: DIGEST("b"),
+    manifest_digest: DIGEST("c"),
+    resource_scope_digest: DIGEST("d"),
+    network_scope_digest: DIGEST("e"),
+    secret_scope_digest: DIGEST("f"),
+    integration_scope_digest: DIGEST("0"),
+    expires_at: "2026-07-14T07:04:00.000Z",
+    ...overrides,
+  };
+}
+
+function deviceApproval(approvalBinding, overrides = {}) {
+  const approval = {
+    schema: "dirextalk.aws.approval/v2",
+    challenge_id: "challenge-v2-001",
+    device_key_id: DEVICE_KEY_ID,
+    binding_sha256: canonicalApprovalBindingDigest(approvalBinding),
+    expires_at: approvalBinding.expires_at,
+    signature_b64: "",
+    ...overrides,
+  };
+  approval.signature_b64 = sign(
+    null,
+    Buffer.from(buildApprovalSignatureBase(approval, approvalBinding), "utf8"),
+    devicePrivateKey,
+  ).toString("base64");
+  return approval;
+}
+
+function signedCommand(action, payload, options = {}) {
+  const payloadBytes = Buffer.from(JSON.stringify(payload), "utf8");
+  const command = {
+    schema: "dirextalk.aws.command/v2",
+    connection_id: CONNECTION_ID,
+    command_id: options.command_id ?? "command-v2-00001",
+    node_key_id: NODE_KEY_ID,
+    issued_at: "2026-07-14T06:59:00.000Z",
+    expires_at: "2026-07-14T07:03:00.000Z",
+    expected_generation: 3,
+    node_counter: options.node_counter ?? 11,
+    action,
+    payload_b64: payloadBytes.toString("base64"),
+    payload_sha256: sha256(payloadBytes),
+    approval_binding: options.approval_binding,
+    approval: options.approval,
+    signature_b64: "",
+  };
+  if (command.approval_binding === undefined) delete command.approval_binding;
+  if (command.approval === undefined) delete command.approval;
+  command.signature_b64 = sign(
+    null,
+    Buffer.from(buildNodeSignatureBase(command), "utf8"),
+    nodePrivateKey,
+  ).toString("base64");
+  return command;
+}
+
+const authOptions = {
+  nowMs: NOW,
+  connectionId: CONNECTION_ID,
+  connectionGeneration: 3,
+  nodeKeyId: NODE_KEY_ID,
+  nodePublicKeySpkiBase64,
+  deviceKeyId: DEVICE_KEY_ID,
+  devicePublicKeySpkiBase64,
+  expectedChallengeId: "challenge-v2-001",
+};
+
+function createFakeReceiptStore({ connectionId, generation }) {
+  const receipts = new Map();
+  const challenges = new Map();
+  let highestNodeCounter = -1;
+
+  function fail(code, message) {
+    throw new ConnectionStackV2Error(code, message, 409);
+  }
+
+  function receiptKey(request) {
+    return `${request.connection_id}:${request.command_id}`;
+  }
+
+  function challengeKey(challenge) {
+    return `${challenge.connection_id}:${challenge.challenge_id}`;
+  }
+
+  function sameRequest(receipt, request) {
+    return receipt.expected_generation === request.expected_generation
+      && receipt.node_counter === request.node_counter
+      && receipt.request_sha256 === request.request_sha256
+      && receipt.action === request.action;
+  }
+
+  return {
+    async commit(request) {
+      assert.equal(request.schema, "dirextalk.aws.receipt-commit/v2");
+      assert.equal(request.connection_id, connectionId);
+      assert.equal(request.expected_generation, generation);
+      assert.equal(typeof request.command_id, "string");
+      assert.match(request.request_sha256, /^[0-9a-f]{64}$/);
+      assert.equal(typeof request.action, "string");
+      assert.ok(Number.isSafeInteger(request.node_counter));
+      assert.ok(Number.isFinite(request.now_ms));
+
+      const key = receiptKey(request);
+      const existing = receipts.get(key);
+      if (existing) {
+        if (!sameRequest(existing, request)) {
+          fail("command_id_conflict", "command id was already committed with a different request");
+        }
+        return { ...existing, disposition: "idempotent" };
+      }
+      if (request.node_counter <= highestNodeCounter) {
+        fail("stale_node_counter", "node counter must advance monotonically");
+      }
+
+      let issuedChallenge;
+      if (request.challenge_to_issue) {
+        issuedChallenge = { ...request.challenge_to_issue };
+        if (challenges.has(challengeKey(issuedChallenge))) {
+          fail("challenge_id_conflict", "challenge id already exists");
+        }
+      }
+
+      let consumedChallenge;
+      if (request.approval_challenge) {
+        const expected = request.approval_challenge;
+        const stored = challenges.get(challengeKey(expected));
+        if (!stored) fail("unknown_approval_challenge", "approval challenge was not issued");
+        if (stored.binding_sha256 !== expected.binding_sha256
+          || stored.expires_at !== expected.expires_at
+          || Date.parse(stored.expires_at) <= request.now_ms) {
+          fail("approval_binding_mismatch", "approval challenge does not match this receipt");
+        }
+        if (stored.consumed) fail("approval_replayed", "approval challenge was already consumed");
+        consumedChallenge = { ...stored, consumed: true, consumed_by_command_id: request.command_id };
+      }
+
+      const receipt = {
+        schema: "dirextalk.aws.command-receipt/v2",
+        disposition: "committed",
+        connection_id: request.connection_id,
+        expected_generation: request.expected_generation,
+        node_counter: request.node_counter,
+        command_id: request.command_id,
+        request_sha256: request.request_sha256,
+        action: request.action,
+        ...(issuedChallenge ? { challenge: issuedChallenge } : {}),
+      };
+      if (issuedChallenge) challenges.set(challengeKey(issuedChallenge), issuedChallenge);
+      if (consumedChallenge) challenges.set(challengeKey(consumedChallenge), consumedChallenge);
+      receipts.set(key, receipt);
+      highestNodeCounter = request.node_counter;
+      return receipt;
+    },
+  };
+}
+
+assert.deepEqual(BROKER_V2_ACTIONS, [
+  "approval.challenge.request",
+  "quote.request",
+  "artifact.put",
+  "deployment.create",
+  "deployment.observe",
+  "deployment.destroy",
+]);
+
+const quote = signedCommand("quote.request", {
+  quote_request_id: "quote-request-v2-01",
+  plan_digest: DIGEST("a"),
+  region: "ap-south-1",
+  purchase_model: "on_demand",
+});
+const authenticatedQuote = validateAndAuthenticateV2Command(quote, authOptions);
+assert.equal(authenticatedQuote.payload.region, "ap-south-1");
+assert.equal(authenticatedQuote.approval_binding, undefined);
+
+const observe = signedCommand("deployment.observe", { deployment_id: "deployment-v2-001" }, {
+  command_id: "command-v2-observe",
+  node_counter: 10,
+});
+assert.equal(validateAndAuthenticateV2Command(observe, authOptions).payload.deployment_id, "deployment-v2-001");
+
+const requestedBinding = binding();
+const challengeRequest = signedCommand("approval.challenge.request", {
+  challenge_request_id: "challenge-request-v2-01",
+}, { approval_binding: requestedBinding });
+const authenticatedChallenge = validateAndAuthenticateV2Command(challengeRequest, authOptions);
+assert.equal(authenticatedChallenge.approval_binding.plan_revision, 7);
+assert.equal(authenticatedChallenge.approval, undefined);
+
+const receiptStore = createFakeReceiptStore({
+  connectionId: CONNECTION_ID,
+  generation: 3,
+});
+const challengeService = createV2ChallengeApprovalService({
+  ...authOptions,
+  clock: () => NOW,
+  createChallengeId: () => "challenge-v2-001",
+  receiptStore,
+});
+const receiptQuote = signedCommand("quote.request", {
+  quote_request_id: "quote-request-v2-receipt",
+  plan_digest: DIGEST("a"),
+  region: "ap-south-1",
+  purchase_model: "on_demand",
+}, {
+  command_id: "command-v2-quote-receipt",
+  node_counter: 10,
+});
+assert.equal((await challengeService.accept(receiptQuote)).status, "read_only_validated");
+const issuedChallenge = await challengeService.accept(challengeRequest);
+assert.equal(issuedChallenge.challenge.challenge_id, "challenge-v2-001");
+
+const createBinding = binding();
+const create = signedCommand("deployment.create", {
+  deployment_id: "deployment-v2-001",
+  quote_id: "quote-v2-00001",
+  manifest_digest: DIGEST("c"),
+}, {
+  command_id: "command-v2-00002",
+  node_counter: 12,
+  approval_binding: createBinding,
+  approval: deviceApproval(createBinding),
+});
+const authenticatedCreate = validateAndAuthenticateV2Command(create, authOptions);
+assert.equal(authenticatedCreate.approval.binding_sha256, canonicalApprovalBindingDigest(createBinding));
+const consumedApproval = await challengeService.accept(create);
+assert.equal(consumedApproval.status, "approval_consumed");
+assert.equal(consumedApproval.receipt.command_id, "command-v2-00002");
+const idempotentCreate = await challengeService.accept(create);
+assert.equal(idempotentCreate.status, "idempotent");
+assert.equal(idempotentCreate.receipt.command_id, "command-v2-00002");
+
+const conflictingCommand = signedCommand("deployment.create", {
+  deployment_id: "deployment-v2-conflict",
+  quote_id: "quote-v2-00001",
+  manifest_digest: DIGEST("c"),
+}, {
+  command_id: "command-v2-00002",
+  node_counter: 12,
+  approval_binding: createBinding,
+  approval: deviceApproval(createBinding),
+});
+await assert.rejects(
+  () => challengeService.accept(conflictingCommand),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "command_id_conflict",
+  "a command id must never be rebound to a different signed request",
+);
+
+const counterRollback = signedCommand("deployment.observe", {
+  deployment_id: "deployment-v2-001",
+}, {
+  command_id: "command-v2-counter-rollback",
+  node_counter: 11,
+});
+await assert.rejects(
+  () => challengeService.accept(counterRollback),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "stale_node_counter",
+  "a new command cannot move the durable node counter backward",
+);
+
+const replayedApproval = signedCommand("deployment.create", {
+  deployment_id: "deployment-v2-004",
+  quote_id: "quote-v2-00001",
+  manifest_digest: DIGEST("c"),
+}, {
+  command_id: "command-v2-00005",
+  node_counter: 13,
+  approval_binding: createBinding,
+  approval: deviceApproval(createBinding),
+});
+await assert.rejects(
+  () => challengeService.accept(replayedApproval),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "approval_replayed",
+  "a Flutter approval challenge is one-time even when a new node command id is used",
+);
+
+const artifactBinding = binding();
+const artifact = signedCommand("artifact.put", {
+  artifact_id: "artifact-v2-00001",
+  manifest_digest: DIGEST("c"),
+  content_digest: DIGEST("3"),
+  content_length: 4096,
+}, {
+  command_id: "command-v2-artifact",
+  node_counter: 16,
+  approval_binding: artifactBinding,
+  approval: deviceApproval(artifactBinding),
+});
+assert.equal(validateAndAuthenticateV2Command(artifact, authOptions).payload.content_length, 4096);
+
+const destroyBinding = binding();
+const destroy = signedCommand("deployment.destroy", {
+  deployment_id: "deployment-v2-001",
+  resource_manifest_digest: DIGEST("c"),
+  volume_policy: "retain",
+}, {
+  command_id: "command-v2-destroy",
+  node_counter: 17,
+  approval_binding: destroyBinding,
+  approval: deviceApproval(destroyBinding),
+});
+assert.equal(validateAndAuthenticateV2Command(destroy, authOptions).payload.volume_policy, "retain");
+
+const arbitraryAction = signedCommand("aws.invoke", { deployment_id: "deployment-v2-001" }, {
+  command_id: "command-v2-arbitrary",
+  node_counter: 18,
+});
+assert.throws(
+  () => validateAndAuthenticateV2Command(arbitraryAction, authOptions),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "unsupported_action",
+  "an envelope cannot escape into a generic AWS action",
+);
+
+const missingApproval = signedCommand("deployment.create", {
+  deployment_id: "deployment-v2-003",
+  quote_id: "quote-v2-00001",
+  manifest_digest: DIGEST("c"),
+}, {
+  command_id: "command-v2-00004",
+  node_counter: 14,
+});
+assert.throws(
+  () => validateAndAuthenticateV2Command(missingApproval, authOptions),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "approval_required",
+  "a mutating command must fail closed before any payload dereference when no approval exists",
+);
+
+const changedNetworkBinding = binding({ network_scope_digest: DIGEST("1") });
+const changedNetworkCommand = signedCommand("deployment.create", {
+  deployment_id: "deployment-v2-002",
+  quote_id: "quote-v2-00001",
+  manifest_digest: DIGEST("c"),
+}, {
+  command_id: "command-v2-00003",
+  node_counter: 13,
+  approval_binding: changedNetworkBinding,
+  approval: deviceApproval(createBinding),
+});
+assert.throws(
+  () => validateAndAuthenticateV2Command(changedNetworkCommand, authOptions),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "approval_binding_mismatch",
+  "a device approval must bind the exact network scope digest",
+);
+
+const rootBootstrap = {
+  Account: "123456789012",
+  Arn: "arn:aws:iam::123456789012:root",
+  UserId: "123456789012",
+};
+assert.throws(
+  () => validateBootstrapIdentity(rootBootstrap),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "root_bootstrap_forbidden",
+);
+assert.deepEqual(
+  validateBootstrapIdentity({
+    Account: "123456789012",
+    Arn: "arn:aws:sts::123456789012:assumed-role/DirextalkConnectionStackBootstrap/session-001",
+    UserId: "AROAXXXXXXXXXXXXX:session-001",
+  }),
+  {
+    account_id: "123456789012",
+    principal_type: "assumed_role",
+  },
+);
+
+const workerManifest = {
+  schema: "dirextalk.worker-bootstrap/v1",
+  connection_id: CONNECTION_ID,
+  deployment_id: "deployment-v2-001",
+  bootstrap_session_id: "worker-session-v2-01",
+  bootstrap_endpoint: "https://broker.example.invalid/v2/worker-sessions",
+  worker_image_digest: DIGEST("2"),
+  artifact_manifest_digest: DIGEST("c"),
+  expires_at: "2026-07-14T07:04:00.000Z",
+};
+const workerValidation = {
+  nowMs: NOW,
+  maxLifetimeMs: 5 * 60 * 1000,
+  expectedConnectionId: CONNECTION_ID,
+  expectedBootstrapEndpoint: "https://broker.example.invalid/v2/worker-sessions",
+};
+assert.equal(validateWorkerBootstrapManifest(workerManifest, workerValidation).deployment_id, "deployment-v2-001");
+assert.throws(
+  () => validateWorkerBootstrapManifest({ ...workerManifest, ssh_key_name: "operator-key" }, workerValidation),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "invalid_worker_manifest",
+  "a worker bootstrap manifest must never carry SSH or cloud-control configuration",
+);
+assert.throws(
+  () => validateWorkerBootstrapManifest({ ...workerManifest, expires_at: "2026-13-01T00:00:00.000Z" }, workerValidation),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "invalid_worker_manifest",
+  "invalid worker expiry must fail as a typed contract error instead of leaking a runtime exception",
+);
+assert.throws(
+  () => validateWorkerBootstrapManifest({ ...workerManifest, expires_at: "2026-07-14T07:00:00.000Z" }, workerValidation),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "invalid_worker_manifest",
+  "an expired worker bootstrap manifest must fail closed",
+);
+assert.throws(
+  () => validateWorkerBootstrapManifest({ ...workerManifest, expires_at: "2026-07-14T07:06:00.000Z" }, workerValidation),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "invalid_worker_manifest",
+  "a worker bootstrap manifest cannot exceed its configured TTL",
+);
+assert.throws(
+  () => validateWorkerBootstrapManifest({ ...workerManifest, connection_id: "connection-v2-other" }, workerValidation),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "invalid_worker_manifest",
+  "worker bootstrap connection_id must match the expected connection",
+);
+assert.throws(
+  () => validateWorkerBootstrapManifest({ ...workerManifest, bootstrap_endpoint: "https://other.example.invalid/v2/worker-sessions" }, workerValidation),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "invalid_worker_manifest",
+  "worker bootstrap endpoint must match the registered broker endpoint",
+);
+assert.throws(
+  () => validateWorkerBootstrapManifest(workerManifest, { ...workerValidation, maxLifetimeMs: 11 * 60 * 1000 }),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "invalid_worker_manifest",
+  "worker verifier context cannot relax the ten-minute maximum bootstrap lifetime",
+);
+
+console.log("connection stack v2 command contract ok");

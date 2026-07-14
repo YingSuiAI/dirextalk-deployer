@@ -18,8 +18,10 @@ isolated Worker instance.
 
 It has no generic AWS API, IAM/PassRole, SSH/key-pair, instance-profile,
 user-data, secret-read, public-ingress, or public-IP capability. It does not
-yet grant a Worker bootstrap/session, command execution, health/event channel,
-or lifecycle mutation such as stop, start, observe, or destroy.
+yet grant Recipe command execution, service health evidence, a renewable
+long-running Worker lease, or lifecycle mutation such as stop, start, observe,
+or destroy. Its Worker path is limited to an initial verified bootstrap claim
+and bounded event channel.
 
 ## Bootstrap boundary
 
@@ -214,8 +216,9 @@ receipt. This covers retries without a second worker purchase. A same-id
 mismatch, stale counter, expired fresh request, expired/replayed proof, quote
 mismatch, or unavailable durable store fails closed.
 
-The Lambda role has scoped DynamoDB reads/conditional transactions and a direct
-conditional update only for deployment receipt promotion. Its EC2 surface is closed to descriptions,
+The Lambda role has scoped DynamoDB reads/conditional transactions, direct
+conditional updates for deployment receipt promotion and the dedicated Worker
+session table, and no scan/query/delete access. Its EC2 surface is closed to descriptions,
 `CreateSecurityGroup`, `RevokeSecurityGroupEgress`,
 `AuthorizeSecurityGroupEgress`, `RunInstances`, and creation-time tagging in
 the Stack Region. It has no `PassRole`, instance profile, key-pair, public-IP,
@@ -285,10 +288,18 @@ default rule, an empty rule set, or a safe subset; an unexpected group, ingress,
 or egress fails closed.
 
 `RunInstances` is strictly one instance from the Stack-pinned AMI and quote:
-no instance profile, SSH/key pair, user data, public IPv4, IPv6, or caller
-security group. It requires IMDSv2, disables instance-metadata tags, creates
-encrypted retained gp3 storage, tags the instance/volume/ENI, and uses the
-signed request digest as `ClientToken`. The only Broker-to-Orchestrator
+no instance profile, SSH/key pair, **caller-supplied** user data, public IPv4,
+IPv6, or caller security group. It requires IMDSv2, disables
+instance-metadata tags, creates encrypted retained gp3 storage, tags the
+instance/volume/ENI, and uses the signed request digest as `ClientToken`. The
+Stack generates the only permitted UserData after the private bootstrap
+session is durably issued: a fixed shell writes the strict non-secret manifest
+and systemd environment file, then restarts only
+`dirextalk-cloud-worker.service`. It cannot carry a bearer token, AWS
+credential, recipe command, mutable image reference, or caller text. The
+fixed AMI must provide that root-owned systemd unit and consume only
+`/etc/dirextalk-cloud-worker/bootstrap.env`; it is an AMI precondition, not a
+fallback installer. The only Broker-to-Orchestrator
 deployment receipt has exactly:
 
 ```text
@@ -305,41 +316,46 @@ network_interface_ids
 It contains no user data, Worker credentials, service secret, pairing material,
 or log content.
 
-`schemas/worker-bootstrap-v1.schema.json` and `src/worker-contract.mjs` still
-define the future constrained bootstrap manifest. They are not an active Worker
-claim/session endpoint: this stage does not issue or consume worker sessions,
-accept Worker events/logs, or establish service readiness. Those remain a
-separate follow-on contract.
+`schemas/worker-bootstrap-v1.schema.json` and `src/worker-contract.mjs` define
+the strict manifest carried by that generated UserData. The Broker atomically
+creates a private `bootstrap_session_id` beside the accepted deployment
+receipt; after the EC2 response it binds that session to the exact instance
+ID and security group before the Worker can claim. The Worker calls only
+`POST /v2/worker-sessions/{id}/claim` and `/events`. Its IMDSv2 document and
+base64 RSA signature are verified with the Stack-pinned official AWS regional
+RSA public certificate, then the Lambda independently reads back the account,
+Region, AMI, type, architecture, AZ, VPC/subnet/security group, private-only
+network, IMDS settings, and mandatory tags. `WorkerIdentityRsaPublicKeyPem`
+must contain that official certificate/public key for the selected Region; an
+empty or invalid value keeps fresh EC2 creation and Worker claims fail closed.
+
+The successful claim returns a short bearer only in that HTTPS response. The
+session table stores its SHA-256 hash only; events use a monotonic lease epoch
+and sequence plus a canonical event hash, so an exact retry is idempotent and
+a reordered or old-token event is rejected. Worker event state is deliberately
+limited to checkpoint/report metadata. This boundary does not execute a
+Recipe, read a service secret, proxy arbitrary commands, declare a service
+ready, open ingress, stop/destroy EC2, or treat a Worker log as independent
+health evidence. The bootstrap expiry is at most ten minutes and is not a
+renewable long-running service identity: do not enable this executor for
+OpenClaw, knowledge nodes, model serving, training, or continuous monitoring
+until a separately reviewed renewal/recovery protocol is in place.
 
 ## Offline verification
 
-No test invokes AWS or reads credentials:
+No Worker-bootstrap test invokes AWS, reads credentials, or runs a deployment
+lifecycle script:
 
 ```bash
-bash tests/connection_stack_v2_test.sh
-node --check scripts/connection-stack-v2/src/command-contract.mjs
-node --check scripts/connection-stack-v2/src/registration-contract.mjs
-node --check scripts/connection-stack-v2/src/deploy-helper.mjs
-node --check scripts/connection-stack-v2/src/dynamo-receipt-store.mjs
-node --check scripts/connection-stack-v2/src/dynamo-deployment-store.mjs
-node --check scripts/connection-stack-v2/src/quote-provider.mjs
-node --check scripts/connection-stack-v2/src/approval-proof.mjs
-node --check scripts/connection-stack-v2/src/deployment-contract.mjs
-node --check scripts/connection-stack-v2/src/deployment-provisioner.mjs
-node --check scripts/connection-stack-v2/src/worker-contract.mjs
-bash -n scripts/connection-stack-v2/deploy.sh
+bash tests/connection_stack_v2_worker_bootstrap_test.sh
 git diff --check
 ```
 
-The tests include in-process DynamoDB and AWS-provider seams that prove atomic
-transaction shape, counter/receipt/challenge fencing, idempotent expired quote
-reconciliation without a second provider call, upward minor-unit rounding,
-read-only API command shape, availability checks, and Spot rejection before any
-provider request. They also prove Go/Node deterministic-CBOR quote-digest
-agreement, ApprovalV1 signature and one-time consumption, strict create/receipt
-shapes, a private subnet, no caller-controlled EC2 settings, a response-lost
-security-group recovery, and no public ingress/instance profile/user data.
-Registration tests additionally prove exact three-field payloads,
-Stack-derived endpoint/Region/ARN binding, immutable replay, root rejection,
-template/source-digest pinning, the private Worker registration fields, and the
-deploy helper's explicit existing-artifact-bucket path.
+The focused lane proves the durable deployment reservation/session binding,
+strict claim/event JSON, token hashes instead of bearer persistence, IID
+signature/read-back rejection, generated-UserData shape, replay-safe event
+ordering, Stack-derived callback URLs, zero-ingress EC2 placement, Worker
+session IAM/table boundaries, and the disabled-verifier no-purchase gate. The
+broader existing `connection_stack_v2_test.sh` remains the deploy-helper and
+lifecycle lane; it is intentionally not required for this Worker-bootstrap
+module stage.

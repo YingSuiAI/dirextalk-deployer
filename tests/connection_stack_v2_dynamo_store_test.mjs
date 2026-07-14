@@ -48,6 +48,7 @@ class ScriptedDynamo {
 const NOW = Date.parse("2026-07-14T07:00:00.000Z");
 const CONNECTION_ID = "connection-v2-0001";
 const REQUEST_SHA256 = "a".repeat(64);
+const BOOTSTRAP_SESSION_ID = "worker-session-v2-001";
 const QUOTE_REQUEST = {
   quote_request_id: "quote-request-v2-001",
   plan_digest: `sha256:${"b".repeat(64)}`,
@@ -105,12 +106,14 @@ function deploymentReservation(deploymentId = "deployment-v2-001") {
 function reservedDeploymentItem({
   deploymentId = "deployment-v2-001",
   requestSHA256 = REQUEST_SHA256,
+  bootstrapSessionID = BOOTSTRAP_SESSION_ID,
 } = {}) {
   return {
     connection_id: { S: CONNECTION_ID },
     deployment_id: { S: deploymentId },
     request_sha256: { S: requestSHA256 },
     command_id: { S: "command-v2-reserved-001" },
+    bootstrap_session_id: { S: bootstrapSessionID },
     reservation_state: { S: "accepted" },
     reserved_at: { S: "2026-07-14T07:00:00.000Z" },
   };
@@ -220,7 +223,7 @@ function storedReceiptItem(input, overrides = {}) {
   };
 }
 
-function store(client) {
+function store(client, { createBootstrapSessionID } = {}) {
   return new DynamoV2ReceiptStore({
     client,
     receiptsTableName: "receipts",
@@ -231,6 +234,7 @@ function store(client) {
     countersTableName: "counters",
     GetItemCommand,
     TransactWriteItemsCommand,
+    ...(createBootstrapSessionID ? { createBootstrapSessionID } : {}),
   });
 }
 
@@ -373,7 +377,13 @@ assert.equal(consumeTransaction.find((item) => item.Put?.TableName === "deployme
 assert.equal(consumeTransaction.find((item) => item.Put?.TableName === "receipts").Put.TableName, "receipts");
 
 const proofClient = new ScriptedDynamo();
-await store(proofClient).commit(request({
+let generatedBootstrapSessionIDs = 0;
+await store(proofClient, {
+  createBootstrapSessionID() {
+    generatedBootstrapSessionIDs += 1;
+    return BOOTSTRAP_SESSION_ID;
+  },
+}).commit(request({
   action: "deployment.create",
   command_id: "command-v2-proof-01",
   node_counter: 13,
@@ -394,10 +404,37 @@ assert.deepEqual(deploymentReservationWrite.Put.Item, {
   deployment_id: { S: "deployment-v2-001" },
   request_sha256: { S: REQUEST_SHA256 },
   command_id: { S: "command-v2-proof-01" },
+  bootstrap_session_id: { S: BOOTSTRAP_SESSION_ID },
   reservation_state: { S: "accepted" },
   reserved_at: { S: "2026-07-14T07:00:00.000Z" },
 });
+assert.equal(generatedBootstrapSessionIDs, 1, "a fresh deployment reservation must generate one opaque Worker session id inside the durable transaction");
 assert.equal(proofTransaction.find((item) => item.Put?.TableName === "receipts").Put.TableName, "receipts");
+
+const recoveredDeploymentInput = request({
+  action: "deployment.create",
+  command_id: "command-v2-deployment-recovered",
+  node_counter: 14,
+  challenge_to_issue: undefined,
+  deployment_reservation: deploymentReservation(),
+  approval_proof: approvalProof(),
+});
+let recoveredGeneratorCalls = 0;
+const recoveredReceiptClient = new ScriptedDynamo({
+  receiptItem: storedReceiptItem(recoveredDeploymentInput),
+});
+assert.equal(
+  (await store(recoveredReceiptClient, {
+    createBootstrapSessionID() {
+      recoveredGeneratorCalls += 1;
+      return "worker-session-v2-should-not-run";
+    },
+  }).commit(recoveredDeploymentInput)).disposition,
+  "idempotent",
+  "a recovered committed command must use its existing receipt before generating a different bootstrap session id",
+);
+assert.equal(recoveredGeneratorCalls, 0, "a retry after a persisted receipt must not replace its bootstrap session id");
+assert.equal(recoveredReceiptClient.transactions.length, 0);
 
 const deploymentReservationConflict = new Error("simulated DynamoDB deployment reservation conflict");
 deploymentReservationConflict.name = "TransactionCanceledException";

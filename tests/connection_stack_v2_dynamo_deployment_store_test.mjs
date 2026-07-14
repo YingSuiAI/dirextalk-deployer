@@ -20,6 +20,7 @@ const CONNECTION_ID = "connection-v2-0001";
 const QUOTE_ID = `quote-${"b".repeat(32)}`;
 const DEPLOYMENT_ID = "deployment-v2-001";
 const REQUEST_SHA256 = "a".repeat(64);
+const BOOTSTRAP_SESSION_ID = "worker-session-v2-001";
 
 function quote() {
   return {
@@ -114,6 +115,7 @@ function reservedDeploymentItem(requestSHA256 = REQUEST_SHA256) {
     deployment_id: { S: DEPLOYMENT_ID },
     request_sha256: { S: requestSHA256 },
     command_id: { S: "command-v2-deployment-001" },
+    bootstrap_session_id: { S: BOOTSTRAP_SESSION_ID },
     reservation_state: { S: "accepted" },
     reserved_at: { S: "2026-07-14T07:00:00.000Z" },
   };
@@ -139,7 +141,8 @@ class ScriptedDynamo {
       this.updates.push(command.input);
       if (this.updateError) throw this.updateError;
       const values = command.input.ExpressionAttributeValues;
-      this.deployment = {
+      const promoted = {
+        ...this.deployment,
         ...command.input.Key,
         request_sha256: values[":request_sha256"],
         resource_status: values[":resource_status"],
@@ -147,6 +150,10 @@ class ScriptedDynamo {
         receipt_json: values[":receipt_json"],
         recorded_at: values[":recorded_at"],
       };
+      delete promoted.reservation_state;
+      delete promoted.command_id;
+      delete promoted.reserved_at;
+      this.deployment = promoted;
       return {};
     }
     throw new Error("unexpected command");
@@ -178,6 +185,18 @@ assert.equal(
   "a same-request reservation must not masquerade as a completed EC2 receipt before the provisioner runs",
 );
 assert.equal(reservationClient.gets.at(-1).ConsistentRead, true);
+assert.deepEqual(
+  await store(reservationClient).getDeploymentBootstrap({
+    connection_id: CONNECTION_ID,
+    deployment_id: DEPLOYMENT_ID,
+    request_sha256: REQUEST_SHA256,
+  }),
+  {
+    bootstrap_session_id: BOOTSTRAP_SESSION_ID,
+    request_sha256: REQUEST_SHA256,
+  },
+  "the provisioner must be able to recover the durable bootstrap session id before EC2 is created",
+);
 await assert.rejects(
   () => store(reservationClient).getDeployment({
     connection_id: CONNECTION_ID,
@@ -194,10 +213,24 @@ assert.deepEqual(persisted, receipt());
 assert.equal(createClient.updates.length, 1);
 const write = createClient.updates[0];
 assert.equal(write.TableName, "deployments");
-assert.equal(write.ConditionExpression, "request_sha256 = :request_sha256 AND reservation_state = :reservation_state");
+assert.equal(write.ConditionExpression, "request_sha256 = :request_sha256 AND reservation_state = :reservation_state AND attribute_exists(bootstrap_session_id)");
 assert.match(write.UpdateExpression, /REMOVE reservation_state, command_id, reserved_at$/);
+assert.doesNotMatch(write.UpdateExpression, /bootstrap_session_id/, "promotion must retain the durable bootstrap session id");
 assert.equal(write.ExpressionAttributeValues[":reservation_state"].S, "accepted");
 assert.equal(write.ExpressionAttributeValues[":receipt_json"].S, JSON.stringify(receipt()));
+assert.equal(createClient.deployment.bootstrap_session_id.S, BOOTSTRAP_SESSION_ID, "Dynamo promotion must retain the bootstrap session id beside the immutable receipt");
+assert.deepEqual(
+  await store(createClient).getDeploymentBootstrap({
+    connection_id: CONNECTION_ID,
+    deployment_id: DEPLOYMENT_ID,
+    request_sha256: REQUEST_SHA256,
+  }),
+  {
+    bootstrap_session_id: BOOTSTRAP_SESSION_ID,
+    request_sha256: REQUEST_SHA256,
+  },
+  "recovery after receipt promotion must observe the original bootstrap session id",
+);
 for (const field of ["user_data", "worker_token", "secret_ref"]) assert.equal(Object.hasOwn(write.ExpressionAttributeValues, `:${field}`), false);
 
 const conditional = new Error("existing");
@@ -226,6 +259,26 @@ await assert.rejects(
   () => store(missingReservationClient).putDeployment(receipt()),
   (error) => error?.code === "deployment_store_unavailable",
   "a deployment receipt must fail closed when no accepted reservation exists",
+);
+
+const legacyReceiptClient = new ScriptedDynamo({ deployment: deploymentItem() });
+assert.deepEqual(
+  await store(legacyReceiptClient).getDeployment({
+    connection_id: CONNECTION_ID,
+    deployment_id: DEPLOYMENT_ID,
+    request_sha256: REQUEST_SHA256,
+  }),
+  receipt(),
+  "completed deployments that predate Worker sessions remain readable",
+);
+await assert.rejects(
+  () => store(legacyReceiptClient).getDeploymentBootstrap({
+    connection_id: CONNECTION_ID,
+    deployment_id: DEPLOYMENT_ID,
+    request_sha256: REQUEST_SHA256,
+  }),
+  (error) => error?.code === "deployment_bootstrap_unavailable",
+  "a historical receipt without a durable session id cannot become a Worker bootstrap source",
 );
 
 console.log("connection stack v2 Dynamo deployment store boundary ok");

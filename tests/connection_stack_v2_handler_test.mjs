@@ -146,6 +146,53 @@ const deployment = {
   volume_ids: ["vol-0123456789abcdef0"],
   network_interface_ids: ["eni-0123456789abcdef0"],
 };
+const runtimeDeploymentCalls = [];
+const runtimeDeploymentHandler = createV2BrokerHandler({
+  async accept() {
+    return {
+      status: "approval_consumed",
+      receipt,
+      command: { action: "deployment.create", request_sha256: deployment.request_sha256 },
+    };
+  },
+}, {
+  registrationConfig: {
+    account_id: "123456789012",
+    region: "ap-south-1",
+    stack_arn: "arn:aws:cloudformation:ap-south-1:123456789012:stack/DirextalkConnectionStackV2-001/01234567-89ab-cdef-0123-456789abcdef",
+    api_gateway_url_suffix: "amazonaws.com",
+    stage_name: "prod",
+    worker_artifact: { kind: "fixed_ami", ami_id: "ami-0123456789abcdef0" },
+    worker_network: {
+      vpc_id: "vpc-0123456789abcdef0",
+      subnet_id: "subnet-0123456789abcdef0",
+      availability_zone: "ap-south-1a",
+    },
+    worker_resource_manifest_digest: `sha256:${"b".repeat(64)}`,
+  },
+  deploymentProvisioner: {
+    async ensure(commandToProvision, options) {
+      runtimeDeploymentCalls.push({ commandToProvision, options });
+      return deployment;
+    },
+  },
+});
+const runtimeDeploymentResponse = await runtimeDeploymentHandler({
+  path: "/prod/v2/commands",
+  httpMethod: "POST",
+  body: JSON.stringify(command),
+  requestContext: {
+    domainName: "abcde12345.execute-api.ap-south-1.amazonaws.com",
+    stage: "prod",
+  },
+});
+assert.equal(runtimeDeploymentResponse.statusCode, 202);
+assert.deepEqual(runtimeDeploymentCalls, [{
+  commandToProvision: { action: "deployment.create", request_sha256: deployment.request_sha256 },
+  options: {
+    workerBootstrapEndpoint: "https://abcde12345.execute-api.ap-south-1.amazonaws.com/prod/v2/worker-sessions",
+  },
+}], "the Stack generates the Worker callback endpoint from its own API Gateway event, never from a signed command");
 const provisionedCommands = [];
 const deploymentHandler = createV2BrokerHandler({
   async accept() {
@@ -221,5 +268,159 @@ assert.doesNotMatch(deniedResponse.body, /internal detail/);
 const invalidResponse = await handler({ body: "not-json" });
 assert.equal(invalidResponse.statusCode, 400);
 assert.deepEqual(JSON.parse(invalidResponse.body), { error: { code: "invalid_request" } });
+
+const workerSessionID = "worker-session-v2-001";
+const workerClaim = {
+  schema: "dirextalk.worker-session-claim/v1",
+  connection_id: "connection-v2-0001",
+  deployment_id: "deployment-v2-001",
+  bootstrap_session_id: workerSessionID,
+  worker_image_digest: `sha256:${"e".repeat(64)}`,
+  artifact_manifest_digest: `sha256:${"f".repeat(64)}`,
+  instance_identity_document_b64: "e30=",
+  instance_identity_signature_b64: "AA==",
+};
+const workerEvent = {
+  schema: "dirextalk.worker-event/v1",
+  connection_id: workerClaim.connection_id,
+  deployment_id: workerClaim.deployment_id,
+  bootstrap_session_id: workerSessionID,
+  lease_epoch: 1,
+  sequence: 1,
+  kind: "progress",
+  occurred_at: "2026-07-15T01:00:00.000Z",
+  report_status: "installing",
+};
+const workerClaimResponse = {
+  schema: "dirextalk.worker-session-claim-response/v1",
+  connection_id: workerClaim.connection_id,
+  deployment_id: workerClaim.deployment_id,
+  bootstrap_session_id: workerSessionID,
+  lease_epoch: 1,
+  lease_expires_at: "2026-07-15T01:05:00.000Z",
+  access_token: "worker-session-test-token-123456",
+};
+const workerEventReceipt = {
+  schema: "dirextalk.worker-event-receipt/v1",
+  connection_id: workerEvent.connection_id,
+  deployment_id: workerEvent.deployment_id,
+  bootstrap_session_id: workerSessionID,
+  lease_epoch: 1,
+  sequence: 1,
+  disposition: "accepted",
+};
+const workerSessionCalls = [];
+let workerRouteCommandCalls = 0;
+const workerRouteHandler = createV2BrokerHandler({
+  async accept() {
+    workerRouteCommandCalls += 1;
+    throw new Error("Worker session routes must not reach signed command acceptance");
+  },
+}, {
+  workerSessionService: {
+    async claim(sessionId, receivedClaim) {
+      workerSessionCalls.push({ kind: "claim", sessionId, receivedClaim });
+      return workerClaimResponse;
+    },
+    async event(sessionId, authorization, receivedEvent) {
+      workerSessionCalls.push({ kind: "event", sessionId, authorization, receivedEvent });
+      return workerEventReceipt;
+    },
+  },
+});
+
+const workerClaimRouteResponse = await workerRouteHandler({
+  path: `/v2/worker-sessions/${workerSessionID}/claim`,
+  httpMethod: "POST",
+  body: JSON.stringify(workerClaim),
+});
+assert.equal(workerClaimRouteResponse.statusCode, 200);
+assert.deepEqual(JSON.parse(workerClaimRouteResponse.body), workerClaimResponse);
+assert.deepEqual(workerSessionCalls, [{ kind: "claim", sessionId: workerSessionID, receivedClaim: workerClaim }]);
+assert.equal(workerRouteCommandCalls, 0, "an unauthenticated Worker claim must never reach signed command acceptance");
+
+const stagedWorkerClaimRouteResponse = await workerRouteHandler({
+  path: `/prod/v2/worker-sessions/${workerSessionID}/claim`,
+  httpMethod: "POST",
+  requestContext: { stage: "prod" },
+  body: JSON.stringify(workerClaim),
+});
+assert.equal(stagedWorkerClaimRouteResponse.statusCode, 200);
+assert.deepEqual(workerSessionCalls.at(-1), { kind: "claim", sessionId: workerSessionID, receivedClaim: workerClaim });
+
+const workerEventRouteResponse = await workerRouteHandler({
+  rawPath: `/v2/worker-sessions/${workerSessionID}/events`,
+  requestContext: { http: { method: "POST" } },
+  headers: { Authorization: `Bearer ${workerClaimResponse.access_token}` },
+  body: JSON.stringify(workerEvent),
+});
+assert.equal(workerEventRouteResponse.statusCode, 200);
+assert.deepEqual(JSON.parse(workerEventRouteResponse.body), workerEventReceipt);
+assert.deepEqual(workerSessionCalls.at(-1), {
+  kind: "event",
+  sessionId: workerSessionID,
+  authorization: `Bearer ${workerClaimResponse.access_token}`,
+  receivedEvent: workerEvent,
+});
+assert.doesNotMatch(workerEventRouteResponse.body, /worker-session-test-token/, "event responses must not echo the bearer token");
+
+const duplicateKeyResponse = await workerRouteHandler({
+  path: `/v2/worker-sessions/${workerSessionID}/claim`,
+  httpMethod: "POST",
+  body: '{"schema":"dirextalk.worker-session-claim/v1","schema":"shadow"}',
+});
+assert.equal(duplicateKeyResponse.statusCode, 400);
+assert.deepEqual(JSON.parse(duplicateKeyResponse.body), { error: { code: "invalid_request" } });
+assert.equal(workerSessionCalls.length, 3, "duplicate-key JSON must be rejected before the Worker session service");
+
+const missingWorkerServiceCommandCalls = [];
+const missingWorkerServiceHandler = createV2BrokerHandler({
+  async accept(received) {
+    missingWorkerServiceCommandCalls.push(received);
+    return { status: "challenge_issued", receipt, challenge };
+  },
+});
+const missingWorkerServiceResponse = await missingWorkerServiceHandler({
+  path: `/v2/worker-sessions/${workerSessionID}/claim`,
+  httpMethod: "POST",
+  body: JSON.stringify(workerClaim),
+});
+assert.equal(missingWorkerServiceResponse.statusCode, 503);
+assert.deepEqual(JSON.parse(missingWorkerServiceResponse.body), { error: { code: "worker_session_unavailable" } });
+assert.deepEqual(missingWorkerServiceCommandCalls, [], "a disabled Worker session service must fail closed instead of treating a claim as a command");
+
+const unknownPathResponse = await workerRouteHandler({
+  path: "/v2/worker-sessions/not-a-session/unknown",
+  httpMethod: "POST",
+  body: JSON.stringify(workerClaim),
+});
+assert.equal(unknownPathResponse.statusCode, 404);
+assert.deepEqual(JSON.parse(unknownPathResponse.body), { error: { code: "not_found" } });
+assert.equal(workerRouteCommandCalls, 0, "an unknown path must not reach signed command acceptance");
+
+const wrongMethodResponse = await workerRouteHandler({
+  path: `/v2/worker-sessions/${workerSessionID}/claim`,
+  httpMethod: "GET",
+  body: JSON.stringify(workerClaim),
+});
+assert.equal(wrongMethodResponse.statusCode, 404);
+assert.deepEqual(JSON.parse(wrongMethodResponse.body), { error: { code: "not_found" } });
+
+const explicitCommandRouteResponse = await handler({
+  path: "/v2/commands",
+  httpMethod: "POST",
+  body: JSON.stringify(command),
+});
+assert.equal(explicitCommandRouteResponse.statusCode, 201);
+assert.equal(accepted.length, 2, "the explicit command path must keep its existing signed-command behavior");
+
+const duplicateCommandResponse = await handler({
+  path: "/v2/commands",
+  httpMethod: "POST",
+  body: '{"schema":"dirextalk.aws.command/v2","schema":"shadow"}',
+});
+assert.equal(duplicateCommandResponse.statusCode, 400);
+assert.deepEqual(JSON.parse(duplicateCommandResponse.body), { error: { code: "invalid_request" } });
+assert.equal(accepted.length, 2, "strict JSON parsing must reject duplicate keys before signed command acceptance");
 
 console.log("connection stack v2 broker handler boundary ok");

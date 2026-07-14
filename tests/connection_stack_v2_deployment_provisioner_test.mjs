@@ -25,6 +25,7 @@ const commandConstructors = {
 };
 const DIGEST = (character) => `sha256:${character.repeat(64)}`;
 const requestSHA256 = "b".repeat(64);
+const workerBootstrapEndpoint = "https://a1b2c3d4e5.execute-api.ap-south-1.amazonaws.com/prod/v2/worker-sessions";
 const payload = {
   schema: "dirextalk.aws.deployment-create/v1",
   deployment_id: "deployment-v2-001",
@@ -115,6 +116,7 @@ const approvalProof = {
 command.approval_proof = approvalProof;
 
 const sent = [];
+const lifecycle = [];
 const ec2Client = {
   async send(commandInput) {
     sent.push(commandInput);
@@ -145,6 +147,7 @@ const ec2Client = {
     if (commandInput instanceof RevokeSecurityGroupEgressCommand) return {};
     if (commandInput instanceof AuthorizeSecurityGroupEgressCommand) return {};
     if (commandInput instanceof RunInstancesCommand) {
+      lifecycle.push("run");
       return { Instances: [{
         InstanceId: "i-0123456789abcdef0",
         BlockDeviceMappings: [{ Ebs: { VolumeId: "vol-0123456789abcdef0" } }],
@@ -156,8 +159,32 @@ const ec2Client = {
 };
 
 const persisted = [];
+let issuedWorkerSession;
+const workerSessionStore = {
+  async issue(input) {
+    lifecycle.push("issue");
+    issuedWorkerSession = {
+      ...structuredClone(input),
+      state: "issued",
+      lease_epoch: 0,
+      last_sequence: 0,
+    };
+    return structuredClone(issuedWorkerSession);
+  },
+  async bind(input) {
+    lifecycle.push("bind");
+    return {
+      ...structuredClone(issuedWorkerSession),
+      state: "bound",
+      expected_instance_id: input.instance_id,
+    };
+  },
+};
 const store = {
   async getDeployment() { return undefined; },
+  async getDeploymentBootstrap() {
+    return { bootstrap_session_id: "worker-session-v2-001", request_sha256: requestSHA256 };
+  },
   async getQuote() { return quote; },
   async putDeployment(receipt) {
     persisted.push(receipt);
@@ -169,15 +196,18 @@ const provisioner = new Ec2DedicatedWorkerProvisioner({
   ec2Client,
   commandConstructors,
   deploymentStore: store,
+  workerSessionStore,
   connectionId: command.connection_id,
   connectionGeneration: 3,
+  accountId: "123456789012",
   region: "ap-south-1",
   workerBaseAmiId: payload.worker_artifact.ami_id,
   workerResourceManifestDigest: payload.resource_manifest_digest,
   workerNetwork: payload.network,
+  workerBootstrapEnabled: true,
   nowMs: () => Date.parse("2026-07-14T07:00:00.000Z"),
 });
-const receipt = await provisioner.ensure(command);
+const receipt = await provisioner.ensure(command, { workerBootstrapEndpoint });
 assert.deepEqual(receipt, {
   schema: "dirextalk.aws.deployment-receipt/v1",
   connection_id: command.connection_id,
@@ -205,9 +235,15 @@ assert.equal(run.BlockDeviceMappings[0].Ebs.Encrypted, true);
 assert.equal(run.BlockDeviceMappings[0].Ebs.DeleteOnTermination, false);
 assert.equal(run.BlockDeviceMappings[0].Ebs.VolumeType, "gp3");
 assert.equal(run.BlockDeviceMappings[0].Ebs.VolumeSize, 40);
-for (const forbidden of ["IamInstanceProfile", "KeyName", "UserData", "SecurityGroupIds", "SubnetId", "AssociatePublicIpAddress"]) {
+for (const forbidden of ["IamInstanceProfile", "KeyName", "SecurityGroupIds", "SubnetId", "AssociatePublicIpAddress"]) {
   assert.ok(!Object.hasOwn(run, forbidden), `${forbidden} must not reach RunInstances`);
 }
+assert.equal(lifecycle.slice(0, 3).join(","), "issue,run,bind", "the Stack must bind a durable bootstrap session around the typed EC2 mutation");
+assert.equal(typeof run.UserData, "string");
+const bootstrapScript = Buffer.from(run.UserData, "base64").toString("utf8");
+assert.match(bootstrapScript, /dirextalk-cloud-worker\.service/);
+assert.equal(issuedWorkerSession.bootstrap_session_id, "worker-session-v2-001");
+assert.ok(!bootstrapScript.includes("access_token"), "EC2 UserData must not carry a Worker bearer token");
 assert.ok(!sent.some((item) => /AuthorizeSecurityGroupIngress|CreateKeyPair|CreateIamInstanceProfile|PassRole/.test(item.constructor.name)));
 const outbound = sent.find((item) => item instanceof AuthorizeSecurityGroupEgressCommand)?.input;
 assert.deepEqual(outbound.IpPermissions.map((permission) => [permission.IpProtocol, permission.FromPort, permission.ToPort]), [
@@ -221,11 +257,36 @@ await assert.rejects(
   () => provisioner.ensure({
     ...command,
     payload: { ...payload, candidate_id: "candidate-performance-01" },
-  }),
+  }, { workerBootstrapEndpoint }),
   (error) => error?.code === "approval_proof_mismatch",
   "a signed deployment command must not select a more expensive durable quote candidate outside the Flutter-approved resource scope",
 );
 assert.equal(sent.length, sentBeforeMismatchedScope, "a resource-scope mismatch must fail before any EC2 preflight or mutation");
+
+const identityDisabledProvisioner = new Ec2DedicatedWorkerProvisioner({
+  ec2Client: {
+    async send() {
+      throw new Error("an unconfigured IID verifier must fail before any EC2 mutation");
+    },
+  },
+  commandConstructors,
+  deploymentStore: store,
+  workerSessionStore,
+  connectionId: command.connection_id,
+  connectionGeneration: 3,
+  accountId: "123456789012",
+  region: "ap-south-1",
+  workerBaseAmiId: payload.worker_artifact.ami_id,
+  workerResourceManifestDigest: payload.resource_manifest_digest,
+  workerNetwork: payload.network,
+  workerBootstrapEnabled: false,
+  nowMs: () => Date.parse("2026-07-14T07:00:00.000Z"),
+});
+await assert.rejects(
+  () => identityDisabledProvisioner.ensure(command, { workerBootstrapEndpoint }),
+  (error) => error?.code === "worker_identity_unavailable",
+  "a Stack without the official IID verifier must not create an EC2 Worker",
+);
 
 const trustedGroupTags = sent.find((item) => item instanceof CreateSecurityGroupCommand)?.input.TagSpecifications[0].Tags;
 const ipv6Egress = outbound.IpPermissions.map((permission, index) => ({
@@ -249,16 +310,19 @@ const ipv6EgressProvisioner = new Ec2DedicatedWorkerProvisioner({
   },
   commandConstructors,
   deploymentStore: store,
+  workerSessionStore,
   connectionId: command.connection_id,
   connectionGeneration: 3,
+  accountId: "123456789012",
   region: "ap-south-1",
   workerBaseAmiId: payload.worker_artifact.ami_id,
   workerResourceManifestDigest: payload.resource_manifest_digest,
   workerNetwork: payload.network,
+  workerBootstrapEnabled: true,
   nowMs: () => Date.parse("2026-07-14T07:00:00.000Z"),
 });
 await assert.rejects(
-  () => ipv6EgressProvisioner.ensure(command),
+  () => ipv6EgressProvisioner.ensure(command, { workerBootstrapEndpoint }),
   (error) => error?.code === "worker_security_group_invalid",
   "an existing tagged group with IPv6 egress must not be treated as a safe Worker group",
 );
@@ -324,19 +388,25 @@ const recoveryProvisioner = new Ec2DedicatedWorkerProvisioner({
   commandConstructors,
   deploymentStore: {
     async getDeployment() { return undefined; },
+    async getDeploymentBootstrap() {
+      return { bootstrap_session_id: "worker-session-v2-001", request_sha256: requestSHA256 };
+    },
     async getQuote() { return quote; },
     async putDeployment(value) { return value; },
   },
+  workerSessionStore,
   connectionId: command.connection_id,
   connectionGeneration: 3,
+  accountId: "123456789012",
   region: "ap-south-1",
   workerBaseAmiId: payload.worker_artifact.ami_id,
   workerResourceManifestDigest: payload.resource_manifest_digest,
   workerNetwork: payload.network,
+  workerBootstrapEnabled: true,
   nowMs: () => Date.parse("2026-07-14T07:00:00.000Z"),
 });
 assert.equal(
-  (await recoveryProvisioner.ensure(command)).instance_id,
+  (await recoveryProvisioner.ensure(command, { workerBootstrapEndpoint })).instance_id,
   "i-0123456789abcdef0",
   "a lost CreateSecurityGroup response must recover only the Stack-tagged zero-ingress group",
 );
@@ -350,6 +420,117 @@ assert.deepEqual(
   recoveredGroup.IpPermissionsEgress.map((permission) => [permission.IpProtocol, permission.FromPort, permission.ToPort]),
   [["tcp", 443, 443], ["udp", 53, 53], ["tcp", 53, 53]],
 );
+
+// An EC2 client can lose the RunInstances response after AWS accepted the
+// ClientToken. The second attempt must reuse the durable bootstrap session and
+// emit byte-identical UserData, otherwise AWS treats the retry as a different
+// request instead of returning the original dedicated Worker.
+let responseLossNow = Date.parse("2026-07-14T07:00:00.000Z");
+let responseLossSession;
+let responseLossRunInput;
+let responseLossRunCalls = 0;
+const responseLossGroup = {
+  GroupId: "sg-0123456789abcdef0",
+  Tags: trustedGroupTags,
+  IpPermissions: [],
+  IpPermissionsEgress: structuredClone(outbound.IpPermissions),
+};
+const responseLossProvisioner = new Ec2DedicatedWorkerProvisioner({
+  ec2Client: {
+    async send(commandInput) {
+      if (commandInput instanceof DescribeSubnetsCommand) {
+        return { Subnets: [{
+          SubnetId: payload.network.subnet_id,
+          VpcId: payload.network.vpc_id,
+          AvailabilityZone: payload.network.availability_zone,
+          AvailableIpAddressCount: 8,
+          MapPublicIpOnLaunch: false,
+          AssignIpv6AddressOnCreation: false,
+          Ipv6CidrBlockAssociationSet: [],
+        }] };
+      }
+      if (commandInput instanceof DescribeVpcsCommand) {
+        return { Vpcs: [{ VpcId: payload.network.vpc_id, CidrBlock: "10.0.0.0/16" }] };
+      }
+      if (commandInput instanceof DescribeImagesCommand) {
+        return { Images: [{
+          ImageId: payload.worker_artifact.ami_id,
+          State: "available",
+          Architecture: "x86_64",
+          RootDeviceName: "/dev/sda1",
+        }] };
+      }
+      if (commandInput instanceof DescribeSecurityGroupsCommand) {
+        return { SecurityGroups: [responseLossGroup] };
+      }
+      if (commandInput instanceof RunInstancesCommand) {
+        responseLossRunCalls += 1;
+        if (responseLossRunCalls === 1) {
+          responseLossRunInput = structuredClone(commandInput.input);
+          throw new Error("simulated RunInstances response loss after AWS accepted ClientToken");
+        }
+        assert.equal(commandInput.input.ClientToken, responseLossRunInput.ClientToken);
+        assert.equal(commandInput.input.UserData, responseLossRunInput.UserData);
+        return { Instances: [{
+          InstanceId: "i-0123456789abcdef0",
+          BlockDeviceMappings: [{ Ebs: { VolumeId: "vol-0123456789abcdef0" } }],
+          NetworkInterfaces: [{ NetworkInterfaceId: "eni-0123456789abcdef0" }],
+        }] };
+      }
+      throw new Error(`unexpected ${commandInput.constructor.name}`);
+    },
+  },
+  commandConstructors,
+  deploymentStore: {
+    async getDeployment() { return undefined; },
+    async getDeploymentBootstrap() {
+      return { bootstrap_session_id: "worker-session-v2-001", request_sha256: requestSHA256 };
+    },
+    async getQuote() { return quote; },
+    async putDeployment(value) { return value; },
+  },
+  workerSessionStore: {
+    async issue(input) {
+      if (!responseLossSession) {
+        responseLossSession = {
+          ...structuredClone(input),
+          state: "issued",
+          lease_epoch: 0,
+          last_sequence: 0,
+        };
+      }
+      return structuredClone(responseLossSession);
+    },
+    async bind(input) {
+      return {
+        ...structuredClone(responseLossSession),
+        state: "bound",
+        expected_instance_id: input.instance_id,
+      };
+    },
+  },
+  connectionId: command.connection_id,
+  connectionGeneration: 3,
+  accountId: "123456789012",
+  region: "ap-south-1",
+  workerBaseAmiId: payload.worker_artifact.ami_id,
+  workerResourceManifestDigest: payload.resource_manifest_digest,
+  workerNetwork: payload.network,
+  workerBootstrapEnabled: true,
+  nowMs: () => responseLossNow,
+});
+await assert.rejects(
+  () => responseLossProvisioner.ensure(command, { workerBootstrapEndpoint }),
+  (error) => error?.code === "deployment_provider_unavailable",
+  "a lost RunInstances response must leave the durable session eligible for one safe recovery request",
+);
+responseLossNow += 5_000;
+assert.equal(
+  (await responseLossProvisioner.ensure(command, { workerBootstrapEndpoint })).instance_id,
+  "i-0123456789abcdef0",
+);
+assert.equal(responseLossRunCalls, 2, "recovery must rely on the original EC2 ClientToken instead of creating another session");
+assert.equal(responseLossSession.expires_at, "2026-07-14T07:10:00.000Z");
 
 const publicSubnetProvisioner = new Ec2DedicatedWorkerProvisioner({
   ec2Client: {
@@ -370,16 +551,19 @@ const publicSubnetProvisioner = new Ec2DedicatedWorkerProvisioner({
   },
   commandConstructors,
   deploymentStore: store,
+  workerSessionStore,
   connectionId: command.connection_id,
   connectionGeneration: 3,
+  accountId: "123456789012",
   region: "ap-south-1",
   workerBaseAmiId: payload.worker_artifact.ami_id,
   workerResourceManifestDigest: payload.resource_manifest_digest,
   workerNetwork: payload.network,
+  workerBootstrapEnabled: true,
   nowMs: () => Date.parse("2026-07-14T07:00:00.000Z"),
 });
 await assert.rejects(
-  () => publicSubnetProvisioner.ensure(command),
+  () => publicSubnetProvisioner.ensure(command, { workerBootstrapEndpoint }),
   (error) => error?.code === "worker_network_invalid",
   "a Stack-configured subnet that assigns public IPs cannot launch a Worker",
 );

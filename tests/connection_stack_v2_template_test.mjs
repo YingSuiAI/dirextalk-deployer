@@ -41,8 +41,8 @@ const deploymentReceiptSchema = JSON.parse(readFileSync(
 ));
 
 assert.equal(template.Transform, "AWS::Serverless-2016-10-31");
-assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "durable-registration-quote-and-isolated-worker-create");
-assert.equal(template.Metadata.DirextalkConnectionStackV2.Execution, "receipt-registration-attestation-approval-challenge-read-only-on-demand-quote-and-typed-worker-create");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "durable-registration-quote-isolated-worker-and-bootstrap-session");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Execution, "receipt-registration-attestation-approval-challenge-read-only-on-demand-quote-typed-worker-create-and-bootstrap-session");
 assert.equal(commandSchema.properties.schema.const, "dirextalk.aws.command/v2");
 assert.equal(approvalBindingSchema.properties.schema.const, "dirextalk.aws.approval-binding/v2");
 assert.equal(workerSchema.properties.schema.const, "dirextalk.worker-bootstrap/v1");
@@ -92,6 +92,10 @@ for (const parameter of [
 ]) {
   assert.ok(template.Parameters[parameter], `${parameter} is required to establish the two-key boundary`);
 }
+assert.equal(template.Parameters.WorkerIdentityRsaPublicKeyPem.Type, "String");
+assert.equal(template.Parameters.WorkerIdentityRsaPublicKeyPem.Default, "", "an unconfigured identity verifier must keep Worker claims fail closed");
+assert.equal(template.Parameters.WorkerIdentityRsaPublicKeyPem.MaxLength, 4096);
+assert.match(template.Parameters.WorkerIdentityRsaPublicKeyPem.Description, /public PEM/i);
 assert.ok(!/access.?key|secret.?access.?key|session.?token/i.test(JSON.stringify(template.Parameters)), "bootstrap credentials must never be stack parameters");
 
 for (const name of [
@@ -101,6 +105,7 @@ for (const name of [
   "IssuedQuotesTable",
   "DeploymentReceiptsTable",
   "ConnectionCountersTable",
+  "WorkerSessionsTable",
 ]) {
   const resource = template.Resources[name];
   assert.equal(resource.Type, "AWS::DynamoDB::Table");
@@ -111,13 +116,27 @@ for (const name of [
   assert.equal(resource.Properties.PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled, true);
   assert.equal(resource.Properties.SSESpecification.SSEType, "KMS");
 }
+assert.deepEqual(template.Resources.WorkerSessionsTable.Properties.AttributeDefinitions, [
+  { AttributeName: "bootstrap_session_id", AttributeType: "S" },
+]);
+assert.deepEqual(template.Resources.WorkerSessionsTable.Properties.KeySchema, [
+  { AttributeName: "bootstrap_session_id", KeyType: "HASH" },
+]);
+assert.deepEqual(template.Resources.WorkerSessionsTable.Properties.TimeToLiveSpecification, {
+  AttributeName: "ttl_epoch_seconds",
+  Enabled: true,
+});
 
 const broker = template.Resources.BrokerCommandFunction;
 assert.equal(broker.Type, "AWS::Serverless::Function");
 assert.equal(broker.Metadata.BuildProperties.UseNpmCi, true, "SAM must install the lockfile-pinned DynamoDB SDK into deployment artifacts");
-assert.deepEqual(Object.keys(broker.Properties.Events), ["PostCommand"]);
+assert.deepEqual(Object.keys(broker.Properties.Events), ["PostCommand", "PostWorkerSessionClaim", "PostWorkerSessionEvent"]);
 assert.equal(broker.Properties.Events.PostCommand.Properties.Path, "/v2/commands");
 assert.equal(broker.Properties.Events.PostCommand.Properties.Method, "post");
+assert.equal(broker.Properties.Events.PostWorkerSessionClaim.Properties.Path, "/v2/worker-sessions/{session_id}/claim");
+assert.equal(broker.Properties.Events.PostWorkerSessionClaim.Properties.Method, "post");
+assert.equal(broker.Properties.Events.PostWorkerSessionEvent.Properties.Path, "/v2/worker-sessions/{session_id}/events");
+assert.equal(broker.Properties.Events.PostWorkerSessionEvent.Properties.Method, "post");
 assert.equal(broker.Properties.Environment.Variables.DEVICE_APPROVAL_KEY_ID.Ref, "DeviceApprovalKeyId");
 assert.equal(broker.Properties.Environment.Variables.DEVICE_APPROVAL_PUBLIC_KEY_SPKI_B64.Ref, "DeviceApprovalPublicKeySpkiBase64");
 assert.equal(broker.Properties.Environment.Variables.COMMAND_RECEIPTS_TABLE.Ref, "CommandReceiptsTable");
@@ -126,6 +145,7 @@ assert.equal(broker.Properties.Environment.Variables.APPROVAL_PROOFS_TABLE.Ref, 
 assert.equal(broker.Properties.Environment.Variables.ISSUED_QUOTES_TABLE.Ref, "IssuedQuotesTable");
 assert.equal(broker.Properties.Environment.Variables.DEPLOYMENT_RECEIPTS_TABLE.Ref, "DeploymentReceiptsTable");
 assert.equal(broker.Properties.Environment.Variables.CONNECTION_COUNTERS_TABLE.Ref, "ConnectionCountersTable");
+assert.equal(broker.Properties.Environment.Variables.WORKER_SESSIONS_TABLE.Ref, "WorkerSessionsTable");
 assert.equal(broker.Properties.Environment.Variables.STACK_ACCOUNT_ID.Ref, "AWS::AccountId");
 assert.equal(broker.Properties.Environment.Variables.STACK_REGION.Ref, "AWS::Region");
 assert.equal(broker.Properties.Environment.Variables.STACK_ARN.Ref, "AWS::StackId");
@@ -136,10 +156,16 @@ assert.equal(broker.Properties.Environment.Variables.WORKER_VPC_ID.Ref, "WorkerV
 assert.equal(broker.Properties.Environment.Variables.WORKER_SUBNET_ID.Ref, "WorkerSubnetId");
 assert.equal(broker.Properties.Environment.Variables.WORKER_AVAILABILITY_ZONE.Ref, "WorkerAvailabilityZone");
 assert.equal(broker.Properties.Environment.Variables.WORKER_RESOURCE_MANIFEST_DIGEST.Ref, "WorkerResourceManifestDigest");
+assert.equal(broker.Properties.Environment.Variables.WORKER_IDENTITY_RSA_PUBLIC_KEY_PEM.Ref, "WorkerIdentityRsaPublicKeyPem");
 assert.equal(broker.Properties.Timeout, 30, "typed EC2 creation must retain a bounded Lambda timeout");
 
 const rolePolicy = template.Resources.BrokerContractRole.Properties.Policies[0].PolicyDocument.Statement;
-assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:GetItem"));
+const receiptReader = rolePolicy.find((statement) => statement.Action === "dynamodb:GetItem");
+assert.ok(receiptReader);
+assert.ok(
+  receiptReader.Resource.some((resource) => resource["Fn::GetAtt"]?.[0] === "WorkerSessionsTable"),
+  "Worker bootstrap sessions need only a direct GetItem lookup",
+);
 const receiptTransaction = rolePolicy.find((statement) => statement.Action === "dynamodb:TransactWriteItems");
 assert.ok(receiptTransaction);
 assert.ok(
@@ -147,6 +173,16 @@ assert.ok(
   "deployment-id reservation must be written in the same receipt acceptance transaction",
 );
 assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:UpdateItem"), "only a same-request reservation may be promoted to a private deployment receipt");
+assert.deepEqual(
+  rolePolicy.find((statement) => statement.Sid === "ManageWorkerBootstrapSessionsOnly"),
+  {
+    Sid: "ManageWorkerBootstrapSessionsOnly",
+    Effect: "Allow",
+    Action: ["dynamodb:PutItem", "dynamodb:UpdateItem"],
+    Resource: { "Fn::GetAtt": ["WorkerSessionsTable", "Arn"] },
+  },
+  "Worker sessions must have only direct PutItem/UpdateItem access to their dedicated table",
+);
 assert.deepEqual(
   rolePolicy.find((statement) => statement.Action === "pricing:GetProducts"),
   {
@@ -178,8 +214,11 @@ assert.deepEqual(
   "instance capacity lookup must remain read-only",
 );
 const providerPolicy = JSON.stringify(rolePolicy);
-assert.doesNotMatch(providerPolicy, /dynamodb:(?:PutItem|DeleteItem|Scan|Query|BatchWriteItem)/);
+assert.doesNotMatch(providerPolicy, /dynamodb:(?:DeleteItem|Scan|Query|BatchWriteItem)/);
 assert.doesNotMatch(JSON.stringify(rolePolicy), /pricing:\*|ec2:\*/i);
+const readWorkerPlacement = rolePolicy.find((statement) => statement.Sid === "ReadDedicatedWorkerPlacementOnly");
+assert.ok(readWorkerPlacement.Action.includes("ec2:DescribeInstances"), "identity verification must read back the created instance");
+assert.ok(readWorkerPlacement.Action.every((action) => action.startsWith("ec2:Describe")), "Worker identity read-back must stay read-only");
 const typedWorkerStatement = rolePolicy.find((statement) => statement.Sid === "CreateDedicatedWorkerOnly");
 assert.deepEqual(typedWorkerStatement.Action, [
   "ec2:CreateSecurityGroup",
@@ -225,6 +264,10 @@ assert.match(handlerText, /AwsOnDemandQuoteProvider/);
 assert.match(handlerText, /registrationRuntimeContext/);
 assert.match(handlerText, /DynamoDeploymentStore/);
 assert.match(handlerText, /UpdateItemCommand/);
+assert.match(handlerText, /DynamoWorkerSessionStore/);
+assert.match(handlerText, /WorkerSessionService/);
+assert.match(handlerText, /AwsInstanceIdentityVerifier/);
+assert.match(handlerText, /DescribeInstancesCommand/);
 assert.match(handlerText, /Ec2DedicatedWorkerProvisioner/);
 assert.match(handlerText, /RunInstancesCommand/);
 assert.doesNotMatch(handlerText, /@aws-sdk\/client-(?:s3|iam|secrets-manager)/);

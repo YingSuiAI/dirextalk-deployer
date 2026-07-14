@@ -13,6 +13,9 @@ import {
   DynamoDeploymentStore,
 } from "./dynamo-deployment-store.mjs";
 import {
+  DynamoWorkerSessionStore,
+} from "./dynamo-worker-session-store.mjs";
+import {
   Ec2DedicatedWorkerProvisioner,
 } from "./deployment-provisioner.mjs";
 import {
@@ -24,6 +27,15 @@ import {
 import {
   validateConnectionRegistrationConfig,
 } from "./registration-contract.mjs";
+import {
+  AwsInstanceIdentityVerifier,
+} from "./worker-identity-verifier.mjs";
+import {
+  parseStrictJSONObject,
+} from "./worker-session-contract.mjs";
+import {
+  WorkerSessionService,
+} from "./worker-session-service.mjs";
 
 function response(statusCode, body) {
   return {
@@ -56,11 +68,56 @@ function parseBody(event) {
   if (body.length > 256 * 1024) {
     throw new ConnectionStackV2Error("request_too_large", "request body is too large", 413);
   }
-  try {
-    return JSON.parse(body.toString("utf8"));
-  } catch {
-    throw new ConnectionStackV2Error("invalid_request", "request body must be JSON", 400);
+  return parseStrictJSONObject(body, {
+    code: "invalid_request",
+    label: "request body",
+  });
+}
+
+function requestPath(event) {
+  const rawPath = [
+    event?.rawPath,
+    event?.path,
+    event?.requestContext?.http?.path,
+  ].find((value) => typeof value === "string");
+  if (rawPath === undefined) return undefined;
+
+  const stage = event?.requestContext?.stage;
+  if (typeof stage === "string" && rawPath.startsWith(`/${stage}/`)) {
+    return rawPath.slice(stage.length + 1);
   }
+  return rawPath;
+}
+
+function requestMethod(event) {
+  const method = event?.requestContext?.http?.method ?? event?.httpMethod;
+  return typeof method === "string" ? method.toUpperCase() : undefined;
+}
+
+function routeRequest(event) {
+  const path = requestPath(event);
+  if (path === undefined) return { kind: "command" };
+  const method = requestMethod(event);
+  if (method !== undefined && method !== "POST") return { kind: "not_found" };
+  if (path === "/v2/commands") return { kind: "command" };
+  const workerMatch = /^\/v2\/worker-sessions\/([^/]+)\/(claim|events)$/.exec(path);
+  if (!workerMatch) return { kind: "not_found" };
+  return {
+    kind: workerMatch[2] === "claim" ? "worker_claim" : "worker_event",
+    sessionId: workerMatch[1],
+  };
+}
+
+function authorizationHeader(event) {
+  if (!event?.headers || typeof event.headers !== "object" || Array.isArray(event.headers)) return undefined;
+  const values = Object.entries(event.headers)
+    .filter(([name]) => name.toLowerCase() === "authorization")
+    .map(([, value]) => value);
+  return values.length === 1 && typeof values[0] === "string" ? values[0] : undefined;
+}
+
+function workerSessionUnavailable() {
+  throw new ConnectionStackV2Error("worker_session_unavailable", "the Worker session service is unavailable", 503);
 }
 
 function resultStatusCode(status) {
@@ -109,24 +166,95 @@ function registrationRuntimeContext(event, registrationConfig) {
   };
 }
 
+function workerBootstrapRuntimeContext(registrationRuntime) {
+  if (!registrationRuntime?.broker_command_url) return undefined;
+  let endpoint;
+  try {
+    endpoint = new URL(registrationRuntime.broker_command_url);
+  } catch {
+    throw new ConnectionStackV2Error("registration_config_invalid", "Broker runtime endpoint is invalid", 500);
+  }
+  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash
+    || !endpoint.pathname.endsWith("/v2/commands")) {
+    throw new ConnectionStackV2Error("registration_config_invalid", "Broker runtime endpoint is invalid", 500);
+  }
+  endpoint.pathname = `${endpoint.pathname.slice(0, -"/commands".length)}/worker-sessions`;
+  return { workerBootstrapEndpoint: endpoint.toString() };
+}
+
+function unavailableWorkerSessionStore() {
+  const unavailable = () => {
+    throw new ConnectionStackV2Error("worker_session_unavailable", "the Worker session store is unavailable", 503);
+  };
+  return {
+    get: unavailable,
+    issue: unavailable,
+    bind: unavailable,
+    claim: unavailable,
+    recordEvent: unavailable,
+  };
+}
+
+function unavailableIdentityVerifier() {
+  return {
+    async verify() {
+      throw new ConnectionStackV2Error("worker_identity_unavailable", "the Stack Worker identity verifier is unavailable", 503);
+    },
+  };
+}
+
+function configuredIdentityVerifier({ ec2Client, DescribeInstancesCommand }) {
+  const rsaPublicKeyPem = process.env.WORKER_IDENTITY_RSA_PUBLIC_KEY_PEM?.trim();
+  if (!rsaPublicKeyPem) return { enabled: false, verifier: unavailableIdentityVerifier() };
+  try {
+    return {
+      enabled: true,
+      verifier: new AwsInstanceIdentityVerifier({
+        ec2Client,
+        DescribeInstancesCommand,
+        rsaPublicKeyPem,
+      }),
+    };
+  } catch {
+    return { enabled: false, verifier: unavailableIdentityVerifier() };
+  }
+}
+
 // createV2BrokerHandler is exported for in-process boundary tests. It exposes
 // only the durable receipt/challenge projection: no signed command payload,
 // approval blob, or internal runtime error is returned to the caller.
-export function createV2BrokerHandler(service, { registrationConfig, deploymentProvisioner } = {}) {
+export function createV2BrokerHandler(service, {
+  registrationConfig,
+  deploymentProvisioner,
+  workerSessionService,
+} = {}) {
   if (!service || typeof service.accept !== "function") {
     throw new TypeError("a V2 broker acceptance service is required");
   }
   return async function brokerHandler(event) {
     try {
-      let result = await service.accept(
-        parseBody(event),
-        registrationConfig ? registrationRuntimeContext(event, registrationConfig) : undefined,
-      );
+      const route = routeRequest(event);
+      if (route.kind === "not_found") {
+        throw new ConnectionStackV2Error("not_found", "Broker route does not exist", 404);
+      }
+      if (route.kind === "worker_claim") {
+        if (!workerSessionService || typeof workerSessionService.claim !== "function") workerSessionUnavailable();
+        return response(200, await workerSessionService.claim(route.sessionId, parseBody(event)));
+      }
+      if (route.kind === "worker_event") {
+        if (!workerSessionService || typeof workerSessionService.event !== "function") workerSessionUnavailable();
+        return response(200, await workerSessionService.event(route.sessionId, authorizationHeader(event), parseBody(event)));
+      }
+      const runtimeContext = registrationConfig ? registrationRuntimeContext(event, registrationConfig) : undefined;
+      let result = await service.accept(parseBody(event), runtimeContext);
       if (result?.command?.action === "deployment.create") {
         if (!deploymentProvisioner || typeof deploymentProvisioner.ensure !== "function") {
           throw new ConnectionStackV2Error("deployment_provider_unavailable", "the Worker deployment provider is unavailable", 503);
         }
-        const deployment = await deploymentProvisioner.ensure(result.command);
+        const deployment = await deploymentProvisioner.ensure(
+          result.command,
+          workerBootstrapRuntimeContext(runtimeContext),
+        );
         result = {
           ...result,
           status: result.status === "idempotent" ? "idempotent" : "deployment_created",
@@ -182,11 +310,13 @@ async function productionHandler() {
       const {
         DynamoDBClient,
         GetItemCommand,
+        PutItemCommand,
         UpdateItemCommand,
         TransactWriteItemsCommand,
       } = await import("@aws-sdk/client-dynamodb");
       const {
         EC2Client,
+        DescribeInstancesCommand,
         DescribeInstanceTypeOfferingsCommand,
         DescribeInstanceTypesCommand,
         DescribeSubnetsCommand,
@@ -231,6 +361,26 @@ async function productionHandler() {
         UpdateItemCommand,
         nowMs: Date.now,
       });
+      const workerSessionsTableName = process.env.WORKER_SESSIONS_TABLE;
+      const workerSessionStore = workerSessionsTableName
+        ? new DynamoWorkerSessionStore({
+          client: dynamodb,
+          workerSessionsTableName,
+          GetItemCommand,
+          PutItemCommand,
+          UpdateItemCommand,
+          nowMs: Date.now,
+        })
+        : unavailableWorkerSessionStore();
+      const identity = configuredIdentityVerifier({
+        ec2Client: ec2,
+        DescribeInstancesCommand,
+      });
+      const workerSessionService = new WorkerSessionService({
+        store: workerSessionStore,
+        identityVerifier: identity.verifier,
+        nowMs: Date.now,
+      });
       const deploymentProvisioner = new Ec2DedicatedWorkerProvisioner({
         ec2Client: ec2,
         commandConstructors: {
@@ -244,12 +394,15 @@ async function productionHandler() {
           RunInstancesCommand,
         },
         deploymentStore,
+        workerSessionStore,
         connectionId: requiredEnvironment("CONNECTION_ID"),
         connectionGeneration: positiveGeneration(requiredEnvironment("CONNECTION_GENERATION")),
+        accountId: registrationConfig.account_id,
         region: requiredEnvironment("STACK_REGION"),
         workerBaseAmiId: registrationConfig.worker_artifact.ami_id,
         workerResourceManifestDigest: registrationConfig.worker_resource_manifest_digest,
         workerNetwork: registrationConfig.worker_network,
+        workerBootstrapEnabled: Boolean(workerSessionsTableName && identity.enabled),
         nowMs: Date.now,
       });
       const service = createV2ChallengeApprovalService({
@@ -268,6 +421,7 @@ async function productionHandler() {
       return createV2BrokerHandler(service, {
         registrationConfig,
         deploymentProvisioner,
+        workerSessionService,
       });
     })();
   }

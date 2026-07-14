@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   ConnectionStackV2Error,
 } from "./command-contract.mjs";
@@ -140,6 +142,24 @@ function validateDeploymentReservation(reservation) {
   return {
     deployment_id: requireString(reservation, "deployment_id", ID_PATTERN),
   };
+}
+
+function defaultBootstrapSessionID() {
+  return `worker-session-${randomUUID()}`;
+}
+
+function generatedBootstrapSessionID(createBootstrapSessionID) {
+  let bootstrapSessionID;
+  try {
+    bootstrapSessionID = createBootstrapSessionID();
+  } catch {
+    fail("receipt_store_invalid", "bootstrap session id generator failed", 500);
+  }
+  return requireString(
+    { bootstrap_session_id: bootstrapSessionID },
+    "bootstrap_session_id",
+    ID_PATTERN,
+  );
 }
 
 function validateRequest(request) {
@@ -303,9 +323,10 @@ export class DynamoV2ReceiptStore {
     countersTableName,
     GetItemCommand,
     TransactWriteItemsCommand,
+    createBootstrapSessionID = defaultBootstrapSessionID,
   }) {
     if (!client?.send || !receiptsTableName || !challengesTableName || !approvalProofsTableName || !issuedQuotesTableName || !deploymentReceiptsTableName || !countersTableName
-      || !GetItemCommand || !TransactWriteItemsCommand) {
+      || !GetItemCommand || !TransactWriteItemsCommand || typeof createBootstrapSessionID !== "function") {
       throw new TypeError("DynamoDB client, table names, and command constructors are required");
     }
     this.client = client;
@@ -317,22 +338,33 @@ export class DynamoV2ReceiptStore {
     this.countersTableName = countersTableName;
     this.GetItemCommand = GetItemCommand;
     this.TransactWriteItemsCommand = TransactWriteItemsCommand;
+    this.createBootstrapSessionID = createBootstrapSessionID;
   }
 
   async commit(input, quoteProvider) {
-    const request = validateRequest(input);
-    const existing = await this.#findReceipt(request);
+    const validatedRequest = validateRequest(input);
+    const existing = await this.#findReceipt(validatedRequest);
     if (existing) return existing;
-    if (request.is_expired) {
+    if (validatedRequest.is_expired) {
       fail("expired_command", "an expired command cannot create a new receipt", 401);
     }
-    if (request.approval_binding_is_expired) {
+    if (validatedRequest.approval_binding_is_expired) {
       fail("approval_expired", "an expired approval cannot create a new receipt", 401);
     }
-    if (request.approval_proof_is_expired) {
+    if (validatedRequest.approval_proof_is_expired) {
       fail("approval_expired", "an expired approval proof cannot create a new receipt", 401);
     }
-    const quote = request.action === "quote.request" ? await resolveQuote(quoteProvider, request) : undefined;
+    const quote = validatedRequest.action === "quote.request" ? await resolveQuote(quoteProvider, validatedRequest) : undefined;
+    const request = validatedRequest.deployment_reservation ? {
+      ...validatedRequest,
+      deployment_reservation: {
+        ...validatedRequest.deployment_reservation,
+        // This opaque identifier is intentionally private Stack state. It is
+        // written atomically beside the command receipt and never returned in
+        // the public command receipt or accepted command payload.
+        bootstrap_session_id: generatedBootstrapSessionID(this.createBootstrapSessionID),
+      },
+    } : validatedRequest;
     const issuedQuote = quote ? {
       quote,
       quote_digest: cloudOrchestratorQuoteDigest(quote, request),
@@ -402,6 +434,7 @@ export class DynamoV2ReceiptStore {
             ...deploymentKey(request.connection_id, reservation.deployment_id),
             request_sha256: { S: request.request_sha256 },
             command_id: { S: request.command_id },
+            bootstrap_session_id: { S: reservation.bootstrap_session_id },
             reservation_state: { S: DEPLOYMENT_RESERVATION_STATE },
             reserved_at: { S: new Date(request.now_ms).toISOString() },
           },

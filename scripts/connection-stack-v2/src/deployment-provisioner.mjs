@@ -7,12 +7,16 @@ import {
   validateDeploymentCreatePayload,
   validateDeploymentReceipt,
 } from "./deployment-contract.mjs";
+import {
+  buildWorkerBootstrapUserData,
+} from "./worker-bootstrap-user-data.mjs";
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const NAMED_SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const AMI_ID_PATTERN = /^ami-[0-9a-f]{8,17}$/;
 const REGION_PATTERN = /^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[a-z]+-\d$/;
+const ACCOUNT_ID_PATTERN = /^\d{12}$/;
 const AWS_ARCHITECTURE_BY_DIREXTALK_ARCHITECTURE = new Map([
   ["amd64", "x86_64"],
   ["arm64", "arm64"],
@@ -34,6 +38,23 @@ function requireString(value, field, pattern, code = "deployment_provider_invali
 function requireSafeMilliseconds(value) {
   if (!Number.isSafeInteger(value) || value < 0) fail("deployment_provider_invalid", "clock is invalid", 500);
   return value;
+}
+
+function canonicalWorkerBootstrapEndpoint(value) {
+  if (typeof value !== "string" || value.length < 12 || value.length > 2048) {
+    fail("worker_bootstrap_unavailable", "the Stack Worker bootstrap endpoint is unavailable", 503);
+  }
+  let endpoint;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    fail("worker_bootstrap_unavailable", "the Stack Worker bootstrap endpoint is unavailable", 503);
+  }
+  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.port
+    || endpoint.search || endpoint.hash || !endpoint.hostname || !endpoint.pathname.endsWith("/v2/worker-sessions")) {
+    fail("worker_bootstrap_unavailable", "the Stack Worker bootstrap endpoint is unavailable", 503);
+  }
+  return endpoint.toString();
 }
 
 function canonicalIDs(values, key, pattern) {
@@ -229,20 +250,24 @@ function extractRunReceipt(output, command) {
 // Ec2DedicatedWorkerProvisioner has a deliberately narrow provider surface.
 // It can launch exactly one quoted EC2 VM with an immutable AMI, a dedicated
 // zero-ingress security group, no public IP/key pair/instance profile, IMDSv2,
-// encrypted retained gp3 storage, and deterministic ClientToken recovery.
-// It neither receives nor generates Worker credentials, user data, or cloud
-// control credentials for the VM.
+// encrypted retained gp3 storage, and deterministic ClientToken recovery. It
+// creates a durable, Stack-owned bootstrap session before RunInstances, then
+// supplies only its fixed non-secret manifest as Stack-generated UserData.
+// It never receives Worker credentials or cloud control credentials for the VM.
 export class Ec2DedicatedWorkerProvisioner {
   constructor({
     ec2Client,
     commandConstructors,
     deploymentStore,
+    workerSessionStore,
     connectionId,
     connectionGeneration,
+    accountId,
     region,
     workerBaseAmiId,
     workerResourceManifestDigest,
     workerNetwork,
+    workerBootstrapEnabled = false,
     nowMs,
   }) {
     const requiredCommands = [
@@ -255,18 +280,21 @@ export class Ec2DedicatedWorkerProvisioner {
       "AuthorizeSecurityGroupEgressCommand",
       "RunInstancesCommand",
     ];
-    if (!ec2Client?.send || !deploymentStore?.getDeployment || !deploymentStore?.getQuote || !deploymentStore?.putDeployment
+    if (!ec2Client?.send || !deploymentStore?.getDeployment || !deploymentStore?.getDeploymentBootstrap || !deploymentStore?.getQuote || !deploymentStore?.putDeployment
+      || !workerSessionStore?.issue || !workerSessionStore?.bind
       || !commandConstructors || !requiredCommands.every((name) => commandConstructors[name]) || typeof nowMs !== "function") {
-      throw new TypeError("EC2 client, deployment store, clock, and typed command constructors are required");
+      throw new TypeError("EC2 client, deployment and Worker session stores, clock, and typed command constructors are required");
     }
     this.ec2Client = ec2Client;
     this.commands = commandConstructors;
     this.deploymentStore = deploymentStore;
+    this.workerSessionStore = workerSessionStore;
     this.connectionId = requireString(connectionId, "connectionId", ID_PATTERN);
     if (!Number.isSafeInteger(connectionGeneration) || connectionGeneration < 1) {
       throw new TypeError("connectionGeneration must be a positive integer");
     }
     this.connectionGeneration = connectionGeneration;
+    this.accountId = requireString(accountId, "accountId", ACCOUNT_ID_PATTERN);
     this.region = requireString(region, "region", REGION_PATTERN);
     this.workerBaseAmiId = requireString(workerBaseAmiId, "workerBaseAmiId", AMI_ID_PATTERN);
     this.workerResourceManifestDigest = requireString(workerResourceManifestDigest, "workerResourceManifestDigest", NAMED_SHA256_PATTERN);
@@ -276,20 +304,38 @@ export class Ec2DedicatedWorkerProvisioner {
       subnet_id: requireString(workerNetwork.subnet_id, "workerNetwork.subnet_id", /^subnet-[0-9a-f]{8,17}$/),
       availability_zone: requireString(workerNetwork.availability_zone, "workerNetwork.availability_zone", /^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[a-z]+-\d[a-z]$/),
     };
+    if (typeof workerBootstrapEnabled !== "boolean") {
+      throw new TypeError("workerBootstrapEnabled must be a boolean");
+    }
+    this.workerBootstrapEnabled = workerBootstrapEnabled;
     this.nowMs = nowMs;
   }
 
-  async ensure(authenticatedCommand) {
+  async ensure(authenticatedCommand, { workerBootstrapEndpoint } = {}) {
     const nowMs = requireSafeMilliseconds(this.nowMs());
     const command = this.#validateAuthenticatedCommand(authenticatedCommand);
     const existing = await this.#getExisting(command);
     if (existing) return existing;
+    if (!this.workerBootstrapEnabled) {
+      fail("worker_identity_unavailable", "the Stack Worker identity verifier is not configured", 503);
+    }
+    const bootstrapEndpoint = canonicalWorkerBootstrapEndpoint(workerBootstrapEndpoint);
     const quote = await this.#getQuote(command);
     const candidate = candidateFromQuote(quote, command.payload, this.region, nowMs, command.approval_proof);
     await this.#preflightNetwork(command);
     await this.#preflightImage(command, candidate);
     const groupId = await this.#ensureSecurityGroup(command);
-    const receipt = extractRunReceipt(await this.#send("RunInstancesCommand", this.#runInput(command, candidate, groupId)), command);
+    const bootstrap = await this.#getDeploymentBootstrap(command);
+    const workerSession = await this.#issueWorkerSession({
+      command,
+      candidate,
+      groupId,
+      bootstrap,
+      bootstrapEndpoint,
+      nowMs,
+    });
+    const receipt = extractRunReceipt(await this.#send("RunInstancesCommand", this.#runInput(command, candidate, groupId, workerSession, nowMs)), command);
+    await this.#bindWorkerSession(workerSession, command, receipt, groupId);
     const persisted = await this.#putDeployment(receipt);
     return validateDeploymentReceipt(persisted, {
       connectionId: command.connection_id,
@@ -343,6 +389,87 @@ export class Ec2DedicatedWorkerProvisioner {
       deploymentId: command.payload.deployment_id,
       requestSHA256: command.request_sha256,
     });
+  }
+
+  async #getDeploymentBootstrap(command) {
+    let bootstrap;
+    try {
+      bootstrap = await this.deploymentStore.getDeploymentBootstrap({
+        connection_id: command.connection_id,
+        deployment_id: command.payload.deployment_id,
+        request_sha256: command.request_sha256,
+      });
+    } catch (error) {
+      if (error instanceof ConnectionStackV2Error) throw error;
+      fail("deployment_store_unavailable", "deployment state storage is unavailable", 503);
+    }
+    if (!bootstrap || typeof bootstrap !== "object" || bootstrap.request_sha256 !== command.request_sha256) {
+      fail("deployment_bootstrap_unavailable", "the accepted deployment has no durable Worker bootstrap session", 409);
+    }
+    return {
+      bootstrap_session_id: requireString(bootstrap.bootstrap_session_id, "bootstrap_session_id", ID_PATTERN, "deployment_bootstrap_unavailable"),
+      request_sha256: bootstrap.request_sha256,
+    };
+  }
+
+  async #issueWorkerSession({ command, candidate, groupId, bootstrap, bootstrapEndpoint, nowMs }) {
+    const expiresAt = new Date(nowMs + 10 * 60 * 1000).toISOString();
+    let session;
+    try {
+      session = await this.workerSessionStore.issue({
+        bootstrap_session_id: bootstrap.bootstrap_session_id,
+        connection_id: command.connection_id,
+        deployment_id: command.payload.deployment_id,
+        request_sha256: command.request_sha256,
+        // The existing Stack-owned resource-manifest pin is currently the
+        // immutable Worker image identity. The artifact pin remains distinct
+        // on the wire even while this first Worker AMI carries no recipe data.
+        worker_image_digest: this.workerResourceManifestDigest,
+        artifact_manifest_digest: command.payload.resource_manifest_digest,
+        bootstrap_endpoint: bootstrapEndpoint,
+        account_id: this.accountId,
+        region: this.region,
+        expected_ami_id: command.payload.worker_artifact.ami_id,
+        expected_instance_type: candidate.instance_type,
+        expected_architecture: AWS_ARCHITECTURE_BY_DIREXTALK_ARCHITECTURE.get(candidate.architecture),
+        expected_vpc_id: command.payload.network.vpc_id,
+        expected_subnet_id: command.payload.network.subnet_id,
+        expected_availability_zone: command.payload.network.availability_zone,
+        expected_security_group_id: groupId,
+        expires_at: expiresAt,
+      });
+    } catch (error) {
+      if (error instanceof ConnectionStackV2Error) throw error;
+      fail("worker_session_unavailable", "Worker bootstrap session storage is unavailable", 503);
+    }
+    if (!session || typeof session !== "object" || session.bootstrap_session_id !== bootstrap.bootstrap_session_id
+      || session.connection_id !== command.connection_id || session.deployment_id !== command.payload.deployment_id
+      || session.request_sha256 !== command.request_sha256 || session.worker_image_digest !== this.workerResourceManifestDigest
+      || session.artifact_manifest_digest !== command.payload.resource_manifest_digest || session.bootstrap_endpoint !== bootstrapEndpoint) {
+      fail("worker_session_invalid", "Worker bootstrap session storage returned an invalid binding", 500);
+    }
+    return session;
+  }
+
+  async #bindWorkerSession(workerSession, command, receipt, groupId) {
+    let bound;
+    try {
+      bound = await this.workerSessionStore.bind({
+        session_id: workerSession.bootstrap_session_id,
+        request_sha256: command.request_sha256,
+        instance_id: receipt.instance_id,
+        security_group_id: groupId,
+      });
+    } catch (error) {
+      if (error instanceof ConnectionStackV2Error) throw error;
+      fail("worker_session_unavailable", "Worker bootstrap session storage is unavailable", 503);
+    }
+    if (!bound || typeof bound !== "object" || !["bound", "active"].includes(bound.state)
+      || bound.bootstrap_session_id !== workerSession.bootstrap_session_id || bound.expected_instance_id !== receipt.instance_id
+      || bound.request_sha256 !== command.request_sha256 || bound.expected_security_group_id !== groupId) {
+      fail("worker_session_invalid", "Worker bootstrap session binding is invalid", 500);
+    }
+    return bound;
   }
 
   async #getQuote(command) {
@@ -475,7 +602,7 @@ export class Ec2DedicatedWorkerProvisioner {
     return output.SecurityGroups[0];
   }
 
-  #runInput(command, candidate, groupId) {
+  #runInput(command, candidate, groupId, workerSession, nowMs) {
     const tags = deploymentTags(command);
     return {
       ImageId: command.payload.worker_artifact.ami_id,
@@ -507,6 +634,7 @@ export class Ec2DedicatedWorkerProvisioner {
         Ipv6AddressCount: 0,
         DeleteOnTermination: true,
       }],
+      UserData: buildWorkerBootstrapUserData(workerSession, { nowMs }),
       TagSpecifications: tagSpecifications(tags),
     };
   }

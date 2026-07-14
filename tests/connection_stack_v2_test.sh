@@ -17,12 +17,14 @@ source "$ROOT/scripts/lib/json.sh"
 "$(json_node)" tests/connection_stack_v2_handler_test.mjs
 "$(json_node)" tests/connection_stack_v2_template_test.mjs
 "$(json_node)" tests/connection_stack_v2_registration_test.mjs
+"$(json_node)" tests/connection_stack_v2_worker_session_contract_test.mjs
 "$(json_node)" tests/connection_stack_v2_deploy_helper_test.mjs
 bash tests/connection_stack_v2_deploy_script_test.sh
 "$(json_node)" --check scripts/connection-stack-v2/src/command-contract.mjs
 "$(json_node)" --check scripts/connection-stack-v2/src/registration-contract.mjs
 "$(json_node)" --check scripts/connection-stack-v2/src/deploy-helper.mjs
 "$(json_node)" --check scripts/connection-stack-v2/src/worker-contract.mjs
+"$(json_node)" --check scripts/connection-stack-v2/src/worker-session-contract.mjs
 "$(json_node)" --check scripts/connection-stack-v2/src/dynamo-receipt-store.mjs
 "$(json_node)" --check scripts/connection-stack-v2/src/dynamo-deployment-store.mjs
 "$(json_node)" --check scripts/connection-stack-v2/src/approval-proof.mjs

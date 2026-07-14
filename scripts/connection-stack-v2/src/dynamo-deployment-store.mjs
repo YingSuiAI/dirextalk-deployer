@@ -44,6 +44,11 @@ function storedString(item, field, pattern) {
   return requireString(item?.[field]?.S, field, pattern);
 }
 
+function storedOptionalString(item, field, pattern) {
+  if (item?.[field] === undefined) return undefined;
+  return storedString(item, field, pattern);
+}
+
 function parseJSON(value, field) {
   try {
     const parsed = JSON.parse(value);
@@ -96,6 +101,7 @@ function parseStoredDeployment(item, { connectionId, deploymentId }) {
     fail("deployment_store_invalid", "stored deployment key is invalid", 500);
   }
   const requestSHA256 = storedString(item, "request_sha256", SHA256_PATTERN);
+  const bootstrapSessionID = storedOptionalString(item, "bootstrap_session_id", ID_PATTERN);
   if (item?.reservation_state !== undefined) {
     if (item.reservation_state?.S !== DEPLOYMENT_RESERVATION_STATE
       || item.receipt_json !== undefined
@@ -105,11 +111,22 @@ function parseStoredDeployment(item, { connectionId, deploymentId }) {
     }
     storedString(item, "command_id", ID_PATTERN);
     storedString(item, "reserved_at", ISO_INSTANT_PATTERN);
-    return { kind: "reservation", request_sha256: requestSHA256 };
+    if (bootstrapSessionID === undefined) {
+      fail("deployment_store_invalid", "stored deployment reservation has no bootstrap session", 500);
+    }
+    return {
+      kind: "reservation",
+      request_sha256: requestSHA256,
+      bootstrap_session_id: bootstrapSessionID,
+    };
   }
   return {
     kind: "receipt",
     request_sha256: requestSHA256,
+    // Historical completed deployments can predate the Worker session
+    // feature. They remain readable through getDeployment, but cannot be
+    // reused as a Worker bootstrap source.
+    bootstrap_session_id: bootstrapSessionID,
     receipt: validateDeploymentReceipt(parseJSON(storedString(item, "receipt_json", /^.+$/), "receipt_json"), {
       connectionId,
       deploymentId,
@@ -196,6 +213,24 @@ export class DynamoDeploymentStore {
     return stored?.kind === "receipt" ? stored.receipt : undefined;
   }
 
+  async getDeploymentBootstrap({ connection_id: connectionId, deployment_id: deploymentId, request_sha256: requestSHA256 } = {}) {
+    requireString(connectionId, "connection_id", ID_PATTERN, "deployment_store_invalid");
+    requireString(deploymentId, "deployment_id", ID_PATTERN, "deployment_store_invalid");
+    requireString(requestSHA256, "request_sha256", SHA256_PATTERN, "deployment_store_invalid");
+    const stored = await this.#readDeployment(connectionId, deploymentId);
+    if (!stored) return undefined;
+    if (stored.request_sha256 !== requestSHA256) {
+      fail("deployment_id_conflict", "deployment id is already bound to another request");
+    }
+    if (stored.bootstrap_session_id === undefined) {
+      fail("deployment_bootstrap_unavailable", "deployment has no worker bootstrap session", 409);
+    }
+    return {
+      bootstrap_session_id: stored.bootstrap_session_id,
+      request_sha256: stored.request_sha256,
+    };
+  }
+
   async #readDeployment(connectionId, deploymentId) {
     let output;
     try {
@@ -221,7 +256,7 @@ export class DynamoDeploymentStore {
       await this.client.send(new this.UpdateItemCommand({
         TableName: this.deploymentReceiptsTableName,
         Key: deploymentKey(normalized.connection_id, normalized.deployment_id),
-        ConditionExpression: "request_sha256 = :request_sha256 AND reservation_state = :reservation_state",
+        ConditionExpression: "request_sha256 = :request_sha256 AND reservation_state = :reservation_state AND attribute_exists(bootstrap_session_id)",
         UpdateExpression: "SET resource_status = :resource_status, instance_id = :instance_id, receipt_json = :receipt_json, recorded_at = :recorded_at REMOVE reservation_state, command_id, reserved_at",
         ExpressionAttributeValues: {
           ":request_sha256": { S: normalized.request_sha256 },

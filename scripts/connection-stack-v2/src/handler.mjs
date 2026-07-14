@@ -16,6 +16,9 @@ import {
   DynamoWorkerSessionStore,
 } from "./dynamo-worker-session-store.mjs";
 import {
+  DynamoWorkerTaskStore,
+} from "./dynamo-worker-task-store.mjs";
+import {
   Ec2DedicatedWorkerProvisioner,
 } from "./deployment-provisioner.mjs";
 import {
@@ -40,6 +43,12 @@ import {
 import {
   WorkerSessionService,
 } from "./worker-session-service.mjs";
+import {
+  validateWorkerTaskSummary,
+} from "./worker-task-contract.mjs";
+import {
+  WorkerTaskService,
+} from "./worker-task-service.mjs";
 
 function response(statusCode, body) {
   return {
@@ -104,6 +113,18 @@ function routeRequest(event) {
   const method = requestMethod(event);
   if (method !== undefined && method !== "POST") return { kind: "not_found" };
   if (path === "/v2/commands") return { kind: "command" };
+  const workerTaskClaimMatch = /^\/v2\/worker-sessions\/([^/]+)\/tasks\/claim$/.exec(path);
+  if (workerTaskClaimMatch) {
+    return { kind: "worker_task_claim", sessionId: workerTaskClaimMatch[1] };
+  }
+  const workerTaskEventMatch = /^\/v2\/worker-sessions\/([^/]+)\/tasks\/([^/]+)\/events$/.exec(path);
+  if (workerTaskEventMatch) {
+    return {
+      kind: "worker_task_event",
+      sessionId: workerTaskEventMatch[1],
+      taskId: workerTaskEventMatch[2],
+    };
+  }
   const workerMatch = /^\/v2\/worker-sessions\/([^/]+)\/(claim|events)$/.exec(path);
   if (!workerMatch) return { kind: "not_found" };
   return {
@@ -124,11 +145,16 @@ function workerSessionUnavailable() {
   throw new ConnectionStackV2Error("worker_session_unavailable", "the Worker session service is unavailable", 503);
 }
 
+function workerTaskUnavailable() {
+  throw new ConnectionStackV2Error("worker_task_unavailable", "the Worker task service is unavailable", 503);
+}
+
 function resultStatusCode(status) {
   if (status === "challenge_issued") return 201;
   if (status === "quote_issued") return 200;
   if (status === "connection_registered") return 200;
   if (status === "deployment_observed") return 200;
+  if (status === "worker_task_issued" || status === "worker_task_observed") return 200;
   if (status === "idempotent") return 200;
   if (status === "deployment_created" || status === "read_only_validated" || status === "approval_consumed") return 202;
   throw new ConnectionStackV2Error("receipt_store_invalid", "receipt store returned an invalid result", 500);
@@ -147,6 +173,9 @@ function publicResult(result) {
   if (result.status === "deployment_observed" && !result.observation) {
     throw new ConnectionStackV2Error("receipt_store_invalid", "deployment observation result is missing its observation", 500);
   }
+  if ((result.status === "worker_task_issued" || result.status === "worker_task_observed") && !result.task) {
+    throw new ConnectionStackV2Error("receipt_store_invalid", "Worker task result is missing its task summary", 500);
+  }
   return {
     status: result.status,
     receipt,
@@ -155,6 +184,7 @@ function publicResult(result) {
     ...(result.registration ? { registration: result.registration } : {}),
     ...(result.deployment ? { deployment: validateDeploymentReceipt(result.deployment) } : {}),
     ...(result.observation ? { observation: validateDeploymentObservation(result.observation) } : {}),
+    ...(result.task ? { task: validateWorkerTaskSummary(result.task) } : {}),
   };
 }
 
@@ -237,6 +267,7 @@ export function createV2BrokerHandler(service, {
   deploymentProvisioner,
   deploymentObserver,
   workerSessionService,
+  workerTaskService,
 } = {}) {
   if (!service || typeof service.accept !== "function") {
     throw new TypeError("a V2 broker acceptance service is required");
@@ -254,6 +285,19 @@ export function createV2BrokerHandler(service, {
       if (route.kind === "worker_event") {
         if (!workerSessionService || typeof workerSessionService.event !== "function") workerSessionUnavailable();
         return response(200, await workerSessionService.event(route.sessionId, authorizationHeader(event), parseBody(event)));
+      }
+      if (route.kind === "worker_task_claim") {
+        if (!workerTaskService || typeof workerTaskService.claim !== "function") workerTaskUnavailable();
+        return response(200, await workerTaskService.claim(route.sessionId, authorizationHeader(event), parseBody(event)));
+      }
+      if (route.kind === "worker_task_event") {
+        if (!workerTaskService || typeof workerTaskService.event !== "function") workerTaskUnavailable();
+        return response(200, await workerTaskService.event(
+          route.sessionId,
+          authorizationHeader(event),
+          route.taskId,
+          parseBody(event),
+        ));
       }
       const runtimeContext = registrationConfig ? registrationRuntimeContext(event, registrationConfig) : undefined;
       let result = await service.accept(parseBody(event), runtimeContext);
@@ -280,6 +324,24 @@ export function createV2BrokerHandler(service, {
           ...result,
           status: result.status === "idempotent" ? "idempotent" : "deployment_observed",
           observation,
+        };
+      }
+      if (result?.command?.action === "worker.task.issue") {
+        if (!workerTaskService || typeof workerTaskService.issue !== "function") workerTaskUnavailable();
+        const task = await workerTaskService.issue(result.command);
+        result = {
+          ...result,
+          status: result.status === "idempotent" ? "idempotent" : "worker_task_issued",
+          task,
+        };
+      }
+      if (result?.command?.action === "worker.task.observe") {
+        if (!workerTaskService || typeof workerTaskService.observe !== "function") workerTaskUnavailable();
+        const task = await workerTaskService.observe(result.command);
+        result = {
+          ...result,
+          status: result.status === "idempotent" ? "idempotent" : "worker_task_observed",
+          task,
         };
       }
       return response(resultStatusCode(result.status), publicResult(result));
@@ -334,6 +396,7 @@ async function productionHandler() {
         PutItemCommand,
         UpdateItemCommand,
         TransactWriteItemsCommand,
+        QueryCommand,
       } = await import("@aws-sdk/client-dynamodb");
       const {
         EC2Client,
@@ -393,6 +456,18 @@ async function productionHandler() {
           nowMs: Date.now,
         })
         : unavailableWorkerSessionStore();
+      const workerTasksTableName = process.env.WORKER_TASKS_TABLE;
+      const workerTaskStore = workerTasksTableName
+        ? new DynamoWorkerTaskStore({
+          client: dynamodb,
+          workerTasksTableName,
+          GetItemCommand,
+          PutItemCommand,
+          UpdateItemCommand,
+          QueryCommand,
+          nowMs: Date.now,
+        })
+        : undefined;
       const identity = configuredIdentityVerifier({
         ec2Client: ec2,
         DescribeInstancesCommand,
@@ -402,6 +477,14 @@ async function productionHandler() {
         identityVerifier: identity.verifier,
         nowMs: Date.now,
       });
+      const workerTaskService = workerTaskStore && workerSessionsTableName
+        ? new WorkerTaskService({
+          deploymentStore,
+          workerSessionStore,
+          taskStore: workerTaskStore,
+          sessionAuthorizer: workerSessionService,
+        })
+        : undefined;
       const deploymentProvisioner = new Ec2DedicatedWorkerProvisioner({
         ec2Client: ec2,
         commandConstructors: {
@@ -449,6 +532,7 @@ async function productionHandler() {
         deploymentProvisioner,
         deploymentObserver,
         workerSessionService,
+        workerTaskService,
       });
     })();
   }

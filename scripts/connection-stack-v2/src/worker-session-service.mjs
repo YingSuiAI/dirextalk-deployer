@@ -276,11 +276,11 @@ export class WorkerSessionService {
     return claimResponse(normalized, token);
   }
 
-  async event(sessionId, authorization, rawEvent) {
-    const event = parseWorkerSessionEvent(rawEvent);
-    if (sessionId !== event.bootstrap_session_id) {
-      fail("worker_session_invalid", "worker session path does not match the event", 409);
-    }
+  // authorize is the shared active-Worker capability check used by both the
+  // legacy bounded session-event route and the separate Worker task transport.
+  // It deliberately returns only a token hash and verified session binding;
+  // callers never receive or persist the bearer itself.
+  async authorize(sessionId, authorization, { leaseEpoch } = {}) {
     const nowMs = requireSafeMilliseconds(this.nowMs(), "clock");
     const current = validateSession(await callStore(() => this.store.get(sessionId)), {
       sessionId,
@@ -288,8 +288,8 @@ export class WorkerSessionService {
       requireActive: true,
       allowExpiredActive: true,
     });
-    if (event.connection_id !== current.connection_id || event.deployment_id !== current.deployment_id || event.lease_epoch !== current.lease_epoch) {
-      fail("worker_session_unauthorized", "worker event does not bind the active session lease", 401);
+    if (leaseEpoch !== undefined && (!Number.isSafeInteger(leaseEpoch) || leaseEpoch < 1 || leaseEpoch !== current.lease_epoch)) {
+      fail("worker_session_unauthorized", "worker request does not bind the active session lease", 401);
     }
     const leaseExpiresAtMs = parseCanonicalInstant(current.lease_expires_at, "lease_expires_at", "worker_session_invalid", 500);
     if (leaseExpiresAtMs <= nowMs) {
@@ -299,14 +299,31 @@ export class WorkerSessionService {
     if (!sameHash(tokenSHA256, current.token_sha256)) {
       fail("worker_session_unauthorized", "worker bearer token is unauthorized", 401);
     }
+    return {
+      session: current,
+      token_sha256: tokenSHA256,
+      now_ms: nowMs,
+    };
+  }
+
+  async event(sessionId, authorization, rawEvent) {
+    const event = parseWorkerSessionEvent(rawEvent);
+    if (sessionId !== event.bootstrap_session_id) {
+      fail("worker_session_invalid", "worker session path does not match the event", 409);
+    }
+    const authorizationContext = await this.authorize(sessionId, authorization, { leaseEpoch: event.lease_epoch });
+    const current = authorizationContext.session;
+    if (event.connection_id !== current.connection_id || event.deployment_id !== current.deployment_id) {
+      fail("worker_session_unauthorized", "worker event does not bind the active session lease", 401);
+    }
     const recorded = await callStore(() => this.store.recordEvent({
       session_id: current.bootstrap_session_id,
-      token_sha256: tokenSHA256,
+      token_sha256: authorizationContext.token_sha256,
       lease_epoch: event.lease_epoch,
       sequence: event.sequence,
       event_sha256: workerSessionEventSHA256(event),
       event_json: JSON.stringify(event),
-      now_ms: nowMs,
+      now_ms: authorizationContext.now_ms,
     }));
     return eventReceipt(event, recorded?.disposition);
   }

@@ -39,10 +39,14 @@ const deploymentReceiptSchema = JSON.parse(readFileSync(
   new URL("scripts/connection-stack-v2/schemas/deployment-receipt-v1.schema.json", root),
   "utf8",
 ));
+const workerTaskIssueSchema = JSON.parse(readFileSync(
+  new URL("scripts/connection-stack-v2/schemas/worker-task-issue-v1.schema.json", root),
+  "utf8",
+));
 
 assert.equal(template.Transform, "AWS::Serverless-2016-10-31");
-assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "durable-registration-quote-isolated-worker-and-bootstrap-session");
-assert.equal(template.Metadata.DirextalkConnectionStackV2.Execution, "receipt-registration-attestation-approval-challenge-read-only-on-demand-quote-typed-worker-create-and-bootstrap-session");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "durable-registration-quote-isolated-worker-bootstrap-and-task-transport");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Execution, "receipt-registration-attestation-approval-challenge-read-only-on-demand-quote-typed-worker-create-bootstrap-and-digest-task-transport");
 assert.equal(commandSchema.properties.schema.const, "dirextalk.aws.command/v2");
 assert.equal(approvalBindingSchema.properties.schema.const, "dirextalk.aws.approval-binding/v2");
 assert.equal(workerSchema.properties.schema.const, "dirextalk.worker-bootstrap/v1");
@@ -52,6 +56,7 @@ assert.equal(registrationManifestSchema.properties.schema.const, "dirextalk.aws.
 assert.equal(approvalProofSchema.properties.schema_version.const, "cloud-orchestrator/v1");
 assert.equal(deploymentCreateSchema.properties.schema.const, "dirextalk.aws.deployment-create/v1");
 assert.equal(deploymentReceiptSchema.properties.schema.const, "dirextalk.aws.deployment-receipt/v1");
+assert.equal(workerTaskIssueSchema.properties.schema.const, "dirextalk.worker-task-issue/v1");
 assert.equal(commandSchema.additionalProperties, false);
 assert.equal(approvalBindingSchema.additionalProperties, false);
 assert.equal(workerSchema.additionalProperties, false);
@@ -61,10 +66,13 @@ assert.equal(registrationManifestSchema.additionalProperties, false);
 assert.equal(approvalProofSchema.additionalProperties, false);
 assert.equal(deploymentCreateSchema.additionalProperties, false);
 assert.equal(deploymentReceiptSchema.additionalProperties, false);
+assert.equal(workerTaskIssueSchema.additionalProperties, false);
 assert.ok(commandSchema.properties.action.enum.includes("approval.challenge.request"));
 assert.ok(commandSchema.properties.action.enum.includes("connection.registration.verify"));
 assert.ok(commandSchema.properties.action.enum.includes("artifact.put"));
 assert.ok(commandSchema.properties.action.enum.includes("deployment.destroy"));
+assert.ok(commandSchema.properties.action.enum.includes("worker.task.issue"));
+assert.ok(commandSchema.properties.action.enum.includes("worker.task.observe"));
 assert.ok(approvalBindingSchema.required.includes("resource_scope_digest"));
 assert.ok(approvalBindingSchema.required.includes("network_scope_digest"));
 assert.ok(approvalBindingSchema.required.includes("secret_scope_digest"));
@@ -106,6 +114,7 @@ for (const name of [
   "DeploymentReceiptsTable",
   "ConnectionCountersTable",
   "WorkerSessionsTable",
+  "WorkerTasksTable",
 ]) {
   const resource = template.Resources[name];
   assert.equal(resource.Type, "AWS::DynamoDB::Table");
@@ -126,17 +135,35 @@ assert.deepEqual(template.Resources.WorkerSessionsTable.Properties.TimeToLiveSpe
   AttributeName: "ttl_epoch_seconds",
   Enabled: true,
 });
+assert.deepEqual(template.Resources.WorkerTasksTable.Properties.AttributeDefinitions, [
+  { AttributeName: "deployment_id", AttributeType: "S" },
+  { AttributeName: "task_id", AttributeType: "S" },
+]);
+assert.deepEqual(template.Resources.WorkerTasksTable.Properties.KeySchema, [
+  { AttributeName: "deployment_id", KeyType: "HASH" },
+  { AttributeName: "task_id", KeyType: "RANGE" },
+]);
 
 const broker = template.Resources.BrokerCommandFunction;
 assert.equal(broker.Type, "AWS::Serverless::Function");
 assert.equal(broker.Metadata.BuildProperties.UseNpmCi, true, "SAM must install the lockfile-pinned DynamoDB SDK into deployment artifacts");
-assert.deepEqual(Object.keys(broker.Properties.Events), ["PostCommand", "PostWorkerSessionClaim", "PostWorkerSessionEvent"]);
+assert.deepEqual(Object.keys(broker.Properties.Events), [
+  "PostCommand",
+  "PostWorkerSessionClaim",
+  "PostWorkerSessionEvent",
+  "PostWorkerTaskClaim",
+  "PostWorkerTaskEvent",
+]);
 assert.equal(broker.Properties.Events.PostCommand.Properties.Path, "/v2/commands");
 assert.equal(broker.Properties.Events.PostCommand.Properties.Method, "post");
 assert.equal(broker.Properties.Events.PostWorkerSessionClaim.Properties.Path, "/v2/worker-sessions/{session_id}/claim");
 assert.equal(broker.Properties.Events.PostWorkerSessionClaim.Properties.Method, "post");
 assert.equal(broker.Properties.Events.PostWorkerSessionEvent.Properties.Path, "/v2/worker-sessions/{session_id}/events");
 assert.equal(broker.Properties.Events.PostWorkerSessionEvent.Properties.Method, "post");
+assert.equal(broker.Properties.Events.PostWorkerTaskClaim.Properties.Path, "/v2/worker-sessions/{session_id}/tasks/claim");
+assert.equal(broker.Properties.Events.PostWorkerTaskClaim.Properties.Method, "post");
+assert.equal(broker.Properties.Events.PostWorkerTaskEvent.Properties.Path, "/v2/worker-sessions/{session_id}/tasks/{task_id}/events");
+assert.equal(broker.Properties.Events.PostWorkerTaskEvent.Properties.Method, "post");
 assert.equal(broker.Properties.Environment.Variables.DEVICE_APPROVAL_KEY_ID.Ref, "DeviceApprovalKeyId");
 assert.equal(broker.Properties.Environment.Variables.DEVICE_APPROVAL_PUBLIC_KEY_SPKI_B64.Ref, "DeviceApprovalPublicKeySpkiBase64");
 assert.equal(broker.Properties.Environment.Variables.COMMAND_RECEIPTS_TABLE.Ref, "CommandReceiptsTable");
@@ -146,6 +173,7 @@ assert.equal(broker.Properties.Environment.Variables.ISSUED_QUOTES_TABLE.Ref, "I
 assert.equal(broker.Properties.Environment.Variables.DEPLOYMENT_RECEIPTS_TABLE.Ref, "DeploymentReceiptsTable");
 assert.equal(broker.Properties.Environment.Variables.CONNECTION_COUNTERS_TABLE.Ref, "ConnectionCountersTable");
 assert.equal(broker.Properties.Environment.Variables.WORKER_SESSIONS_TABLE.Ref, "WorkerSessionsTable");
+assert.equal(broker.Properties.Environment.Variables.WORKER_TASKS_TABLE.Ref, "WorkerTasksTable");
 assert.equal(broker.Properties.Environment.Variables.STACK_ACCOUNT_ID.Ref, "AWS::AccountId");
 assert.equal(broker.Properties.Environment.Variables.STACK_REGION.Ref, "AWS::Region");
 assert.equal(broker.Properties.Environment.Variables.STACK_ARN.Ref, "AWS::StackId");
@@ -166,6 +194,10 @@ assert.ok(
   receiptReader.Resource.some((resource) => resource["Fn::GetAtt"]?.[0] === "WorkerSessionsTable"),
   "Worker bootstrap sessions need only a direct GetItem lookup",
 );
+assert.ok(
+  receiptReader.Resource.some((resource) => resource["Fn::GetAtt"]?.[0] === "WorkerTasksTable"),
+  "Worker task observations need only a direct GetItem lookup",
+);
 const receiptTransaction = rolePolicy.find((statement) => statement.Action === "dynamodb:TransactWriteItems");
 assert.ok(receiptTransaction);
 assert.ok(
@@ -182,6 +214,16 @@ assert.deepEqual(
     Resource: { "Fn::GetAtt": ["WorkerSessionsTable", "Arn"] },
   },
   "Worker sessions must have only direct PutItem/UpdateItem access to their dedicated table",
+);
+assert.deepEqual(
+  rolePolicy.find((statement) => statement.Sid === "ManageWorkerTasksOnly"),
+  {
+    Sid: "ManageWorkerTasksOnly",
+    Effect: "Allow",
+    Action: ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query"],
+    Resource: { "Fn::GetAtt": ["WorkerTasksTable", "Arn"] },
+  },
+  "task-id-free active Worker claims need only the dedicated task-table partition Query plus conditional writes",
 );
 assert.deepEqual(
   rolePolicy.find((statement) => statement.Action === "pricing:GetProducts"),
@@ -214,7 +256,7 @@ assert.deepEqual(
   "instance capacity lookup must remain read-only",
 );
 const providerPolicy = JSON.stringify(rolePolicy);
-assert.doesNotMatch(providerPolicy, /dynamodb:(?:DeleteItem|Scan|Query|BatchWriteItem)/);
+assert.doesNotMatch(providerPolicy, /dynamodb:(?:DeleteItem|Scan|BatchWriteItem)/);
 assert.doesNotMatch(JSON.stringify(rolePolicy), /pricing:\*|ec2:\*/i);
 const readWorkerPlacement = rolePolicy.find((statement) => statement.Sid === "ReadDedicatedWorkerPlacementOnly");
 assert.ok(readWorkerPlacement.Action.includes("ec2:DescribeInstances"), "identity verification must read back the created instance");
@@ -265,11 +307,14 @@ assert.match(handlerText, /registrationRuntimeContext/);
 assert.match(handlerText, /DynamoDeploymentStore/);
 assert.match(handlerText, /UpdateItemCommand/);
 assert.match(handlerText, /DynamoWorkerSessionStore/);
+assert.match(handlerText, /DynamoWorkerTaskStore/);
 assert.match(handlerText, /WorkerSessionService/);
+assert.match(handlerText, /WorkerTaskService/);
 assert.match(handlerText, /AwsInstanceIdentityVerifier/);
 assert.match(handlerText, /DescribeInstancesCommand/);
 assert.match(handlerText, /Ec2DedicatedWorkerProvisioner/);
 assert.match(handlerText, /RunInstancesCommand/);
+assert.match(handlerText, /QueryCommand/);
 assert.doesNotMatch(handlerText, /@aws-sdk\/client-(?:s3|iam|secrets-manager)/);
 assert.doesNotMatch(handlerText, /TerminateInstances|PassRole|CreateRole|GetSecretValue/);
 

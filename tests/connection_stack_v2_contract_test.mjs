@@ -351,6 +351,8 @@ assert.deepEqual(BROKER_V2_ACTIONS, [
   "artifact.put",
   "deployment.create",
   "deployment.observe",
+  "worker.task.issue",
+  "worker.task.observe",
   "deployment.destroy",
 ]);
 
@@ -397,6 +399,50 @@ const observe = signedCommand("deployment.observe", { deployment_id: "deployment
   node_counter: 10,
 });
 assert.equal(validateAndAuthenticateV2Command(observe, authOptions).payload.deployment_id, "deployment-v2-001");
+
+const workerTaskIssue = signedCommand("worker.task.issue", {
+  schema: "dirextalk.worker-task-issue/v1",
+  deployment_id: "deployment-v2-001",
+  task_id: "task-v2-execution-001",
+  task_kind: "execution_probe",
+  execution_manifest_digest: DIGEST("1"),
+  input_digest: DIGEST("2"),
+}, {
+  command_id: "command-v2-worker-task-issue",
+  node_counter: 11,
+});
+assert.deepEqual(validateAndAuthenticateV2Command(workerTaskIssue, authOptions).payload, {
+  schema: "dirextalk.worker-task-issue/v1",
+  deployment_id: "deployment-v2-001",
+  task_id: "task-v2-execution-001",
+  task_kind: "execution_probe",
+  execution_manifest_digest: DIGEST("1"),
+  input_digest: DIGEST("2"),
+}, "a task issue is a signed digest-only execution-probe reference");
+const workerTaskObserve = signedCommand("worker.task.observe", {
+  deployment_id: "deployment-v2-001",
+  task_id: "task-v2-execution-001",
+}, {
+  command_id: "command-v2-worker-task-observe",
+  node_counter: 12,
+});
+assert.equal(validateAndAuthenticateV2Command(workerTaskObserve, authOptions).payload.task_id, "task-v2-execution-001");
+assert.throws(
+  () => validateAndAuthenticateV2Command(signedCommand("worker.task.issue", {
+    schema: "dirextalk.worker-task-issue/v1",
+    deployment_id: "deployment-v2-001",
+    task_id: "task-v2-execution-001",
+    task_kind: "execution_probe",
+    execution_manifest_digest: DIGEST("1"),
+    input_digest: DIGEST("2"),
+    shell: "forbidden",
+  }, {
+    command_id: "command-v2-worker-task-shell",
+    node_counter: 13,
+  }), authOptions),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "invalid_payload",
+  "the signed task issue has no shell or arbitrary execution extension",
+);
 
 const requestedBinding = binding();
 const challengeRequest = signedCommand("approval.challenge.request", {

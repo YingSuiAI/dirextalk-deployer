@@ -14,6 +14,9 @@ import {
   validateDeploymentCreatePayload,
 } from "./deployment-contract.mjs";
 import {
+  validateWorkerTaskIssue,
+} from "./worker-task-contract.mjs";
+import {
   approvalProofPayloadSHA256,
   validateApprovalProof,
   validateApprovalProofAgainstDeployment,
@@ -43,6 +46,8 @@ export const BROKER_V2_ACTIONS = Object.freeze([
   "artifact.put",
   "deployment.create",
   "deployment.observe",
+  "worker.task.issue",
+  "worker.task.observe",
   "deployment.destroy",
 ]);
 
@@ -355,6 +360,13 @@ function validatePayload(action, payload, binding, expectedGeneration) {
     case "deployment.observe":
       exactPayloadKeys(payload, ["deployment_id"]);
       requireId(payload, "deployment_id");
+      return payload;
+    case "worker.task.issue":
+      return validateWorkerTaskIssue(payload, { code: "invalid_payload" });
+    case "worker.task.observe":
+      exactPayloadKeys(payload, ["deployment_id", "task_id"]);
+      requireId(payload, "deployment_id");
+      requireId(payload, "task_id");
       return payload;
     case "deployment.destroy":
       exactPayloadKeys(payload, ["deployment_id", "resource_manifest_digest", "volume_policy"]);

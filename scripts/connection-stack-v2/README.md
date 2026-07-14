@@ -18,10 +18,11 @@ isolated Worker instance.
 
 It has no generic AWS API, IAM/PassRole, SSH/key-pair, instance-profile,
 user-data, secret-read, public-ingress, or public-IP capability. It does not
-yet grant Recipe command execution, service health evidence, or lifecycle
+yet execute a Recipe, grant service health evidence, or allow lifecycle
 mutation such as stop, start, or destroy. Its Worker path is limited to an
-initial verified bootstrap claim, a bounded reauthentication lease, an event
-channel, and a signed read-only bootstrap observation.
+initial verified bootstrap claim, a bounded reauthentication lease, a typed
+session event channel, a signed read-only bootstrap observation, and a
+digest-only `execution_probe` task transport.
 
 ## Bootstrap boundary
 
@@ -51,6 +52,8 @@ set is:
 - `artifact.put`
 - `deployment.create`
 - `deployment.observe`
+- `worker.task.issue`
+- `worker.task.observe`
 - `deployment.destroy`
 
 There is no generic AWS action, arbitrary API name, shell command, IAM action,
@@ -99,6 +102,73 @@ future Stack-issued lease, while `last_event_at` remains null until its first
 accepted event. The response never contains a bootstrap session id, Worker
 bearer or hash, endpoint, raw event, identity document, log, secret, volume
 id, or ENI. The action cannot claim a Worker, record an event, or invoke EC2.
+
+## Worker task transport boundary
+
+`worker.task.issue` is another signed, no-approval command. Its canonical JSON
+payload is exact and deliberately contains no shell, URL, Docker image,
+service secret, AWS action, or free-form configuration:
+
+```text
+schema = dirextalk.worker-task-issue/v1
+deployment_id
+task_id
+task_kind = execution_probe
+execution_manifest_digest
+input_digest
+```
+
+After the durable command receipt is accepted, the Broker reads the immutable
+deployment receipt, its receipt-bound bootstrap session, and the bound EC2
+instance id again before writing an idempotent record in the separate
+`WorkerTasksTable` keyed by `(deployment_id, task_id)`. A same task id with a
+different immutable binding fails closed. A fresh issue returns
+`worker_task_issued`; an exact signed-command replay remains `idempotent`.
+Both return only this summary, never a task body, session id, bearer, raw event,
+or Worker log:
+
+```text
+task_id
+deployment_id
+status = queued | running | succeeded | failed | interrupted
+attempt
+last_sequence
+checkpoint | null
+error_code | null
+evidence_digest | null
+updated_at
+```
+
+`worker.task.observe` is signed and read-only; it returns the same de-secreted
+summary for the specified deployment/task pair. Neither action invokes EC2 or
+opens a network path.
+
+Only an already active, IID-verified Worker bearer can call these separate
+routes:
+
+```text
+POST /v2/worker-sessions/{session}/tasks/claim
+  { schema = dirextalk.worker-task-claim/v1, lease_epoch }
+
+POST /v2/worker-sessions/{session}/tasks/{task}/events
+  { schema, task_id, attempt, lease_epoch, sequence,
+    status, checkpoint, error_code, evidence_digest, occurred_at }
+```
+
+Claim returns `none` or a strict digest-only task document, always including
+the active `lease_epoch`. A claimed document includes `attempt` and
+`last_sequence`, so a renewed Worker starts the next event at
+`last_sequence + 1`. Events have no free-text field: `running` must use
+`execution_manifest_received`; `succeeded` must use
+`task_transport_verified`; both carry the exact issued execution-manifest
+digest and a null error code. A success transition is accepted only after the
+fixed running receipt. `failed` and `interrupted` must carry a bounded error
+code and null checkpoint and evidence digest. The independent task table
+persists only the canonical event hash and summary metadata. An old lease, a
+skipped sequence, substituted digest, invalid transition, or a repeat with a
+different body is rejected; an exact retry is idempotent. This proves a
+transport/recovery fence only—it does **not** yet authorize any process inside
+the VM to interpret or execute the referenced manifest.
 
 ## Stack-derived registration attestation
 
@@ -344,7 +414,8 @@ the strict manifest carried by that generated UserData. The Broker atomically
 creates a private `bootstrap_session_id` beside the accepted deployment
 receipt; after the EC2 response it binds that session to the exact instance
 ID and security group before the Worker can claim. The Worker calls only
-`POST /v2/worker-sessions/{id}/claim` and `/events`. Its IMDSv2 document and
+`POST /v2/worker-sessions/{id}/claim`, `/events`, `/tasks/claim`, and
+`/tasks/{task}/events`. Its IMDSv2 document and
 base64 RSA signature are verified with the Stack-pinned official AWS regional
 RSA public certificate, then the Lambda independently reads back the account,
 Region, AMI, type, architecture, AZ, VPC/subnet/security group, private-only
@@ -383,7 +454,8 @@ The focused lane proves the durable deployment reservation/session binding,
 strict claim/event JSON, token hashes instead of bearer persistence, IID
 signature/read-back rejection, generated-UserData shape, replay-safe event
 ordering, Stack-derived callback URLs, zero-ingress EC2 placement, Worker
-session IAM/table boundaries, and the disabled-verifier no-purchase gate. The
+session/task IAM-table boundaries, digest-only task issue/claim/event recovery,
+and the disabled-verifier no-purchase gate. The
 broader existing `connection_stack_v2_test.sh` remains the deploy-helper and
 lifecycle lane; it is intentionally not required for this Worker-bootstrap
 module stage.

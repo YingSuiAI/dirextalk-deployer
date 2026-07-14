@@ -35,6 +35,8 @@
         "artifact.put",
         "deployment.create",
         "deployment.observe",
+        "worker.task.issue",
+        "worker.task.observe",
         "deployment.destroy"
       ]
     },

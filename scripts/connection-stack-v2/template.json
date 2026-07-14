@@ -1,12 +1,12 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
   "Transform": "AWS::Serverless-2016-10-31",
-  "Description": "Dirextalk Connection Stack V2 durable signed command, registration attestation, Flutter approval, read-only on-demand quote, and isolated Worker EC2 creation fence.",
+  "Description": "Dirextalk Connection Stack V2 durable signed command, registration attestation, Flutter approval, isolated Worker EC2 creation fence, and bounded digest-only Worker task transport.",
   "Metadata": {
     "DirextalkConnectionStackV2": {
-      "Stage": "durable-registration-quote-isolated-worker-and-bootstrap-session",
-      "Execution": "receipt-registration-attestation-approval-challenge-read-only-on-demand-quote-typed-worker-create-and-bootstrap-session",
-      "Note": "This stack authenticates signed commands, persists immutable receipts/one-time approval challenges and Worker bootstrap sessions, returns a stack-derived registration attestation and a bounded on-demand EC2 price estimate, and accepts only a typed isolated Worker create command. It never accepts arbitrary AWS APIs, instance profiles, SSH key pairs, public ingress, public IP allocation, caller-supplied user data, or mutable image tags."
+      "Stage": "durable-registration-quote-isolated-worker-bootstrap-and-task-transport",
+      "Execution": "receipt-registration-attestation-approval-challenge-read-only-on-demand-quote-typed-worker-create-bootstrap-and-digest-task-transport",
+      "Note": "This stack authenticates signed commands, persists immutable receipts/one-time approval challenges, Worker bootstrap sessions, and digest-only Worker tasks, returns a stack-derived registration attestation and a bounded on-demand EC2 price estimate, and accepts only a typed isolated Worker create command plus execution-probe task references. It never accepts arbitrary AWS APIs, instance profiles, SSH key pairs, public ingress, public IP allocation, caller-supplied user data, mutable image tags, shells, URLs, or service secrets."
     }
   },
   "Parameters": {
@@ -344,6 +344,34 @@
         ]
       }
     },
+    "WorkerTasksTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BillingMode": "PAY_PER_REQUEST",
+        "DeletionProtectionEnabled": true,
+        "AttributeDefinitions": [
+          { "AttributeName": "deployment_id", "AttributeType": "S" },
+          { "AttributeName": "task_id", "AttributeType": "S" }
+        ],
+        "KeySchema": [
+          { "AttributeName": "deployment_id", "KeyType": "HASH" },
+          { "AttributeName": "task_id", "KeyType": "RANGE" }
+        ],
+        "PointInTimeRecoverySpecification": { "PointInTimeRecoveryEnabled": true },
+        "SSESpecification": {
+          "SSEEnabled": true,
+          "SSEType": "KMS",
+          "KMSMasterKeyId": { "Fn::GetAtt": ["ConnectionDataKey", "Arn"] }
+        },
+        "Tags": [
+          { "Key": "dirextalk:connection-id", "Value": { "Ref": "ConnectionId" } },
+          { "Key": "dirextalk:managed-by", "Value": "connection-stack-v2" },
+          { "Key": "dirextalk:component", "Value": "worker-tasks" }
+        ]
+      }
+    },
     "BrokerContractRole": {
       "Type": "AWS::IAM::Role",
       "Properties": {
@@ -359,7 +387,7 @@
         },
         "Policies": [
           {
-            "PolicyName": "DurableReceiptFenceQuoteAndTypedWorkerCreate",
+            "PolicyName": "DurableReceiptFenceQuoteWorkerCreateAndTaskTransport",
             "PolicyDocument": {
               "Version": "2012-10-17",
               "Statement": [
@@ -374,7 +402,8 @@
                     { "Fn::GetAtt": ["IssuedQuotesTable", "Arn"] },
                     { "Fn::GetAtt": ["DeploymentReceiptsTable", "Arn"] },
                     { "Fn::GetAtt": ["ConnectionCountersTable", "Arn"] },
-                    { "Fn::GetAtt": ["WorkerSessionsTable", "Arn"] }
+                    { "Fn::GetAtt": ["WorkerSessionsTable", "Arn"] },
+                    { "Fn::GetAtt": ["WorkerTasksTable", "Arn"] }
                   ]
                 },
                 {
@@ -401,6 +430,12 @@
                   "Effect": "Allow",
                   "Action": ["dynamodb:PutItem", "dynamodb:UpdateItem"],
                   "Resource": { "Fn::GetAtt": ["WorkerSessionsTable", "Arn"] }
+                },
+                {
+                  "Sid": "ManageWorkerTasksOnly",
+                  "Effect": "Allow",
+                  "Action": ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query"],
+                  "Resource": { "Fn::GetAtt": ["WorkerTasksTable", "Arn"] }
                 },
                 {
                   "Sid": "ReadOnDemandPriceListOnly",
@@ -525,6 +560,7 @@
             "DEPLOYMENT_RECEIPTS_TABLE": { "Ref": "DeploymentReceiptsTable" },
             "CONNECTION_COUNTERS_TABLE": { "Ref": "ConnectionCountersTable" },
             "WORKER_SESSIONS_TABLE": { "Ref": "WorkerSessionsTable" },
+            "WORKER_TASKS_TABLE": { "Ref": "WorkerTasksTable" },
             "STACK_ACCOUNT_ID": { "Ref": "AWS::AccountId" },
             "STACK_REGION": { "Ref": "AWS::Region" },
             "STACK_ARN": { "Ref": "AWS::StackId" },
@@ -562,12 +598,28 @@
               "Path": "/v2/worker-sessions/{session_id}/events",
               "Method": "post"
             }
+          },
+          "PostWorkerTaskClaim": {
+            "Type": "Api",
+            "Properties": {
+              "RestApiId": { "Ref": "BrokerApi" },
+              "Path": "/v2/worker-sessions/{session_id}/tasks/claim",
+              "Method": "post"
+            }
+          },
+          "PostWorkerTaskEvent": {
+            "Type": "Api",
+            "Properties": {
+              "RestApiId": { "Ref": "BrokerApi" },
+              "Path": "/v2/worker-sessions/{session_id}/tasks/{task_id}/events",
+              "Method": "post"
+            }
           }
         },
         "Tags": {
           "dirextalk:connection-id": { "Ref": "ConnectionId" },
           "dirextalk:managed-by": "connection-stack-v2",
-          "dirextalk:component": "broker-registration-quote-and-typed-worker-create"
+          "dirextalk:component": "broker-registration-quote-worker-create-and-task-transport"
         }
       },
       "Metadata": {

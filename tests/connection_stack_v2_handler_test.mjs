@@ -333,6 +333,86 @@ assert.deepEqual(JSON.parse(replayObserveResponse.body), {
   observation: deploymentObservation,
 });
 
+const taskSummary = {
+  task_id: "task-v2-execution-001",
+  deployment_id: deployment.deployment_id,
+  status: "queued",
+  attempt: 1,
+  last_sequence: 0,
+  checkpoint: null,
+  error_code: null,
+  evidence_digest: null,
+  updated_at: "2026-07-15T01:00:00.000Z",
+};
+const taskIssueCommand = {
+  action: "worker.task.issue",
+  connection_id: deployment.connection_id,
+  request_sha256: "d".repeat(64),
+  payload: {
+    schema: "dirextalk.worker-task-issue/v1",
+    deployment_id: deployment.deployment_id,
+    task_id: taskSummary.task_id,
+    task_kind: "execution_probe",
+    execution_manifest_digest: `sha256:${"a".repeat(64)}`,
+    input_digest: `sha256:${"b".repeat(64)}`,
+  },
+};
+const taskIssueCalls = [];
+const taskIssueHandler = createV2BrokerHandler({
+  async accept() {
+    return {
+      status: "read_only_validated",
+      receipt: { ...receipt, action: "worker.task.issue" },
+      command: taskIssueCommand,
+    };
+  },
+}, {
+  workerTaskService: {
+    async issue(commandToIssue) {
+      taskIssueCalls.push(commandToIssue);
+      return taskSummary;
+    },
+  },
+});
+const taskIssueResponse = await taskIssueHandler({ body: JSON.stringify(command) });
+assert.equal(taskIssueResponse.statusCode, 200);
+assert.deepEqual(JSON.parse(taskIssueResponse.body), {
+  status: "worker_task_issued",
+  receipt: { ...receipt, action: "worker.task.issue" },
+  task: taskSummary,
+});
+assert.deepEqual(taskIssueCalls, [taskIssueCommand], "the signed task issue reaches only the bounded task service after receipt acceptance");
+assert.doesNotMatch(taskIssueResponse.body, /bootstrap_session_id|access_token|token_sha256|execution_manifest[^_]|input[^_]/);
+
+const taskObserveCommand = {
+  action: "worker.task.observe",
+  connection_id: deployment.connection_id,
+  request_sha256: "e".repeat(64),
+  payload: { deployment_id: deployment.deployment_id, task_id: taskSummary.task_id },
+};
+const taskObserveHandler = createV2BrokerHandler({
+  async accept() {
+    return {
+      status: "idempotent",
+      receipt: { ...receipt, action: "worker.task.observe", disposition: "idempotent" },
+      command: taskObserveCommand,
+    };
+  },
+}, {
+  workerTaskService: {
+    async observe(commandToObserve) {
+      assert.deepEqual(commandToObserve, taskObserveCommand);
+      return taskSummary;
+    },
+  },
+});
+const taskObserveResponse = await taskObserveHandler({ body: JSON.stringify(command) });
+assert.deepEqual(JSON.parse(taskObserveResponse.body), {
+  status: "idempotent",
+  receipt: { ...receipt, action: "worker.task.observe", disposition: "idempotent" },
+  task: taskSummary,
+}, "an idempotent task observe receipt still reads a fresh de-secreted summary");
+
 const denied = createV2BrokerHandler({
   async accept() {
     throw new ConnectionStackV2Error("invalid_node_signature", "internal detail must not leave the broker", 401);
@@ -387,7 +467,47 @@ const workerEventReceipt = {
   sequence: 1,
   disposition: "accepted",
 };
+const workerTaskClaim = {
+  schema: "dirextalk.worker-task-claim/v1",
+  lease_epoch: 1,
+};
+const workerTaskClaimResponse = {
+  schema: "dirextalk.worker-task-claim-response/v1",
+  status: "claimed",
+  lease_epoch: 1,
+  task: {
+    schema: "dirextalk.worker-task/v1",
+    task_id: taskSummary.task_id,
+    deployment_id: workerClaim.deployment_id,
+    task_kind: "execution_probe",
+    execution_manifest_digest: `sha256:${"a".repeat(64)}`,
+    input_digest: `sha256:${"b".repeat(64)}`,
+    attempt: 1,
+    last_sequence: 0,
+  },
+};
+const workerTaskEvent = {
+  schema: "dirextalk.worker-task-event/v1",
+  task_id: taskSummary.task_id,
+  attempt: 1,
+  lease_epoch: 1,
+  sequence: 1,
+  status: "running",
+  checkpoint: "probe_started",
+  error_code: null,
+  evidence_digest: `sha256:${"c".repeat(64)}`,
+  occurred_at: "2026-07-15T01:00:00.000Z",
+};
+const workerTaskEventReceipt = {
+  schema: "dirextalk.worker-task-event-receipt/v1",
+  task_id: taskSummary.task_id,
+  attempt: 1,
+  lease_epoch: 1,
+  sequence: 1,
+  disposition: "accepted",
+};
 const workerSessionCalls = [];
+const workerTaskCalls = [];
 let workerRouteCommandCalls = 0;
 const workerRouteHandler = createV2BrokerHandler({
   async accept() {
@@ -403,6 +523,16 @@ const workerRouteHandler = createV2BrokerHandler({
     async event(sessionId, authorization, receivedEvent) {
       workerSessionCalls.push({ kind: "event", sessionId, authorization, receivedEvent });
       return workerEventReceipt;
+    },
+  },
+  workerTaskService: {
+    async claim(sessionId, authorization, receivedClaim) {
+      workerTaskCalls.push({ kind: "claim", sessionId, authorization, receivedClaim });
+      return workerTaskClaimResponse;
+    },
+    async event(sessionId, authorization, taskId, receivedEvent) {
+      workerTaskCalls.push({ kind: "event", sessionId, authorization, taskId, receivedEvent });
+      return workerTaskEventReceipt;
     },
   },
 });
@@ -442,6 +572,37 @@ assert.deepEqual(workerSessionCalls.at(-1), {
 });
 assert.doesNotMatch(workerEventRouteResponse.body, /worker-session-test-token/, "event responses must not echo the bearer token");
 
+const workerTaskClaimRouteResponse = await workerRouteHandler({
+  path: `/v2/worker-sessions/${workerSessionID}/tasks/claim`,
+  httpMethod: "POST",
+  headers: { Authorization: `Bearer ${workerClaimResponse.access_token}` },
+  body: JSON.stringify(workerTaskClaim),
+});
+assert.equal(workerTaskClaimRouteResponse.statusCode, 200);
+assert.deepEqual(JSON.parse(workerTaskClaimRouteResponse.body), workerTaskClaimResponse);
+assert.deepEqual(workerTaskCalls.at(-1), {
+  kind: "claim",
+  sessionId: workerSessionID,
+  authorization: `Bearer ${workerClaimResponse.access_token}`,
+  receivedClaim: workerTaskClaim,
+});
+const workerTaskEventRouteResponse = await workerRouteHandler({
+  path: `/v2/worker-sessions/${workerSessionID}/tasks/${taskSummary.task_id}/events`,
+  httpMethod: "POST",
+  headers: { Authorization: `Bearer ${workerClaimResponse.access_token}` },
+  body: JSON.stringify(workerTaskEvent),
+});
+assert.equal(workerTaskEventRouteResponse.statusCode, 200);
+assert.deepEqual(JSON.parse(workerTaskEventRouteResponse.body), workerTaskEventReceipt);
+assert.deepEqual(workerTaskCalls.at(-1), {
+  kind: "event",
+  sessionId: workerSessionID,
+  authorization: `Bearer ${workerClaimResponse.access_token}`,
+  taskId: taskSummary.task_id,
+  receivedEvent: workerTaskEvent,
+});
+assert.doesNotMatch(workerTaskEventRouteResponse.body, /worker-session-test-token|execution_manifest_digest|input_digest/);
+
 const duplicateKeyResponse = await workerRouteHandler({
   path: `/v2/worker-sessions/${workerSessionID}/claim`,
   httpMethod: "POST",
@@ -450,6 +611,16 @@ const duplicateKeyResponse = await workerRouteHandler({
 assert.equal(duplicateKeyResponse.statusCode, 400);
 assert.deepEqual(JSON.parse(duplicateKeyResponse.body), { error: { code: "invalid_request" } });
 assert.equal(workerSessionCalls.length, 3, "duplicate-key JSON must be rejected before the Worker session service");
+
+const duplicateTaskKeyResponse = await workerRouteHandler({
+  path: `/v2/worker-sessions/${workerSessionID}/tasks/claim`,
+  httpMethod: "POST",
+  headers: { Authorization: `Bearer ${workerClaimResponse.access_token}` },
+  body: '{"schema":"dirextalk.worker-task-claim/v1","lease_epoch":1,"lease_epoch":2}',
+});
+assert.equal(duplicateTaskKeyResponse.statusCode, 400);
+assert.deepEqual(JSON.parse(duplicateTaskKeyResponse.body), { error: { code: "invalid_request" } });
+assert.equal(workerTaskCalls.length, 2, "duplicate-key task JSON must be rejected before active-bearer authorization");
 
 const missingWorkerServiceCommandCalls = [];
 const missingWorkerServiceHandler = createV2BrokerHandler({
@@ -466,6 +637,16 @@ const missingWorkerServiceResponse = await missingWorkerServiceHandler({
 assert.equal(missingWorkerServiceResponse.statusCode, 503);
 assert.deepEqual(JSON.parse(missingWorkerServiceResponse.body), { error: { code: "worker_session_unavailable" } });
 assert.deepEqual(missingWorkerServiceCommandCalls, [], "a disabled Worker session service must fail closed instead of treating a claim as a command");
+
+const missingWorkerTaskServiceResponse = await missingWorkerServiceHandler({
+  path: `/v2/worker-sessions/${workerSessionID}/tasks/claim`,
+  httpMethod: "POST",
+  headers: { Authorization: `Bearer ${workerClaimResponse.access_token}` },
+  body: JSON.stringify(workerTaskClaim),
+});
+assert.equal(missingWorkerTaskServiceResponse.statusCode, 503);
+assert.deepEqual(JSON.parse(missingWorkerTaskServiceResponse.body), { error: { code: "worker_task_unavailable" } });
+assert.deepEqual(missingWorkerServiceCommandCalls, [], "a disabled Worker task service must fail closed instead of treating a task claim as a signed command");
 
 const unknownPathResponse = await workerRouteHandler({
   path: "/v2/worker-sessions/not-a-session/unknown",

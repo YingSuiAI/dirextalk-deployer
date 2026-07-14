@@ -91,6 +91,9 @@ for (const required of ["SKILL.md", "bin/dirextalk-deployer.mjs", "scripts/json.
 if (files.includes("README_zh.md")) {
   throw new Error("npm package must not include the removed Chinese README");
 }
+if (files.some((file) => file.startsWith("scripts/connection-stack-v2/"))) {
+  throw new Error("Connection Stack must not be distributed with dirextalk-deployer");
+}
 if (files.some((file) => file === "tests" || file.startsWith("tests/"))) {
   throw new Error("npm package must not include tests/");
 }

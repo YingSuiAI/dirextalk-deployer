@@ -26,7 +26,6 @@ quick_tests=(
   tests/tracked_text_lf_test.sh
   tests/test_runner_entry_test.mjs
   tests/npm_skill_distribution_test.sh
-  tests/connection_stack_v2_test.sh
   tests/skill_structure_test.sh
   tests/atomic_write_test.sh
   tests/json_helper_test.sh

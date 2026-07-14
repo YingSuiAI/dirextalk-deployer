@@ -42,6 +42,7 @@
     "payload_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "approval_binding": { "$ref": "approval-binding-v2.schema.json" },
     "approval": { "$ref": "#/$defs/approval" },
+    "approval_proof": { "$ref": "approval-proof-v1.schema.json" },
     "signature_b64": { "type": "string", "contentEncoding": "base64" }
   },
   "$defs": {

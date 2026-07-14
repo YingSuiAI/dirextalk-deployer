@@ -74,6 +74,9 @@ function receiptStore() {
         "broker_command_url",
         "node_key_id",
         "connection_generation",
+        "worker_artifact",
+        "worker_network",
+        "worker_resource_manifest_digest",
         "stack_arn",
         "command_id",
         "request_sha256",
@@ -112,6 +115,13 @@ const serviceOptions = {
     stack_arn: STACK_ARN,
     api_gateway_url_suffix: "amazonaws.com",
     stage_name: "prod",
+    worker_artifact: { kind: "fixed_ami", ami_id: "ami-0123456789abcdef0" },
+    worker_network: {
+      vpc_id: "vpc-0123456789abcdef0",
+      subnet_id: "subnet-0123456789abcdef0",
+      availability_zone: "ap-south-1a",
+    },
+    worker_resource_manifest_digest: `sha256:${"b".repeat(64)}`,
   },
 };
 const service = createV2ChallengeApprovalService(serviceOptions);
@@ -133,6 +143,13 @@ assert.deepEqual(registered.registration, {
   broker_command_url: BROKER_URL,
   node_key_id: NODE_KEY_ID,
   connection_generation: 3,
+  worker_artifact: { kind: "fixed_ami", ami_id: "ami-0123456789abcdef0" },
+  worker_network: {
+    vpc_id: "vpc-0123456789abcdef0",
+    subnet_id: "subnet-0123456789abcdef0",
+    availability_zone: "ap-south-1a",
+  },
+  worker_resource_manifest_digest: `sha256:${"b".repeat(64)}`,
   stack_arn: STACK_ARN,
   command_id: command.command_id,
   request_sha256: registered.receipt.request_sha256,

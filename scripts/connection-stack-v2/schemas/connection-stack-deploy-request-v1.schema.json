@@ -16,6 +16,11 @@
     "device_approval_key_id",
     "device_approval_public_key_spki_b64",
     "stage_name",
+    "worker_base_ami_id",
+    "worker_vpc_id",
+    "worker_subnet_id",
+    "worker_availability_zone",
+    "worker_resource_manifest_digest",
     "template_sha256",
     "source_tree_sha256"
   ],
@@ -31,6 +36,11 @@
     "device_approval_key_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
     "device_approval_public_key_spki_b64": { "type": "string", "contentEncoding": "base64" },
     "stage_name": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$" },
+    "worker_base_ami_id": { "type": "string", "pattern": "^ami-[0-9a-f]{8,17}$" },
+    "worker_vpc_id": { "type": "string", "pattern": "^vpc-[0-9a-f]{8,17}$" },
+    "worker_subnet_id": { "type": "string", "pattern": "^subnet-[0-9a-f]{8,17}$" },
+    "worker_availability_zone": { "type": "string", "pattern": "^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[a-z]+-\\d[a-z]$" },
+    "worker_resource_manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "template_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "source_tree_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
   }

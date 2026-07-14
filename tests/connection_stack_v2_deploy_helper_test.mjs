@@ -50,6 +50,11 @@ try {
     device_approval_key_id: "device-key-v2",
     device_approval_public_key_spki_b64: publicKeySpkiBase64,
     stage_name: "prod",
+    worker_base_ami_id: "ami-0123456789abcdef0",
+    worker_vpc_id: "vpc-0123456789abcdef0",
+    worker_subnet_id: "subnet-0123456789abcdef0",
+    worker_availability_zone: "ap-south-1a",
+    worker_resource_manifest_digest: `sha256:${"c".repeat(64)}`,
     template_sha256: connectionStackTemplateDigest(templatePath),
     source_tree_sha256: connectionStackSourceTreeDigest(new URL("scripts/connection-stack-v2/", root)),
   };
@@ -67,6 +72,11 @@ try {
         { OutputKey: "AccountId", OutputValue: "123456789012" },
         { OutputKey: "Region", OutputValue: request.requested_region },
         { OutputKey: "NodeKeyId", OutputValue: request.node_key_id },
+        { OutputKey: "WorkerBaseAmiId", OutputValue: request.worker_base_ami_id },
+        { OutputKey: "WorkerVpcId", OutputValue: request.worker_vpc_id },
+        { OutputKey: "WorkerSubnetId", OutputValue: request.worker_subnet_id },
+        { OutputKey: "WorkerAvailabilityZone", OutputValue: request.worker_availability_zone },
+        { OutputKey: "WorkerResourceManifestDigest", OutputValue: request.worker_resource_manifest_digest },
         { OutputKey: "BrokerCommandUrl", OutputValue: brokerURL },
         { OutputKey: "StackArn", OutputValue: stackArn },
       ],
@@ -95,6 +105,9 @@ try {
     "broker_command_url",
     "node_key_id",
     "connection_generation",
+    "worker_artifact",
+    "worker_network",
+    "worker_resource_manifest_digest",
     "stack_arn",
   ]);
   assert.deepEqual(manifest, {
@@ -106,6 +119,13 @@ try {
     broker_command_url: brokerURL,
     node_key_id: request.node_key_id,
     connection_generation: 3,
+    worker_artifact: { kind: "fixed_ami", ami_id: request.worker_base_ami_id },
+    worker_network: {
+      vpc_id: request.worker_vpc_id,
+      subnet_id: request.worker_subnet_id,
+      availability_zone: request.worker_availability_zone,
+    },
+    worker_resource_manifest_digest: request.worker_resource_manifest_digest,
     stack_arn: stackArn,
   });
   assert.doesNotMatch(JSON.stringify(manifest), /public_key|approval_key|template_sha256|secret|token/i);

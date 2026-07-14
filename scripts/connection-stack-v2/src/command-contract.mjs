@@ -11,6 +11,14 @@ import {
   validateStoredQuote,
 } from "./quote-contract.mjs";
 import {
+  validateDeploymentCreatePayload,
+} from "./deployment-contract.mjs";
+import {
+  approvalProofPayloadSHA256,
+  validateApprovalProof,
+  validateApprovalProofAgainstDeployment,
+} from "./approval-proof.mjs";
+import {
   CONNECTION_REGISTRATION_VERIFY_ACTION,
   buildConnectionRegistration,
   validateConnectionRegistration,
@@ -52,6 +60,7 @@ const COMMAND_FIELDS = new Set([
   "payload_sha256",
   "approval_binding",
   "approval",
+  "approval_proof",
   "signature_b64",
 ]);
 const APPROVAL_BINDING_FIELDS = [
@@ -76,11 +85,11 @@ const APPROVAL_FIELDS = [
   "expires_at",
   "signature_b64",
 ];
-const SENSITIVE_ACTIONS = new Set([
+const LEGACY_SENSITIVE_ACTIONS = new Set([
   "artifact.put",
-  "deployment.create",
   "deployment.destroy",
 ]);
+const DEPLOYMENT_CREATE_ACTION = "deployment.create";
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
 const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -232,6 +241,7 @@ function approvalSignatureDigest(approval) {
 
 export function buildNodeSignatureBase(command) {
   const bindingDigest = command.approval_binding ? canonicalApprovalBindingDigest(command.approval_binding) : "";
+  const approvalProofDigest = command.approval_proof ? approvalProofPayloadSHA256(command.approval_proof) : "";
   return [
     "dirextalk.aws.command-signature/v2",
     `schema=${command.schema ?? ""}`,
@@ -247,6 +257,7 @@ export function buildNodeSignatureBase(command) {
     `approval_binding_sha256=${bindingDigest}`,
     `approval_challenge_id=${command.approval?.challenge_id ?? ""}`,
     `approval_signature_sha256=${approvalSignatureDigest(command.approval)}`,
+    `approval_proof_payload_sha256=${approvalProofDigest}`,
     "",
   ].join("\n");
 }
@@ -314,18 +325,16 @@ function validateApproval(approval, binding, options) {
   return approval;
 }
 
-function validatePayload(action, payload, binding) {
+function validatePayload(action, payload, binding, expectedGeneration) {
   switch (action) {
     case "approval.challenge.request":
       exactPayloadKeys(payload, ["challenge_request_id"]);
       requireId(payload, "challenge_request_id");
-      break;
+      return payload;
     case CONNECTION_REGISTRATION_VERIFY_ACTION:
-      validateRegistrationVerifyPayload(payload);
-      break;
+      return validateRegistrationVerifyPayload(payload);
     case "quote.request":
-      validateQuoteRequestPayload(payload);
-      break;
+      return validateQuoteRequestPayload(payload);
     case "artifact.put":
       exactPayloadKeys(payload, ["artifact_id", "manifest_digest", "content_digest", "content_length"]);
       requireId(payload, "artifact_id");
@@ -337,20 +346,16 @@ function validatePayload(action, payload, binding) {
       if (payload.manifest_digest !== binding.manifest_digest) {
         fail("approval_binding_mismatch", "artifact manifest does not match approval binding", 409);
       }
-      break;
+      return payload;
     case "deployment.create":
-      exactPayloadKeys(payload, ["deployment_id", "quote_id", "manifest_digest"]);
-      requireId(payload, "deployment_id");
-      requireId(payload, "quote_id");
-      requireDigest(payload, "manifest_digest");
-      if (payload.quote_id !== binding.quote_id || payload.manifest_digest !== binding.manifest_digest) {
-        fail("approval_binding_mismatch", "deployment create does not match approval binding", 409);
-      }
-      break;
+      return validateDeploymentCreatePayload(payload, {
+        approvalBinding: binding,
+        expectedGeneration,
+      });
     case "deployment.observe":
       exactPayloadKeys(payload, ["deployment_id"]);
       requireId(payload, "deployment_id");
-      break;
+      return payload;
     case "deployment.destroy":
       exactPayloadKeys(payload, ["deployment_id", "resource_manifest_digest", "volume_policy"]);
       requireId(payload, "deployment_id");
@@ -361,7 +366,7 @@ function validatePayload(action, payload, binding) {
       if (payload.resource_manifest_digest !== binding.manifest_digest) {
         fail("approval_binding_mismatch", "destroy manifest does not match approval binding", 409);
       }
-      break;
+      return payload;
     default:
       fail("unsupported_action", "action is not supported", 400);
   }
@@ -373,20 +378,47 @@ function validateActionApprovalPresence(command, binding) {
     if (command.approval !== undefined) fail("invalid_approval", "approval challenge requests cannot contain an approval");
     return;
   }
-  if (SENSITIVE_ACTIONS.has(command.action)) {
-    if (!binding || !command.approval) {
-      fail("approval_required", "this action requires a Flutter device approval", 409);
+  if (command.action === DEPLOYMENT_CREATE_ACTION) {
+    if (!command.approval_proof) {
+      fail("approval_required", "deployment create requires the existing Flutter ApprovalV1 proof", 409);
+    }
+    if (binding !== undefined || command.approval !== undefined) {
+      fail("invalid_approval", "deployment create cannot carry the retired V2 approval fields");
     }
     return;
   }
-  if (binding !== undefined || command.approval !== undefined) {
+  if (LEGACY_SENSITIVE_ACTIONS.has(command.action)) {
+    if (!binding || !command.approval) {
+      fail("approval_required", "this action requires a Flutter device approval", 409);
+    }
+    if (command.approval_proof !== undefined) {
+      fail("invalid_approval", "this action cannot carry an ApprovalV1 proof");
+    }
+    return;
+  }
+  if (binding !== undefined || command.approval !== undefined || command.approval_proof !== undefined) {
     fail("invalid_approval", "read-only actions cannot carry an approval binding");
   }
 }
 
-function validateActionApprovalShape(command, binding, options) {
+function validateActionApprovalShape(command, binding, options, payload, allowExpiredReplay) {
   validateActionApprovalPresence(command, binding);
-  if (SENSITIVE_ACTIONS.has(command.action)) {
+  if (command.action === DEPLOYMENT_CREATE_ACTION) {
+    const proof = validateApprovalProof(command.approval_proof, {
+      deviceKeyId: options.deviceKeyId,
+      devicePublicKeySpkiBase64: options.devicePublicKeySpkiBase64,
+      nowMs: options.nowMs,
+      allowExpiredReplay,
+    });
+    validateApprovalProofAgainstDeployment(proof, {
+      connectionId: command.connection_id,
+      payload,
+      nowMs: options.nowMs,
+      allowExpiredReplay,
+    });
+    return proof;
+  }
+  if (LEGACY_SENSITIVE_ACTIONS.has(command.action)) {
     return validateApproval(command.approval, binding, options);
   }
   return undefined;
@@ -438,10 +470,12 @@ export function validateAndAuthenticateV2Command(command, options, { allowExpire
       nowMs: allowExpiredReplay ? undefined : options.nowMs,
     });
   const approvalBindingIsExpired = binding !== undefined && Date.parse(binding.expires_at) <= options.nowMs;
-  const payload = decodeCanonicalPayload({ ...command, payload_sha256: payloadSha256 });
+  const decodedPayload = decodeCanonicalPayload({ ...command, payload_sha256: payloadSha256 });
   validateActionApprovalPresence(command, binding);
-  validatePayload(action, payload, binding);
-  const approval = validateActionApprovalShape(command, binding, options);
+  const payload = validatePayload(action, decodedPayload, binding, command.expected_generation);
+  const approval = validateActionApprovalShape(command, binding, options, payload, allowExpiredReplay);
+  const approvalProofIsExpired = command.action === DEPLOYMENT_CREATE_ACTION
+    && (Date.parse(approval.expires_at) <= options.nowMs || Date.parse(approval.quote_valid_until) <= options.nowMs);
 
   const signature = decodeBase64(command.signature_b64, "signature_b64");
   const nodeKey = configuredEd25519Key(options.nodePublicKeySpkiBase64, "invalid_stack_node_key");
@@ -454,10 +488,12 @@ export function validateAndAuthenticateV2Command(command, options, { allowExpire
     payload,
     approval_binding: binding,
     approval,
+    approval_proof: command.action === DEPLOYMENT_CREATE_ACTION ? approval : undefined,
     request_sha256: sha256(signatureBase),
     ...(allowExpiredReplay ? {
       is_expired: isExpired,
       approval_binding_is_expired: approvalBindingIsExpired,
+      approval_proof_is_expired: approvalProofIsExpired,
     } : {}),
   };
 }
@@ -516,6 +552,16 @@ function approvalChallengeReference(authenticated) {
   };
 }
 
+function approvalProofReference(authenticated) {
+  return {
+    schema: "dirextalk.aws.approval-proof-reference/v1",
+    connection_id: authenticated.connection_id,
+    approval_id: authenticated.approval_proof.approval_id,
+    payload_sha256: approvalProofPayloadSHA256(authenticated.approval_proof),
+    expires_at: authenticated.approval_proof.expires_at,
+  };
+}
+
 function buildReceiptCommit(authenticated, nowMs, { challengeToIssue, registration } = {}) {
   return {
     schema: RECEIPT_COMMIT_V2_SCHEMA,
@@ -528,11 +574,15 @@ function buildReceiptCommit(authenticated, nowMs, { challengeToIssue, registrati
     now_ms: nowMs,
     ...(authenticated.is_expired ? { is_expired: true } : {}),
     ...(authenticated.approval_binding_is_expired ? { approval_binding_is_expired: true } : {}),
+    ...(authenticated.approval_proof_is_expired ? { approval_proof_is_expired: true } : {}),
     ...(authenticated.action === "quote.request" ? { quote_request: authenticated.payload } : {}),
     ...(registration ? { registration } : {}),
     ...(challengeToIssue ? { challenge_to_issue: challengeToIssue } : {}),
-    ...(SENSITIVE_ACTIONS.has(authenticated.action)
+    ...(LEGACY_SENSITIVE_ACTIONS.has(authenticated.action)
       ? { approval_challenge: approvalChallengeReference(authenticated) }
+      : {}),
+    ...(authenticated.action === DEPLOYMENT_CREATE_ACTION
+      ? { approval_proof: approvalProofReference(authenticated) }
       : {}),
   };
 }
@@ -725,13 +775,16 @@ export function createV2ChallengeApprovalService(options) {
       if (authenticated.action === CONNECTION_REGISTRATION_VERIFY_ACTION) {
         return { status: "connection_registered", registration: receipt.registration, receipt, command: authenticated };
       }
-      if (SENSITIVE_ACTIONS.has(authenticated.action)) {
+      if (LEGACY_SENSITIVE_ACTIONS.has(authenticated.action)) {
         return {
           status: "approval_consumed",
           challenge: approvalChallengeReference(authenticated),
           receipt,
           command: authenticated,
         };
+      }
+      if (authenticated.action === DEPLOYMENT_CREATE_ACTION) {
+        return { status: "approval_consumed", receipt, command: authenticated };
       }
       return { status: "read_only_validated", receipt, command: authenticated };
     },

@@ -16,6 +16,9 @@ import {
   validateBootstrapIdentity,
 } from "../scripts/connection-stack-v2/src/command-contract.mjs";
 import {
+  canonicalApprovalProofPayload,
+} from "../scripts/connection-stack-v2/src/approval-proof.mjs";
+import {
   validateWorkerBootstrapManifest,
 } from "../scripts/connection-stack-v2/src/worker-contract.mjs";
 
@@ -70,6 +73,68 @@ function deviceApproval(approvalBinding, overrides = {}) {
   return approval;
 }
 
+function deploymentPayload(deploymentId, approvalBinding = binding()) {
+  return {
+    schema: "dirextalk.aws.deployment-create/v1",
+    deployment_id: deploymentId,
+    connection_generation: 3,
+    plan_hash: approvalBinding.plan_hash,
+    plan_revision: approvalBinding.plan_revision,
+    quote_id: approvalBinding.quote_id,
+    quote_digest: DIGEST("9"),
+    candidate_id: "candidate-recommended-01",
+    resource_manifest_digest: approvalBinding.manifest_digest,
+    worker_artifact: {
+      kind: "fixed_ami",
+      ami_id: "ami-0123456789abcdef0",
+    },
+    network: {
+      vpc_id: "vpc-0123456789abcdef0",
+      subnet_id: "subnet-0123456789abcdef0",
+      availability_zone: "ap-south-1a",
+    },
+  };
+}
+
+function approvalProof(approvalBinding, overrides = {}) {
+  const proof = {
+    schema_version: "cloud-orchestrator/v1",
+    approval_id: "approval-proof-v2-01",
+    challenge_id: "challenge-v2-001",
+    signer_key_id: DEVICE_KEY_ID,
+    plan_id: "plan-v2-0001",
+    plan_hash: approvalBinding.plan_hash,
+    plan_revision: approvalBinding.plan_revision,
+    quote_id: approvalBinding.quote_id,
+    quote_digest: DIGEST("9"),
+    quote_valid_until: "2026-07-14T07:15:00Z",
+    cloud_connection_id: CONNECTION_ID,
+    recipe_digest: approvalBinding.recipe_digest,
+    resource_scope: {
+      region: "ap-south-1",
+      instance_type: "t3.large",
+      architecture: "amd64",
+      vcpu: 2,
+      memory_mib: 8192,
+      disk_gib: 40,
+      purchase_option: "on_demand",
+    },
+    network_scope: {
+      public_ingress: false,
+      entry_point: "none",
+      tls_required: false,
+      authentication_required: false,
+    },
+    secret_scope: [],
+    integration_scope: [],
+    expires_at: "2026-07-14T07:04:00Z",
+    signature: "",
+    ...overrides,
+  };
+  proof.signature = sign(null, canonicalApprovalProofPayload(proof), devicePrivateKey).toString("base64url");
+  return proof;
+}
+
 function signedCommand(action, payload, options = {}) {
   const payloadBytes = Buffer.from(JSON.stringify(payload), "utf8");
   const command = {
@@ -86,10 +151,12 @@ function signedCommand(action, payload, options = {}) {
     payload_sha256: sha256(payloadBytes),
     approval_binding: options.approval_binding,
     approval: options.approval,
+    approval_proof: options.approval_proof,
     signature_b64: "",
   };
   if (command.approval_binding === undefined) delete command.approval_binding;
   if (command.approval === undefined) delete command.approval;
+  if (command.approval_proof === undefined) delete command.approval_proof;
   command.signature_b64 = sign(
     null,
     Buffer.from(buildNodeSignatureBase(command), "utf8"),
@@ -112,6 +179,7 @@ const authOptions = {
 function createFakeReceiptStore({ connectionId, generation }) {
   const receipts = new Map();
   const challenges = new Map();
+  const approvalProofs = new Map();
   let highestNodeCounter = -1;
 
   function fail(code, message) {
@@ -182,6 +250,17 @@ function createFakeReceiptStore({ connectionId, generation }) {
         }
         if (stored.consumed) fail("approval_replayed", "approval challenge was already consumed");
         consumedChallenge = { ...stored, consumed: true, consumed_by_command_id: request.command_id };
+      }
+
+      if (request.approval_proof) {
+        const proof = request.approval_proof;
+        assert.equal(proof.schema, "dirextalk.aws.approval-proof-reference/v1");
+        assert.equal(proof.connection_id, connectionId);
+        assert.match(proof.approval_id, /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
+        assert.match(proof.payload_sha256, /^[0-9a-f]{64}$/);
+        assert.equal(typeof proof.expires_at, "string");
+        if (approvalProofs.has(proof.approval_id)) fail("approval_replayed", "approval proof was already consumed");
+        approvalProofs.set(proof.approval_id, { ...proof, consumed_by_command_id: request.command_id });
       }
 
       const quote = request.action === "quote.request"
@@ -351,21 +430,17 @@ const issuedChallenge = await challengeService.accept(challengeRequest);
 assert.equal(issuedChallenge.challenge.challenge_id, "challenge-v2-001");
 
 const createBinding = binding();
-const create = signedCommand("deployment.create", {
-  deployment_id: "deployment-v2-001",
-  quote_id: "quote-v2-00001",
-  manifest_digest: DIGEST("c"),
-}, {
+const create = signedCommand("deployment.create", deploymentPayload("deployment-v2-001", createBinding), {
   command_id: "command-v2-00002",
   node_counter: 12,
-  approval_binding: createBinding,
-  approval: deviceApproval(createBinding),
+  approval_proof: approvalProof(createBinding),
 });
 const authenticatedCreate = validateAndAuthenticateV2Command(create, authOptions);
-assert.equal(authenticatedCreate.approval.binding_sha256, canonicalApprovalBindingDigest(createBinding));
+assert.equal(authenticatedCreate.approval_proof.approval_id, "approval-proof-v2-01");
 const consumedApproval = await challengeService.accept(create);
 assert.equal(consumedApproval.status, "approval_consumed");
 assert.equal(consumedApproval.receipt.command_id, "command-v2-00002");
+assert.equal(consumedApproval.challenge, undefined, "ApprovalV1 create must not project a retired challenge reference");
 const idempotentCreate = await challengeService.accept(create);
 assert.equal(idempotentCreate.status, "idempotent");
 assert.equal(idempotentCreate.receipt.command_id, "command-v2-00002");
@@ -393,15 +468,10 @@ await assert.rejects(
   "an expired command with no receipt must never advance the counter or become executable",
 );
 
-const conflictingCommand = signedCommand("deployment.create", {
-  deployment_id: "deployment-v2-conflict",
-  quote_id: "quote-v2-00001",
-  manifest_digest: DIGEST("c"),
-}, {
+const conflictingCommand = signedCommand("deployment.create", deploymentPayload("deployment-v2-conflict", createBinding), {
   command_id: "command-v2-00002",
   node_counter: 12,
-  approval_binding: createBinding,
-  approval: deviceApproval(createBinding),
+  approval_proof: approvalProof(createBinding),
 });
 await assert.rejects(
   () => challengeService.accept(conflictingCommand),
@@ -421,15 +491,10 @@ await assert.rejects(
   "a new command cannot move the durable node counter backward",
 );
 
-const replayedApproval = signedCommand("deployment.create", {
-  deployment_id: "deployment-v2-004",
-  quote_id: "quote-v2-00001",
-  manifest_digest: DIGEST("c"),
-}, {
+const replayedApproval = signedCommand("deployment.create", deploymentPayload("deployment-v2-004", createBinding), {
   command_id: "command-v2-00005",
   node_counter: 13,
-  approval_binding: createBinding,
-  approval: deviceApproval(createBinding),
+  approval_proof: approvalProof(createBinding),
 });
 await assert.rejects(
   () => challengeService.accept(replayedApproval),
@@ -474,11 +539,7 @@ assert.throws(
   "an envelope cannot escape into a generic AWS action",
 );
 
-const missingApproval = signedCommand("deployment.create", {
-  deployment_id: "deployment-v2-003",
-  quote_id: "quote-v2-00001",
-  manifest_digest: DIGEST("c"),
-}, {
+const missingApproval = signedCommand("deployment.create", deploymentPayload("deployment-v2-003"), {
   command_id: "command-v2-00004",
   node_counter: 14,
 });
@@ -488,21 +549,17 @@ assert.throws(
   "a mutating command must fail closed before any payload dereference when no approval exists",
 );
 
-const changedNetworkBinding = binding({ network_scope_digest: DIGEST("1") });
-const changedNetworkCommand = signedCommand("deployment.create", {
-  deployment_id: "deployment-v2-002",
-  quote_id: "quote-v2-00001",
-  manifest_digest: DIGEST("c"),
-}, {
+const changedQuotePayload = deploymentPayload("deployment-v2-002", createBinding);
+changedQuotePayload.quote_digest = DIGEST("1");
+const changedQuoteCommand = signedCommand("deployment.create", changedQuotePayload, {
   command_id: "command-v2-00003",
   node_counter: 13,
-  approval_binding: changedNetworkBinding,
-  approval: deviceApproval(createBinding),
+  approval_proof: approvalProof(createBinding),
 });
 assert.throws(
-  () => validateAndAuthenticateV2Command(changedNetworkCommand, authOptions),
-  (error) => error instanceof ConnectionStackV2Error && error.code === "approval_binding_mismatch",
-  "a device approval must bind the exact network scope digest",
+  () => validateAndAuthenticateV2Command(changedQuoteCommand, authOptions),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "approval_proof_mismatch",
+  "the existing device approval must bind the exact approved quote digest",
 );
 
 const rootBootstrap = {

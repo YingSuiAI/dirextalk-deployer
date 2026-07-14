@@ -35,6 +35,13 @@ const registration = {
   broker_command_url: "https://abcde12345.execute-api.ap-south-1.amazonaws.com/prod/v2/commands",
   node_key_id: "node-key-v2",
   connection_generation: 3,
+  worker_artifact: { kind: "fixed_ami", ami_id: "ami-0123456789abcdef0" },
+  worker_network: {
+    vpc_id: "vpc-0123456789abcdef0",
+    subnet_id: "subnet-0123456789abcdef0",
+    availability_zone: "ap-south-1a",
+  },
+  worker_resource_manifest_digest: `sha256:${"b".repeat(64)}`,
   stack_arn: "arn:aws:cloudformation:ap-south-1:123456789012:stack/DirextalkConnectionStackV2-001/01234567-89ab-cdef-0123-456789abcdef",
   command_id: "command-v2-00001",
   request_sha256: "a".repeat(64),
@@ -108,6 +115,13 @@ const stackDerivedEndpointHandler = createV2BrokerHandler({
     stack_arn: "arn:aws:cloudformation:ap-south-1:123456789012:stack/DirextalkConnectionStackV2-001/01234567-89ab-cdef-0123-456789abcdef",
     api_gateway_url_suffix: "amazonaws.com",
     stage_name: "prod",
+    worker_artifact: { kind: "fixed_ami", ami_id: "ami-0123456789abcdef0" },
+    worker_network: {
+      vpc_id: "vpc-0123456789abcdef0",
+      subnet_id: "subnet-0123456789abcdef0",
+      availability_zone: "ap-south-1a",
+    },
+    worker_resource_manifest_digest: `sha256:${"b".repeat(64)}`,
   },
 });
 const stackDerivedEndpointResponse = await stackDerivedEndpointHandler({
@@ -121,6 +135,60 @@ assert.equal(stackDerivedEndpointResponse.statusCode, 200);
 assert.deepEqual(runtimeContexts, [{
   broker_command_url: "https://abcde12345.execute-api.ap-south-1.amazonaws.com/prod/v2/commands",
 }], "the Lambda must derive the Broker endpoint from its own API Gateway event, not command payload claims");
+
+const deployment = {
+  schema: "dirextalk.aws.deployment-receipt/v1",
+  connection_id: "connection-v2-0001",
+  deployment_id: "deployment-v2-001",
+  request_sha256: "a".repeat(64),
+  resource_status: "provisioning",
+  instance_id: "i-0123456789abcdef0",
+  volume_ids: ["vol-0123456789abcdef0"],
+  network_interface_ids: ["eni-0123456789abcdef0"],
+};
+const provisionedCommands = [];
+const deploymentHandler = createV2BrokerHandler({
+  async accept() {
+    return {
+      status: "approval_consumed",
+      receipt,
+      command: { action: "deployment.create", request_sha256: deployment.request_sha256 },
+    };
+  },
+}, {
+  deploymentProvisioner: {
+    async ensure(commandToProvision) {
+      provisionedCommands.push(commandToProvision);
+      return deployment;
+    },
+  },
+});
+const deploymentResponse = await deploymentHandler({ body: JSON.stringify(command) });
+assert.equal(deploymentResponse.statusCode, 202);
+assert.deepEqual(JSON.parse(deploymentResponse.body), {
+  status: "deployment_created",
+  receipt,
+  deployment,
+});
+assert.equal(provisionedCommands.length, 1, "only the typed deployment command reaches the EC2 provisioner");
+assert.doesNotMatch(deploymentResponse.body, /user_data|worker_token|secret_ref|approval_proof/);
+
+const replayDeploymentHandler = createV2BrokerHandler({
+  async accept() {
+    return {
+      status: "idempotent",
+      receipt: { ...receipt, disposition: "idempotent" },
+      command: { action: "deployment.create", request_sha256: deployment.request_sha256 },
+    };
+  },
+}, {
+  deploymentProvisioner: {
+    async ensure() { return deployment; },
+  },
+});
+const replayDeploymentResponse = await replayDeploymentHandler({ body: JSON.stringify(command) });
+assert.equal(replayDeploymentResponse.statusCode, 200, "an expired/replayed command must still reconcile the EC2 receipt without a second approval");
+assert.equal(JSON.parse(replayDeploymentResponse.body).status, "idempotent");
 
 const denied = createV2BrokerHandler({
   async accept() {

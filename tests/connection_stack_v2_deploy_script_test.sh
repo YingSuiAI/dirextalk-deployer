@@ -56,6 +56,11 @@ const request = {
   device_approval_key_id: "device-key-v2",
   device_approval_public_key_spki_b64: spki,
   stage_name: "prod",
+  worker_base_ami_id: "ami-0123456789abcdef0",
+  worker_vpc_id: "vpc-0123456789abcdef0",
+  worker_subnet_id: "subnet-0123456789abcdef0",
+  worker_availability_zone: "ap-south-1a",
+  worker_resource_manifest_digest: `sha256:${"c".repeat(64)}`,
   template_sha256: `sha256:${createHash("sha256").update(readFileSync(process.env.TEMPLATE_NODE)).digest("hex")}`,
   source_tree_sha256: connectionStackSourceTreeDigest(process.env.STACK_DIR_NODE),
 };
@@ -74,6 +79,11 @@ writeFileSync(process.env.STACK_NODE, `${JSON.stringify({
       { OutputKey: "AccountId", OutputValue: "123456789012" },
       { OutputKey: "Region", OutputValue: request.requested_region },
       { OutputKey: "NodeKeyId", OutputValue: request.node_key_id },
+      { OutputKey: "WorkerBaseAmiId", OutputValue: request.worker_base_ami_id },
+      { OutputKey: "WorkerVpcId", OutputValue: request.worker_vpc_id },
+      { OutputKey: "WorkerSubnetId", OutputValue: request.worker_subnet_id },
+      { OutputKey: "WorkerAvailabilityZone", OutputValue: request.worker_availability_zone },
+      { OutputKey: "WorkerResourceManifestDigest", OutputValue: request.worker_resource_manifest_digest },
       { OutputKey: "BrokerCommandUrl", OutputValue: "https://abcde12345.execute-api.ap-south-1.amazonaws.com/prod/v2/commands" },
       { OutputKey: "StackArn", OutputValue: stackArn },
     ],
@@ -164,6 +174,9 @@ assert.deepEqual(Object.keys(manifest), [
   "broker_command_url",
   "node_key_id",
   "connection_generation",
+  "worker_artifact",
+  "worker_network",
+  "worker_resource_manifest_digest",
   "stack_arn",
 ]);
 assert.equal(manifest.schema, "dirextalk.aws.connection-registration-manifest/v1");

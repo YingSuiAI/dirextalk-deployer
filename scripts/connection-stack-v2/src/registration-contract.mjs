@@ -19,6 +19,10 @@ const STACK_NAME_PATTERN = /^[A-Za-z][-A-Za-z0-9]{0,127}$/;
 const STAGE_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const NAMED_SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const AMI_ID_PATTERN = /^ami-[0-9a-f]{8,17}$/;
+const VPC_ID_PATTERN = /^vpc-[0-9a-f]{8,17}$/;
+const SUBNET_ID_PATTERN = /^subnet-[0-9a-f]{8,17}$/;
+const AVAILABILITY_ZONE_PATTERN = /^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[a-z]+-\d[a-z]$/;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const URL_SUFFIX_PATTERN = /^[a-z0-9][a-z0-9.-]{1,126}[a-z0-9]$/;
 
@@ -32,6 +36,9 @@ const REGISTRATION_FIELDS = [
   "broker_command_url",
   "node_key_id",
   "connection_generation",
+  "worker_artifact",
+  "worker_network",
+  "worker_resource_manifest_digest",
   "stack_arn",
   "command_id",
   "request_sha256",
@@ -48,6 +55,11 @@ const DEPLOY_REQUEST_FIELDS = [
   "device_approval_key_id",
   "device_approval_public_key_spki_b64",
   "stage_name",
+  "worker_base_ami_id",
+  "worker_vpc_id",
+  "worker_subnet_id",
+  "worker_availability_zone",
+  "worker_resource_manifest_digest",
   "template_sha256",
   "source_tree_sha256",
 ];
@@ -60,6 +72,9 @@ const MANIFEST_FIELDS = [
   "broker_command_url",
   "node_key_id",
   "connection_generation",
+  "worker_artifact",
+  "worker_network",
+  "worker_resource_manifest_digest",
   "stack_arn",
 ];
 const STACK_OUTPUT_FIELDS = new Set([
@@ -68,6 +83,11 @@ const STACK_OUTPUT_FIELDS = new Set([
   "AccountId",
   "Region",
   "NodeKeyId",
+  "WorkerBaseAmiId",
+  "WorkerVpcId",
+  "WorkerSubnetId",
+  "WorkerAvailabilityZone",
+  "WorkerResourceManifestDigest",
   "BrokerCommandUrl",
   "StackArn",
 ]);
@@ -173,6 +193,39 @@ function canonicalManifest(record) {
   return Object.fromEntries(MANIFEST_FIELDS.map((field) => [field, record[field]]));
 }
 
+function validateWorkerArtifact(value, code, statusCode) {
+  exactKeys(value, ["kind", "ami_id"], code, statusCode, "worker_artifact");
+  if (value.kind !== "fixed_ami") fail(code, "worker_artifact.kind is invalid", statusCode);
+  return {
+    kind: "fixed_ami",
+    ami_id: requireString(value, "ami_id", AMI_ID_PATTERN, code, statusCode),
+  };
+}
+
+function validateWorkerNetwork(value, code, statusCode) {
+  exactKeys(value, ["vpc_id", "subnet_id", "availability_zone"], code, statusCode, "worker_network");
+  return {
+    vpc_id: requireString(value, "vpc_id", VPC_ID_PATTERN, code, statusCode),
+    subnet_id: requireString(value, "subnet_id", SUBNET_ID_PATTERN, code, statusCode),
+    availability_zone: requireString(value, "availability_zone", AVAILABILITY_ZONE_PATTERN, code, statusCode),
+  };
+}
+
+function workerConfigurationFromDeployRequest(request, code, statusCode) {
+  return {
+    worker_artifact: {
+      kind: "fixed_ami",
+      ami_id: requireString(request, "worker_base_ami_id", AMI_ID_PATTERN, code, statusCode),
+    },
+    worker_network: {
+      vpc_id: requireString(request, "worker_vpc_id", VPC_ID_PATTERN, code, statusCode),
+      subnet_id: requireString(request, "worker_subnet_id", SUBNET_ID_PATTERN, code, statusCode),
+      availability_zone: requireString(request, "worker_availability_zone", AVAILABILITY_ZONE_PATTERN, code, statusCode),
+    },
+    worker_resource_manifest_digest: requireString(request, "worker_resource_manifest_digest", NAMED_SHA256_PATTERN, code, statusCode),
+  };
+}
+
 export function validateRegistrationVerifyPayload(payload, { code = "invalid_payload", statusCode = 400 } = {}) {
   exactKeys(payload, REGISTRATION_PAYLOAD_FIELDS, code, statusCode, "payload");
   requireString(payload, "bootstrap_id", ID_PATTERN, code, statusCode);
@@ -184,7 +237,16 @@ export function validateRegistrationVerifyPayload(payload, { code = "invalid_pay
 }
 
 export function validateConnectionRegistrationConfig(config, { code = "registration_config_invalid", statusCode = 500 } = {}) {
-  const fields = ["account_id", "region", "stack_arn", "api_gateway_url_suffix", "stage_name"];
+  const fields = [
+    "account_id",
+    "region",
+    "stack_arn",
+    "api_gateway_url_suffix",
+    "stage_name",
+    "worker_artifact",
+    "worker_network",
+    "worker_resource_manifest_digest",
+  ];
   exactKeys(config, fields, code, statusCode, "registration_config");
   const accountId = requireString(config, "account_id", ACCOUNT_ID_PATTERN, code, statusCode);
   const region = requireString(config, "region", REGION_PATTERN, code, statusCode);
@@ -197,6 +259,9 @@ export function validateConnectionRegistrationConfig(config, { code = "registrat
     stack_arn: stackArn,
     api_gateway_url_suffix: urlSuffix,
     stage_name: stageName,
+    worker_artifact: validateWorkerArtifact(config.worker_artifact, code, statusCode),
+    worker_network: validateWorkerNetwork(config.worker_network, code, statusCode),
+    worker_resource_manifest_digest: requireString(config, "worker_resource_manifest_digest", NAMED_SHA256_PATTERN, code, statusCode),
   };
 }
 
@@ -236,6 +301,9 @@ export function buildConnectionRegistration(authenticated, config, runtimeContex
     broker_command_url: brokerCommandURL,
     node_key_id: nodeKeyId,
     connection_generation: generation,
+    worker_artifact: configured.worker_artifact,
+    worker_network: configured.worker_network,
+    worker_resource_manifest_digest: configured.worker_resource_manifest_digest,
     stack_arn: configured.stack_arn,
     command_id: commandId,
     request_sha256: requestSha256,
@@ -260,6 +328,9 @@ export function validateConnectionRegistration(record, {
   const region = requireString(record, "region", REGION_PATTERN, code, statusCode);
   const nodeKeyId = requireString(record, "node_key_id", KEY_ID_PATTERN, code, statusCode);
   const generation = requireInteger(record, "connection_generation", 1, code, statusCode);
+  const workerArtifact = validateWorkerArtifact(record.worker_artifact, code, statusCode);
+  const workerNetwork = validateWorkerNetwork(record.worker_network, code, statusCode);
+  const workerResourceManifestDigest = requireString(record, "worker_resource_manifest_digest", NAMED_SHA256_PATTERN, code, statusCode);
   const stackArn = validateStackArn(record.stack_arn, { accountId, region, code, statusCode });
   const actualCommandId = requireString(record, "command_id", ID_PATTERN, code, statusCode);
   const actualRequestSha256 = requireString(record, "request_sha256", SHA256_PATTERN, code, statusCode);
@@ -290,6 +361,9 @@ export function validateConnectionRegistration(record, {
     broker_command_url: brokerCommandURL,
     node_key_id: nodeKeyId,
     connection_generation: generation,
+    worker_artifact: workerArtifact,
+    worker_network: workerNetwork,
+    worker_resource_manifest_digest: workerResourceManifestDigest,
     stack_arn: stackArn,
     command_id: actualCommandId,
     request_sha256: actualRequestSha256,
@@ -325,6 +399,7 @@ export function validateConnectionStackDeployRequest(request, { templateSha256, 
   requireString(request, "device_approval_key_id", KEY_ID_PATTERN, code, 400);
   requireEd25519PublicKey(request, "device_approval_public_key_spki_b64", code, 400);
   requireString(request, "stage_name", STAGE_NAME_PATTERN, code, 400);
+  workerConfigurationFromDeployRequest(request, code, 400);
   const digest = requireString(request, "template_sha256", NAMED_SHA256_PATTERN, code, 400);
   if (templateSha256 !== undefined && digest !== templateSha256) {
     fail("connection_stack_template_digest_mismatch", "the requested Connection Stack template digest does not match this pinned artifact", 409);
@@ -370,6 +445,11 @@ export function buildConnectionRegistrationManifest(request, bootstrapIdentity, 
     || output("AccountId") !== accountId
     || output("Region") !== validatedRequest.requested_region
     || output("NodeKeyId") !== validatedRequest.node_key_id
+    || output("WorkerBaseAmiId") !== validatedRequest.worker_base_ami_id
+    || output("WorkerVpcId") !== validatedRequest.worker_vpc_id
+    || output("WorkerSubnetId") !== validatedRequest.worker_subnet_id
+    || output("WorkerAvailabilityZone") !== validatedRequest.worker_availability_zone
+    || output("WorkerResourceManifestDigest") !== validatedRequest.worker_resource_manifest_digest
     || output("StackArn") !== stackArn) {
     fail("connection_stack_output_mismatch", "Connection Stack outputs do not match the signed deployment request", 409);
   }
@@ -388,6 +468,16 @@ export function buildConnectionRegistrationManifest(request, bootstrapIdentity, 
     broker_command_url: brokerCommandURL,
     node_key_id: validatedRequest.node_key_id,
     connection_generation: validatedRequest.connection_generation,
+    worker_artifact: {
+      kind: "fixed_ami",
+      ami_id: validatedRequest.worker_base_ami_id,
+    },
+    worker_network: {
+      vpc_id: validatedRequest.worker_vpc_id,
+      subnet_id: validatedRequest.worker_subnet_id,
+      availability_zone: validatedRequest.worker_availability_zone,
+    },
+    worker_resource_manifest_digest: validatedRequest.worker_resource_manifest_digest,
     stack_arn: stackArn,
   });
 }
@@ -404,6 +494,9 @@ export function validateConnectionRegistrationManifest(manifest) {
   const region = requireString(manifest, "region", REGION_PATTERN, code, 400);
   const nodeKeyId = requireString(manifest, "node_key_id", KEY_ID_PATTERN, code, 400);
   const generation = requireInteger(manifest, "connection_generation", 1, code, 400);
+  const workerArtifact = validateWorkerArtifact(manifest.worker_artifact, code, 400);
+  const workerNetwork = validateWorkerNetwork(manifest.worker_network, code, 400);
+  const workerResourceManifestDigest = requireString(manifest, "worker_resource_manifest_digest", NAMED_SHA256_PATTERN, code, 400);
   const stackArn = validateStackArn(manifest.stack_arn, { accountId, region, code, statusCode: 400 });
   const brokerCommandURL = validateBrokerCommandURL(manifest.broker_command_url, {
     region,
@@ -420,6 +513,9 @@ export function validateConnectionRegistrationManifest(manifest) {
     broker_command_url: brokerCommandURL,
     node_key_id: nodeKeyId,
     connection_generation: generation,
+    worker_artifact: workerArtifact,
+    worker_network: workerNetwork,
+    worker_resource_manifest_digest: workerResourceManifestDigest,
     stack_arn: stackArn,
   });
 }

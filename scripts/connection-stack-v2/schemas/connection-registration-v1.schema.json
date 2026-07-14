@@ -13,6 +13,9 @@
     "broker_command_url",
     "node_key_id",
     "connection_generation",
+    "worker_artifact",
+    "worker_network",
+    "worker_resource_manifest_digest",
     "stack_arn",
     "command_id",
     "request_sha256"
@@ -26,6 +29,26 @@
     "broker_command_url": { "type": "string", "format": "uri", "pattern": "^https://" },
     "node_key_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
     "connection_generation": { "type": "integer", "minimum": 1 },
+    "worker_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ami_id"],
+      "properties": {
+        "kind": { "const": "fixed_ami" },
+        "ami_id": { "type": "string", "pattern": "^ami-[0-9a-f]{8,17}$" }
+      }
+    },
+    "worker_network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vpc_id", "subnet_id", "availability_zone"],
+      "properties": {
+        "vpc_id": { "type": "string", "pattern": "^vpc-[0-9a-f]{8,17}$" },
+        "subnet_id": { "type": "string", "pattern": "^subnet-[0-9a-f]{8,17}$" },
+        "availability_zone": { "type": "string", "pattern": "^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[a-z]+-\\d[a-z]$" }
+      }
+    },
+    "worker_resource_manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "stack_arn": { "type": "string", "pattern": "^arn:(?:aws|aws-cn|aws-us-gov):cloudformation:" },
     "command_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$" },
     "request_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }

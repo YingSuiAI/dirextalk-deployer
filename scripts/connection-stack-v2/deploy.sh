@@ -111,6 +111,11 @@ node_public_key_spki_b64=$(json_get "$request_file" node_public_key_spki_b64)
 device_approval_key_id=$(json_get "$request_file" device_approval_key_id)
 device_approval_public_key_spki_b64=$(json_get "$request_file" device_approval_public_key_spki_b64)
 stage_name=$(json_get "$request_file" stage_name)
+worker_base_ami_id=$(json_get "$request_file" worker_base_ami_id)
+worker_vpc_id=$(json_get "$request_file" worker_vpc_id)
+worker_subnet_id=$(json_get "$request_file" worker_subnet_id)
+worker_availability_zone=$(json_get "$request_file" worker_availability_zone)
+worker_resource_manifest_digest=$(json_get "$request_file" worker_resource_manifest_digest)
 
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/dirextalk-connection-stack-v2.XXXXXX")
 identity_file="$tmp_dir/identity.json"
@@ -177,7 +182,12 @@ sam deploy \
   "ParameterKey=NodePublicKeySpkiBase64,ParameterValue=${node_public_key_spki_b64}" \
   "ParameterKey=DeviceApprovalKeyId,ParameterValue=${device_approval_key_id}" \
   "ParameterKey=DeviceApprovalPublicKeySpkiBase64,ParameterValue=${device_approval_public_key_spki_b64}" \
-  "ParameterKey=StageName,ParameterValue=${stage_name}"
+  "ParameterKey=StageName,ParameterValue=${stage_name}" \
+  "ParameterKey=WorkerBaseAmiId,ParameterValue=${worker_base_ami_id}" \
+  "ParameterKey=WorkerVpcId,ParameterValue=${worker_vpc_id}" \
+  "ParameterKey=WorkerSubnetId,ParameterValue=${worker_subnet_id}" \
+  "ParameterKey=WorkerAvailabilityZone,ParameterValue=${worker_availability_zone}" \
+  "ParameterKey=WorkerResourceManifestDigest,ParameterValue=${worker_resource_manifest_digest}"
 
 aws cloudformation describe-stacks \
   --stack-name "$stack_name" \

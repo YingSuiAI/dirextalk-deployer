@@ -2,6 +2,7 @@ import {
   ConnectionStackV2Error,
 } from "./command-contract.mjs";
 import {
+  cloudOrchestratorQuoteDigest,
   validateIssuedQuote,
   validateQuoteRequestPayload,
 } from "./quote-contract.mjs";
@@ -13,6 +14,7 @@ import {
 const RECEIPT_COMMIT_SCHEMA = "dirextalk.aws.receipt-commit/v2";
 const RECEIPT_SCHEMA = "dirextalk.aws.command-receipt/v2";
 const CHALLENGE_SCHEMA = "dirextalk.aws.approval-challenge/v2";
+const APPROVAL_PROOF_SCHEMA = "dirextalk.aws.approval-proof-reference/v1";
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -70,6 +72,13 @@ function challengeKey(connectionId, challengeId) {
   };
 }
 
+function approvalProofKey(connectionId, approvalId) {
+  return {
+    connection_id: { S: connectionId },
+    approval_id: { S: approvalId },
+  };
+}
+
 function validateChallengeToIssue(challenge, request) {
   if (!isRecord(challenge) || challenge.schema !== CHALLENGE_SCHEMA) {
     fail("receipt_store_invalid", "challenge to issue is invalid", 500);
@@ -98,6 +107,19 @@ function validateApprovalChallenge(challenge, request) {
   return challenge;
 }
 
+function validateApprovalProof(proof, request) {
+  if (!isRecord(proof) || proof.schema !== APPROVAL_PROOF_SCHEMA) {
+    fail("receipt_store_invalid", "approval proof is invalid", 500);
+  }
+  if (requireString(proof, "connection_id", ID_PATTERN) !== request.connection_id) {
+    fail("receipt_store_invalid", "approval proof connection is invalid", 500);
+  }
+  requireString(proof, "approval_id", ID_PATTERN);
+  requireString(proof, "payload_sha256", SHA256_PATTERN);
+  requireCanonicalInstant(proof.expires_at, "approval proof expires_at");
+  return proof;
+}
+
 function validateRequest(request) {
   if (!isRecord(request) || request.schema !== RECEIPT_COMMIT_SCHEMA) {
     fail("receipt_store_invalid", "receipt commit is invalid", 500);
@@ -118,6 +140,9 @@ function validateRequest(request) {
   }
   if (request.approval_binding_is_expired !== undefined && request.approval_binding_is_expired !== true) {
     fail("receipt_store_invalid", "approval_binding_is_expired is invalid", 500);
+  }
+  if (request.approval_proof_is_expired !== undefined && request.approval_proof_is_expired !== true) {
+    fail("receipt_store_invalid", "approval_proof_is_expired is invalid", 500);
   }
   if (request.action === "quote.request") {
     if (request.quote_request === undefined) {
@@ -144,8 +169,12 @@ function validateRequest(request) {
   }
   if (request.challenge_to_issue !== undefined) validateChallengeToIssue(request.challenge_to_issue, request);
   if (request.approval_challenge !== undefined) validateApprovalChallenge(request.approval_challenge, request);
-  if (request.challenge_to_issue !== undefined && request.approval_challenge !== undefined) {
+  if (request.approval_proof !== undefined) validateApprovalProof(request.approval_proof, request);
+  if (request.challenge_to_issue !== undefined && (request.approval_challenge !== undefined || request.approval_proof !== undefined)) {
     fail("receipt_store_invalid", "a command cannot issue and consume a challenge", 500);
+  }
+  if (request.approval_challenge !== undefined && request.approval_proof !== undefined) {
+    fail("receipt_store_invalid", "a command cannot consume both approval formats", 500);
   }
   return request;
 }
@@ -238,17 +267,21 @@ export class DynamoV2ReceiptStore {
     client,
     receiptsTableName,
     challengesTableName,
+    approvalProofsTableName,
+    issuedQuotesTableName,
     countersTableName,
     GetItemCommand,
     TransactWriteItemsCommand,
   }) {
-    if (!client?.send || !receiptsTableName || !challengesTableName || !countersTableName
+    if (!client?.send || !receiptsTableName || !challengesTableName || !approvalProofsTableName || !issuedQuotesTableName || !countersTableName
       || !GetItemCommand || !TransactWriteItemsCommand) {
       throw new TypeError("DynamoDB client, table names, and command constructors are required");
     }
     this.client = client;
     this.receiptsTableName = receiptsTableName;
     this.challengesTableName = challengesTableName;
+    this.approvalProofsTableName = approvalProofsTableName;
+    this.issuedQuotesTableName = issuedQuotesTableName;
     this.countersTableName = countersTableName;
     this.GetItemCommand = GetItemCommand;
     this.TransactWriteItemsCommand = TransactWriteItemsCommand;
@@ -264,11 +297,18 @@ export class DynamoV2ReceiptStore {
     if (request.approval_binding_is_expired) {
       fail("approval_expired", "an expired approval cannot create a new receipt", 401);
     }
+    if (request.approval_proof_is_expired) {
+      fail("approval_expired", "an expired approval proof cannot create a new receipt", 401);
+    }
     const quote = request.action === "quote.request" ? await resolveQuote(quoteProvider, request) : undefined;
+    const issuedQuote = quote ? {
+      quote,
+      quote_digest: cloudOrchestratorQuoteDigest(quote, request),
+    } : undefined;
     const receipt = receiptFor(request, quote);
     try {
       await this.client.send(new this.TransactWriteItemsCommand({
-        TransactItems: this.#transactionItems(request, receipt),
+        TransactItems: this.#transactionItems(request, receipt, issuedQuote),
       }));
       return receipt;
     } catch (error) {
@@ -282,7 +322,7 @@ export class DynamoV2ReceiptStore {
     fail("receipt_race", "command receipt could not be reconciled", 503);
   }
 
-  #transactionItems(request, receipt) {
+  #transactionItems(request, receipt, issuedQuote) {
     const items = [];
     if (request.approval_challenge) {
       const challenge = request.approval_challenge;
@@ -299,6 +339,23 @@ export class DynamoV2ReceiptStore {
             ":now": { S: new Date(request.now_ms).toISOString() },
             ":binding_sha256": { S: challenge.binding_sha256 },
             ":expires_at": { S: challenge.expires_at },
+          },
+        },
+      });
+    }
+    if (request.approval_proof) {
+      const proof = request.approval_proof;
+      items.push({
+        Put: {
+          TableName: this.approvalProofsTableName,
+          ConditionExpression: "attribute_not_exists(connection_id) AND attribute_not_exists(approval_id)",
+          Item: {
+            connection_id: { S: request.connection_id },
+            approval_id: { S: proof.approval_id },
+            payload_sha256: { S: proof.payload_sha256 },
+            expires_at: { S: proof.expires_at },
+            consumed_by_command_id: { S: request.command_id },
+            consumed_at: { S: new Date(request.now_ms).toISOString() },
           },
         },
       });
@@ -322,6 +379,25 @@ export class DynamoV2ReceiptStore {
         Item: receiptItem(request, receipt),
       },
     });
+    if (issuedQuote) {
+      items.push({
+        Put: {
+          TableName: this.issuedQuotesTableName,
+          ConditionExpression: "attribute_not_exists(connection_id) AND attribute_not_exists(quote_id)",
+          Item: {
+            connection_id: { S: request.connection_id },
+            quote_id: { S: issuedQuote.quote.quote_id },
+            quote_digest: { S: issuedQuote.quote_digest },
+            plan_digest: { S: issuedQuote.quote.plan_digest },
+            valid_until: { S: issuedQuote.quote.valid_until },
+            command_id: { S: request.command_id },
+            request_sha256: { S: request.request_sha256 },
+            quote_json: { S: JSON.stringify(issuedQuote.quote) },
+            issued_at: { S: new Date(request.now_ms).toISOString() },
+          },
+        },
+      });
+    }
     if (request.challenge_to_issue) {
       const challenge = request.challenge_to_issue;
       items.push({
@@ -383,6 +459,19 @@ export class DynamoV2ReceiptStore {
     }
   }
 
+  async #readApprovalProof(connectionId, approvalId) {
+    try {
+      const output = await this.client.send(new this.GetItemCommand({
+        TableName: this.approvalProofsTableName,
+        ConsistentRead: true,
+        Key: approvalProofKey(connectionId, approvalId),
+      }));
+      return output?.Item;
+    } catch {
+      fail("connection_stack_store_unavailable", "Connection Stack receipt storage is unavailable", 503);
+    }
+  }
+
   async #classifyCanceledTransaction(request) {
     if (request.approval_challenge) {
       const expected = request.approval_challenge;
@@ -401,6 +490,16 @@ export class DynamoV2ReceiptStore {
     if (request.challenge_to_issue) {
       const stored = await this.#readChallenge(request.connection_id, request.challenge_to_issue.challenge_id);
       if (stored) fail("challenge_id_conflict", "challenge id is already in use");
+    }
+    if (request.approval_proof) {
+      const stored = await this.#readApprovalProof(request.connection_id, request.approval_proof.approval_id);
+      if (stored) {
+        if (stored.payload_sha256?.S !== request.approval_proof.payload_sha256
+          || stored.expires_at?.S !== request.approval_proof.expires_at) {
+          fail("approval_proof_mismatch", "approval proof was already bound to another payload");
+        }
+        fail("approval_replayed", "approval proof was already consumed");
+      }
     }
     const counter = await this.#readCounter(request.connection_id);
     if (counter !== undefined && counter >= request.node_counter) {

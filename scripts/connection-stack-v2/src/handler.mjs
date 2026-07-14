@@ -10,6 +10,15 @@ import {
   DynamoV2ReceiptStore,
 } from "./dynamo-receipt-store.mjs";
 import {
+  DynamoDeploymentStore,
+} from "./dynamo-deployment-store.mjs";
+import {
+  Ec2DedicatedWorkerProvisioner,
+} from "./deployment-provisioner.mjs";
+import {
+  validateDeploymentReceipt,
+} from "./deployment-contract.mjs";
+import {
   AwsOnDemandQuoteProvider,
 } from "./quote-provider.mjs";
 import {
@@ -59,7 +68,7 @@ function resultStatusCode(status) {
   if (status === "quote_issued") return 200;
   if (status === "connection_registered") return 200;
   if (status === "idempotent") return 200;
-  if (status === "read_only_validated" || status === "approval_consumed") return 202;
+  if (status === "deployment_created" || status === "read_only_validated" || status === "approval_consumed") return 202;
   throw new ConnectionStackV2Error("receipt_store_invalid", "receipt store returned an invalid result", 500);
 }
 
@@ -70,12 +79,16 @@ function publicResult(result) {
   const receipt = result.registration
     ? Object.fromEntries(Object.entries(result.receipt).filter(([key]) => key !== "registration"))
     : result.receipt;
+  if (result.status === "deployment_created" && !result.deployment) {
+    throw new ConnectionStackV2Error("receipt_store_invalid", "deployment creation result is missing its receipt", 500);
+  }
   return {
     status: result.status,
     receipt,
     ...(result.challenge ? { challenge: result.challenge } : {}),
     ...(result.quote ? { quote: result.quote } : {}),
     ...(result.registration ? { registration: result.registration } : {}),
+    ...(result.deployment ? { deployment: validateDeploymentReceipt(result.deployment) } : {}),
   };
 }
 
@@ -99,16 +112,27 @@ function registrationRuntimeContext(event, registrationConfig) {
 // createV2BrokerHandler is exported for in-process boundary tests. It exposes
 // only the durable receipt/challenge projection: no signed command payload,
 // approval blob, or internal runtime error is returned to the caller.
-export function createV2BrokerHandler(service, { registrationConfig } = {}) {
+export function createV2BrokerHandler(service, { registrationConfig, deploymentProvisioner } = {}) {
   if (!service || typeof service.accept !== "function") {
     throw new TypeError("a V2 broker acceptance service is required");
   }
   return async function brokerHandler(event) {
     try {
-      const result = await service.accept(
+      let result = await service.accept(
         parseBody(event),
         registrationConfig ? registrationRuntimeContext(event, registrationConfig) : undefined,
       );
+      if (result?.command?.action === "deployment.create") {
+        if (!deploymentProvisioner || typeof deploymentProvisioner.ensure !== "function") {
+          throw new ConnectionStackV2Error("deployment_provider_unavailable", "the Worker deployment provider is unavailable", 503);
+        }
+        const deployment = await deploymentProvisioner.ensure(result.command);
+        result = {
+          ...result,
+          status: result.status === "idempotent" ? "idempotent" : "deployment_created",
+          deployment,
+        };
+      }
       return response(resultStatusCode(result.status), publicResult(result));
     } catch (error) {
       return errorResponse(error);
@@ -137,6 +161,16 @@ function registrationConfigFromEnvironment() {
     stack_arn: requiredEnvironment("STACK_ARN"),
     api_gateway_url_suffix: requiredEnvironment("AWS_URL_SUFFIX"),
     stage_name: requiredEnvironment("BROKER_STAGE_NAME"),
+    worker_artifact: {
+      kind: "fixed_ami",
+      ami_id: requiredEnvironment("WORKER_BASE_AMI_ID"),
+    },
+    worker_network: {
+      vpc_id: requiredEnvironment("WORKER_VPC_ID"),
+      subnet_id: requiredEnvironment("WORKER_SUBNET_ID"),
+      availability_zone: requiredEnvironment("WORKER_AVAILABILITY_ZONE"),
+    },
+    worker_resource_manifest_digest: requiredEnvironment("WORKER_RESOURCE_MANIFEST_DIGEST"),
   };
 }
 
@@ -148,21 +182,31 @@ async function productionHandler() {
       const {
         DynamoDBClient,
         GetItemCommand,
+        PutItemCommand,
         TransactWriteItemsCommand,
       } = await import("@aws-sdk/client-dynamodb");
       const {
         EC2Client,
         DescribeInstanceTypeOfferingsCommand,
         DescribeInstanceTypesCommand,
+        DescribeSubnetsCommand,
+        DescribeVpcsCommand,
+        DescribeImagesCommand,
+        DescribeSecurityGroupsCommand,
+        CreateSecurityGroupCommand,
+        RevokeSecurityGroupEgressCommand,
+        AuthorizeSecurityGroupEgressCommand,
+        RunInstancesCommand,
       } = await import("@aws-sdk/client-ec2");
       const {
         PricingClient,
         GetProductsCommand,
       } = await import("@aws-sdk/client-pricing");
       const dynamodb = new DynamoDBClient({});
+      const ec2 = new EC2Client({});
       const quoteProvider = new AwsOnDemandQuoteProvider({
         pricingClient: new PricingClient({ region: "us-east-1" }),
-        ec2Client: new EC2Client({}),
+        ec2Client: ec2,
         GetProductsCommand,
         DescribeInstanceTypeOfferingsCommand,
         DescribeInstanceTypesCommand,
@@ -171,11 +215,42 @@ async function productionHandler() {
         client: dynamodb,
         receiptsTableName: requiredEnvironment("COMMAND_RECEIPTS_TABLE"),
         challengesTableName: requiredEnvironment("APPROVAL_CHALLENGES_TABLE"),
+        approvalProofsTableName: requiredEnvironment("APPROVAL_PROOFS_TABLE"),
+        issuedQuotesTableName: requiredEnvironment("ISSUED_QUOTES_TABLE"),
         countersTableName: requiredEnvironment("CONNECTION_COUNTERS_TABLE"),
         GetItemCommand,
         TransactWriteItemsCommand,
       });
       const registrationConfig = registrationConfigFromEnvironment();
+      const deploymentStore = new DynamoDeploymentStore({
+        client: dynamodb,
+        issuedQuotesTableName: requiredEnvironment("ISSUED_QUOTES_TABLE"),
+        deploymentReceiptsTableName: requiredEnvironment("DEPLOYMENT_RECEIPTS_TABLE"),
+        GetItemCommand,
+        PutItemCommand,
+        nowMs: Date.now,
+      });
+      const deploymentProvisioner = new Ec2DedicatedWorkerProvisioner({
+        ec2Client: ec2,
+        commandConstructors: {
+          DescribeSubnetsCommand,
+          DescribeVpcsCommand,
+          DescribeImagesCommand,
+          DescribeSecurityGroupsCommand,
+          CreateSecurityGroupCommand,
+          RevokeSecurityGroupEgressCommand,
+          AuthorizeSecurityGroupEgressCommand,
+          RunInstancesCommand,
+        },
+        deploymentStore,
+        connectionId: requiredEnvironment("CONNECTION_ID"),
+        connectionGeneration: positiveGeneration(requiredEnvironment("CONNECTION_GENERATION")),
+        region: requiredEnvironment("STACK_REGION"),
+        workerBaseAmiId: registrationConfig.worker_artifact.ami_id,
+        workerResourceManifestDigest: registrationConfig.worker_resource_manifest_digest,
+        workerNetwork: registrationConfig.worker_network,
+        nowMs: Date.now,
+      });
       const service = createV2ChallengeApprovalService({
         clock: Date.now,
         createChallengeId: () => `challenge-${randomUUID()}`,
@@ -191,16 +266,17 @@ async function productionHandler() {
       });
       return createV2BrokerHandler(service, {
         registrationConfig,
+        deploymentProvisioner,
       });
     })();
   }
   return productionHandlerPromise;
 }
 
-// handler is the production Lambda entry point. This stage activates only the
-// signed DynamoDB receipt/challenge fence plus read-only AWS on-demand quote
-// lookup. It has no EC2/EBS/IAM/S3 mutation, Worker, secret-read, or generic
-// AWS API capability.
+// handler is the production Lambda entry point. It exposes a fixed DynamoDB
+// receipt/proof fence, read-only quote lookup, and one typed isolated Worker
+// EC2 creation transition. It has no generic AWS API, secret read, IAM pass
+// role, key pair, public ingress, public IP, or Worker credential capability.
 export async function handler(event) {
   try {
     return await (await productionHandler())(event);

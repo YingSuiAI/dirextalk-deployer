@@ -1,12 +1,12 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
   "Transform": "AWS::Serverless-2016-10-31",
-  "Description": "Dirextalk Connection Stack V2 durable signed command, registration attestation, Flutter approval, and read-only on-demand quote fence.",
+  "Description": "Dirextalk Connection Stack V2 durable signed command, registration attestation, Flutter approval, read-only on-demand quote, and isolated Worker EC2 creation fence.",
   "Metadata": {
     "DirextalkConnectionStackV2": {
-      "Stage": "durable-registration-and-read-only-quote",
-      "Execution": "receipt-registration-attestation-approval-challenge-and-read-only-on-demand-quote",
-      "Note": "This stack authenticates signed commands, persists immutable receipts/one-time approval challenges, returns a stack-derived registration attestation and a bounded on-demand EC2 price estimate. It cannot create, observe, stop, start, or destroy cloud resources."
+      "Stage": "durable-registration-quote-and-isolated-worker-create",
+      "Execution": "receipt-registration-attestation-approval-challenge-read-only-on-demand-quote-and-typed-worker-create",
+      "Note": "This stack authenticates signed commands, persists immutable receipts/one-time approval challenges, returns a stack-derived registration attestation and a bounded on-demand EC2 price estimate, and accepts only a typed isolated Worker create command. It never accepts arbitrary AWS APIs, instance profiles, SSH key pairs, public ingress, public IP allocation, user data, or mutable image tags."
     }
   },
   "Parameters": {
@@ -49,6 +49,31 @@
       "Type": "String",
       "Default": "prod",
       "AllowedPattern": "^[A-Za-z0-9_-]{1,32}$"
+    },
+    "WorkerBaseAmiId": {
+      "Type": "String",
+      "AllowedPattern": "^ami-[0-9a-f]{8,17}$",
+      "Description": "Immutable AMI id for the Stack-trusted isolated Worker base image. Mutable image tags are not accepted."
+    },
+    "WorkerResourceManifestDigest": {
+      "Type": "String",
+      "AllowedPattern": "^sha256:[0-9a-f]{64}$",
+      "Description": "Immutable SHA-256 digest of the Stack-trusted Worker resource manifest."
+    },
+    "WorkerVpcId": {
+      "Type": "String",
+      "AllowedPattern": "^vpc-[0-9a-f]{8,17}$",
+      "Description": "Existing VPC for dedicated Workers. The Stack never creates a VPC, NAT gateway, or public egress path."
+    },
+    "WorkerSubnetId": {
+      "Type": "String",
+      "AllowedPattern": "^subnet-[0-9a-f]{8,17}$",
+      "Description": "Existing private IPv4 subnet for dedicated Workers; the Broker verifies it before RunInstances."
+    },
+    "WorkerAvailabilityZone": {
+      "Type": "String",
+      "AllowedPattern": "^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[a-z]+-\\d[a-z]$",
+      "Description": "Availability Zone of WorkerSubnetId, selected from the signed quote candidate."
     }
   },
   "Resources": {
@@ -173,6 +198,34 @@
         ]
       }
     },
+    "ApprovalProofsTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BillingMode": "PAY_PER_REQUEST",
+        "DeletionProtectionEnabled": true,
+        "AttributeDefinitions": [
+          { "AttributeName": "connection_id", "AttributeType": "S" },
+          { "AttributeName": "approval_id", "AttributeType": "S" }
+        ],
+        "KeySchema": [
+          { "AttributeName": "connection_id", "KeyType": "HASH" },
+          { "AttributeName": "approval_id", "KeyType": "RANGE" }
+        ],
+        "PointInTimeRecoverySpecification": { "PointInTimeRecoveryEnabled": true },
+        "SSESpecification": {
+          "SSEEnabled": true,
+          "SSEType": "KMS",
+          "KMSMasterKeyId": { "Fn::GetAtt": ["ConnectionDataKey", "Arn"] }
+        },
+        "Tags": [
+          { "Key": "dirextalk:connection-id", "Value": { "Ref": "ConnectionId" } },
+          { "Key": "dirextalk:managed-by", "Value": "connection-stack-v2" },
+          { "Key": "dirextalk:component", "Value": "approval-proofs" }
+        ]
+      }
+    },
     "ConnectionCountersTable": {
       "Type": "AWS::DynamoDB::Table",
       "DeletionPolicy": "Retain",
@@ -199,6 +252,62 @@
         ]
       }
     },
+    "IssuedQuotesTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BillingMode": "PAY_PER_REQUEST",
+        "DeletionProtectionEnabled": true,
+        "AttributeDefinitions": [
+          { "AttributeName": "connection_id", "AttributeType": "S" },
+          { "AttributeName": "quote_id", "AttributeType": "S" }
+        ],
+        "KeySchema": [
+          { "AttributeName": "connection_id", "KeyType": "HASH" },
+          { "AttributeName": "quote_id", "KeyType": "RANGE" }
+        ],
+        "PointInTimeRecoverySpecification": { "PointInTimeRecoveryEnabled": true },
+        "SSESpecification": {
+          "SSEEnabled": true,
+          "SSEType": "KMS",
+          "KMSMasterKeyId": { "Fn::GetAtt": ["ConnectionDataKey", "Arn"] }
+        },
+        "Tags": [
+          { "Key": "dirextalk:connection-id", "Value": { "Ref": "ConnectionId" } },
+          { "Key": "dirextalk:managed-by", "Value": "connection-stack-v2" },
+          { "Key": "dirextalk:component", "Value": "issued-quotes" }
+        ]
+      }
+    },
+    "DeploymentReceiptsTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BillingMode": "PAY_PER_REQUEST",
+        "DeletionProtectionEnabled": true,
+        "AttributeDefinitions": [
+          { "AttributeName": "connection_id", "AttributeType": "S" },
+          { "AttributeName": "deployment_id", "AttributeType": "S" }
+        ],
+        "KeySchema": [
+          { "AttributeName": "connection_id", "KeyType": "HASH" },
+          { "AttributeName": "deployment_id", "KeyType": "RANGE" }
+        ],
+        "PointInTimeRecoverySpecification": { "PointInTimeRecoveryEnabled": true },
+        "SSESpecification": {
+          "SSEEnabled": true,
+          "SSEType": "KMS",
+          "KMSMasterKeyId": { "Fn::GetAtt": ["ConnectionDataKey", "Arn"] }
+        },
+        "Tags": [
+          { "Key": "dirextalk:connection-id", "Value": { "Ref": "ConnectionId" } },
+          { "Key": "dirextalk:managed-by", "Value": "connection-stack-v2" },
+          { "Key": "dirextalk:component", "Value": "deployment-receipts" }
+        ]
+      }
+    },
     "BrokerContractRole": {
       "Type": "AWS::IAM::Role",
       "Properties": {
@@ -214,7 +323,7 @@
         },
         "Policies": [
           {
-            "PolicyName": "DurableReceiptFenceAndReadOnlyQuote",
+            "PolicyName": "DurableReceiptFenceQuoteAndTypedWorkerCreate",
             "PolicyDocument": {
               "Version": "2012-10-17",
               "Statement": [
@@ -225,6 +334,9 @@
                   "Resource": [
                     { "Fn::GetAtt": ["CommandReceiptsTable", "Arn"] },
                     { "Fn::GetAtt": ["ApprovalChallengesTable", "Arn"] },
+                    { "Fn::GetAtt": ["ApprovalProofsTable", "Arn"] },
+                    { "Fn::GetAtt": ["IssuedQuotesTable", "Arn"] },
+                    { "Fn::GetAtt": ["DeploymentReceiptsTable", "Arn"] },
                     { "Fn::GetAtt": ["ConnectionCountersTable", "Arn"] }
                   ]
                 },
@@ -235,8 +347,16 @@
                   "Resource": [
                     { "Fn::GetAtt": ["CommandReceiptsTable", "Arn"] },
                     { "Fn::GetAtt": ["ApprovalChallengesTable", "Arn"] },
+                    { "Fn::GetAtt": ["ApprovalProofsTable", "Arn"] },
+                    { "Fn::GetAtt": ["IssuedQuotesTable", "Arn"] },
                     { "Fn::GetAtt": ["ConnectionCountersTable", "Arn"] }
                   ]
+                },
+                {
+                  "Sid": "WritePrivateDeploymentReceipt",
+                  "Effect": "Allow",
+                  "Action": "dynamodb:PutItem",
+                  "Resource": { "Fn::GetAtt": ["DeploymentReceiptsTable", "Arn"] }
                 },
                 {
                   "Sid": "ReadOnDemandPriceListOnly",
@@ -255,6 +375,45 @@
                   "Effect": "Allow",
                   "Action": "ec2:DescribeInstanceTypes",
                   "Resource": "*"
+                },
+                {
+                  "Sid": "ReadDedicatedWorkerPlacementOnly",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeSubnets",
+                    "ec2:DescribeVpcs",
+                    "ec2:DescribeImages",
+                    "ec2:DescribeSecurityGroups"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Sid": "CreateDedicatedWorkerOnly",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:CreateSecurityGroup",
+                    "ec2:RevokeSecurityGroupEgress",
+                    "ec2:AuthorizeSecurityGroupEgress",
+                    "ec2:RunInstances"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": { "Ref": "AWS::Region" }
+                    }
+                  }
+                },
+                {
+                  "Sid": "TagDedicatedWorkerAtCreateOnly",
+                  "Effect": "Allow",
+                  "Action": "ec2:CreateTags",
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": { "Ref": "AWS::Region" },
+                      "ec2:CreateAction": ["CreateSecurityGroup", "RunInstances"]
+                    }
+                  }
                 },
                 {
                   "Sid": "WriteFunctionLogs",
@@ -303,7 +462,7 @@
         "Runtime": "nodejs22.x",
         "Architectures": ["x86_64"],
         "MemorySize": 256,
-        "Timeout": 20,
+        "Timeout": 30,
         "ReservedConcurrentExecutions": 5,
         "Role": { "Fn::GetAtt": ["BrokerContractRole", "Arn"] },
         "Environment": {
@@ -316,12 +475,20 @@
             "DEVICE_APPROVAL_PUBLIC_KEY_SPKI_B64": { "Ref": "DeviceApprovalPublicKeySpkiBase64" },
             "COMMAND_RECEIPTS_TABLE": { "Ref": "CommandReceiptsTable" },
             "APPROVAL_CHALLENGES_TABLE": { "Ref": "ApprovalChallengesTable" },
+            "APPROVAL_PROOFS_TABLE": { "Ref": "ApprovalProofsTable" },
+            "ISSUED_QUOTES_TABLE": { "Ref": "IssuedQuotesTable" },
+            "DEPLOYMENT_RECEIPTS_TABLE": { "Ref": "DeploymentReceiptsTable" },
             "CONNECTION_COUNTERS_TABLE": { "Ref": "ConnectionCountersTable" },
             "STACK_ACCOUNT_ID": { "Ref": "AWS::AccountId" },
             "STACK_REGION": { "Ref": "AWS::Region" },
             "STACK_ARN": { "Ref": "AWS::StackId" },
             "AWS_URL_SUFFIX": { "Ref": "AWS::URLSuffix" },
-            "BROKER_STAGE_NAME": { "Ref": "StageName" }
+            "BROKER_STAGE_NAME": { "Ref": "StageName" },
+            "WORKER_BASE_AMI_ID": { "Ref": "WorkerBaseAmiId" },
+            "WORKER_VPC_ID": { "Ref": "WorkerVpcId" },
+            "WORKER_SUBNET_ID": { "Ref": "WorkerSubnetId" },
+            "WORKER_AVAILABILITY_ZONE": { "Ref": "WorkerAvailabilityZone" },
+            "WORKER_RESOURCE_MANIFEST_DIGEST": { "Ref": "WorkerResourceManifestDigest" }
           }
         },
         "Events": {
@@ -337,7 +504,7 @@
         "Tags": {
           "dirextalk:connection-id": { "Ref": "ConnectionId" },
           "dirextalk:managed-by": "connection-stack-v2",
-          "dirextalk:component": "broker-registration-and-read-only-quote"
+          "dirextalk:component": "broker-registration-quote-and-typed-worker-create"
         }
       },
       "Metadata": {
@@ -353,6 +520,11 @@
     "AccountId": { "Value": { "Ref": "AWS::AccountId" } },
     "Region": { "Value": { "Ref": "AWS::Region" } },
     "NodeKeyId": { "Value": { "Ref": "NodeKeyId" } },
+    "WorkerBaseAmiId": { "Value": { "Ref": "WorkerBaseAmiId" } },
+    "WorkerVpcId": { "Value": { "Ref": "WorkerVpcId" } },
+    "WorkerSubnetId": { "Value": { "Ref": "WorkerSubnetId" } },
+    "WorkerAvailabilityZone": { "Value": { "Ref": "WorkerAvailabilityZone" } },
+    "WorkerResourceManifestDigest": { "Value": { "Ref": "WorkerResourceManifestDigest" } },
     "BrokerCommandUrl": {
       "Value": {
         "Fn::Sub": "https://${BrokerApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}/v2/commands"

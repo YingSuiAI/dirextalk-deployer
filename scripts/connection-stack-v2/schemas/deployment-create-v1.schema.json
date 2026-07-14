@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dirextalk:schema:aws:deployment-create:v1",
+  "title": "Dirextalk typed isolated Worker create request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "deployment_id",
+    "connection_generation",
+    "plan_hash",
+    "plan_revision",
+    "quote_id",
+    "quote_digest",
+    "candidate_id",
+    "resource_manifest_digest",
+    "worker_artifact",
+    "network"
+  ],
+  "properties": {
+    "schema": { "const": "dirextalk.aws.deployment-create/v1" },
+    "deployment_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$" },
+    "connection_generation": { "type": "integer", "minimum": 1 },
+    "plan_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "plan_revision": { "type": "integer", "minimum": 1 },
+    "quote_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$" },
+    "quote_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "candidate_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$" },
+    "resource_manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "worker_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ami_id"],
+      "properties": {
+        "kind": { "const": "fixed_ami" },
+        "ami_id": { "type": "string", "pattern": "^ami-[0-9a-f]{8,17}$" }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vpc_id", "subnet_id", "availability_zone"],
+      "properties": {
+        "vpc_id": { "type": "string", "pattern": "^vpc-[0-9a-f]{8,17}$" },
+        "subnet_id": { "type": "string", "pattern": "^subnet-[0-9a-f]{8,17}$" },
+        "availability_zone": { "type": "string", "pattern": "^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[a-z]+-\\d[a-z]$" }
+      }
+    }
+  }
+}

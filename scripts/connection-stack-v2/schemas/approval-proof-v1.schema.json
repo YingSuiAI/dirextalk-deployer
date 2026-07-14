@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dirextalk:schema:cloud-orchestrator:approval-proof:v1",
+  "title": "Flutter-signed Cloud Orchestrator ApprovalV1 proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "approval_id",
+    "challenge_id",
+    "signer_key_id",
+    "plan_id",
+    "plan_hash",
+    "plan_revision",
+    "quote_id",
+    "quote_digest",
+    "quote_valid_until",
+    "cloud_connection_id",
+    "recipe_digest",
+    "resource_scope",
+    "network_scope",
+    "secret_scope",
+    "integration_scope",
+    "expires_at",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": { "const": "cloud-orchestrator/v1" },
+    "approval_id": { "$ref": "#/$defs/id" },
+    "challenge_id": { "$ref": "#/$defs/id" },
+    "signer_key_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "plan_id": { "$ref": "#/$defs/id" },
+    "plan_hash": { "$ref": "#/$defs/digest" },
+    "plan_revision": { "type": "integer", "minimum": 1 },
+    "quote_id": { "$ref": "#/$defs/id" },
+    "quote_digest": { "$ref": "#/$defs/digest" },
+    "quote_valid_until": { "$ref": "#/$defs/instant" },
+    "cloud_connection_id": { "$ref": "#/$defs/id" },
+    "recipe_digest": { "$ref": "#/$defs/digest" },
+    "resource_scope": { "$ref": "#/$defs/resource_scope" },
+    "network_scope": { "$ref": "#/$defs/network_scope" },
+    "secret_scope": { "type": ["array", "null"], "items": { "$ref": "#/$defs/secret" } },
+    "integration_scope": { "type": ["array", "null"], "items": { "$ref": "#/$defs/integration" } },
+    "expires_at": { "$ref": "#/$defs/instant" },
+    "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "instant": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$" },
+    "resource_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["region", "instance_type", "architecture", "vcpu", "memory_mib", "disk_gib", "purchase_option"],
+      "properties": {
+        "region": { "type": "string", "pattern": "^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[a-z]+-\\d$" },
+        "instance_type": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{1,63}$" },
+        "architecture": { "enum": ["amd64", "arm64"] },
+        "vcpu": { "type": "integer", "minimum": 1 },
+        "memory_mib": { "type": "integer", "minimum": 1 },
+        "disk_gib": { "type": "integer", "minimum": 8 },
+        "purchase_option": { "enum": ["on_demand", "spot"] },
+        "availability_zones": { "type": "array", "items": { "type": "string" } },
+        "gpu_count": { "type": "integer", "minimum": 0 },
+        "gpu_memory_mib": { "type": "integer", "minimum": 0 },
+        "spot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checkpoint_required", "max_retries"],
+          "properties": {
+            "checkpoint_required": { "type": "boolean" },
+            "max_retries": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "network_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["public_ingress", "entry_point", "tls_required", "authentication_required"],
+      "properties": {
+        "public_ingress": { "type": "boolean" },
+        "entry_point": { "enum": ["none", "alb", "cloudfront", "direct"] },
+        "tls_required": { "type": "boolean" },
+        "authentication_required": { "type": "boolean" },
+        "ingress": { "type": "array", "items": { "$ref": "#/$defs/ingress" } }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "port", "purpose"],
+      "properties": {
+        "protocol": { "enum": ["tcp", "udp", "http", "https"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "purpose": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "secret": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secret_ref", "purpose", "delivery"],
+      "properties": {
+        "secret_ref": { "type": "string", "pattern": "^secret_ref:[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$" },
+        "purpose": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "delivery": { "enum": ["file", "environment"] }
+      }
+    },
+    "integration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "enum": ["mcp", "acp", "dirextalk_connector", "web"] },
+        "name": { "$ref": "#/$defs/id" }
+      }
+    }
+  }
+}

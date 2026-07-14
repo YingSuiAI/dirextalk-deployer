@@ -1,4 +1,10 @@
 import {
+  createHash,
+} from "node:crypto";
+import {
+  canonicalDeterministicCBOR,
+} from "./approval-proof.mjs";
+import {
   ConnectionStackV2Error,
 } from "./errors.mjs";
 
@@ -281,6 +287,64 @@ function normalizeQuote(quote, request, code, statusCode, { requireQuotedAtNow }
     fail(code, "quote cost coverage is invalid", statusCode);
   }
   return normalized;
+}
+
+function goCanonicalInstant(value) {
+  const parsed = new Date(value);
+  const canonical = parsed.toISOString();
+  // encoding/json's time.Time representation follows RFC3339Nano and omits
+  // a zero fractional second. The Stack's public quote intentionally keeps
+  // milliseconds, so the private approval digest must normalize only here.
+  return canonical.endsWith(".000Z") ? `${canonical.slice(0, -5)}Z` : canonical;
+}
+
+function cloudOrchestratorQuoteDocument(normalized) {
+  return {
+    schema_version: "cloud-orchestrator/v1",
+    quote_id: normalized.quote_id,
+    cloud_connection_id: normalized.connection_id,
+    region: normalized.region,
+    currency: normalized.currency,
+    quoted_at: goCanonicalInstant(normalized.quoted_at),
+    valid_until: goCanonicalInstant(normalized.valid_until),
+    candidates: normalized.candidates
+      .map((candidate) => ({
+        candidate_id: candidate.candidate_id,
+        tier: candidate.tier,
+        instance_type: candidate.instance_type,
+        purchase_option: candidate.purchase_option,
+        architecture: candidate.architecture,
+        vcpu: candidate.vcpu,
+        memory_mib: candidate.memory_mib,
+        gpu_count: candidate.gpu_count,
+        gpu_memory_mib: candidate.gpu_memory_mib,
+        hourly_minor: candidate.hourly_minor,
+        thirty_day_minor: candidate.thirty_day_minor,
+        startup_upper_minor: candidate.startup_upper_minor,
+        estimated_disk_gib: candidate.estimated_disk_gib,
+        ...(candidate.availability_zones.length ? { availability_zones: [...candidate.availability_zones].sort() } : {}),
+      }))
+      .sort((left, right) => left.tier.localeCompare(right.tier) || left.candidate_id.localeCompare(right.candidate_id)),
+    ...(normalized.included_items.length ? { included_items: [...normalized.included_items].sort() } : {}),
+    ...(normalized.unincluded_items.length ? { unincluded_items: [...normalized.unincluded_items].sort() } : {}),
+  };
+}
+
+// cloudOrchestratorQuoteDigest deliberately excludes the Broker-only command
+// and request identifiers. It is the exact private digest of the Go
+// cloudorchestrator.QuoteV1 projection used in PlanV1 and ApprovalV1, not a
+// hash of the public Stack quote JSON.
+export function cloudOrchestratorQuoteDigest(quote, request) {
+  const normalized = normalizeQuote(quote, request, "receipt_store_invalid", 500, { requireQuotedAtNow: false });
+  return `sha256:${createHash("sha256").update(canonicalDeterministicCBOR(cloudOrchestratorQuoteDocument(normalized))).digest("hex")}`;
+}
+
+// Exported only for cross-language golden vectors. Callers that receive a
+// Broker quote must use cloudOrchestratorQuoteDigest so the original signed
+// quote-request binding is revalidated first.
+export function cloudOrchestratorQuoteDocumentForGolden(quote, request) {
+  const normalized = normalizeQuote(quote, request, "receipt_store_invalid", 500, { requireQuotedAtNow: false });
+  return cloudOrchestratorQuoteDocument(normalized);
 }
 
 export function validateIssuedQuote(quote, request) {

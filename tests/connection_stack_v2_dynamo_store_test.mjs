@@ -86,6 +86,16 @@ function request(overrides = {}) {
   };
 }
 
+function approvalProof() {
+  return {
+    schema: "dirextalk.aws.approval-proof-reference/v1",
+    connection_id: CONNECTION_ID,
+    approval_id: "approval-proof-v2-01",
+    payload_sha256: "d".repeat(64),
+    expires_at: "2026-07-14T07:04:00.000Z",
+  };
+}
+
 function quoteFor(input) {
   return {
     schema: "dirextalk.aws.quote/v1",
@@ -138,6 +148,13 @@ function registration() {
     broker_command_url: "https://abcde12345.execute-api.ap-south-1.amazonaws.com/prod/v2/commands",
     node_key_id: "node-key-v2",
     connection_generation: 3,
+    worker_artifact: { kind: "fixed_ami", ami_id: "ami-0123456789abcdef0" },
+    worker_network: {
+      vpc_id: "vpc-0123456789abcdef0",
+      subnet_id: "subnet-0123456789abcdef0",
+      availability_zone: "ap-south-1a",
+    },
+    worker_resource_manifest_digest: `sha256:${"e".repeat(64)}`,
     stack_arn: "arn:aws:cloudformation:ap-south-1:123456789012:stack/DirextalkConnectionStackV2-001/01234567-89ab-cdef-0123-456789abcdef",
     command_id: "command-v2-registration-01",
     request_sha256: "d".repeat(64),
@@ -188,6 +205,8 @@ function store(client) {
     client,
     receiptsTableName: "receipts",
     challengesTableName: "challenges",
+    approvalProofsTableName: "approval-proofs",
+    issuedQuotesTableName: "issued-quotes",
     countersTableName: "counters",
     GetItemCommand,
     TransactWriteItemsCommand,
@@ -236,12 +255,16 @@ const quoteReceipt = await store(quoteClient).commit(quoteInput, {
 assert.equal(quoteProviderCalls, 1, "a fresh quote must be obtained once before its receipt is committed");
 assert.equal(quoteReceipt.quote.quote_id, `quote-${"c".repeat(32)}`);
 assert.equal(quoteClient.transactions.length, 1);
-assert.equal(quoteClient.transactions[0].TransactItems.length, 2, "a quote only advances the counter and stores its receipt");
+assert.equal(quoteClient.transactions[0].TransactItems.length, 3, "a quote atomically stores its durable private digest, counter, and receipt");
 assert.deepEqual(
   JSON.parse(quoteClient.transactions[0].TransactItems[1].Put.Item.receipt_json.S).quote,
   quoteReceipt.quote,
   "the durable receipt must retain the exact provider quote",
 );
+const issuedQuoteWrite = quoteClient.transactions[0].TransactItems[2].Put;
+assert.equal(issuedQuoteWrite.TableName, "issued-quotes");
+assert.match(issuedQuoteWrite.Item.quote_digest.S, /^sha256:[0-9a-f]{64}$/);
+assert.equal(issuedQuoteWrite.Item.quote_json.S, JSON.stringify(quoteReceipt.quote), "the private quote record must preserve the public quote without expanding it");
 
 const expiredQuoteInput = quoteRequest({ is_expired: true });
 const quoteReplayClient = new ScriptedDynamo({ receiptItem: storedReceiptItem(expiredQuoteInput) });
@@ -325,5 +348,20 @@ assert.equal(consumeTransaction.length, 3, "challenge consume, counter, and rece
 assert.equal(consumeTransaction[0].Update.TableName, "challenges");
 assert.match(consumeTransaction[0].Update.ConditionExpression, /consumed/);
 assert.equal(consumeTransaction[2].Put.TableName, "receipts");
+
+const proofClient = new ScriptedDynamo();
+await store(proofClient).commit(request({
+  action: "deployment.create",
+  command_id: "command-v2-proof-01",
+  node_counter: 13,
+  challenge_to_issue: undefined,
+  approval_proof: approvalProof(),
+}));
+const proofTransaction = proofClient.transactions[0].TransactItems;
+assert.equal(proofTransaction.length, 3, "ApprovalV1 proof consume, counter, and immutable command receipt must commit together");
+assert.equal(proofTransaction[0].Put.TableName, "approval-proofs");
+assert.equal(proofTransaction[0].Put.Item.approval_id.S, "approval-proof-v2-01");
+assert.equal(proofTransaction[0].Put.Item.payload_sha256.S, "d".repeat(64));
+assert.equal(proofTransaction[2].Put.TableName, "receipts");
 
 console.log("connection stack v2 Dynamo receipt store boundary ok");

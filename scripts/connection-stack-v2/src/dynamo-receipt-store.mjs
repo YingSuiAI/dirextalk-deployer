@@ -1,6 +1,10 @@
 import {
   ConnectionStackV2Error,
 } from "./command-contract.mjs";
+import {
+  validateIssuedQuote,
+  validateQuoteRequestPayload,
+} from "./quote-contract.mjs";
 
 const RECEIPT_COMMIT_SCHEMA = "dirextalk.aws.receipt-commit/v2";
 const RECEIPT_SCHEMA = "dirextalk.aws.command-receipt/v2";
@@ -111,6 +115,14 @@ function validateRequest(request) {
   if (request.approval_binding_is_expired !== undefined && request.approval_binding_is_expired !== true) {
     fail("receipt_store_invalid", "approval_binding_is_expired is invalid", 500);
   }
+  if (request.action === "quote.request") {
+    if (request.quote_request === undefined) {
+      fail("receipt_store_invalid", "quote_request is required for quote receipts", 500);
+    }
+    validateQuoteRequestPayload(request.quote_request);
+  } else if (request.quote_request !== undefined) {
+    fail("receipt_store_invalid", "quote_request is only valid for quote receipts", 500);
+  }
   if (request.challenge_to_issue !== undefined) validateChallengeToIssue(request.challenge_to_issue, request);
   if (request.approval_challenge !== undefined) validateApprovalChallenge(request.approval_challenge, request);
   if (request.challenge_to_issue !== undefined && request.approval_challenge !== undefined) {
@@ -119,7 +131,7 @@ function validateRequest(request) {
   return request;
 }
 
-function receiptFor(request) {
+function receiptFor(request, quote) {
   return {
     schema: RECEIPT_SCHEMA,
     disposition: "committed",
@@ -130,7 +142,22 @@ function receiptFor(request) {
     request_sha256: request.request_sha256,
     action: request.action,
     ...(request.challenge_to_issue ? { challenge: request.challenge_to_issue } : {}),
+    ...(quote ? { quote } : {}),
   };
+}
+
+async function resolveQuote(quoteProvider, request) {
+  if (!quoteProvider || typeof quoteProvider.quote !== "function") {
+    fail("quote_provider_unavailable", "the Connection Stack quote provider is unavailable", 503);
+  }
+  let quote;
+  try {
+    quote = await quoteProvider.quote(request);
+  } catch (error) {
+    if (error instanceof ConnectionStackV2Error) throw error;
+    fail("quote_provider_unavailable", "the Connection Stack quote provider is unavailable", 503);
+  }
+  return validateIssuedQuote(quote, request);
 }
 
 function storedNumber(item, field) {
@@ -184,7 +211,8 @@ function receiptItem(request, receipt) {
 
 // DynamoV2ReceiptStore is the sole durable command/approval fence for the
 // Connection Stack. It never accepts cloud credentials or invokes provider
-// control APIs: a caller receives only an immutable command receipt.
+// control APIs. A quote provider, when supplied, may perform only its bounded
+// read-only lookup before the immutable receipt is persisted.
 export class DynamoV2ReceiptStore {
   constructor({
     client,
@@ -206,7 +234,7 @@ export class DynamoV2ReceiptStore {
     this.TransactWriteItemsCommand = TransactWriteItemsCommand;
   }
 
-  async commit(input) {
+  async commit(input, quoteProvider) {
     const request = validateRequest(input);
     const existing = await this.#findReceipt(request);
     if (existing) return existing;
@@ -216,7 +244,8 @@ export class DynamoV2ReceiptStore {
     if (request.approval_binding_is_expired) {
       fail("approval_expired", "an expired approval cannot create a new receipt", 401);
     }
-    const receipt = receiptFor(request);
+    const quote = request.action === "quote.request" ? await resolveQuote(quoteProvider, request) : undefined;
+    const receipt = receiptFor(request, quote);
     try {
       await this.client.send(new this.TransactWriteItemsCommand({
         TransactItems: this.#transactionItems(request, receipt),

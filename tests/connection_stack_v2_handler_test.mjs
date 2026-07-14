@@ -20,6 +20,12 @@ const challenge = {
   schema: "dirextalk.aws.approval-challenge/v2",
   challenge_id: "challenge-v2-001",
 };
+const quote = {
+  schema: "dirextalk.aws.quote/v1",
+  quote_id: "quote-v2-00001",
+  currency: "USD",
+  candidates: [{ instance_type: "t3.large", hourly_minor: 5 }],
+};
 
 const accepted = [];
 const handler = createV2BrokerHandler({
@@ -37,6 +43,20 @@ assert.deepEqual(JSON.parse(response.body), {
   challenge,
 });
 assert.doesNotMatch(response.body, /payload_b64|signature_b64|approval_binding/);
+
+const quoteHandler = createV2BrokerHandler({
+  async accept() {
+    return { status: "quote_issued", receipt, quote, command };
+  },
+});
+const quoteResponse = await quoteHandler({ body: JSON.stringify(command) });
+assert.equal(quoteResponse.statusCode, 200);
+assert.deepEqual(JSON.parse(quoteResponse.body), {
+  status: "quote_issued",
+  receipt,
+  quote,
+});
+assert.doesNotMatch(quoteResponse.body, /payload_b64|signature_b64|approval_binding/);
 
 const denied = createV2BrokerHandler({
   async accept() {

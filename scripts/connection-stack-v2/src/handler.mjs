@@ -9,6 +9,9 @@ import {
 import {
   DynamoV2ReceiptStore,
 } from "./dynamo-receipt-store.mjs";
+import {
+  AwsOnDemandQuoteProvider,
+} from "./quote-provider.mjs";
 
 function response(statusCode, body) {
   return {
@@ -50,6 +53,7 @@ function parseBody(event) {
 
 function resultStatusCode(status) {
   if (status === "challenge_issued") return 201;
+  if (status === "quote_issued") return 200;
   if (status === "idempotent") return 200;
   if (status === "read_only_validated" || status === "approval_consumed") return 202;
   throw new ConnectionStackV2Error("receipt_store_invalid", "receipt store returned an invalid result", 500);
@@ -63,6 +67,7 @@ function publicResult(result) {
     status: result.status,
     receipt: result.receipt,
     ...(result.challenge ? { challenge: result.challenge } : {}),
+    ...(result.quote ? { quote: result.quote } : {}),
   };
 }
 
@@ -107,7 +112,21 @@ async function productionHandler() {
         GetItemCommand,
         TransactWriteItemsCommand,
       } = await import("@aws-sdk/client-dynamodb");
+      const {
+        EC2Client,
+        DescribeInstanceTypeOfferingsCommand,
+      } = await import("@aws-sdk/client-ec2");
+      const {
+        PricingClient,
+        GetProductsCommand,
+      } = await import("@aws-sdk/client-pricing");
       const dynamodb = new DynamoDBClient({});
+      const quoteProvider = new AwsOnDemandQuoteProvider({
+        pricingClient: new PricingClient({ region: "us-east-1" }),
+        ec2Client: new EC2Client({}),
+        GetProductsCommand,
+        DescribeInstanceTypeOfferingsCommand,
+      });
       const receiptStore = new DynamoV2ReceiptStore({
         client: dynamodb,
         receiptsTableName: requiredEnvironment("COMMAND_RECEIPTS_TABLE"),
@@ -120,6 +139,7 @@ async function productionHandler() {
         clock: Date.now,
         createChallengeId: () => `challenge-${randomUUID()}`,
         receiptStore,
+        quoteProvider,
         connectionId: requiredEnvironment("CONNECTION_ID"),
         connectionGeneration: positiveGeneration(requiredEnvironment("CONNECTION_GENERATION")),
         nodeKeyId: requiredEnvironment("NODE_KEY_ID"),
@@ -134,8 +154,9 @@ async function productionHandler() {
 }
 
 // handler is the production Lambda entry point. This stage activates only the
-// signed DynamoDB receipt/challenge fence; it has no EC2, EBS, IAM, S3, Worker,
-// secret-read, or generic AWS API capability.
+// signed DynamoDB receipt/challenge fence plus read-only AWS on-demand quote
+// lookup. It has no EC2/EBS/IAM/S3 mutation, Worker, secret-read, or generic
+// AWS API capability.
 export async function handler(event) {
   try {
     return await (await productionHandler())(event);

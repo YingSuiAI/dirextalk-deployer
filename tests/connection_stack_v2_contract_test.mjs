@@ -134,7 +134,7 @@ function createFakeReceiptStore({ connectionId, generation }) {
   }
 
   return {
-    async commit(request) {
+    async commit(request, quoteProvider) {
       assert.equal(request.schema, "dirextalk.aws.receipt-commit/v2");
       assert.equal(request.connection_id, connectionId);
       assert.equal(request.expected_generation, generation);
@@ -184,6 +184,12 @@ function createFakeReceiptStore({ connectionId, generation }) {
         consumedChallenge = { ...stored, consumed: true, consumed_by_command_id: request.command_id };
       }
 
+      const quote = request.action === "quote.request"
+        ? await quoteProvider?.quote(request)
+        : undefined;
+      if (request.action === "quote.request" && !quote) {
+        fail("quote_provider_unavailable", "quote provider is required");
+      }
       const receipt = {
         schema: "dirextalk.aws.command-receipt/v2",
         disposition: "committed",
@@ -194,6 +200,7 @@ function createFakeReceiptStore({ connectionId, generation }) {
         request_sha256: request.request_sha256,
         action: request.action,
         ...(issuedChallenge ? { challenge: issuedChallenge } : {}),
+        ...(quote ? { quote } : {}),
       };
       if (issuedChallenge) challenges.set(challengeKey(issuedChallenge), issuedChallenge);
       if (consumedChallenge) challenges.set(challengeKey(consumedChallenge), consumedChallenge);
@@ -201,6 +208,32 @@ function createFakeReceiptStore({ connectionId, generation }) {
       highestNodeCounter = request.node_counter;
       return receipt;
     },
+  };
+}
+
+function quoteForRequest(request) {
+  const candidate = request.quote_request.candidates[0];
+  return {
+    schema: "dirextalk.aws.quote/v1",
+    quote_id: `quote-${request.request_sha256.slice(0, 32)}`,
+    connection_id: request.connection_id,
+    command_id: request.command_id,
+    request_sha256: request.request_sha256,
+    quote_request_id: request.quote_request.quote_request_id,
+    plan_digest: request.quote_request.plan_digest,
+    region: request.quote_request.region,
+    currency: "USD",
+    quoted_at: new Date(request.now_ms).toISOString(),
+    valid_until: new Date(request.now_ms + 15 * 60 * 1000).toISOString(),
+    candidates: [{
+      ...candidate,
+      hourly_minor: 5,
+      thirty_day_minor: 2996,
+      startup_upper_minor: 0,
+      availability_zones: ["ap-south-1a"],
+    }],
+    included_items: ["ec2_linux_ondemand"],
+    unincluded_items: ["cloudwatch_logs", "data_transfer", "ebs_gp3", "public_ipv4", "snapshots", "taxes"],
   };
 }
 
@@ -217,10 +250,38 @@ const quote = signedCommand("quote.request", {
   quote_request_id: "quote-request-v2-01",
   plan_digest: DIGEST("a"),
   region: "ap-south-1",
-  purchase_model: "on_demand",
+  candidates: [{
+    candidate_id: "candidate-economy-01",
+    tier: "economy",
+    instance_type: "t3.large",
+    purchase_option: "on_demand",
+    estimated_disk_gib: 40,
+  }],
 });
 const authenticatedQuote = validateAndAuthenticateV2Command(quote, authOptions);
 assert.equal(authenticatedQuote.payload.region, "ap-south-1");
+assert.equal(authenticatedQuote.payload.candidates[0].instance_type, "t3.large");
+
+const spotQuote = signedCommand("quote.request", {
+  quote_request_id: "quote-request-v2-spot",
+  plan_digest: DIGEST("a"),
+  region: "ap-south-1",
+  candidates: [{
+    candidate_id: "candidate-spot-quote-01",
+    tier: "economy",
+    instance_type: "t3.large",
+    purchase_option: "spot",
+    estimated_disk_gib: 40,
+  }],
+}, {
+  command_id: "command-v2-quote-spot",
+  node_counter: 9,
+});
+assert.throws(
+  () => validateAndAuthenticateV2Command(spotQuote, authOptions),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "spot_quote_not_enabled",
+  "Spot must be rejected by the signed command boundary before the provider can receive it",
+);
 assert.equal(authenticatedQuote.approval_binding, undefined);
 
 const observe = signedCommand("deployment.observe", { deployment_id: "deployment-v2-001" }, {
@@ -246,17 +307,40 @@ const challengeService = createV2ChallengeApprovalService({
   clock: () => NOW,
   createChallengeId: () => "challenge-v2-001",
   receiptStore,
+  quoteProvider: { quote: quoteForRequest },
 });
 const receiptQuote = signedCommand("quote.request", {
   quote_request_id: "quote-request-v2-receipt",
   plan_digest: DIGEST("a"),
   region: "ap-south-1",
-  purchase_model: "on_demand",
+  candidates: [{
+    candidate_id: "candidate-economy-02",
+    tier: "economy",
+    instance_type: "t3.large",
+    purchase_option: "on_demand",
+    estimated_disk_gib: 40,
+  }],
 }, {
   command_id: "command-v2-quote-receipt",
   node_counter: 10,
 });
-assert.equal((await challengeService.accept(receiptQuote)).status, "read_only_validated");
+const issuedQuote = await challengeService.accept(receiptQuote);
+assert.equal(issuedQuote.status, "quote_issued");
+assert.equal(issuedQuote.quote.candidates[0].hourly_minor, 5);
+const expiredQuoteReplayService = createV2ChallengeApprovalService({
+  ...authOptions,
+  clock: () => Date.parse("2026-07-14T07:05:00.000Z"),
+  createChallengeId: () => "challenge-v2-unused",
+  receiptStore,
+  quoteProvider: {
+    async quote() {
+      throw new Error("a stored quote must replay without a provider request");
+    },
+  },
+});
+const replayedQuote = await expiredQuoteReplayService.accept(receiptQuote);
+assert.equal(replayedQuote.status, "idempotent");
+assert.equal(replayedQuote.quote.quote_id, issuedQuote.quote.quote_id);
 const issuedChallenge = await challengeService.accept(challengeRequest);
 assert.equal(issuedChallenge.challenge.challenge_id, "challenge-v2-001");
 

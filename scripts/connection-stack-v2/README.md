@@ -1,4 +1,4 @@
-# Dirextalk Connection Stack V2 — durable command fence
+# Dirextalk Connection Stack V2 — durable command and quote fence
 
 This directory implements the V2 signed-command and Flutter-device-approval
 **durable fence**, not a cloud executor. It is deliberately separate from
@@ -9,9 +9,11 @@ Cloud Orchestrator.
 The SAM template may be deployed only as a Connection Stack control-plane
 prerequisite. Its regional Broker API verifies a bounded signed command,
 persists an immutable receipt and a one-time approval challenge in DynamoDB,
-and returns a de-secretsed receipt. It has no EC2/EBS/IAM/PassRole/SSH/S3
-mutation, no worker bootstrap execution, and no secret-read capability. It
-cannot provision, observe, stop, start, or destroy cloud resources.
+and returns a de-secretsed receipt. For one bounded command it can also perform
+read-only EC2 offering and AWS Price List lookups to issue an on-demand quote.
+It has no EC2/EBS/IAM/PassRole/SSH/S3 mutation, no worker bootstrap execution,
+and no secret-read capability. It cannot provision, observe, stop, start, or
+destroy cloud resources.
 
 ## Bootstrap boundary
 
@@ -46,6 +48,33 @@ There is no generic AWS action, arbitrary API name, shell command, IAM action,
 or raw EC2 specification in the protocol. `artifact.put` carries only a typed
 content reference in this skeleton; it does not upload bytes.
 
+## Read-only on-demand quote
+
+`quote.request` accepts one to three ordered candidates. Each candidate binds a
+stable id, `economy`/`recommended`/`performance` tier, EC2 instance type,
+`on_demand` purchase option, and estimated disk size. Spot is deliberately
+rejected with `spot_quote_not_enabled`: it requires a separately validated
+checkpoint/resume and interruption contract and cannot reuse this quote path.
+
+For a fresh signed quote command, the Broker first verifies that every requested
+instance type is offered in at least one availability zone in the requested
+region. It then queries the AWS Price List using the Linux, Shared-tenancy,
+used-capacity on-demand product filters. The Pricing client uses the `us-east-1`
+endpoint while the product filter retains the requested region; the EC2 client
+uses the Stack region. It accepts only an unambiguous hourly USD price and
+stores the result with the immutable command receipt. An exact idempotent replay
+returns that stored result, including after the short signed-command window has
+expired, without another AWS provider lookup.
+
+The returned `dirextalk.aws.quote/v1` is valid for fifteen minutes and contains
+USD minor-unit estimates rounded upward: `hourly_minor` and
+`thirty_day_minor` (720 hours). It currently includes only
+`ec2_linux_ondemand`; it explicitly excludes CloudWatch logs, data transfer,
+gp3 EBS, public IPv4, snapshots, and taxes. `startup_upper_minor: 0` means no
+one-off cost is modeled in this stage, **not** that the account has a hard
+spending cap. A quote never creates an approval, opens a network endpoint, or
+authorizes `deployment.create`.
+
 The Dirextalk node signs each canonical command with its Stack-registered
 Ed25519 public key. Mutating actions (`artifact.put`, `deployment.create`, and
 `deployment.destroy`) additionally require a Flutter Ed25519 approval. The
@@ -79,7 +108,9 @@ digest, and action, plus the challenge issue/consume data when applicable.
 - Same connection + command id with any different signed identity field: reject
   as a command-id conflict.
 - New command: require the active generation, a still-live command/approval,
-  and a strictly advancing counter, then write the immutable receipt.
+  and a strictly advancing counter, then write the immutable receipt. For a
+  quote, resolve the read-only provider result before that transaction and
+  persist the exact validated quote with the receipt.
 - For a challenge request: write the one-time challenge with the receipt. For a
   mutating command: conditionally consume that exact unexpired challenge with
   the counter advance and receipt write.
@@ -91,9 +122,12 @@ stage has no cloud action. A same-id mismatch, stale counter, expired fresh
 request, expired/replayed challenge, or unavailable durable store fails closed.
 
 The Lambda role has only `dynamodb:GetItem` and
-`dynamodb:TransactWriteItems` against the three Stack-owned tables, plus its
-CloudWatch Logs permissions. The Lambda source pins the DynamoDB SDK dependency
-in `src/package-lock.json`; do not rely on a runtime-provided SDK version for a
+`dynamodb:TransactWriteItems` against the three Stack-owned tables,
+`pricing:GetProducts`, and `ec2:DescribeInstanceTypeOfferings`, plus its
+CloudWatch Logs permissions. Both provider actions require `Resource: "*"`;
+they are still read-only and no EC2 mutation or role-passing permission is
+present. The Lambda source pins DynamoDB, EC2, and Pricing SDK dependencies in
+`src/package-lock.json`; do not rely on a runtime-provided SDK version for a
 release build. The SAM function sets `BuildProperties.UseNpmCi: true`, so a
 release must build artifacts before packaging/deployment:
 
@@ -135,11 +169,14 @@ No test invokes AWS or reads credentials:
 bash tests/connection_stack_v2_test.sh
 node --check scripts/connection-stack-v2/src/command-contract.mjs
 node --check scripts/connection-stack-v2/src/dynamo-receipt-store.mjs
+node --check scripts/connection-stack-v2/src/quote-provider.mjs
 node --check scripts/connection-stack-v2/src/worker-contract.mjs
 git diff --check
 ```
 
-The tests include an in-process DynamoDB seam that proves atomic transaction
-shape, counter/receipt/challenge fencing, idempotent expired reconciliation,
-and a reused Flutter approval challenge failing even when an attacker supplies
-a new node command id.
+The tests include in-process DynamoDB and AWS-provider seams that prove atomic
+transaction shape, counter/receipt/challenge fencing, idempotent expired quote
+reconciliation without a second provider call, upward minor-unit rounding,
+read-only API command shape, availability checks, and Spot rejection before any
+provider request. They also prove a reused Flutter approval challenge fails even
+when an attacker supplies a new node command id.

@@ -1,12 +1,12 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
   "Transform": "AWS::Serverless-2016-10-31",
-  "Description": "Dirextalk Connection Stack V2 durable signed command and Flutter approval fence.",
+  "Description": "Dirextalk Connection Stack V2 durable signed command, Flutter approval, and read-only on-demand quote fence.",
   "Metadata": {
     "DirextalkConnectionStackV2": {
-      "Stage": "durable-command-fence",
-      "Execution": "receipt-and-approval-challenge-only",
-      "Note": "This stack authenticates signed commands and persists immutable receipts/one-time approval challenges. It cannot create, observe, stop, start, or destroy cloud resources."
+      "Stage": "durable-read-only-quote",
+      "Execution": "receipt-approval-challenge-and-read-only-on-demand-quote",
+      "Note": "This stack authenticates signed commands, persists immutable receipts/one-time approval challenges, and returns a bounded on-demand EC2 price estimate. It cannot create, observe, stop, start, or destroy cloud resources."
     }
   },
   "Parameters": {
@@ -214,7 +214,7 @@
         },
         "Policies": [
           {
-            "PolicyName": "DurableReceiptAndChallengeFence",
+            "PolicyName": "DurableReceiptFenceAndReadOnlyQuote",
             "PolicyDocument": {
               "Version": "2012-10-17",
               "Statement": [
@@ -237,6 +237,18 @@
                     { "Fn::GetAtt": ["ApprovalChallengesTable", "Arn"] },
                     { "Fn::GetAtt": ["ConnectionCountersTable", "Arn"] }
                   ]
+                },
+                {
+                  "Sid": "ReadOnDemandPriceListOnly",
+                  "Effect": "Allow",
+                  "Action": "pricing:GetProducts",
+                  "Resource": "*"
+                },
+                {
+                  "Sid": "ReadInstanceTypeOfferingsOnly",
+                  "Effect": "Allow",
+                  "Action": "ec2:DescribeInstanceTypeOfferings",
+                  "Resource": "*"
                 },
                 {
                   "Sid": "WriteFunctionLogs",
@@ -285,7 +297,7 @@
         "Runtime": "nodejs22.x",
         "Architectures": ["x86_64"],
         "MemorySize": 256,
-        "Timeout": 10,
+        "Timeout": 20,
         "ReservedConcurrentExecutions": 5,
         "Role": { "Fn::GetAtt": ["BrokerContractRole", "Arn"] },
         "Environment": {
@@ -314,7 +326,7 @@
         "Tags": {
           "dirextalk:connection-id": { "Ref": "ConnectionId" },
           "dirextalk:managed-by": "connection-stack-v2",
-          "dirextalk:component": "broker-receipt-fence"
+          "dirextalk:component": "broker-read-only-quote"
         }
       },
       "Metadata": {

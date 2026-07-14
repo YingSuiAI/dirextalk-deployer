@@ -17,8 +17,8 @@ const workerSchema = JSON.parse(readFileSync(
 ));
 
 assert.equal(template.Transform, "AWS::Serverless-2016-10-31");
-assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "durable-command-fence");
-assert.equal(template.Metadata.DirextalkConnectionStackV2.Execution, "receipt-and-approval-challenge-only");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "durable-read-only-quote");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Execution, "receipt-approval-challenge-and-read-only-on-demand-quote");
 assert.equal(commandSchema.properties.schema.const, "dirextalk.aws.command/v2");
 assert.equal(approvalBindingSchema.properties.schema.const, "dirextalk.aws.approval-binding/v2");
 assert.equal(workerSchema.properties.schema.const, "dirextalk.worker-bootstrap/v1");
@@ -66,11 +66,33 @@ assert.equal(broker.Properties.Environment.Variables.DEVICE_APPROVAL_PUBLIC_KEY_
 assert.equal(broker.Properties.Environment.Variables.COMMAND_RECEIPTS_TABLE.Ref, "CommandReceiptsTable");
 assert.equal(broker.Properties.Environment.Variables.APPROVAL_CHALLENGES_TABLE.Ref, "ApprovalChallengesTable");
 assert.equal(broker.Properties.Environment.Variables.CONNECTION_COUNTERS_TABLE.Ref, "ConnectionCountersTable");
+assert.equal(broker.Properties.Timeout, 20, "read-only price lookups must have a bounded network timeout");
 
 const rolePolicy = template.Resources.BrokerContractRole.Properties.Policies[0].PolicyDocument.Statement;
 assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:GetItem"));
 assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:TransactWriteItems"));
+assert.deepEqual(
+  rolePolicy.find((statement) => statement.Action === "pricing:GetProducts"),
+  {
+    Sid: "ReadOnDemandPriceListOnly",
+    Effect: "Allow",
+    Action: "pricing:GetProducts",
+    Resource: "*",
+  },
+  "AWS Price List lookup must remain its only pricing permission",
+);
+assert.deepEqual(
+  rolePolicy.find((statement) => statement.Action === "ec2:DescribeInstanceTypeOfferings"),
+  {
+    Sid: "ReadInstanceTypeOfferingsOnly",
+    Effect: "Allow",
+    Action: "ec2:DescribeInstanceTypeOfferings",
+    Resource: "*",
+  },
+  "instance availability lookup must remain the only EC2 permission",
+);
 assert.doesNotMatch(JSON.stringify(rolePolicy), /dynamodb:(?:PutItem|UpdateItem|DeleteItem|Scan|Query)/);
+assert.doesNotMatch(JSON.stringify(rolePolicy), /pricing:\*|ec2:\*/i);
 
 const resourceText = JSON.stringify(template.Resources);
 assert.doesNotMatch(resourceText, /AWS::EC2::|AWS::S3::|AWS::IAM::InstanceProfile/);
@@ -82,7 +104,10 @@ const handlerText = readFileSync(new URL("scripts/connection-stack-v2/src/handle
 assert.match(handlerText, /createV2ChallengeApprovalService/);
 assert.match(handlerText, /DynamoV2ReceiptStore/);
 assert.match(handlerText, /@aws-sdk\/client-dynamodb/);
-assert.doesNotMatch(handlerText, /@aws-sdk\/client-(?:ec2|s3|iam|secrets-manager)/);
+assert.match(handlerText, /@aws-sdk\/client-ec2/);
+assert.match(handlerText, /@aws-sdk\/client-pricing/);
+assert.match(handlerText, /AwsOnDemandQuoteProvider/);
+assert.doesNotMatch(handlerText, /@aws-sdk\/client-(?:s3|iam|secrets-manager)/);
 assert.doesNotMatch(handlerText, /RunInstances|TerminateInstances|PassRole|CreateRole|GetSecretValue/);
 
 const brokerPackage = JSON.parse(readFileSync(
@@ -90,5 +115,7 @@ const brokerPackage = JSON.parse(readFileSync(
   "utf8",
 ));
 assert.match(brokerPackage.dependencies["@aws-sdk/client-dynamodb"], /^\d+\.\d+\.\d+$/);
+assert.match(brokerPackage.dependencies["@aws-sdk/client-ec2"], /^\d+\.\d+\.\d+$/);
+assert.match(brokerPackage.dependencies["@aws-sdk/client-pricing"], /^\d+\.\d+\.\d+$/);
 
 console.log("connection stack v2 template contract ok");

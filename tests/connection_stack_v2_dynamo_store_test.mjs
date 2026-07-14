@@ -46,6 +46,18 @@ class ScriptedDynamo {
 const NOW = Date.parse("2026-07-14T07:00:00.000Z");
 const CONNECTION_ID = "connection-v2-0001";
 const REQUEST_SHA256 = "a".repeat(64);
+const QUOTE_REQUEST = {
+  quote_request_id: "quote-request-v2-001",
+  plan_digest: `sha256:${"b".repeat(64)}`,
+  region: "ap-south-1",
+  candidates: [{
+    candidate_id: "candidate-economy-01",
+    tier: "economy",
+    instance_type: "t3.large",
+    purchase_option: "on_demand",
+    estimated_disk_gib: 40,
+  }],
+};
 
 function challenge() {
   return {
@@ -74,6 +86,43 @@ function request(overrides = {}) {
   };
 }
 
+function quoteFor(input) {
+  return {
+    schema: "dirextalk.aws.quote/v1",
+    quote_id: `quote-${input.request_sha256.slice(0, 32)}`,
+    connection_id: input.connection_id,
+    command_id: input.command_id,
+    request_sha256: input.request_sha256,
+    quote_request_id: input.quote_request.quote_request_id,
+    plan_digest: input.quote_request.plan_digest,
+    region: input.quote_request.region,
+    currency: "USD",
+    quoted_at: new Date(input.now_ms).toISOString(),
+    valid_until: new Date(input.now_ms + 15 * 60 * 1000).toISOString(),
+    candidates: input.quote_request.candidates.map((candidate) => ({
+      ...candidate,
+      hourly_minor: 5,
+      thirty_day_minor: 2996,
+      startup_upper_minor: 0,
+      availability_zones: ["ap-south-1a"],
+    })),
+    included_items: ["ec2_linux_ondemand"],
+    unincluded_items: ["cloudwatch_logs", "data_transfer", "ebs_gp3", "public_ipv4", "snapshots", "taxes"],
+  };
+}
+
+function quoteRequest(overrides = {}) {
+  return request({
+    action: "quote.request",
+    command_id: "command-v2-quote-001",
+    node_counter: 12,
+    request_sha256: "c".repeat(64),
+    challenge_to_issue: undefined,
+    quote_request: structuredClone(QUOTE_REQUEST),
+    ...overrides,
+  });
+}
+
 function receiptFor(input) {
   return {
     schema: "dirextalk.aws.command-receipt/v2",
@@ -85,6 +134,7 @@ function receiptFor(input) {
     request_sha256: input.request_sha256,
     action: input.action,
     ...(input.challenge_to_issue ? { challenge: input.challenge_to_issue } : {}),
+    ...(input.action === "quote.request" ? { quote: quoteFor(input) } : {}),
   };
 }
 
@@ -139,6 +189,61 @@ assert.equal(
   "a transaction outcome race must reconcile against the immutable receipt before retrying",
 );
 assert.equal(reconciledClient.transactions.length, 1);
+
+let quoteProviderCalls = 0;
+const quoteInput = quoteRequest();
+const quoteClient = new ScriptedDynamo();
+const quoteReceipt = await store(quoteClient).commit(quoteInput, {
+  async quote(input) {
+    quoteProviderCalls += 1;
+    return quoteFor(input);
+  },
+});
+assert.equal(quoteProviderCalls, 1, "a fresh quote must be obtained once before its receipt is committed");
+assert.equal(quoteReceipt.quote.quote_id, `quote-${"c".repeat(32)}`);
+assert.equal(quoteClient.transactions.length, 1);
+assert.equal(quoteClient.transactions[0].TransactItems.length, 2, "a quote only advances the counter and stores its receipt");
+assert.deepEqual(
+  JSON.parse(quoteClient.transactions[0].TransactItems[1].Put.Item.receipt_json.S).quote,
+  quoteReceipt.quote,
+  "the durable receipt must retain the exact provider quote",
+);
+
+const expiredQuoteInput = quoteRequest({ is_expired: true });
+const quoteReplayClient = new ScriptedDynamo({ receiptItem: storedReceiptItem(expiredQuoteInput) });
+const quoteReplay = await store(quoteReplayClient).commit(expiredQuoteInput, {
+  async quote() {
+    throw new Error("an idempotent quote replay must not query AWS pricing");
+  },
+});
+assert.equal(quoteReplay.disposition, "idempotent");
+assert.equal(quoteReplay.quote.quote_id, `quote-${"c".repeat(32)}`);
+assert.equal(quoteReplayClient.transactions.length, 0);
+
+let expiredQuoteProviderCalls = 0;
+const expiredFreshQuoteClient = new ScriptedDynamo();
+await assert.rejects(
+  () => store(expiredFreshQuoteClient).commit(quoteRequest({ is_expired: true }), {
+    async quote() {
+      expiredQuoteProviderCalls += 1;
+      return quoteFor(quoteInput);
+    },
+  }),
+  (error) => error?.code === "expired_command",
+);
+assert.equal(expiredQuoteProviderCalls, 0, "an expired fresh quote must not query AWS pricing");
+assert.equal(expiredFreshQuoteClient.transactions.length, 0);
+
+const invalidQuoteClient = new ScriptedDynamo();
+await assert.rejects(
+  () => store(invalidQuoteClient).commit(quoteRequest({ command_id: "command-v2-quote-002", node_counter: 13 }), {
+    async quote() {
+      return {};
+    },
+  }),
+  (error) => error?.code === "receipt_store_invalid",
+);
+assert.equal(invalidQuoteClient.transactions.length, 0, "an invalid provider result must not be persisted");
 
 const expiredFreshClient = new ScriptedDynamo();
 await assert.rejects(

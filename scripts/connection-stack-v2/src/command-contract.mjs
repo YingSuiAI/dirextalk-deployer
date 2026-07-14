@@ -3,6 +3,17 @@ import {
   createPublicKey,
   verify,
 } from "node:crypto";
+import {
+  ConnectionStackV2Error,
+} from "./errors.mjs";
+import {
+  validateQuoteRequestPayload,
+  validateStoredQuote,
+} from "./quote-contract.mjs";
+
+export {
+  ConnectionStackV2Error,
+} from "./errors.mjs";
 
 export const COMMAND_V2_SCHEMA = "dirextalk.aws.command/v2";
 export const APPROVAL_BINDING_V2_SCHEMA = "dirextalk.aws.approval-binding/v2";
@@ -76,15 +87,6 @@ const MAX_APPROVAL_LIFETIME_MS = 15 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS = 60 * 1000;
 const MAX_PAYLOAD_BYTES = 192 * 1024;
 const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024 * 1024;
-
-export class ConnectionStackV2Error extends Error {
-  constructor(code, message, statusCode = 400) {
-    super(message);
-    this.name = "ConnectionStackV2Error";
-    this.code = code;
-    this.statusCode = statusCode;
-  }
-}
 
 function fail(code, message, statusCode = 400) {
   throw new ConnectionStackV2Error(code, message, statusCode);
@@ -312,16 +314,7 @@ function validatePayload(action, payload, binding) {
       requireId(payload, "challenge_request_id");
       break;
     case "quote.request":
-      exactPayloadKeys(payload, ["quote_request_id", "plan_digest", "region", "purchase_model"], ["instance_type"]);
-      requireId(payload, "quote_request_id");
-      requireDigest(payload, "plan_digest");
-      requireString(payload, "region", REGION_PATTERN, "invalid_payload");
-      if (!new Set(["on_demand", "spot"]).has(payload.purchase_model)) {
-        fail("invalid_payload", "purchase_model must be on_demand or spot");
-      }
-      if (Object.hasOwn(payload, "instance_type")) {
-        requireString(payload, "instance_type", INSTANCE_TYPE_PATTERN, "invalid_payload");
-      }
+      validateQuoteRequestPayload(payload);
       break;
     case "artifact.put":
       exactPayloadKeys(payload, ["artifact_id", "manifest_digest", "content_digest", "content_length"]);
@@ -525,6 +518,7 @@ function buildReceiptCommit(authenticated, nowMs, { challengeToIssue } = {}) {
     now_ms: nowMs,
     ...(authenticated.is_expired ? { is_expired: true } : {}),
     ...(authenticated.approval_binding_is_expired ? { approval_binding_is_expired: true } : {}),
+    ...(authenticated.action === "quote.request" ? { quote_request: authenticated.payload } : {}),
     ...(challengeToIssue ? { challenge_to_issue: challengeToIssue } : {}),
     ...(SENSITIVE_ACTIONS.has(authenticated.action)
       ? { approval_challenge: approvalChallengeReference(authenticated) }
@@ -561,7 +555,7 @@ function validateStoredChallenge(challenge, authenticated, proposedChallenge) {
 
 function validateReceipt(receipt, authenticated, proposedChallenge) {
   if (!isRecord(receipt)) fail("receipt_store_invalid", "receipt store returned no receipt", 500);
-  const allowed = new Set([...RECEIPT_FIELDS, "challenge"]);
+  const allowed = new Set([...RECEIPT_FIELDS, "challenge", "quote"]);
   for (const key of Object.keys(receipt)) {
     if (!allowed.has(key)) fail("receipt_store_invalid", `receipt.${key} is not allowed`, 500);
   }
@@ -595,8 +589,20 @@ function validateReceipt(receipt, authenticated, proposedChallenge) {
       ),
     };
   }
-  if (Object.hasOwn(receipt, "challenge")) {
-    fail("receipt_store_invalid", "non-challenge receipt must not include a challenge", 500);
+  if (authenticated.action === "quote.request") {
+    if (!Object.hasOwn(receipt, "quote")) {
+      fail("receipt_store_invalid", "quote receipt is missing its quote", 500);
+    }
+    if (Object.hasOwn(receipt, "challenge")) {
+      fail("receipt_store_invalid", "quote receipt must not include a challenge", 500);
+    }
+    return {
+      ...receipt,
+      quote: validateStoredQuote(receipt.quote, authenticated),
+    };
+  }
+  if (Object.hasOwn(receipt, "challenge") || Object.hasOwn(receipt, "quote")) {
+    fail("receipt_store_invalid", "receipt has an action-incompatible result", 500);
   }
   return receipt;
 }
@@ -618,6 +624,7 @@ export function createV2ChallengeApprovalService(options) {
     clock,
     createChallengeId,
     receiptStore,
+    quoteProvider,
     // Challenge lookups must be owned by the store rather than a process-global
     // configured id. Ignore a caller-supplied value to avoid bypassing that lookup.
     expectedChallengeId: _expectedChallengeId,
@@ -653,7 +660,7 @@ export function createV2ChallengeApprovalService(options) {
         };
       }
       const receipt = validateReceipt(
-        await receiptStore.commit(buildReceiptCommit(authenticated, nowMs, { challengeToIssue: proposedChallenge })),
+        await receiptStore.commit(buildReceiptCommit(authenticated, nowMs, { challengeToIssue: proposedChallenge }), quoteProvider),
         authenticated,
         proposedChallenge,
       );
@@ -662,11 +669,15 @@ export function createV2ChallengeApprovalService(options) {
           status: "idempotent",
           receipt,
           ...(authenticated.action === "approval.challenge.request" ? { challenge: receipt.challenge } : {}),
+          ...(authenticated.action === "quote.request" ? { quote: receipt.quote } : {}),
           ...(authenticated.action === "approval.challenge.request" ? {} : { command: authenticated }),
         };
       }
       if (authenticated.action === "approval.challenge.request") {
         return { status: "challenge_issued", challenge: receipt.challenge, receipt };
+      }
+      if (authenticated.action === "quote.request") {
+        return { status: "quote_issued", quote: receipt.quote, receipt, command: authenticated };
       }
       if (SENSITIVE_ACTIONS.has(authenticated.action)) {
         return {

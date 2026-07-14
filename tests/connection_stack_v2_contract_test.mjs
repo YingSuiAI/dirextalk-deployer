@@ -77,8 +77,8 @@ function signedCommand(action, payload, options = {}) {
     connection_id: CONNECTION_ID,
     command_id: options.command_id ?? "command-v2-00001",
     node_key_id: NODE_KEY_ID,
-    issued_at: "2026-07-14T06:59:00.000Z",
-    expires_at: "2026-07-14T07:03:00.000Z",
+    issued_at: options.issued_at ?? "2026-07-14T06:59:00.000Z",
+    expires_at: options.expires_at ?? "2026-07-14T07:03:00.000Z",
     expected_generation: 3,
     node_counter: options.node_counter ?? 11,
     action,
@@ -151,6 +151,12 @@ function createFakeReceiptStore({ connectionId, generation }) {
           fail("command_id_conflict", "command id was already committed with a different request");
         }
         return { ...existing, disposition: "idempotent" };
+      }
+      if (request.is_expired) {
+        fail("expired_command", "an expired command cannot create a new receipt");
+      }
+      if (request.approval_binding_is_expired) {
+        fail("approval_expired", "an expired approval binding cannot create a new receipt");
       }
       if (request.node_counter <= highestNodeCounter) {
         fail("stale_node_counter", "node counter must advance monotonically");
@@ -273,6 +279,29 @@ assert.equal(consumedApproval.receipt.command_id, "command-v2-00002");
 const idempotentCreate = await challengeService.accept(create);
 assert.equal(idempotentCreate.status, "idempotent");
 assert.equal(idempotentCreate.receipt.command_id, "command-v2-00002");
+
+const expiredReplayService = createV2ChallengeApprovalService({
+  ...authOptions,
+  clock: () => Date.parse("2026-07-14T07:05:00.000Z"),
+  createChallengeId: () => "challenge-v2-001",
+  receiptStore,
+});
+assert.equal(
+  (await expiredReplayService.accept(create)).status,
+  "idempotent",
+  "a signed command must reconcile its durable receipt after the short acceptance window expires",
+);
+const expiredNewCommand = signedCommand("deployment.observe", {
+  deployment_id: "deployment-v2-001",
+}, {
+  command_id: "command-v2-expired-new",
+  node_counter: 15,
+});
+await assert.rejects(
+  () => expiredReplayService.accept(expiredNewCommand),
+  (error) => error instanceof ConnectionStackV2Error && error.code === "expired_command",
+  "an expired command with no receipt must never advance the counter or become executable",
+);
 
 const conflictingCommand = signedCommand("deployment.create", {
   deployment_id: "deployment-v2-conflict",

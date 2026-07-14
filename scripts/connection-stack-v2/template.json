@@ -1,12 +1,12 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
   "Transform": "AWS::Serverless-2016-10-31",
-  "Description": "Dirextalk Connection Stack V2 contract-only signed command and Flutter approval boundary.",
+  "Description": "Dirextalk Connection Stack V2 durable signed command and Flutter approval fence.",
   "Metadata": {
     "DirextalkConnectionStackV2": {
-      "Stage": "contract-only",
-      "Execution": "disabled",
-      "Note": "This skeleton persists no commands and cannot create, observe, or destroy cloud resources. A separately reviewed executor is required before activation."
+      "Stage": "durable-command-fence",
+      "Execution": "receipt-and-approval-challenge-only",
+      "Note": "This stack authenticates signed commands and persists immutable receipts/one-time approval challenges. It cannot create, observe, stop, start, or destroy cloud resources."
     }
   },
   "Parameters": {
@@ -214,11 +214,32 @@
         },
         "Policies": [
           {
-            "PolicyName": "WriteContractFunctionLogsOnly",
+            "PolicyName": "DurableReceiptAndChallengeFence",
             "PolicyDocument": {
               "Version": "2012-10-17",
               "Statement": [
                 {
+                  "Sid": "ReadStackOwnedReceiptFence",
+                  "Effect": "Allow",
+                  "Action": "dynamodb:GetItem",
+                  "Resource": [
+                    { "Fn::GetAtt": ["CommandReceiptsTable", "Arn"] },
+                    { "Fn::GetAtt": ["ApprovalChallengesTable", "Arn"] },
+                    { "Fn::GetAtt": ["ConnectionCountersTable", "Arn"] }
+                  ]
+                },
+                {
+                  "Sid": "WriteOnlyAtomicReceiptTransactions",
+                  "Effect": "Allow",
+                  "Action": "dynamodb:TransactWriteItems",
+                  "Resource": [
+                    { "Fn::GetAtt": ["CommandReceiptsTable", "Arn"] },
+                    { "Fn::GetAtt": ["ApprovalChallengesTable", "Arn"] },
+                    { "Fn::GetAtt": ["ConnectionCountersTable", "Arn"] }
+                  ]
+                },
+                {
+                  "Sid": "WriteFunctionLogs",
                   "Effect": "Allow",
                   "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
                   "Resource": {
@@ -263,9 +284,9 @@
         "Handler": "handler.handler",
         "Runtime": "nodejs22.x",
         "Architectures": ["x86_64"],
-        "MemorySize": 128,
-        "Timeout": 5,
-        "ReservedConcurrentExecutions": 2,
+        "MemorySize": 256,
+        "Timeout": 10,
+        "ReservedConcurrentExecutions": 5,
         "Role": { "Fn::GetAtt": ["BrokerContractRole", "Arn"] },
         "Environment": {
           "Variables": {
@@ -274,7 +295,10 @@
             "NODE_KEY_ID": { "Ref": "NodeKeyId" },
             "NODE_PUBLIC_KEY_SPKI_B64": { "Ref": "NodePublicKeySpkiBase64" },
             "DEVICE_APPROVAL_KEY_ID": { "Ref": "DeviceApprovalKeyId" },
-            "DEVICE_APPROVAL_PUBLIC_KEY_SPKI_B64": { "Ref": "DeviceApprovalPublicKeySpkiBase64" }
+            "DEVICE_APPROVAL_PUBLIC_KEY_SPKI_B64": { "Ref": "DeviceApprovalPublicKeySpkiBase64" },
+            "COMMAND_RECEIPTS_TABLE": { "Ref": "CommandReceiptsTable" },
+            "APPROVAL_CHALLENGES_TABLE": { "Ref": "ApprovalChallengesTable" },
+            "CONNECTION_COUNTERS_TABLE": { "Ref": "ConnectionCountersTable" }
           }
         },
         "Events": {
@@ -290,7 +314,12 @@
         "Tags": {
           "dirextalk:connection-id": { "Ref": "ConnectionId" },
           "dirextalk:managed-by": "connection-stack-v2",
-          "dirextalk:component": "broker-contract"
+          "dirextalk:component": "broker-receipt-fence"
+        }
+      },
+      "Metadata": {
+        "BuildProperties": {
+          "UseNpmCi": true
         }
       }
     }

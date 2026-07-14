@@ -17,7 +17,8 @@ const workerSchema = JSON.parse(readFileSync(
 ));
 
 assert.equal(template.Transform, "AWS::Serverless-2016-10-31");
-assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "contract-only");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "durable-command-fence");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Execution, "receipt-and-approval-challenge-only");
 assert.equal(commandSchema.properties.schema.const, "dirextalk.aws.command/v2");
 assert.equal(approvalBindingSchema.properties.schema.const, "dirextalk.aws.approval-binding/v2");
 assert.equal(workerSchema.properties.schema.const, "dirextalk.worker-bootstrap/v1");
@@ -56,11 +57,20 @@ for (const name of ["CommandReceiptsTable", "ApprovalChallengesTable", "Connecti
 
 const broker = template.Resources.BrokerCommandFunction;
 assert.equal(broker.Type, "AWS::Serverless::Function");
+assert.equal(broker.Metadata.BuildProperties.UseNpmCi, true, "SAM must install the lockfile-pinned DynamoDB SDK into deployment artifacts");
 assert.deepEqual(Object.keys(broker.Properties.Events), ["PostCommand"]);
 assert.equal(broker.Properties.Events.PostCommand.Properties.Path, "/v2/commands");
 assert.equal(broker.Properties.Events.PostCommand.Properties.Method, "post");
 assert.equal(broker.Properties.Environment.Variables.DEVICE_APPROVAL_KEY_ID.Ref, "DeviceApprovalKeyId");
 assert.equal(broker.Properties.Environment.Variables.DEVICE_APPROVAL_PUBLIC_KEY_SPKI_B64.Ref, "DeviceApprovalPublicKeySpkiBase64");
+assert.equal(broker.Properties.Environment.Variables.COMMAND_RECEIPTS_TABLE.Ref, "CommandReceiptsTable");
+assert.equal(broker.Properties.Environment.Variables.APPROVAL_CHALLENGES_TABLE.Ref, "ApprovalChallengesTable");
+assert.equal(broker.Properties.Environment.Variables.CONNECTION_COUNTERS_TABLE.Ref, "ConnectionCountersTable");
+
+const rolePolicy = template.Resources.BrokerContractRole.Properties.Policies[0].PolicyDocument.Statement;
+assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:GetItem"));
+assert.ok(rolePolicy.some((statement) => statement.Action === "dynamodb:TransactWriteItems"));
+assert.doesNotMatch(JSON.stringify(rolePolicy), /dynamodb:(?:PutItem|UpdateItem|DeleteItem|Scan|Query)/);
 
 const resourceText = JSON.stringify(template.Resources);
 assert.doesNotMatch(resourceText, /AWS::EC2::|AWS::S3::|AWS::IAM::InstanceProfile/);
@@ -69,13 +79,16 @@ assert.doesNotMatch(resourceText, /ssh|keypair|user.?data/i);
 assert.ok(!Object.keys(template.Outputs).some((name) => /secret|token|private/i.test(name)), "the stack must not output secrets");
 
 const handlerText = readFileSync(new URL("scripts/connection-stack-v2/src/handler.mjs", root), "utf8");
-assert.match(handlerText, /connection_stack_v2_not_activated/);
-assert.doesNotMatch(handlerText, /@aws-sdk\//);
-const { handler } = await import(new URL("scripts/connection-stack-v2/src/handler.mjs", root));
-const wrongSchemaResponse = await handler({ body: JSON.stringify({ schema: "dirextalk.aws.command/v1" }) });
-assert.equal(wrongSchemaResponse.statusCode, 400);
-const v2Response = await handler({ body: JSON.stringify({ schema: "dirextalk.aws.command/v2" }) });
-assert.equal(v2Response.statusCode, 503);
-assert.equal(JSON.parse(v2Response.body).error.code, "connection_stack_v2_not_activated");
+assert.match(handlerText, /createV2ChallengeApprovalService/);
+assert.match(handlerText, /DynamoV2ReceiptStore/);
+assert.match(handlerText, /@aws-sdk\/client-dynamodb/);
+assert.doesNotMatch(handlerText, /@aws-sdk\/client-(?:ec2|s3|iam|secrets-manager)/);
+assert.doesNotMatch(handlerText, /RunInstances|TerminateInstances|PassRole|CreateRole|GetSecretValue/);
+
+const brokerPackage = JSON.parse(readFileSync(
+  new URL("scripts/connection-stack-v2/src/package.json", root),
+  "utf8",
+));
+assert.match(brokerPackage.dependencies["@aws-sdk/client-dynamodb"], /^\d+\.\d+\.\d+$/);
 
 console.log("connection stack v2 template contract ok");

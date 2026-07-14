@@ -430,7 +430,11 @@ export function validateAndAuthenticateV2Command(command, options, { allowExpire
 
   const binding = command.approval_binding === undefined
     ? undefined
-    : validateApprovalBinding(command.approval_binding, { connectionId, nowMs: options.nowMs });
+    : validateApprovalBinding(command.approval_binding, {
+      connectionId,
+      nowMs: allowExpiredReplay ? undefined : options.nowMs,
+    });
+  const approvalBindingIsExpired = binding !== undefined && Date.parse(binding.expires_at) <= options.nowMs;
   const payload = decodeCanonicalPayload({ ...command, payload_sha256: payloadSha256 });
   validateActionApprovalPresence(command, binding);
   validatePayload(action, payload, binding);
@@ -448,7 +452,10 @@ export function validateAndAuthenticateV2Command(command, options, { allowExpire
     approval_binding: binding,
     approval,
     request_sha256: sha256(signatureBase),
-    ...(allowExpiredReplay ? { is_expired: isExpired } : {}),
+    ...(allowExpiredReplay ? {
+      is_expired: isExpired,
+      approval_binding_is_expired: approvalBindingIsExpired,
+    } : {}),
   };
 }
 
@@ -516,6 +523,8 @@ function buildReceiptCommit(authenticated, nowMs, { challengeToIssue } = {}) {
     request_sha256: authenticated.request_sha256,
     action: authenticated.action,
     now_ms: nowMs,
+    ...(authenticated.is_expired ? { is_expired: true } : {}),
+    ...(authenticated.approval_binding_is_expired ? { approval_binding_is_expired: true } : {}),
     ...(challengeToIssue ? { challenge_to_issue: challengeToIssue } : {}),
     ...(SENSITIVE_ACTIONS.has(authenticated.action)
       ? { approval_challenge: approvalChallengeReference(authenticated) }
@@ -622,7 +631,7 @@ export function createV2ChallengeApprovalService(options) {
       const authenticated = validateAndAuthenticateV2Command(command, {
         ...authenticationOptions,
         nowMs,
-      });
+      }, { allowExpiredReplay: true });
       let proposedChallenge;
       if (authenticated.action === "approval.challenge.request") {
         const challengeId = createChallengeId({

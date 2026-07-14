@@ -1,0 +1,8 @@
+{
+  "name": "dirextalk-connection-stack-v2-broker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1086.0"
+  }
+}

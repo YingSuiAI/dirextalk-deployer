@@ -12,6 +12,58 @@ trap 'rm -rf "$tmp"' EXIT
 host="$tmp/host"
 legacy="$host/root/dirextalk/dirextalk-message-server"
 mkdir -p "$legacy" "$host/etc/caddy" "$host/usr/bin" "$tmp/bin"
+
+# The simulated remote host requires Python 3. Git Bash can expose the Windows
+# Store python3 alias, which exists on PATH but is not executable. Resolve a
+# usable local interpreter once, then provide it through the fake remote PATH.
+python_bin=
+for candidate in "$(command -v python3 2>/dev/null || true)" "$(command -v python 2>/dev/null || true)"; do
+  [ -n "$candidate" ] || continue
+  if "$candidate" --version >/dev/null 2>&1; then
+    python_bin=$candidate
+    break
+  fi
+done
+[ -n "$python_bin" ] || {
+  echo "legacy adoption test requires a usable Python interpreter" >&2
+  exit 1
+}
+cat > "$tmp/bin/python3" <<EOF
+#!/usr/bin/env bash
+exec "$python_bin" "\$@"
+EOF
+chmod 0755 "$tmp/bin/python3"
+
+# This test simulates the remote Ubuntu host. Git Bash's bundled `install` can
+# reject NTFS permission changes even though the fixture only needs the files
+# and directory layout, so emulate the remote install forms used by adoption.
+cat > "$tmp/bin/install" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+directory=0
+mode=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -d) directory=1; shift ;;
+    -m) mode=$2; shift 2 ;;
+    --) shift; break ;;
+    -*) echo "unexpected install option: $1" >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+if [ "$directory" = 1 ]; then
+  for destination in "$@"; do
+    mkdir -p "$destination"
+    [ -z "$mode" ] || chmod "$mode" "$destination" 2>/dev/null || true
+  done
+  exit 0
+fi
+[ "$#" = 2 ] || { echo "unexpected install arguments" >&2; exit 2; }
+cp -- "$1" "$2"
+[ -z "$mode" ] || chmod "$mode" "$2" 2>/dev/null || true
+EOF
+chmod 0755 "$tmp/bin/install"
+
 cat > "$host/usr/bin/caddy" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail

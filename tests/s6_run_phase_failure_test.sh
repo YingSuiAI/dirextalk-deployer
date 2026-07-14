@@ -2,6 +2,11 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+mode=${1:-quick}
+case "$mode" in
+  quick|--extended) ;;
+  *) echo "usage: $0 [--extended]" >&2; exit 2 ;;
+esac
 # shellcheck disable=SC1090
 source "$ROOT/tests/lib/json_test.sh"
 # shellcheck disable=SC1090
@@ -47,15 +52,42 @@ _ensure_connect_wrapper() { :; }
 _create_connect_matrix_session() {
   local output=$4
   mkdir -p "$(dirname "$output")"
-  json_build object \
-    access_token=matrix-token \
-    device_id=DEVICE \
-    'user_id=@agent:service.example.test' \
-    homeserver=https://service.example.test > "$output"
+  printf '%s\n' '{"access_token":"matrix-token","device_id":"DEVICE","user_id":"@agent:service.example.test","homeserver":"https://service.example.test"}' > "$output"
 }
 _maybe_auto_install_agent() { return 0; }
 _print_connect_guidance() { :; }
 _print_mcp_guidance() { :; }
+
+# Most matrix cases assert phase propagation, state-set calls, and rendered
+# artifacts. Keep one success case on the real JSON helper below; use this
+# recorder for the remaining cases so the same delete-only contract does not
+# launch native Node once per state key on Windows Git Bash.
+use_json_mutate_recorder() {
+  JSON_MUTATE_CALLS=${1:?json mutation call log is required}
+  export JSON_MUTATE_CALLS
+  : > "$JSON_MUTATE_CALLS"
+  json_mutate() {
+    [ "$#" -eq 3 ] && [ "$1" = "${STATE_JSON:?}" ] && [ "$2" = delete ] || return 1
+    printf '%s\n' "$3" >> "$JSON_MUTATE_CALLS"
+  }
+  json_get() {
+    [ "$#" -eq 2 ] || return 1
+    case "$2" in
+      access_token) printf 'matrix-token\n' ;;
+      device_id) printf 'DEVICE\n' ;;
+      user_id) printf '@agent:service.example.test\n' ;;
+      homeserver) printf 'https://service.example.test\n' ;;
+      *) return 1 ;;
+    esac
+  }
+}
+
+restore_real_json_mutate() {
+  unset -f json_mutate
+  # shellcheck disable=SC1090
+  source "$ROOT/scripts/lib/json.sh"
+  unset JSON_MUTATE_CALLS
+}
 
 run_failure_case() {
   local name=$1 case_dir="$tmp/$1"
@@ -69,7 +101,7 @@ run_failure_case() {
   export PHASE_CALLS STATE_CALLS STATE_JSON
   : > "$PHASE_CALLS"
   : > "$STATE_CALLS"
-  json_build object > "$STATE_JSON"
+  printf '{}\n' > "$STATE_JSON"
 
   unset DIREXTALK_AGENT_PLATFORM DIREXTALK_CONNECT_AGENT DIREXTALK_CONNECT_AGENT_OPTIONS_TOML STATE_FAIL_KEY
   unset DIREXTALK_AGENT_INSTALL DIREXTALK_AGENT_INSTALL_MODE
@@ -82,6 +114,7 @@ run_failure_case() {
   unset -f _maybe_auto_install_mcp 2>/dev/null || true
   # shellcheck disable=SC1090
   source "$ROOT/scripts/lib/mcp-client-adapters.sh"
+  use_json_mutate_recorder "$case_dir/json-mutations.log"
 
   case "$name" in
     invalid_runtime)
@@ -129,6 +162,14 @@ run_failure_case() {
       STATE_FAIL_KEY=agent_node_id
       export STATE_FAIL_KEY
       ;;
+    json_mutation)
+      DIREXTALK_AGENT_PLATFORM=codex
+      json_mutate() {
+        [ "$#" -eq 3 ] && [ "$1" = "${STATE_JSON:?}" ] && [ "$2" = delete ] || return 1
+        [ "$3" = mcp_daemon_url ] && return 1
+        printf '%s\n' "$3" >> "$JSON_MUTATE_CALLS"
+      }
+      ;;
     *)
       echo "unknown case: $name" >&2
       return 2
@@ -156,11 +197,30 @@ run_failure_case() {
   fi
 }
 
-for failure_case in invalid_runtime invalid_agent invalid_options invalid_policy invalid_mode host_openclaw_override host_hermes_override mcp_enrollment artifact_path_directory connect_config_path_directory state_persistence; do
+failure_cases=(
+  invalid_runtime
+  mcp_enrollment
+  json_mutation
+)
+if [ "$mode" = --extended ]; then
+  failure_cases+=(
+    state_persistence
+    host_openclaw_override
+    artifact_path_directory
+    invalid_agent
+    invalid_options
+    invalid_policy
+    invalid_mode
+    host_hermes_override
+    connect_config_path_directory
+  )
+fi
+for failure_case in "${failure_cases[@]}"; do
   run_failure_case "$failure_case"
 done
 
 unset STATE_FAIL_KEY
+restore_real_json_mutate
 
 success_dir="$tmp/success"
 mkdir -p "$success_dir"
@@ -175,7 +235,15 @@ json_build object \
   mcp_json_config=/legacy/service/mcp/mcp-servers.json \
   mcp_codex_config=/legacy/service/mcp/codex.toml \
   mcp_cursor_config=/legacy/service/mcp/cursor.mcp.json \
-  mcp_daemon_install_command=legacy-command > "$STATE_JSON"
+  mcp_daemon_install_command=legacy-command \
+  mcp_daemon_status_command=legacy-status \
+  mcp_daemon_url=http://127.0.0.1:7331 \
+  mcp_daemon_proxy_command=legacy-proxy \
+  mcp_daemon_install_status=legacy-status \
+  mcp_npm_package=legacy-package \
+  mcp_command=legacy-command \
+  mcp_package_dir=/legacy/package \
+  mcp_env_file=/legacy/service/mcp/env > "$STATE_JSON"
 unset -f _maybe_auto_install_mcp 2>/dev/null || true
 # shellcheck disable=SC1090
 source "$ROOT/scripts/lib/mcp-client-adapters.sh"
@@ -206,7 +274,7 @@ if grep -q '^agent_env_file=' "$STATE_CALLS"; then
 fi
 ! grep -q '^mcp_env_file=' "$STATE_CALLS"
 grep -q '^mcp_capability=session$' "$STATE_CALLS"
-json_test_check "$STATE_JSON" "!('agent_env_file' in data) && !('mcp_env_file' in data) && !('mcp_json_config' in data) && !('mcp_codex_config' in data) && !('mcp_cursor_config' in data) && !('mcp_daemon_install_command' in data)"
+json_test_check "$STATE_JSON" "!('agent_env_file' in data) && !('mcp_env_file' in data) && !('mcp_json_config' in data) && !('mcp_codex_config' in data) && !('mcp_cursor_config' in data) && !('mcp_daemon_install_command' in data) && !('mcp_daemon_status_command' in data) && !('mcp_daemon_url' in data) && !('mcp_daemon_proxy_command' in data) && !('mcp_daemon_install_status' in data) && !('mcp_npm_package' in data) && !('mcp_command' in data) && !('mcp_package_dir' in data)"
 
 run_capability_case() {
   local name=$1 runtime=$2 agent=$3 expected_capability=$4 expect_connect_mcp=$5 expected_result=${6:-done}
@@ -220,7 +288,8 @@ run_capability_case() {
   dirextalk_test_assert_isolated_homes "$tmp"
   : > "$PHASE_CALLS"
   : > "$STATE_CALLS"
-  json_build object > "$STATE_JSON"
+  printf '{}\n' > "$STATE_JSON"
+  use_json_mutate_recorder "$case_dir/json-mutations.log"
 
   export DIREXTALK_AGENT_PLATFORM="$runtime"
   if [ -n "$agent" ]; then
@@ -276,15 +345,17 @@ run_capability_case() {
   fi
 }
 
-run_capability_case openclaw-acp openclaw "" host-managed false
-run_capability_case hermes-acp hermes "" host-managed false
-run_capability_case codex-iflow codex iflow host-managed false
-run_capability_case iflow-default iflow "" host-managed false
-run_capability_case codex-antigravity codex antigravity host-managed false
-run_capability_case codex-cursor codex cursor host-managed false
 run_capability_case codex-pi codex pi unsupported true failed
-run_capability_case codex-tmux codex tmux unsupported true failed
-run_capability_case codex-reasonix codex reasonix unsupported true failed
+if [ "$mode" = --extended ]; then
+  run_capability_case hermes-acp hermes "" host-managed false
+  run_capability_case openclaw-acp openclaw "" host-managed false
+  run_capability_case codex-iflow codex iflow host-managed false
+  run_capability_case iflow-default iflow "" host-managed false
+  run_capability_case codex-antigravity codex antigravity host-managed false
+  run_capability_case codex-cursor codex cursor host-managed false
+  run_capability_case codex-tmux codex tmux unsupported true failed
+  run_capability_case codex-reasonix codex reasonix unsupported true failed
+fi
 
 run_host_managed_auto_case() {
   local ready=$1 probe_exit=$2 expected_phase=$3 expected_status=$4 case_dir="$tmp/host-managed-auto-$1-$2" rc
@@ -301,7 +372,8 @@ run_host_managed_auto_case() {
   : > "$STATE_CALLS"
   : > "$CONNECT_START_CALLS"
   : > "$OPENCLAW_PROBE_CALLS"
-  json_build object > "$STATE_JSON"
+  printf '{}\n' > "$STATE_JSON"
+  use_json_mutate_recorder "$case_dir/json-mutations.log"
   mkdir -p "$case_dir/bin"
   cat > "$case_dir/bin/openclaw" <<'EOF'
 #!/usr/bin/env bash
@@ -362,8 +434,11 @@ EOF
 }
 
 run_host_managed_auto_case 0 0 waiting_user host_action_required
-run_host_managed_auto_case 1 0 done host_probe_passed
-run_host_managed_auto_case 1 1 waiting_user host_probe_failed
+if [ "$mode" = --extended ]; then
+  run_host_managed_auto_case 1 0 done host_probe_passed
+  run_host_managed_auto_case 1 1 waiting_user host_probe_failed
+fi
+restore_real_json_mutate
 
 find "$tmp" -type f -print | while IFS= read -r written; do
   case "$written" in
@@ -372,4 +447,4 @@ find "$tmp" -type f -print | while IFS= read -r written; do
   esac
 done
 
-echo "s6 run_phase failure propagation ok"
+echo "s6 run_phase failure propagation ok ($mode)"

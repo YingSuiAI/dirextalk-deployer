@@ -33,6 +33,7 @@ fi
 DIREXTALK_WORKDIR_WAS_SET=${DIREXTALK_WORKDIR+x}
 
 source "$HERE/lib/state.sh"
+source "$HERE/lib/git-bash.sh"
 source "$HERE/lib/aws.sh"
 source "$HERE/lib/domain.sh"
 source "$HERE/lib/operation_report.sh"
@@ -76,7 +77,7 @@ check_deps() {
       warn "See references/user-journey.md for the AWS CLI setup guide."
       ;;
   esac
-  warn "On Windows, use a working POSIX Bash environment such as Git Bash, MSYS2, Cygwin, or WSL. Do not assume C:\\Windows\\System32\\bash.exe is usable; verify with: bash -lc 'echo ok'."
+  warn "On Windows, install Git for Windows, open Git Bash, and rerun. PowerShell and WSL are not supported lifecycle entrypoints."
   fail "Install the missing dependencies and rerun."
 }
 
@@ -93,7 +94,7 @@ run_one_phase() {
 # Print current state summary.
 cmd_status_inventory() {
   local nodes state found=0 domain phase current instance service_dir
-  nodes="${DIREXTALK_HOME:-$HOME/.dirextalk}/nodes"
+  nodes="$(dirextalk_home)/nodes"
   if [ ! -d "$nodes" ]; then
     warn "No local service directory found: $nodes"
     warn "Set DOMAIN=<service domain> when running or inspecting a specific deployment."
@@ -247,11 +248,7 @@ status_stop_loss() {
     echo "no recorded cloud resources need destroy from this state"
   else
     echo "ask the agent to run destroy, or run:"
-    if [ "${DIREXTALK_LOCAL_PATH_STYLE:-}" = "windows" ] || [ -n "${DIREXTALK_WINDOWS_HOME:-}" ]; then
-      command=$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_render_env_command DOMAIN "${domain:-__DOMAIN__}" '.\scripts\destroy.ps1') || return 1
-    else
-      command=$(dirextalk_render_env_command DOMAIN "${domain:-__DOMAIN__}" bash "$HERE/destroy.sh") || return 1
-    fi
+    command=$(dirextalk_render_env_command DOMAIN "${domain:-__DOMAIN__}" bash "$HERE/destroy.sh") || return 1
     echo "  $command"
     echo "  Purchased domains, third-party DNS records, and retained hosted zones are not automatically removed."
   fi
@@ -336,11 +333,7 @@ ensure_delivery_runtime_checks() {
   fi
 
   warn "Final delivery blocked because runtime checks did not all pass: $(delivery_runtime_checks_summary)"
-  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
-    retry_command=$(dirextalk_render_env_command DOMAIN "$(state_get domain)" '.\scripts\orchestrate.ps1' verify runtime) || return 1
-  else
-    retry_command=$(dirextalk_render_env_command DOMAIN "$(state_get domain)" bash "$0" verify runtime) || return 1
-  fi
+  retry_command=$(dirextalk_render_env_command DOMAIN "$(state_get domain)" bash "$0" verify runtime) || return 1
   warn "Fix the failed check, then rerun: $retry_command"
   return 1
 }
@@ -419,11 +412,7 @@ print_delivery() {
   if report_path=$(operation_report_write new_deploy automated_gates_complete_user_confirmation_pending "$STATE_JSON" 2>/dev/null); then
     echo "  report       : $report_path"
   else
-    if [ "$(dirextalk_local_path_style)" = "windows" ]; then
-      report_command=$(dirextalk_render_local_command '.\scripts\orchestrate.ps1' report new_deploy) || return 1
-    else
-      report_command=$(dirextalk_render_local_command bash "$0" report new_deploy) || return 1
-    fi
+    report_command=$(dirextalk_render_local_command bash "$0" report new_deploy) || return 1
     echo "  report       : not written; run $report_command"
   fi
 }
@@ -1162,6 +1151,8 @@ cmd_verify() {
 if [ "${DIREXTALK_ORCHESTRATE_LIB_ONLY:-0}" = "1" ]; then
   return 0 2>/dev/null || exit 0
 fi
+
+dirextalk_require_git_bash_on_windows || exit 1
 
 # Entry point.
 case "${1:-run}" in

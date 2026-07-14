@@ -102,9 +102,9 @@ _cursor_agent_prepare_windows() {
   local latest
 
   if [ ! -f "$agent_root/agent.cmd" ]; then
-    warn "Cursor Agent CLI is missing at $agent_root/agent.cmd. Install it before S6 auto wiring:"
-    warn "  powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm 'https://cursor.com/install?win32=true' | iex\""
-    warn "Then run: & \"\$env:LOCALAPPDATA\\cursor-agent\\agent.cmd\" login"
+    warn "Cursor Agent CLI is missing at $agent_root/agent.cmd. Install it with Cursor's official Windows installer, then reopen Git Bash before S6 auto wiring."
+    warn 'Then run: cursor_agent=$(cygpath -m "$LOCALAPPDATA/cursor-agent/agent.cmd")'
+    warn '          "$cursor_agent" login'
     return 1
   fi
 

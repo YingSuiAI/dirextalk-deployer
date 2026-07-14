@@ -149,7 +149,7 @@ Defaults:
 
 - `DIREXTALK_CONNECT_AGENT` is the preferred explicit selector. It accepts every dirextalk-connect agent: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
 - `DIREXTALK_AGENT_PLATFORM=auto` detects the local agent runtime and maps it to a `dirextalk-connect` agent type only when it can identify one unambiguously. OpenClaw and Hermes map exclusively to the generic `acp` connect agent. OpenClaw uses the same optional `--profile`/`OPENCLAW_CONFIG_PATH` scope for ACP and its native MCP probe. Hermes uses `dirextalk-connect hermes-acp-adapter -- hermes -p <service-profile> acp` with the same service HERMES_HOME as its native MCP test.
-- `DIREXTALK_LOCAL_PATH_STYLE=windows` writes Windows-compatible `data_dir`, `work_dir`, config paths, and install commands. `scripts/orchestrate.ps1` sets this automatically. Linux, macOS, and WSL Bash runs should leave the default `posix` style. Windows Git Bash/MSYS2 users who run `scripts/orchestrate.sh` directly must set `DIREXTALK_LOCAL_PATH_STYLE=windows` when the local bridge is a Windows process.
+- `DIREXTALK_LOCAL_PATH_STYLE=windows` writes Windows-compatible `data_dir`, `work_dir`, config paths, and install commands. Git Bash detects Windows automatically and applies that style before invoking Windows-native Node.js or local agent processes; users should not set it manually. Linux and macOS retain the default `posix` style.
 - `DIREXTALK_CONNECT_AGENT_CMD` writes `cmd = "<path>"` into `[projects.agent.options]` for direct agents. It is rejected for OpenClaw/Hermes because their host-owned bridge shape must match the native MCP profile/probe. Agent-specific forms such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_CLAUDE_CODE_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, `DIREXTALK_OPENCODE_COMMAND`, `DIREXTALK_QODERCLI_COMMAND`, and `DIREXTALK_OPENCLAW_COMMAND` are accepted in their declared scope. For Hermes, `DIREXTALK_HERMES_COMMAND` selects the child Hermes executable behind the adapter, while `DIREXTALK_HERMES_ACP_ADAPTER_COMMAND` overrides the adapter command itself.
 - S6 writes `mode = "yolo"` by default under `[projects.agent.options]` for generated agent configs. A `mode` supplied through `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` or `DIREXTALK_CURSOR_MODE` overrides this default.
 - Windows Cursor wiring uses Cursor Agent CLI, not Cursor Desktop CLI. S6 looks for `%LOCALAPPDATA%\cursor-agent\agent.cmd` and writes that as `cmd`. Set `DIREXTALK_CURSOR_AGENT_COMMAND`, `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CONNECT_AGENT_CMD`, `DIREXTALK_CURSOR_MODE`, or `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` to override defaults. If `agent.cmd status` is not logged in, run `agent.cmd login` once and rerun the deployer; S6 will refresh config and reinstall the daemon.
@@ -161,7 +161,7 @@ Defaults:
 - `DIREXTALK_AGENT_INSTALL_MODE=recommended` maps every supported local runtime to `dirextalk-connect`.
 - Speech defaults to `DIREXTALK_SPEECH_PROVIDER=openai` and `DIREXTALK_SPEECH_LANGUAGE=zh`. Provider-specific keys are also accepted: `DIREXTALK_SPEECH_OPENAI_API_KEY` or `OPENAI_API_KEY`, `DIREXTALK_SPEECH_GROQ_API_KEY` or `GROQ_API_KEY`, `DIREXTALK_SPEECH_QWEN_API_KEY` or `DASHSCOPE_API_KEY`, and `DIREXTALK_SPEECH_GEMINI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`. Set `DIREXTALK_SPEECH_ENABLED=false` to suppress speech config generation even when a key exists.
 
-POSIX Bash manual command:
+Linux/macOS Bash manual command:
 
 ```bash
 npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk-connect@latest
@@ -170,16 +170,16 @@ npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon logs --service-name <service_id> -n 120
 ```
 
-Windows PowerShell manual command:
+Windows Git Bash manual command:
 
-```powershell
-$serviceDir = Join-Path $env:USERPROFILE '.dirextalk\nodes\<service_id>'
-$runtimeDir = Join-Path $serviceDir 'dirextalk-connect'
-$connect = Join-Path $runtimeDir 'dirextalk-connect.cmd'
-npm install --prefix $runtimeDir dirextalk-connect@latest
-& $connect daemon install --config (Join-Path $runtimeDir 'config.toml') --service-name '<service_id>' --force
-& $connect daemon status --service-name '<service_id>'
-& $connect daemon logs --service-name '<service_id>' -n 120
+```bash
+service_dir=$(cygpath -m "$HOME/.dirextalk/nodes/<service_id>")
+runtime_dir="$service_dir/dirextalk-connect"
+connect="$runtime_dir/dirextalk-connect.cmd"
+npm install --prefix "$runtime_dir" dirextalk-connect@latest
+"$connect" daemon install --config "$runtime_dir/config.toml" --service-name <service_id> --force
+"$connect" daemon status --service-name <service_id>
+"$connect" daemon logs --service-name <service_id> -n 120
 ```
 
 Source fallback:

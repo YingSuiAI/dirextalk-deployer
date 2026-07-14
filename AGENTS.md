@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`dirextalk-deployer` is a cross-platform deployment product and agent skill, not a Linux-only script collection. Maintain it as a portable orchestration layer that can be driven from Windows PowerShell, Git Bash/MSYS2, Linux, and macOS while deploying a Linux-based Dirextalk server.
+`dirextalk-deployer` is a cross-platform deployment product and agent skill, not a Linux-only script collection. Maintain it as a portable orchestration layer driven by Git Bash on Windows and Bash on Linux/macOS while deploying a Linux-based Dirextalk server.
 
 ## Product Scope
 
@@ -19,20 +19,18 @@
 Every deployer change must classify paths and commands by the platform that will consume them:
 
 - **Remote server paths** are Linux paths inside EC2/cloud-init/Docker, such as `/var/dirextalk-message-server`, `/var/dirextalk-message-server/p2p/bootstrap.json`, and `/etc/dirextalk-message-server`.
-- **Deployer execution paths** are used by the orchestration engine. Bash phase scripts can use POSIX paths, but PowerShell entrypoints must convert Windows paths before invoking Bash.
+- **Deployer execution paths** are used by the orchestration engine. On Git Bash, normalize paths before passing them to Windows-native Node.js or agent executables.
 - **Local bridge paths** are consumed by `dirextalk-connect` and the local agent process. On Windows they must be Windows-compatible paths, not `/mnt/c/...` or Git Bash-only `/c/...` paths.
 - **Documentation paths** must be portable examples using `$HOME`, `%USERPROFILE%`, `$env:USERPROFILE`, `<service_id>`, or `<domain>`, not machine-specific absolute paths.
 
 If a change writes a path into `state.json`, `credentials.json`, `dirextalk-connect/config.toml`, docs, or printed commands, verify which process will read that path and format it for that process. Do not generate an artifact without a current consumer.
-Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `scripts/lib/windows-paths.ps1` for PowerShell wrapper conversion. These helpers must lexically recognize `C:\Users\alice`, `C:/Users/alice`, `/mnt/c/Users/alice`, `/cygdrive/c/Users/alice`, and `/c/Users/alice` before calling shell-specific conversion tools.
+Use `scripts/lib/git-bash.sh`, `scripts/lib/local-paths.sh`, and `scripts/lib/paths.sh` for the Git Bash platform check and path conversion. These helpers must lexically recognize `C:\Users\alice`, `C:/Users/alice`, `/mnt/c/Users/alice`, `/cygdrive/c/Users/alice`, and `/c/Users/alice` before calling shell-specific conversion tools.
 
 ## Entrypoints
 
-- POSIX users run `bash scripts/orchestrate.sh`.
-- Windows users run `.\scripts\orchestrate.ps1` from PowerShell. The wrapper may use Git Bash internally for existing Bash phases, but it must set Windows-local wiring variables such as `DIREXTALK_LOCAL_PATH_STYLE=windows`.
-- POSIX users run `bash scripts/destroy.sh`; Windows users run `.\scripts\destroy.ps1`.
-- Do not tell Windows users to run WSL unless the user explicitly chooses WSL as the host runtime. WSL and Windows are different local runtimes with different home directories, PATH lookup, daemon process control, and agent executable paths.
-- Keep `scripts/orchestrate.sh` and `scripts/orchestrate.ps1` behaviorally aligned for status, deploy/resume, and local bridge wiring.
+- All supported hosts run `bash scripts/orchestrate.sh`, `bash scripts/destroy.sh`, `bash scripts/update.sh`, and `bash scripts/reset-app-data.sh`.
+- Windows users must install Git for Windows and run those commands from Git Bash. The skill CLI and lifecycle scripts require a `MINGW*` shell, `cygpath`, a `.windows.` Git version, and a matching Git for Windows installation root; otherwise they must tell the user to install Git for Windows and stop.
+- Do not tell Windows users to run PowerShell wrappers or WSL. Keep lifecycle commands, recovery output, documentation, and generated recommendations in Bash syntax.
 
 ## Script Architecture
 
@@ -43,7 +41,7 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 - Remote server commands may assume Linux because the EC2 host is Linux. Local commands must not assume Linux.
 - Version 1 cloud hosts may run Ubuntu 22.04 or 24.04 on x86_64. New cloud hosts still default to Ubuntu 24.04; bootstrap must verify the supported host set before downloading the pinned updater or starting Compose.
 - Pre-updater d1 adoption is never inferred by normal resume. Use only `scripts/adopt-legacy-node.sh` after its fixed v0.15.2/digest/Compose/systemd-Caddy dry run and exact confirmation; it must not pull or recreate the running image.
-- Use PowerShell for Windows-native process and path behavior when the consumer is Windows-local, especially `dirextalk-connect.exe`, local agent executables, Windows user profile paths, or npm global binaries.
+- Use Git Bash path normalization before Windows-native process and path behavior, especially for `dirextalk-connect.exe`, local agent executables, Windows user profile paths, or npm global binaries.
 - When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXTALK_CONNECT_AGENT`, `DIREXTALK_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, or `DIREXTALK_CLAUDE_CODE_COMMAND`. Host-owned OpenClaw/Hermes bridges reject generic child command/args overrides.
 - Do not make Codex, Claude, Gemini, Cursor, or any other provider the semantic default for an unknown runtime. Unknown or ambiguous detection should require an explicit `DIREXTALK_CONNECT_AGENT`.
 
@@ -71,35 +69,38 @@ Use `scripts/lib/local-paths.sh` for Bash-side local path conversion and `script
 
 - Keep `README.md`, `SKILL.md`, `AGENTS.md`, `agents/README.md`, `agents/openai.yaml`, and `references/*` synchronized when changing deployment contracts, local bridge behavior, install commands, or platform support.
 - Keep user-facing docs focused on operating the deployer. Put implementation details and edge cases in `references/`.
-- Document Windows and POSIX examples separately when commands differ.
-- Avoid saying "run bash" as the universal answer. Say which host runtime is intended and why.
+- Use the same Bash command examples on Windows, Linux, and macOS; explain that Windows runs them from Git Bash.
 
 ## Validation
 
-Run focused checks after every change:
+During one coherent delivery stage, use only the smallest immediate check that
+answers a real safety question. At the stage boundary, run this consolidated
+validation set:
 
 ```bash
-bash tests/skill_structure_test.sh
-bash tests/s6_wire_local_test.sh
-bash tests/local_paths_test.sh
-bash tests/render_userdata_remote_nodes_test.sh
-find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
 git diff --check
 npm test
 ```
 
-On Windows-specific changes, also run or inspect:
+`npm test` is the fast cross-platform gate. At the end of a coherent delivery
+stage—and before release, deployment, or a broad orchestration/updater change—
+run `npm run test:extended`; it covers the slower deployment state, migration,
+full S6, credential/DNS gate, and remote-Ubuntu fixture scenarios.
 
-```powershell
-.\scripts\orchestrate.ps1 status
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\orchestrate.ps1 status
-```
+CI runs `npm test` on all three supported platforms and runs the remaining
+extended-only suite once on Ubuntu for pull requests, default-branch pushes,
+and manual dispatches, without repeating the Ubuntu fast gate.
+
+On Windows-specific changes, run the Git Bash contract test and a direct status command from Git Bash.
 
 If a validation cannot be run on the current host, record the reason and run the closest targeted static check.
 
 ## Change Discipline
 
 - Prefer portable helpers over one-off fixes.
+- Do not repeat design/spec reviews for pure internal helpers or test fixtures;
+  one stage-end diff review is sufficient unless a public contract changes.
 - When fixing a platform bug, search for the same assumption elsewhere before stopping.
 - Keep unrelated deployment behavior untouched unless the same abstraction owns it.
 - Self-review diffs before committing.

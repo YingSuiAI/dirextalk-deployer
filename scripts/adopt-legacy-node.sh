@@ -4,6 +4,10 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1090
+source "$HERE/lib/git-bash.sh"
+# shellcheck disable=SC1090
+source "$HERE/lib/paths.sh"
+# shellcheck disable=SC1090
 source "$HERE/lib/state.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/server-release.sh"
@@ -12,12 +16,14 @@ source "$HERE/lib/updater-release.sh"
 # shellcheck disable=SC1090
 source "$HERE/phases/s3_provision.sh"
 
+dirextalk_require_git_bash_on_windows || exit 1
+
 dry_run=0
 if [ "${1:-}" = --dry-run ]; then
   dry_run=1
   shift
 fi
-STATE_JSON=${1:-$STATE_JSON}
+STATE_JSON=$(dirextalk_execution_path "${1:-$STATE_JSON}")
 DIREXTALK_WORKDIR=${STATE_JSON%/state.json}
 [ -f "$STATE_JSON" ] || { echo "state.json not found: $STATE_JSON" >&2; exit 1; }
 

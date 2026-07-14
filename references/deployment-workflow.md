@@ -109,13 +109,9 @@ From the repository root:
 DOMAIN=__DOMAIN__ bash scripts/destroy.sh
 ```
 
-On Windows, run destroy from PowerShell so local service paths stay in Windows
-form and the wrapper selects Git for Windows Bash instead of WSL:
-
-```powershell
-$env:DOMAIN = "__DOMAIN__"
-.\scripts\destroy.ps1
-```
+On Windows, install Git for Windows and run the same command from Git Bash.
+The deployer automatically records Windows-native local paths for Node.js and
+local agent processes.
 
 Destroy stops and uninstalls the local `dirextalk-connect` daemon only when `dirextalk-connect daemon status --service-name <service_id>` reports a `WorkDir` matching the current service directory, `~/.dirextalk/nodes/<service_id>/dirextalk-connect`. It then removes resources based on `cloud_provider`: Lightsail destroy releases the recorded static IP, deletes the Lightsail instance and key pair; EC2 destroy terminates the recorded EC2 instance, verifies the recorded EBS root volume, releases the Elastic IP, deletes the security group and key pair. Both paths remove Route53 records/zones created by the deployer, record AWS read-back results under `destroy.evidence`, and remove the corresponding local service directory under `~/.dirextalk/nodes/<service_id>`.
 
@@ -123,7 +119,7 @@ Destroy allows root AWS access-key identity when the operator explicitly chose
 root credentials. Use the same deployment profile for teardown that was used
 for provisioning.
 
-Use `DIREXTALK_KEEP_WORKDIR=1 DOMAIN=__DOMAIN__ bash scripts/destroy.sh` on POSIX, or set `$env:DIREXTALK_KEEP_WORKDIR = "1"` before `.\scripts\destroy.ps1` on Windows, only when preserving local state files for debugging; if used, report that the service directory still exists.
+Use `DIREXTALK_KEEP_WORKDIR=1 DOMAIN=__DOMAIN__ bash scripts/destroy.sh` only when preserving local state files for debugging; if used, report that the service directory still exists. This Bash command is the same on Windows Git Bash, Linux, and macOS.
 
 ## Run
 
@@ -328,7 +324,7 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
    ```bash
    bash scripts/destroy.sh
    ```
-   On Windows, use `.\scripts\destroy.ps1` from PowerShell.
+   On Windows, run the same command from Git Bash.
    Then start again with a fresh domain.
 
 3. **Force Caddy staging CA** (development only) — Set the environment

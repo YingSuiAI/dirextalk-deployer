@@ -13,14 +13,30 @@ Entrypoints:
 
 ```text
 scripts/orchestrate.sh
-scripts/orchestrate.ps1
 scripts/destroy.sh
-scripts/destroy.ps1
 scripts/update.sh
 scripts/reset-app-data.sh
 ```
 
 ## Freshness Gate
+
+On Windows, this check comes first, including before skill installation or
+refresh. Run it from Git Bash:
+
+```bash
+git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
+case "$(uname -s)" in
+  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  *) false ;;
+esac
+```
+
+Continue only when that command succeeds. It verifies that the current shell's
+`EXEPATH` is under the same Git for Windows installation as `git`, and rejects
+PowerShell, WSL, MSYS2, and Cygwin. Otherwise tell the user to install Git for
+Windows from `https://git-scm.com/download/win`, reopen Git Bash, and stop. The
+skill CLI repeats and strengthens this gate before `install`, `update`, or
+`refresh` can write a target.
 
 Before deployment, repair, verification, teardown, runtime wiring, or skill
 installation, make one freshness attempt:
@@ -54,14 +70,19 @@ Classify every path by consumer before writing it to `state.json`,
 - Documentation paths must be portable examples using `$HOME`, `%USERPROFILE%`,
   `$env:USERPROFILE`, `<service_id>`, or `<domain>`.
 
-Windows users run `.\scripts\orchestrate.ps1` and `.\scripts\destroy.ps1` from
-Windows PowerShell. These wrappers may use Git Bash internally, but must set
-`DIREXTALK_LOCAL_PATH_STYLE=windows`. POSIX users run `bash scripts/orchestrate.sh`
-and `bash scripts/destroy.sh`. Do not tell Windows users to use WSL unless they
-explicitly choose WSL as the host runtime.
-The Windows wrappers accept a working Git for Windows or MSYS2 Bash from
-`PATH`; `DIREXTALK_BASH_COMMAND` selects a custom executable. They reject the
-implicit Windows WSL aliases so local path ownership cannot change silently.
+Windows, Linux, and macOS users run the same Bash entrypoints. On Windows,
+Git for Windows is required: use the exact preflight above before any deployment
+action. If it fails, tell the user to install Git for Windows from
+`https://git-scm.com/download/win`, open **Git Bash**, and rerun; do not
+substitute PowerShell or WSL. Git Bash automatically writes native `C:/...`
+paths for Windows-native Node.js, `dirextalk-connect`, and agent processes. Run
+every lifecycle action from that same Git Bash session:
+
+```bash
+DOMAIN=<domain> bash scripts/orchestrate.sh
+```
+
+Do not manually mix PowerShell, WSL, and Git Bash for one local service.
 
 ## Prerequisites And Confirmation
 
@@ -422,18 +443,17 @@ or disable temporary credentials and rotate/remove root access keys if used.
 
 ## Update, Reset, And Destroy
 
-Use `scripts/update.sh` for image-only refresh. It preserves infrastructure,
+Use `bash scripts/update.sh` for image-only refresh. It preserves infrastructure,
 TLS storage, local credentials, confirmations, runtime checks, dirextalk-connect daemon
 state, and MCP artifacts unless verification proves credentials were regenerated.
 
-Use `scripts/reset-app-data.sh` only with `DIREXTALK_RESET_APP_DATA_CONFIRM=1`.
+Use `bash scripts/reset-app-data.sh` only with `DIREXTALK_RESET_APP_DATA_CONFIRM=1`.
 It preserves the cloud instance, fixed public IP/static IP or Elastic IP, DNS, and Caddy TLS storage, clears
 application data, clears old user-confirmation/runtime-check evidence, sets
 `connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped dirextalk-connect daemon. The follow-up
 orchestrate run regenerates credentials and MCP snippets.
 
-Destroy uses `scripts/destroy.sh` on POSIX and `.\scripts\destroy.ps1` on
-Windows PowerShell. Destroy uses the same AWS identity boundary as deployment.
+Destroy uses `bash scripts/destroy.sh` on every supported local host. Destroy uses the same AWS identity boundary as deployment.
 Root AWS access-key identity is allowed when the operator explicitly chose it.
 Destroy stops and uninstalls only the service-scoped daemon whose WorkDir
 matches `~/.dirextalk/nodes/<service_id>/dirextalk-connect`, then removes recorded AWS

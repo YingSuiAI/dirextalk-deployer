@@ -38,29 +38,30 @@ Portal owner discovery is served by message-server's dynamic
 
 ## Windows Runtime Pitfalls
 
-Do not hard-code a Git Bash path. Different machines install Git/MSYS/Cygwin in
-different locations, and WSL may or may not be configured.
+Windows deployment uses Git for Windows Git Bash only. From Git Bash, verify
+the installation before running a lifecycle command:
 
-Use a POSIX shell that actually runs the deployment scripts:
-
-```powershell
-Get-Command bash.exe -All
-bash -lc 'echo ok; command -v node; command -v aws; command -v ssh; command -v curl'
+```bash
+git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
+case "$(uname -s)" in
+  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  *) false ;;
+esac
+command -v node aws ssh curl
 ```
 
-If `bash` prints the Windows Subsystem for Linux installation prompt or exits
-before running `echo ok`, it is only the Windows WSL launcher and cannot run ops
-until a WSL distro is installed. Use another POSIX shell such as Git Bash, MSYS2,
-Cygwin, or a working WSL distro.
+If the Git Bash preflight fails, install Git for Windows from
+<https://git-scm.com/download/win>, reopen Git Bash, and stop. Do not substitute
+PowerShell, MSYS2, Cygwin, or WSL.
 
 The orchestrator uses the repository's Node.js JSON helper for local JSON
-processing, so the POSIX shell that runs deployment scripts must be able to run
-`node` against the same path style it passes to the scripts.
+processing, so Git Bash must be able to run `node` against the same path style
+it passes to the scripts.
 
-Prefer the `ssh` that belongs to the same POSIX environment used for
-`bash`. Windows OpenSSH can reject EC2 private keys because inherited ACLs make
-the `.pem` look too open, even when Git/MSYS OpenSSH accepts it. If using Windows
-OpenSSH directly, fix the key ACL instead of disabling SSH checks.
+Prefer the `ssh` that belongs to Git Bash. Windows OpenSSH can reject EC2
+private keys because inherited ACLs make the `.pem` look too open, even when
+Git Bash OpenSSH accepts it. If using a Windows-native tool for a separate
+diagnostic, fix the key ACL instead of disabling SSH checks.
 
 ## Local Polling Can Hang While The Server Is Healthy
 

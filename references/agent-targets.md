@@ -6,13 +6,28 @@ Use this file when installing or updating this skill and when reviewing S6 local
 
 Prefer the npm-managed global install for normal users. Install the versioned package, then let the CLI copy the skill bundle into the selected runtime's host-level skill directory:
 
+On Windows, first open Git Bash and run this preflight before npm installs the
+package:
+
+```bash
+git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
+case "$(uname -s)" in
+  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  *) false ;;
+esac
+```
+
+If it fails, install Git for Windows from <https://git-scm.com/download/win>,
+reopen Git Bash, and stop. This rejects WSL, PowerShell, MSYS2, and Cygwin.
+
 Do not use a generic "install skills <GitHub URL>" instruction for normal users. That can invoke a host's GitHub skill installer instead of the npm-managed installer. A short user prompt should give the repository URL for reading only and point the agent back to this npm install rule:
 
 ```text
 Read https://github.com/YingSuiAI/dirextalk-deployer README and follow its npm install rule, then deploy Dirextalk with domain __DOMAIN__.
 ```
 
-POSIX shells:
+All supported hosts use Bash. On Windows, install Git for Windows, open Git
+Bash, and run the same commands:
 
 ```bash
 npm install -g dirextalk-deployer@latest
@@ -20,13 +35,6 @@ dirextalk-deployer skill install --agent codex
 dirextalk-deployer skill update --agent codex
 ```
 
-Windows PowerShell:
-
-```powershell
-npm install -g dirextalk-deployer@latest
-dirextalk-deployer skill install --agent codex
-dirextalk-deployer skill update --agent codex
-```
 
 Use `--scope project --project PROJECT_ROOT` only when the user explicitly asks for a repository-local install. Use a Git clone only for deployer development or local patching, not as the normal end-user installation path. The npm installer writes `.dirextalk-skill-install.json` and refuses to overwrite unmanaged existing target directories unless `--force` is passed.
 
@@ -162,5 +170,5 @@ With `recommend` or `skip`, output generation completes but
 
 Prefer `DIREXTALK_CONNECT_AGENT=<agent>` to choose the local agent that `dirextalk-connect` should run. Keep `DIREXTALK_AGENT_PLATFORM=<runtime>` for auto-detection overrides and legacy host-runtime naming. Use `DIREXTALK_AGENT_INSTALL_MODE=dirextalk-connect` only when overriding the default `recommended` mapping explicitly.
 Use `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXTALK_CONNECT_AGENT_CMD` is not enough.
-For OpenCode, use `DIREXTALK_OPENCODE_COMMAND` when PATH lookup does not find the right CLI. The Windows wrapper also checks the global `opencode-ai` npm package under the npm global prefix.
+For OpenCode, use `DIREXTALK_OPENCODE_COMMAND` when PATH lookup does not find the right CLI. On Windows, Git Bash also checks the global `opencode-ai` npm package under the npm global prefix.
 For OpenClaw Gateway ACP, S6 defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-discover the Gateway from `~/.openclaw/openclaw.json`. To force an explicit Gateway, complete OpenClaw pairing first, then set all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime. S6 writes `["acp", "--url", <url>, "--token-file", <local path>, "--session", <session>]` and converts the token-file with `DIREXTALK_LOCAL_PATH_STYLE`. Fully replaceable OpenClaw args are rejected so the host ACP shape cannot be bypassed. `DIREXTALK_HERMES_ACP_ARGS_TOML` supplies child Hermes args and keeps the Dirextalk adapter/profile prefix.

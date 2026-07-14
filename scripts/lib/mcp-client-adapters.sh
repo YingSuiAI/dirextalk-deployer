@@ -142,11 +142,6 @@ _mcp_doctor_command() {
   local domain=${service_url#https://}
   domain=${domain#http://}
   domain=${domain%%/*}
-  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
-    dirextalk_render_env_command DOMAIN "$domain" '.\scripts\orchestrate.ps1' verify mcp_doctor
-    printf '\n'
-    return 0
-  fi
   if [ -n "$domain" ]; then
     dirextalk_render_env_command DOMAIN "$domain" bash scripts/orchestrate.sh verify mcp_doctor
     printf '\n'

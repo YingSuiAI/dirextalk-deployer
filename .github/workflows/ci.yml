@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,11 +27,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Verify tracked text uses LF
-        shell: bash
-        run: bash tests/tracked_text_lf_test.sh
-
-      - name: Run deployer tests
+      - name: Run fast deployer tests
         shell: bash
         run: npm test
 
@@ -38,14 +35,22 @@ jobs:
         shell: bash
         run: find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
-      - name: Check npm package contents
-        shell: bash
-        run: npm pack --dry-run
+  ubuntu-extended:
+    name: Ubuntu extended integration
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ubuntu-latest
 
-      - name: Run native PowerShell tests
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          & .\tests\windows_path_wrappers_test.ps1
-          & .\tests\windows_recommendation_test.ps1
-          & .\tests\windows_orchestrate_status_smoke_test.ps1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run extended deployer tests
+        shell: bash
+        run: npm run test:extended-only
+
+      - name: Check Bash syntax
+        shell: bash
+        run: find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n

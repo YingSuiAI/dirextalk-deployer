@@ -6,7 +6,7 @@ This skill is runtime-neutral. Claude, Codex/OpenAI, Gemini, Cursor, Copilot, Op
 SKILL.md
 ```
 
-When an agent runtime supports skill metadata, point it at `SKILL.md`. POSIX hosts use `scripts/orchestrate.sh`; Windows hosts use `scripts/orchestrate.ps1`. Read `references/agent-targets.md` before installing this skill or wiring the local `dirextalk-connect` bridge. S6 normally records capability from the effective connect agent and never falls back to generic MCP JSON. Antigravity/Cursor/iFlow and every detected OpenClaw/Hermes host are host-managed; Devin/Pi/Reasonix/tmux are unsupported and fail closed. OpenClaw and Hermes require native secret-free probes before bridge startup.
+When an agent runtime supports skill metadata, point it at `SKILL.md`. Every supported host uses `bash scripts/orchestrate.sh`; Windows hosts must install Git for Windows and run it from Git Bash. Read `references/agent-targets.md` before installing this skill or wiring the local `dirextalk-connect` bridge. S6 normally records capability from the effective connect agent and never falls back to generic MCP JSON. Antigravity/Cursor/iFlow and every detected OpenClaw/Hermes host are host-managed; Devin/Pi/Reasonix/tmux are unsupported and fail closed. OpenClaw and Hermes require native secret-free probes before bridge startup.
 
 Recognition keywords:
 
@@ -21,6 +21,6 @@ Recognition keywords:
 Required capabilities:
 
 - Read local files.
-- Run POSIX shell commands on Linux/macOS, or native PowerShell plus Git Bash on Windows.
+- Run Bash commands on Linux/macOS, or Git Bash on Windows. Before a Windows lifecycle or skill-install action, use the matching-install-root `MINGW*`/`cygpath`/`.windows.` Git preflight in `references/agent-targets.md`; if it fails, tell the user to install Git for Windows and stop.
 - Use `aws`, `ssh`, `curl`, and Node.js for `scripts/json.mjs` after the user approves any missing installs. Go and SCP are not deployment prerequisites; the Ubuntu host downloads the pinned independent updater Release itself.
 - Preserve secrets outside the repository.

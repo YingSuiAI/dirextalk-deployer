@@ -15,12 +15,15 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1090
 source "$HERE/lib/paths.sh"
 # shellcheck disable=SC1090
+source "$HERE/lib/git-bash.sh"
+# shellcheck disable=SC1090
 source "$HERE/lib/aws.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/operation_report.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/local-paths.sh"
 DIREXTALK_WORKDIR=$(dirextalk_default_workdir)
+dirextalk_require_git_bash_on_windows || exit 1
 
 log() { echo -e "\033[33m[destroy]\033[0m $*"; }
 
@@ -216,8 +219,9 @@ if [ -z "$SRC" ]; then
   else echo "state.json not found; set DOMAIN=<service domain> or DIREXTALK_WORKDIR=<service dir> to destroy a specific deployment."; exit 1
   fi
 fi
+SRC=$(dirextalk_execution_path "$SRC")
 [ -f "$SRC" ] || { echo "$SRC not found."; exit 1; }
-DIREXTALK_ROOT=$(cd "${DIREXTALK_HOME:-$HOME/.dirextalk}" 2>/dev/null && pwd -P || printf '%s' "${DIREXTALK_HOME:-$HOME/.dirextalk}")
+DIREXTALK_ROOT=$(cd "$(dirextalk_home)" 2>/dev/null && pwd -P || dirextalk_home)
 
 REGION=$(json_get "$SRC" region)
 CLOUD_PROVIDER=$(json_get "$SRC" cloud_provider)

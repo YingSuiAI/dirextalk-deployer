@@ -1,6 +1,6 @@
 {
   "name": "dirextalk-deployer",
-  "version": "0.1.34",
+  "version": "0.1.35",
   "description": "Versioned Dirextalk deployer agent skill and portable deployment orchestration tools.",
   "type": "module",
   "bin": {
@@ -17,7 +17,9 @@
     "scripts/"
   ],
   "scripts": {
-    "test": "bash tests/lib/run_isolated.sh bash tests/npm_test_suite.sh"
+    "test": "bash tests/lib/run_isolated.sh bash tests/npm_test_suite.sh",
+    "test:extended": "bash tests/lib/run_isolated.sh bash tests/npm_test_suite.sh extended",
+    "test:extended-only": "bash tests/lib/run_isolated.sh bash tests/npm_test_suite.sh extended-only"
   },
   "engines": {
     "node": ">=18"

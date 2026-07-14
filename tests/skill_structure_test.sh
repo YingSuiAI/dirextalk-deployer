@@ -15,16 +15,14 @@ required=(
   agents/openai.yaml
   bin/dirextalk-deployer.mjs
   scripts/orchestrate.sh
-  scripts/orchestrate.ps1
   scripts/aws-credentials.sh
   scripts/destroy.sh
-  scripts/destroy.ps1
   scripts/json.mjs
   scripts/lib/atomic-write.sh
   scripts/update.sh
   scripts/reset-app-data.sh
   scripts/pricing-estimate.sh
-  scripts/lib/windows-paths.ps1
+  scripts/lib/git-bash.sh
   scripts/lib/ops.sh
   scripts/lib/operation_report.sh
   scripts/lib/json.sh
@@ -36,7 +34,8 @@ required=(
   tests/json_helper_test.sh
   tests/atomic_write_test.sh
   tests/lib/isolated_home.sh
-  tests/lib/isolated-homes.ps1
+  tests/lib/linux-flock.sh
+  tests/lib/linux-install.sh
   tests/lib/run_isolated.sh
   tests/npm_test_suite.sh
   tests/lib/json_test.sh
@@ -44,10 +43,7 @@ required=(
   tests/npm_skill_distribution_test.sh
   tests/private_file_permissions_test.sh
   tests/local_paths_test.sh
-  tests/windows_path_wrappers_test.sh
-  tests/windows_path_wrappers_test.ps1
-  tests/windows_recommendation_test.ps1
-  tests/windows_orchestrate_status_smoke_test.ps1
+  tests/git_bash_windows_contract_test.sh
   tests/tracked_text_lf_test.sh
   tests/s6_run_phase_failure_test.sh
   tests/orchestrate_status_recovery_test.sh
@@ -55,7 +51,6 @@ required=(
   tests/domain_dns_mode_detection_test.sh
   tests/update_reset_ops_test.sh
   tests/aws_credentials_test.sh
-  tests/connect_daemon_runtime_check_test.sh
   tests/pricing_estimate_test.sh
   tests/region_recommendation_test.sh
   tests/orchestrate_region_env_test.sh
@@ -65,16 +60,11 @@ required=(
   tests/lightsail_static_ip_quota_test.sh
   tests/destroy_lightsail_test.sh
   tests/route53_zone_required_test.sh
-  tests/route53_overwrite_guard_test.sh
   tests/destroy_root_identity_test.sh
-  tests/destroy_route53_zone_test.sh
   tests/domain_authoritative_dns_test.sh
-  tests/mcp_doctor_runtime_check_test.sh
-  tests/mcp_smoke_runtime_check_test.sh
   tests/mcp_tools_runtime_check_test.sh
   tests/s7_http_mcp_acceptance_test.sh
   tests/root_volume_size_test.sh
-  tests/root_volume_tracking_test.sh
   tests/runtime_summary_check_test.sh
   tests/user_confirmation_gates_test.sh
   references/agent-targets.md
@@ -106,12 +96,58 @@ grep -q 'dirextalk-deployer' package.json
 grep -q 'bin/dirextalk-deployer.mjs' package.json
 grep -q 'compact agent-facing entrypoint' AGENTS.md
 grep -q 'scripts/lib/local-paths.sh' AGENTS.md
-grep -q 'scripts/lib/windows-paths.ps1' AGENTS.md
+grep -q 'scripts/lib/git-bash.sh' AGENTS.md
 grep -q 'scripts/json.mjs' AGENTS.md
 grep -q 'dirextalk-connect@latest' AGENTS.md
 grep -q 'HTTP MCP endpoint' AGENTS.md
-grep -q 'bash tests/local_paths_test.sh' AGENTS.md
 grep -q 'npm test' AGENTS.md
+grep -q 'npm run test:extended' AGENTS.md
+grep -q '"test:extended"' package.json
+grep -q '"test:extended-only"' package.json
+grep -q '^quick_tests=(' tests/npm_test_suite.sh
+grep -q '^extended_tests=(' tests/npm_test_suite.sh
+grep -q 'extended-only' tests/npm_test_suite.sh
+grep -q 'ubuntu-extended:' .github/workflows/ci.yml
+quick_suite=$(sed -n '/^quick_tests=(/,/^)/p' tests/npm_test_suite.sh)
+extended_suite=$(sed -n '/^extended_tests=(/,/^)/p' tests/npm_test_suite.sh)
+for test_file in \
+  tests/git_bash_windows_contract_test.sh \
+  tests/local_paths_test.sh \
+  tests/region_recommendation_test.sh \
+  tests/updater_atomic_install_test.sh
+do
+  case "$quick_suite" in *"$test_file"*) ;; *) echo "quick suite must include $test_file" >&2; exit 1 ;; esac
+done
+for test_file in \
+  tests/aws_credentials_test.sh \
+  tests/domain_authoritative_dns_test.sh \
+  tests/route53_zone_required_test.sh \
+  tests/s5_init_tokens_test.sh \
+  tests/s6_run_phase_failure_test.sh \
+  tests/user_confirmation_gates_test.sh \
+  tests/destroy_local_bridge_test.sh \
+  tests/destroy_root_identity_test.sh \
+  tests/pricing_estimate_test.sh \
+  tests/update_reset_ops_test.sh \
+  tests/server_release_test.sh \
+  tests/destroy_lightsail_test.sh
+do
+  case "$extended_suite" in *"$test_file"*) ;; *) echo "extended suite must include $test_file" >&2; exit 1 ;; esac
+done
+case "$quick_suite" in
+  *tests/server_release_test.sh*|*tests/destroy_lightsail_test.sh*)
+    echo "release resolution and destroy integration must remain extended-only" >&2
+    exit 1
+    ;;
+esac
+for retired_test in \
+  tests/phase_timeout_test.sh \
+  tests/root_volume_tracking_test.sh \
+  tests/route53_overwrite_guard_test.sh \
+  tests/destroy_route53_zone_test.sh
+do
+  [ ! -e "$retired_test" ] || { echo "redundant test should be merged, not retained: $retired_test" >&2; exit 1; }
+done
 grep -q 'scripts/json.mjs' agents/README.md
 grep -q 'dirextalk-connect' agents/README.md
 grep -q 'dirextalk-connect' agents/openai.yaml
@@ -121,7 +157,13 @@ grep -q 'connect_install_status' scripts/phases/s6_wire_local.sh
 grep -q 'connect_install_status' scripts/orchestrate.sh
 grep -q 'skill install --agent' README.md
 grep -q 'skill refresh --agent' SKILL.md
-grep -q 'Windows PowerShell' README.md
+grep -q 'git --version' SKILL.md
+grep -q 'Git for Windows' SKILL.md
+grep -q 'dirextalk_require_git_bash_on_windows' scripts/orchestrate.sh
+for entrypoint in scripts/orchestrate.sh scripts/destroy.sh scripts/update.sh scripts/reset-app-data.sh scripts/aws-credentials.sh scripts/pricing-estimate.sh scripts/adopt-legacy-node.sh; do
+  grep -q 'dirextalk_require_git_bash_on_windows' "$entrypoint"
+done
+grep -q 'Git Bash' README.md
 grep -q '.dirextalk-skill-install.json' references/agent-targets.md
 grep -q 'mcp_agent_token' scripts/phases/s6_wire_local.sh
 grep -q 'agent_room_id' scripts/phases/s6_wire_local.sh
@@ -158,11 +200,15 @@ grep -q 'mcp-client-adapters.sh' scripts/phases/s6_wire_local.sh
 grep -q 'PLATFORMS_INCLUDE=matrix' scripts/phases/s6_wire_local.sh
 grep -q 'YingSuiAI/dirextalk-connect.git' scripts/phases/s6_wire_local.sh
 grep -q 'DIREXTALK_CONNECT_AGENT' scripts/phases/s6_wire_local.sh
-grep -q 'orchestrate.ps1' README.md
-grep -q 'destroy.ps1' README.md
-grep -q 'destroy.ps1' SKILL.md
-grep -q 'destroy.ps1' references/deployment-workflow.md
-grep -q 'destroy.ps1' references/windows-deployment-notes.md
+if rg --files -g '*.ps1' | grep -q .; then
+  echo "Git-Bash-only deployer must not keep PowerShell wrapper files" >&2
+  exit 1
+fi
+if rg -n '\.ps1' README.md SKILL.md AGENTS.md agents references scripts .github package.json >/dev/null; then
+  echo "current lifecycle docs and scripts must not reference PowerShell wrappers" >&2
+  rg -n '\.ps1' README.md SKILL.md AGENTS.md agents references scripts .github package.json >&2
+  exit 1
+fi
 grep -q 'dirextalk-connect' SKILL.md
 grep -q 'mcp_config_dir' SKILL.md
 if grep -R '@dirextalk/agent-plugins' SKILL.md scripts README.md references >/dev/null; then

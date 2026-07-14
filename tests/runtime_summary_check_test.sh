@@ -17,6 +17,12 @@ mkdir -p "$fakebin"
 cat > "$fakebin/dirextalk-connect" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "logs" ]; then
+  [ "${3:-}" = "--service-name" ]
+  [ "${4:-}" = "runtime-summary.example.test" ]
+  printf '%s\n' "${CONNECT_LOG_OUTPUT:-}"
+  exit 0
+fi
 [ "${1:-}" = "daemon" ]
 [ "${2:-}" = "status" ]
 [ "${3:-}" = "--service-name" ]
@@ -39,11 +45,18 @@ body_path=""
 write_code=0
 args="$*"
 secret_headers=""
+direct_headers=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) body_path=$2; shift 2 ;;
     -w) write_code=1; shift 2 ;;
-    -H) case "${2:-}" in @*) secret_headers=$(cat "${2#@}") ;; esac; shift 2 ;;
+    -H)
+      case "${2:-}" in
+        @*) secret_headers=$(cat "${2#@}") ;;
+        *) direct_headers+="${2:-}"$'\n' ;;
+      esac
+      shift 2
+      ;;
     *) shift ;;
   esac
 done
@@ -57,6 +70,13 @@ case "$args" in
         exit 1
         ;;
     esac
+    case "$direct_headers" in
+      *"MCP-Protocol-Version: 2025-06-18"*) ;;
+      *)
+        echo "missing MCP protocol version header" >&2
+        exit 1
+        ;;
+    esac
     case "$args" in *AGENT_TOKEN_RUNTIME*) echo "token leaked into curl argv" >&2; exit 1 ;; esac
     case "$args" in
       *'"method":"initialize"'*)
@@ -65,7 +85,7 @@ case "$args" in
       *'"method":"tools/list"'*)
         payload='{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"search_rooms"},{"name":"send_message"},{"name":"list_messages"}]}}'
         ;;
-      *'"method":"tools/call"'*'"name":"dirextalk_messages_list"'*)
+      *'"method":"tools/call"'*'"name":"dirextalk_messages_list"'*'"room_id":"!agent:runtime-summary.example.test"'*)
         payload='{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"[]"}],"isError":false}}'
         ;;
       *)
@@ -120,10 +140,21 @@ verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CONNECT_W
 printf '%s\n' "$verify_output" | grep -q 'verified runtime checks: passed'
 
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'passed' && data.runtime_checks.summary.checks.mcp_doctor === 'passed' && data.runtime_checks.summary.checks.mcp_tools === 'passed' && data.runtime_checks.summary.checks.mcp_smoke === 'passed' && !data.user_confirmations?.agent_mcp_runtime"
+json_test_check "$state" "data.runtime_checks.mcp_doctor.protocol_version === '2025-06-18' && data.runtime_checks.mcp_doctor.server_name === 'dirextalk-message-server' && data.runtime_checks.mcp_doctor.tools_capable === true && data.runtime_checks.mcp_smoke.action === 'tools/call' && data.runtime_checks.mcp_smoke.room_id === '!agent:runtime-summary.example.test' && data.runtime_checks.mcp_smoke.response_content_type === 'array'"
 
 report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)
 json_test_check "$report_path" "data.runtime_checks.summary.status === 'passed'"
+
+set +e
+DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" CONNECT_LOG_OUTPUT='ACP error (ACP_SESSION_INIT_FAILED): session metadata is missing.' bash "$ROOT/scripts/orchestrate.sh" verify connect_daemon > "$tmp/runtime-agent-error.out" 2>&1
+agent_error_rc=$?
+set -e
+[ "$agent_error_rc" -ne 0 ] || {
+  echo "connect daemon verification must fail when daemon logs report an ACP agent error" >&2
+  exit 1
+}
+json_test_check "$state" "data.runtime_checks.connect_daemon.status === 'failed' && data.runtime_checks.connect_daemon.agent_error.includes('ACP_SESSION_INIT_FAILED')"
 
 set +e
 DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime > "$tmp/runtime-fail.out" 2>&1

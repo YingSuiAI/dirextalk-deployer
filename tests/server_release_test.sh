@@ -69,6 +69,9 @@ exit 98
 EOF
 chmod 0755 "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH"
+# Git Bash can resolve a native node.exe before an extensionless shim on PATH.
+# Pin the JSON/runtime selector to the shim so this test is fully offline.
+export NODE="$tmp/bin/node"
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/server-release.sh"

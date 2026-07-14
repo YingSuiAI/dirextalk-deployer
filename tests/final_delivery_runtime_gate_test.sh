@@ -135,8 +135,8 @@ set -e
   exit 1
 }
 grep -q 'Final delivery blocked because runtime checks did not all pass' "$tmp/fail.out"
-grep -Fq "\$env:DOMAIN = 'final-delivery.example.test'; & '.\\scripts\\orchestrate.ps1' 'verify' 'runtime'" "$tmp/fail.out" || {
-  echo "Windows delivery recovery must render a PowerShell verify command" >&2
+grep -Fq 'DOMAIN=final-delivery.example.test bash' "$tmp/fail.out" || {
+  echo "Windows delivery recovery must render a Git Bash verify command" >&2
   exit 1
 }
 if grep -q 'Automated Deployment Gates Passed' "$tmp/fail.out"; then
@@ -149,14 +149,12 @@ pass_output=$(DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_WORKDIR="$service_dir
 printf '%s\n' "$pass_output" | grep -q 'Automated Deployment Gates Passed'
 connect_windows=$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_normalize_local_path "$connect_binary")
 keyfile_windows=$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_normalize_local_path "$keyfile")
-connect_quoted=$(printf '%s' "$connect_windows" | sed "s/'/''/g")
-keyfile_quoted=$(printf '%s' "$keyfile_windows" | sed "s/'/''/g")
-printf '%s\n' "$pass_output" | grep -Fq "  daemon       : & '$connect_quoted' 'daemon' 'status' '--service-name' 'final-delivery.example.test'" || {
-  echo "Windows final delivery must render the daemon status command with PowerShell quoting" >&2
+printf '%s\n' "$pass_output" | grep -Eq "  daemon       : .*daemon status --service-name final-delivery\.example\.test" || {
+  echo "Windows final delivery must render the daemon status command with Git Bash quoting" >&2
   exit 1
 }
-printf '%s\n' "$pass_output" | grep -Fq "  SSH          : & 'ssh' '-i' '$keyfile_quoted' 'ubuntu@203.0.113.21'" || {
-  echo "Windows final delivery must render the SSH command with PowerShell quoting" >&2
+printf '%s\n' "$pass_output" | grep -Eq "  SSH          : ssh -i .* ubuntu@203\.0\.113\.21" || {
+  echo "Windows final delivery must render the SSH command with Git Bash quoting" >&2
   exit 1
 }
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.connect_daemon.status === 'passed' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"

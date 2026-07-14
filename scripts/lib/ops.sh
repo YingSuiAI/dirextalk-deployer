@@ -3,9 +3,9 @@
 
 OPS_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
-source "$OPS_LIB_DIR/json.sh"
+source "$OPS_LIB_DIR/paths.sh"
 # shellcheck disable=SC1090
-source "$OPS_LIB_DIR/local-paths.sh"
+source "$OPS_LIB_DIR/json.sh"
 
 ops_desired_state_helper_payload() {
   base64 < "$OPS_LIB_DIR/../updater/set-desired-state.sh" | tr -d '\r\n'
@@ -32,7 +32,7 @@ EOF
 ops_state_path() {
   local explicit=${1:-}
   if [ -n "$explicit" ]; then
-    printf '%s\n' "$explicit"
+    dirextalk_execution_path "$explicit"
     return 0
   fi
   printf '%s/state.json\n' "$(dirextalk_default_workdir)"

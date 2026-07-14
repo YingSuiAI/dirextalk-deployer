@@ -4,7 +4,11 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1090
+source "$HERE/lib/git-bash.sh"
+# shellcheck disable=SC1090
 source "$HERE/lib/aws.sh"
+
+dirextalk_require_git_bash_on_windows || exit 1
 
 usage() {
   cat >&2 <<'EOF'

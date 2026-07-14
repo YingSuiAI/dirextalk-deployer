@@ -3,6 +3,38 @@
 
 JSON_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 JSON_HELPER="$JSON_LIB_DIR/../json.mjs"
+# shellcheck disable=SC1090
+source "$JSON_LIB_DIR/local-paths.sh"
+
+json_native_file_path() {
+  local file=${1:-} uname_s
+  uname_s=$(uname -s 2>/dev/null || printf unknown)
+  case "$uname_s" in
+    *MINGW*|*MSYS*|*CYGWIN*) dirextalk_to_windows_local_path "$file" ;;
+    *) printf '%s\n' "$file" ;;
+  esac
+}
+
+json_normalize_file_arguments() {
+  local command=${1:-}
+  shift || true
+  case "$command" in
+    get|assert|check|entries|length|type|mutate|valid)
+      [ "$#" -gt 0 ] || return 0
+      set -- "$(json_native_file_path "$1")" "${@:2}"
+      ;;
+    operation-report)
+      [ "$#" -ge 3 ] || return 0
+      set -- "$1" "$2" "$(json_native_file_path "$3")" "${@:4}"
+      ;;
+    build)
+      if [ "${1:-}" = "bootstrap-normalized" ] && [ "$#" -ge 2 ]; then
+        set -- "$1" "$(json_native_file_path "$2")" "${@:3}"
+      fi
+      ;;
+  esac
+  printf '%s\0' "$command" "$@"
+}
 
 json_node() {
   local uname_s node_path
@@ -31,7 +63,7 @@ json_node() {
           return 0
         fi
       done
-      echo "POSIX node is required for JSON processing in Linux/WSL; Windows node.exe cannot read POSIX paths." >&2
+      echo "POSIX node is required for JSON processing on Linux; Windows node.exe cannot read POSIX paths." >&2
       return 1
       ;;
   esac
@@ -44,11 +76,12 @@ json_node() {
 }
 
 json_cli() {
-  local node_bin
+  local node_bin command
   node_bin=$(json_node) || return 1
-  case "${1:-}" in
+  command=${1:-}
+  case "$command" in
     stdin-*) "$node_bin" "$JSON_HELPER" "$@" ;;
-    *) printf '%s\0' "$@" | "$node_bin" "$JSON_HELPER" --args0 ;;
+    *) json_normalize_file_arguments "$@" | "$node_bin" "$JSON_HELPER" --args0 ;;
   esac
 }
 

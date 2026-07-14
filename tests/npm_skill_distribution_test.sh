@@ -33,7 +33,43 @@ export GEMINI_HOME="$tmp/home2/.gemini"
 dirextalk_test_assert_isolated_homes "$DIREXTALK_TEST_ROOT"
 
 NODE_BIN=$(json_node)
-export PATH="$(dirname "$NODE_BIN"):$PATH"
+NODE_DIR=$(dirname "$NODE_BIN")
+case "$(uname -s 2>/dev/null || printf unknown)" in
+  *MINGW*|*MSYS*|*CYGWIN*) NODE_DIR=$(cygpath -u "$NODE_DIR") ;;
+esac
+export PATH="$NODE_DIR:$PATH"
+
+# A Windows user must not create a second skill copy from WSL. Exercise every
+# lifecycle command in dry-run mode before any target is written.
+for skill_command in install update refresh; do
+  wsl_home="$tmp/wsl-$skill_command"
+  if WSL_INTEROP=1 "$NODE_BIN" bin/dirextalk-deployer.mjs skill "$skill_command" --agent codex --home "$wsl_home" --dry-run >"$tmp/wsl-$skill_command.out" 2>"$tmp/wsl-$skill_command.err"; then
+    echo "skill $skill_command must reject a WSL environment" >&2
+    exit 1
+  fi
+  assert_contains "$tmp/wsl-$skill_command.err" 'Git for Windows'
+  if [ -e "$wsl_home" ]; then
+    echo "WSL dry-run must not create a skill target" >&2
+    exit 1
+  fi
+done
+
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*)
+    no_git_bin="$tmp/no-git-bin"
+    mkdir "$no_git_bin"
+    if PATH="$no_git_bin" "$NODE_BIN" bin/dirextalk-deployer.mjs skill install --agent codex --home "$tmp/no-git-home" --dry-run >"$tmp/no-git.out" 2>"$tmp/no-git.err"; then
+      echo "skill install must reject Git Bash without Git for Windows tools" >&2
+      exit 1
+    fi
+    assert_contains "$tmp/no-git.err" 'Install Git for Windows'
+    if EXEPATH='C:\msys64\usr\bin' "$NODE_BIN" bin/dirextalk-deployer.mjs skill install --agent codex --home "$tmp/not-git-bash-home" --dry-run >"$tmp/not-git-bash.out" 2>"$tmp/not-git-bash.err"; then
+      echo "skill install must reject a MINGW shell outside the Git for Windows installation" >&2
+      exit 1
+    fi
+    assert_contains "$tmp/not-git-bash.err" 'Git Bash only'
+    ;;
+esac
 
 "$NODE_BIN" -e '
 const pkg = require("./package.json");
@@ -49,7 +85,7 @@ npm pack --dry-run --json > "$tmp/pack.json"
 const fs = require("node:fs");
 const pack = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))[0];
 const files = pack.files.map((entry) => entry.path);
-for (const required of ["SKILL.md", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh", "scripts/updater/release.env", "scripts/lib/server-release-resolver.mjs"]) {
+for (const required of ["SKILL.md", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh", "scripts/lib/git-bash.sh", "scripts/updater/release.env", "scripts/lib/server-release-resolver.mjs"]) {
   if (!files.includes(required)) throw new Error(`missing package file: ${required}`);
 }
 if (files.includes("README_zh.md")) {
@@ -57,6 +93,9 @@ if (files.includes("README_zh.md")) {
 }
 if (files.some((file) => file === "tests" || file.startsWith("tests/"))) {
   throw new Error("npm package must not include tests/");
+}
+if (files.some((file) => file.endsWith(".ps1"))) {
+  throw new Error("Git-Bash-only deployer package must not include PowerShell wrappers");
 }
 if (files.some((file) => file === "updater" || file.startsWith("updater/")) || files.includes("scripts/updater/build.sh")) {
   throw new Error("deployer package must not embed updater Go source/build logic");

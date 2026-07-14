@@ -69,11 +69,17 @@ source "$S6_DIR/../lib/mcp-client-adapters.sh"
 
 _detect_agent_runtime() {
   local active_runtime explicit_agent home_runtime host_runtime
+  # Runtime detection asks several predicates about the same inherited
+  # environment. Snapshot exported names once so Windows Git Bash does not
+  # repeatedly launch env/sed/grep for every candidate runtime.
+  local _dirextalk_env_names _dirextalk_env_names_ready=0
   if [ -n "${DIREXTALK_AGENT_PLATFORM:-}" ] && [ "${DIREXTALK_AGENT_PLATFORM:-}" != "auto" ]; then
     _validate_agent_platform "$DIREXTALK_AGENT_PLATFORM" || return 1
     printf '%s\n' "$DIREXTALK_AGENT_PLATFORM"
     return 0
   fi
+  _dirextalk_env_names=$(compgen -e)
+  _dirextalk_env_names_ready=1
   # Host orchestrators own their native MCP registry even when a child process
   # advertises another agent runtime. Only an explicit platform may bypass it.
   host_runtime=$(_active_mcp_host_runtime)
@@ -87,7 +93,7 @@ _detect_agent_runtime() {
     return 0
   fi
   # Active-process signals are stronger than stale config directories from
-  # other agents that have used this WSL home before.
+  # other local agent runtimes that have used this home before.
   active_runtime=$(_active_agent_runtime)
   if [ -n "$active_runtime" ]; then printf '%s\n' "$active_runtime"; return 0; fi
   home_runtime=$(_single_runtime_from_home_vars)
@@ -369,7 +375,17 @@ _runtime_config_dir_exists() {
 }
 
 _env_name_matches() {
-  env | sed -E 's/=.*$//' | grep -Eq "$1"
+  local pattern=$1 env_name
+  # _detect_agent_runtime supplies a dynamically scoped snapshot. Keep a
+  # standalone fallback for direct callers and tests.
+  if [ "${_dirextalk_env_names_ready:-0}" != 1 ]; then
+    _dirextalk_env_names=$(compgen -e)
+    _dirextalk_env_names_ready=1
+  fi
+  while IFS= read -r env_name; do
+    [[ "$env_name" =~ $pattern ]] && return 0
+  done <<< "${_dirextalk_env_names:-}"
+  return 1
 }
 
 _active_text_contains() {
@@ -799,31 +815,16 @@ _write_connect_config() {
 
 _connect_daemon_install_command() {
   local binary=$1 config=$2 service_name=$3 package_dir=${4:-}
-  local binary_local config_local package_dir_local package package_q binary_q config_q service_q package_dir_q
   [ -n "$service_name" ] || service_name=dirextalk-connect
   if [ "$(dirextalk_local_path_style)" = "windows" ]; then
-    binary_local=$(_local_connect_path "$binary")
-    config_local=$(_local_connect_path "$config")
-    package_dir_local=${package_dir:+$(_local_connect_path "$package_dir")}
-    package=$(_connect_npm_package)
-    binary_q=$(dirextalk_quote_powershell "$binary_local")
-    config_q=$(dirextalk_quote_powershell "$config_local")
-    service_q=$(dirextalk_quote_powershell "$service_name")
-    package_q=$(dirextalk_quote_powershell "$package")
-    if [ -n "$package_dir_local" ]; then
-      package_dir_q=$(dirextalk_quote_powershell "$package_dir_local")
-      printf "if (Test-Path -LiteralPath '%s') { & '%s' daemon stop --service-name '%s'; if (\$LASTEXITCODE -ne 0) { Write-Warning 'dirextalk-connect daemon stop failed; continuing refresh' } }; npm install --prefix '%s' '%s'; if (\$LASTEXITCODE -ne 0) { throw 'dirextalk-connect npm install failed' }; & '%s' daemon install --config '%s' --service-name '%s' --force" \
-        "$binary_q" "$binary_q" "$service_q" "$package_dir_q" "$package_q" "$binary_q" "$config_q" "$service_q"
-    else
-      printf "if (-not (Get-Command '%s' -ErrorAction SilentlyContinue)) { npm install -g '%s'; if (\$LASTEXITCODE -ne 0) { throw 'dirextalk-connect npm install failed' } }; & '%s' daemon install --config '%s' --service-name '%s' --force" \
-        "$binary_q" "$package_q" "$binary_q" "$config_q" "$service_q"
-    fi
-    return 0
+    binary=$(_local_connect_path "$binary")
+    config=$(_local_connect_path "$config")
+    package_dir=${package_dir:+$(_local_connect_path "$package_dir")}
   fi
   if [ -n "$package_dir" ]; then
-    printf 'if [ -x %q ]; then %q daemon stop --service-name %q || true; fi; npm install --prefix %q %q && %q daemon install --config %q --service-name %q --force' "$binary" "$binary" "$service_name" "$package_dir" "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
+    printf 'if [ -x %q ]; then %q daemon stop --service-name %q || true; fi; npm install --prefix %q %q && %q daemon install --config %q --service-name %q --force' "$binary" "$binary" "$service_name" "$package_dir" "$(_connect_npm_package)" "$binary" "$config" "$service_name"
   else
-    printf 'if ! command -v %q >/dev/null 2>&1; then npm install -g %q; fi && %q daemon install --config %q --service-name %q --force' "$binary" "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
+    printf 'if ! command -v %q >/dev/null 2>&1; then npm install -g %q; fi && %q daemon install --config %q --service-name %q --force' "$binary" "$(_connect_npm_package)" "$binary" "$config" "$service_name"
   fi
 }
 

@@ -13,6 +13,35 @@ claim that every App or host-agent runtime has been proven in a real session.
   provide final evidence.
 - Deferred by design: intentionally outside the current deployer-side scope.
 
+## Test Profiles And Windows Feedback Time
+
+Windows Git Bash profiling on 2026-07-14 found that the former default suite
+ran 42 sequential scripts in roughly 18 minutes. The dominant cost was local
+fixture work: mocked deployment state machines repeatedly launched Git Bash
+processes and Windows-native Node JSON helpers. It did not create AWS resources
+or wait on live cloud APIs.
+
+The test runner is therefore split deliberately:
+
+- `npm test` runs the 11 fast cross-platform contracts for package contents,
+  Git-Bash execution, local paths, JSON/atomic writes, permissions, region
+  selection, and updater replacement. On the profiled Windows host it finished
+  in 81 seconds.
+- `npm run test:extended` runs the complete 50-contract release suite.
+  `npm run test:extended-only` runs its 39 slower deployment-state contracts
+  without repeating the fast set, which is what CI uses after its Ubuntu fast
+  gate.
+- CI keeps the fast gate on Windows, Linux, and macOS, then runs the
+  extended-only set once on Ubuntu for pull requests, default-branch pushes,
+  and manual dispatches.
+
+The split does not discard credential, DNS, initialization, S6, updater, or
+destroy contracts. Redundant compatibility tests were merged into their
+owning tests: default path inventory, runtime summary details, S5 timeout and
+code-shape checks, root-volume tracking, Route53 overwrite protection, and
+Route53 destroy calls. PowerShell-wrapper tests were removed with the retired
+wrappers; Windows behavior is now covered by the Git Bash contract test.
+
 ## Current Best Plan
 
 Current best plan is the stricter plan now encoded in this branch:

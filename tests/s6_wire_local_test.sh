@@ -87,6 +87,12 @@ fi
 [ "$(DIREXTALK_AGENT_PLATFORM=opencode _detect_agent_runtime)" = "opencode" ]
 [ "$(DIREXTALK_CONNECT_AGENT=qodercli _detect_agent_runtime)" = "qoder" ]
 [ "$(DIREXTALK_AGENT_PLATFORM=hermes DIREXTALK_CONNECT_AGENT=codex _detect_agent_runtime)" = "hermes" ]
+(
+  clear_runtime_env
+  export CODEX_RUNTIME_MARKER=1
+  _env_name_matches '^CODEX_'
+  ! _env_name_matches '^OPENCLAW_'
+)
 assert_active_runtime() {
   local expected=$1 signal=$2
   shift 2
@@ -247,12 +253,12 @@ custom_install_command=$(DIREXTALK_CONNECT_NPM_PACKAGE='dirextalk-connect@overri
 [ "$(DIREXTALK_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml')" = "C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" ]
 windows_connect_binary="/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd"
 windows_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _connect_install_command "$windows_connect_binary" "/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" "im" "/mnt/c/Users/alice/.dirextalk/nodes/im")
-[[ "$windows_install_command" == *"Test-Path -LiteralPath 'C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd'"* ]]
-[[ "$windows_install_command" == *"npm install --prefix 'C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect' 'dirextalk-connect@latest'"* ]]
-[[ "$windows_install_command" == *"& 'C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd' daemon install --config 'C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml'"* ]]
-[[ "$windows_install_command" == *"--service-name 'im'"* ]]
+[[ "$windows_install_command" == *"if [ -x C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd ]"* ]]
+[[ "$windows_install_command" == *"npm install --prefix C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect dirextalk-connect@latest"* ]]
+[[ "$windows_install_command" == *"C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd daemon install --config C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml"* ]]
+[[ "$windows_install_command" == *"--service-name im"* ]]
 [[ "$windows_install_command" != *"/mnt/c/"* ]]
-[[ "$windows_install_command" != *"if [ -x"* ]]
+[[ "$windows_install_command" != *"Test-Path -LiteralPath"* ]]
 
 posix_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=posix _connect_install_command "/home/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect" "/home/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" "im" "/home/alice/.dirextalk/nodes/im")
 [[ "$posix_install_command" == *"if [ -x"* ]]
@@ -260,9 +266,8 @@ posix_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=posix _connect_install_comman
 [[ "$posix_install_command" != *"Test-Path -LiteralPath"* ]]
 
 windows_mcp_doctor_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _mcp_doctor_command "https://service.example.test" "C:/Users/alice/.dirextalk/nodes/im/credentials.json" node-id "C:/Users/alice/.dirextalk/nodes/im")
-[[ "$windows_mcp_doctor_command" == *'$env:DOMAIN = '\''service.example.test'\'''* ]]
-[[ "$windows_mcp_doctor_command" == *"orchestrate.ps1' 'verify' 'mcp_doctor'"* ]]
-[[ "$windows_mcp_doctor_command" != *" bash "* ]]
+[[ "$windows_mcp_doctor_command" == *"DOMAIN=service.example.test bash scripts/orchestrate.sh verify mcp_doctor"* ]]
+[[ "$windows_mcp_doctor_command" != *"orchestrate.ps1"* ]]
 
 posix_mcp_doctor_command=$(DIREXTALK_LOCAL_PATH_STYLE=posix _mcp_doctor_command "https://service.example.test" "/home/alice/.dirextalk/nodes/im/credentials.json" node-id "/home/alice/.dirextalk/nodes/im")
 [[ "$posix_mcp_doctor_command" == *"DOMAIN=service.example.test bash scripts/orchestrate.sh verify mcp_doctor"* ]]

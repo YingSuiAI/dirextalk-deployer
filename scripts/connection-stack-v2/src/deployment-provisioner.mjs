@@ -328,6 +328,7 @@ export class Ec2DedicatedWorkerProvisioner {
       existing = await this.deploymentStore.getDeployment({
         connection_id: command.connection_id,
         deployment_id: command.payload.deployment_id,
+        request_sha256: command.request_sha256,
       });
     } catch (error) {
       if (error instanceof ConnectionStackV2Error) throw error;

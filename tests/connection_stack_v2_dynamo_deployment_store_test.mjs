@@ -178,6 +178,15 @@ assert.equal(
   "a same-request reservation must not masquerade as a completed EC2 receipt before the provisioner runs",
 );
 assert.equal(reservationClient.gets.at(-1).ConsistentRead, true);
+await assert.rejects(
+  () => store(reservationClient).getDeployment({
+    connection_id: CONNECTION_ID,
+    deployment_id: DEPLOYMENT_ID,
+    request_sha256: "d".repeat(64),
+  }),
+  (error) => error?.code === "deployment_id_conflict",
+  "a different request must not pass through an existing deployment reservation before EC2 provisioning",
+);
 
 const createClient = new ScriptedDynamo({ deployment: reservedDeploymentItem() });
 const persisted = await store(createClient).putDeployment(receipt());

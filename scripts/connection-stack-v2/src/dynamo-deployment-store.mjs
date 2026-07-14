@@ -185,10 +185,14 @@ export class DynamoDeploymentStore {
     return { ...quote, quote_digest: quoteDigest };
   }
 
-  async getDeployment({ connection_id: connectionId, deployment_id: deploymentId }) {
+  async getDeployment({ connection_id: connectionId, deployment_id: deploymentId, request_sha256: requestSHA256 } = {}) {
     requireString(connectionId, "connection_id", ID_PATTERN, "deployment_store_invalid");
     requireString(deploymentId, "deployment_id", ID_PATTERN, "deployment_store_invalid");
+    if (requestSHA256 !== undefined) requireString(requestSHA256, "request_sha256", SHA256_PATTERN, "deployment_store_invalid");
     const stored = await this.#readDeployment(connectionId, deploymentId);
+    if (stored && requestSHA256 !== undefined && stored.request_sha256 !== requestSHA256) {
+      fail("deployment_id_conflict", "deployment id is already bound to another request");
+    }
     return stored?.kind === "receipt" ? stored.receipt : undefined;
   }
 

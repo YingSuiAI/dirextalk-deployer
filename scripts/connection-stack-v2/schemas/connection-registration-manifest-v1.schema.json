@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dirextalk:schema:aws:connection-registration-manifest:v1",
+  "title": "Dirextalk AWS Connection Stack nonsecret registration manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "bootstrap_id",
+    "connection_id",
+    "account_id",
+    "region",
+    "broker_command_url",
+    "node_key_id",
+    "connection_generation",
+    "stack_arn"
+  ],
+  "properties": {
+    "schema": { "const": "dirextalk.aws.connection-registration-manifest/v1" },
+    "bootstrap_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$" },
+    "connection_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$" },
+    "account_id": { "type": "string", "pattern": "^\\d{12}$" },
+    "region": { "type": "string", "pattern": "^(?:af|ap|ca|cn|eu|il|me|mx|sa|us)(?:-gov)?-[a-z]+-\\d$" },
+    "broker_command_url": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "node_key_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "connection_generation": { "type": "integer", "minimum": 1 },
+    "stack_arn": { "type": "string", "pattern": "^arn:(?:aws|aws-cn|aws-us-gov):cloudformation:" }
+  }
+}

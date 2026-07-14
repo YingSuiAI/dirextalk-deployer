@@ -1,12 +1,12 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
   "Transform": "AWS::Serverless-2016-10-31",
-  "Description": "Dirextalk Connection Stack V2 durable signed command, Flutter approval, and read-only on-demand quote fence.",
+  "Description": "Dirextalk Connection Stack V2 durable signed command, registration attestation, Flutter approval, and read-only on-demand quote fence.",
   "Metadata": {
     "DirextalkConnectionStackV2": {
-      "Stage": "durable-read-only-quote",
-      "Execution": "receipt-approval-challenge-and-read-only-on-demand-quote",
-      "Note": "This stack authenticates signed commands, persists immutable receipts/one-time approval challenges, and returns a bounded on-demand EC2 price estimate. It cannot create, observe, stop, start, or destroy cloud resources."
+      "Stage": "durable-registration-and-read-only-quote",
+      "Execution": "receipt-registration-attestation-approval-challenge-and-read-only-on-demand-quote",
+      "Note": "This stack authenticates signed commands, persists immutable receipts/one-time approval challenges, returns a stack-derived registration attestation and a bounded on-demand EC2 price estimate. It cannot create, observe, stop, start, or destroy cloud resources."
     }
   },
   "Parameters": {
@@ -310,7 +310,12 @@
             "DEVICE_APPROVAL_PUBLIC_KEY_SPKI_B64": { "Ref": "DeviceApprovalPublicKeySpkiBase64" },
             "COMMAND_RECEIPTS_TABLE": { "Ref": "CommandReceiptsTable" },
             "APPROVAL_CHALLENGES_TABLE": { "Ref": "ApprovalChallengesTable" },
-            "CONNECTION_COUNTERS_TABLE": { "Ref": "ConnectionCountersTable" }
+            "CONNECTION_COUNTERS_TABLE": { "Ref": "ConnectionCountersTable" },
+            "STACK_ACCOUNT_ID": { "Ref": "AWS::AccountId" },
+            "STACK_REGION": { "Ref": "AWS::Region" },
+            "STACK_ARN": { "Ref": "AWS::StackId" },
+            "AWS_URL_SUFFIX": { "Ref": "AWS::URLSuffix" },
+            "BROKER_STAGE_NAME": { "Ref": "StageName" }
           }
         },
         "Events": {
@@ -326,7 +331,7 @@
         "Tags": {
           "dirextalk:connection-id": { "Ref": "ConnectionId" },
           "dirextalk:managed-by": "connection-stack-v2",
-          "dirextalk:component": "broker-read-only-quote"
+          "dirextalk:component": "broker-registration-and-read-only-quote"
         }
       },
       "Metadata": {
@@ -338,14 +343,15 @@
   },
   "Outputs": {
     "ConnectionId": { "Value": { "Ref": "ConnectionId" } },
+    "ConnectionGeneration": { "Value": { "Ref": "ConnectionGeneration" } },
+    "AccountId": { "Value": { "Ref": "AWS::AccountId" } },
+    "Region": { "Value": { "Ref": "AWS::Region" } },
+    "NodeKeyId": { "Value": { "Ref": "NodeKeyId" } },
     "BrokerCommandUrl": {
       "Value": {
         "Fn::Sub": "https://${BrokerApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}/v2/commands"
       }
     },
-    "CommandReceiptsTableArn": { "Value": { "Fn::GetAtt": ["CommandReceiptsTable", "Arn"] } },
-    "ApprovalChallengesTableArn": { "Value": { "Fn::GetAtt": ["ApprovalChallengesTable", "Arn"] } },
-    "ConnectionCountersTableArn": { "Value": { "Fn::GetAtt": ["ConnectionCountersTable", "Arn"] } },
-    "ReceiptSigningKeyArn": { "Value": { "Fn::GetAtt": ["ReceiptSigningKey", "Arn"] } }
+    "StackArn": { "Value": { "Ref": "AWS::StackId" } }
   }
 }

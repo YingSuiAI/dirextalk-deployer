@@ -1,4 +1,4 @@
-# Dirextalk Connection Stack V2 — durable command and quote fence
+# Dirextalk Connection Stack V2 — durable registration, command, and quote fence
 
 This directory implements the V2 signed-command and Flutter-device-approval
 **durable fence**, not a cloud executor. It is deliberately separate from
@@ -9,8 +9,10 @@ Cloud Orchestrator.
 The SAM template may be deployed only as a Connection Stack control-plane
 prerequisite. Its regional Broker API verifies a bounded signed command,
 persists an immutable receipt and a one-time approval challenge in DynamoDB,
-and returns a de-secretsed receipt. For one bounded command it can also perform
-read-only EC2 offering and AWS Price List lookups to issue an on-demand quote.
+and returns a de-secretsed receipt. It can attest its own CloudFormation stack
+identity for a pending Connection registration, and for one bounded command it
+can also perform read-only EC2 offering and AWS Price List lookups to issue an
+on-demand quote.
 It has no EC2/EBS/IAM/PassRole/SSH/S3 mutation, no worker bootstrap execution,
 and no secret-read capability. It cannot provision, observe, stop, start, or
 destroy cloud resources.
@@ -38,6 +40,7 @@ Only `dirextalk.aws.command/v2` is a valid Broker envelope. The closed action
 set is:
 
 - `approval.challenge.request`
+- `connection.registration.verify`
 - `quote.request`
 - `artifact.put`
 - `deployment.create`
@@ -47,6 +50,49 @@ set is:
 There is no generic AWS action, arbitrary API name, shell command, IAM action,
 or raw EC2 specification in the protocol. `artifact.put` carries only a typed
 content reference in this skeleton; it does not upload bytes.
+
+## Stack-derived registration attestation
+
+`connection.registration.verify` is a read-only, no-approval command that
+binds a pending ProductCore bootstrap to the deployed Stack. Its canonical JSON
+payload has exactly three fields:
+
+```text
+bootstrap_id
+requested_region
+stack_arn
+```
+
+The Broker never accepts account, endpoint, connection id, node key, or
+generation values from this payload. It compares `requested_region` and
+`stack_arn` with CloudFormation pseudo-parameter values injected into the
+Lambda. It derives the direct API Gateway command URL from its own API Gateway
+request context and configured Stack stage. A mismatched Region, Stack ARN,
+stage, or endpoint fails closed.
+
+A committed or exact idempotent response has status `connection_registered` or
+`idempotent`, a receipt whose action remains
+`connection.registration.verify`, and exactly this de-secretsed registration
+object:
+
+```text
+schema = dirextalk.aws.connection-registration/v1
+bootstrap_id
+connection_id
+account_id
+region
+broker_command_url
+node_key_id
+connection_generation
+stack_arn
+command_id
+request_sha256
+```
+
+The registration is stored in the immutable DynamoDB receipt, so retrying the
+same signed request after its short command window returns the original
+attestation rather than recalculating a caller-provided claim. This action has
+no EC2/EBS/IAM/S3 mutation and no Flutter approval path.
 
 ## Read-only on-demand quote
 
@@ -110,7 +156,8 @@ digest, and action, plus the challenge issue/consume data when applicable.
 - New command: require the active generation, a still-live command/approval,
   and a strictly advancing counter, then write the immutable receipt. For a
   quote, resolve the read-only provider result before that transaction and
-  persist the exact validated quote with the receipt.
+  persist the exact validated quote with the receipt. For registration, persist
+  the exact Stack-derived attestation with that same counter advance.
 - For a challenge request: write the one-time challenge with the receipt. For a
   mutating command: conditionally consume that exact unexpired challenge with
   the counter advance and receipt write.
@@ -140,6 +187,41 @@ Do not deploy the source template directly. `sam build` installs the exact
 lockfile dependency into the Lambda artifact; the source-tree `.npmignore` only
 keeps local `node_modules` out of the published `dirextalk-deployer` package.
 
+## Pinned non-root deployment helper
+
+The supported create/update entry point is `deploy.sh`, not an ad hoc `sam
+deploy` command. ProductCore first creates a strict
+`dirextalk.aws.connection-stack-deploy-request/v1` containing the opaque
+bootstrap id, connection values, Ed25519 **public** keys, requested Region,
+stage, stack name, and exact `sha256:` digests for both this template and the
+complete Connection Stack source tree. It contains no AWS credentials or
+service secrets.
+
+```bash
+bash scripts/connection-stack-v2/deploy.sh --apply \
+  --request <connection-stack-deploy-request.json> \
+  --artifact-bucket <existing-private-sam-artifact-bucket> \
+  --output <connection-registration-manifest.json>
+```
+
+Before `sam build` or `sam deploy`, the helper verifies both pinned digests and
+both Ed25519 public keys, calls `aws sts get-caller-identity`, and rejects root
+and IAM-user identities. It requires a pre-existing explicit artifact bucket,
+then verifies that the bucket is in the requested Region, has default SSE
+encryption, and enables all four S3 public-access blocks. It never uses
+`--resolve-s3` or creates a hidden SAM managed bucket. The caller must therefore
+use a short-lived assumed role with the scoped CloudFormation/SAM artifact
+permissions plus read-only bucket configuration checks required for this Stack.
+
+The output is atomically written with restrictive permissions and has exactly
+the nonsecret `dirextalk.aws.connection-registration-manifest/v1` fields:
+`schema`, `bootstrap_id`, `connection_id`, `account_id`, `region`,
+`broker_command_url`, `node_key_id`, `connection_generation`, and `stack_arn`.
+ProductCore must submit its `bootstrap_id`, `region`, and `stack_arn` through
+the signed Broker action above before it treats this manifest as a registered
+connection. The Stack exposes only the corresponding nonsecret CloudFormation
+outputs; table/key ARNs and public-key parameters are intentionally not output.
+
 ## Worker boundary
 
 `schemas/worker-bootstrap-v1.schema.json` and `src/worker-contract.mjs` define
@@ -168,9 +250,12 @@ No test invokes AWS or reads credentials:
 ```bash
 bash tests/connection_stack_v2_test.sh
 node --check scripts/connection-stack-v2/src/command-contract.mjs
+node --check scripts/connection-stack-v2/src/registration-contract.mjs
+node --check scripts/connection-stack-v2/src/deploy-helper.mjs
 node --check scripts/connection-stack-v2/src/dynamo-receipt-store.mjs
 node --check scripts/connection-stack-v2/src/quote-provider.mjs
 node --check scripts/connection-stack-v2/src/worker-contract.mjs
+bash -n scripts/connection-stack-v2/deploy.sh
 git diff --check
 ```
 
@@ -179,4 +264,7 @@ transaction shape, counter/receipt/challenge fencing, idempotent expired quote
 reconciliation without a second provider call, upward minor-unit rounding,
 read-only API command shape, availability checks, and Spot rejection before any
 provider request. They also prove a reused Flutter approval challenge fails even
-when an attacker supplies a new node command id.
+when an attacker supplies a new node command id. Registration tests additionally
+prove exact three-field payloads, Stack-derived endpoint/Region/ARN binding,
+immutable replay, root rejection, template/source-digest pinning, nonsecret manifest
+shape, and the deploy helper's explicit existing-artifact-bucket path.

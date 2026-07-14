@@ -5,6 +5,10 @@ import {
   validateIssuedQuote,
   validateQuoteRequestPayload,
 } from "./quote-contract.mjs";
+import {
+  CONNECTION_REGISTRATION_VERIFY_ACTION,
+  validateConnectionRegistration,
+} from "./registration-contract.mjs";
 
 const RECEIPT_COMMIT_SCHEMA = "dirextalk.aws.receipt-commit/v2";
 const RECEIPT_SCHEMA = "dirextalk.aws.command-receipt/v2";
@@ -123,6 +127,21 @@ function validateRequest(request) {
   } else if (request.quote_request !== undefined) {
     fail("receipt_store_invalid", "quote_request is only valid for quote receipts", 500);
   }
+  if (request.action === CONNECTION_REGISTRATION_VERIFY_ACTION) {
+    if (request.registration === undefined) {
+      fail("receipt_store_invalid", "registration is required for registration receipts", 500);
+    }
+    validateConnectionRegistration(request.registration, {
+      connectionId: request.connection_id,
+      connectionGeneration: request.expected_generation,
+      commandId: request.command_id,
+      requestSha256: request.request_sha256,
+      code: "receipt_store_invalid",
+      statusCode: 500,
+    });
+  } else if (request.registration !== undefined) {
+    fail("receipt_store_invalid", "registration is only valid for registration receipts", 500);
+  }
   if (request.challenge_to_issue !== undefined) validateChallengeToIssue(request.challenge_to_issue, request);
   if (request.approval_challenge !== undefined) validateApprovalChallenge(request.approval_challenge, request);
   if (request.challenge_to_issue !== undefined && request.approval_challenge !== undefined) {
@@ -143,6 +162,7 @@ function receiptFor(request, quote) {
     action: request.action,
     ...(request.challenge_to_issue ? { challenge: request.challenge_to_issue } : {}),
     ...(quote ? { quote } : {}),
+    ...(request.registration ? { registration: request.registration } : {}),
   };
 }
 

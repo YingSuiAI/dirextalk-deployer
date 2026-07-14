@@ -15,23 +15,44 @@ const workerSchema = JSON.parse(readFileSync(
   new URL("scripts/connection-stack-v2/schemas/worker-bootstrap-v1.schema.json", root),
   "utf8",
 ));
+const registrationSchema = JSON.parse(readFileSync(
+  new URL("scripts/connection-stack-v2/schemas/connection-registration-v1.schema.json", root),
+  "utf8",
+));
+const deploymentRequestSchema = JSON.parse(readFileSync(
+  new URL("scripts/connection-stack-v2/schemas/connection-stack-deploy-request-v1.schema.json", root),
+  "utf8",
+));
+const registrationManifestSchema = JSON.parse(readFileSync(
+  new URL("scripts/connection-stack-v2/schemas/connection-registration-manifest-v1.schema.json", root),
+  "utf8",
+));
 
 assert.equal(template.Transform, "AWS::Serverless-2016-10-31");
-assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "durable-read-only-quote");
-assert.equal(template.Metadata.DirextalkConnectionStackV2.Execution, "receipt-approval-challenge-and-read-only-on-demand-quote");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Stage, "durable-registration-and-read-only-quote");
+assert.equal(template.Metadata.DirextalkConnectionStackV2.Execution, "receipt-registration-attestation-approval-challenge-and-read-only-on-demand-quote");
 assert.equal(commandSchema.properties.schema.const, "dirextalk.aws.command/v2");
 assert.equal(approvalBindingSchema.properties.schema.const, "dirextalk.aws.approval-binding/v2");
 assert.equal(workerSchema.properties.schema.const, "dirextalk.worker-bootstrap/v1");
+assert.equal(registrationSchema.properties.schema.const, "dirextalk.aws.connection-registration/v1");
+assert.equal(deploymentRequestSchema.properties.schema.const, "dirextalk.aws.connection-stack-deploy-request/v1");
+assert.equal(registrationManifestSchema.properties.schema.const, "dirextalk.aws.connection-registration-manifest/v1");
 assert.equal(commandSchema.additionalProperties, false);
 assert.equal(approvalBindingSchema.additionalProperties, false);
 assert.equal(workerSchema.additionalProperties, false);
+assert.equal(registrationSchema.additionalProperties, false);
+assert.equal(deploymentRequestSchema.additionalProperties, false);
+assert.equal(registrationManifestSchema.additionalProperties, false);
 assert.ok(commandSchema.properties.action.enum.includes("approval.challenge.request"));
+assert.ok(commandSchema.properties.action.enum.includes("connection.registration.verify"));
 assert.ok(commandSchema.properties.action.enum.includes("artifact.put"));
 assert.ok(commandSchema.properties.action.enum.includes("deployment.destroy"));
 assert.ok(approvalBindingSchema.required.includes("resource_scope_digest"));
 assert.ok(approvalBindingSchema.required.includes("network_scope_digest"));
 assert.ok(approvalBindingSchema.required.includes("secret_scope_digest"));
 assert.ok(approvalBindingSchema.required.includes("integration_scope_digest"));
+assert.ok(deploymentRequestSchema.required.includes("template_sha256"));
+assert.ok(deploymentRequestSchema.required.includes("source_tree_sha256"));
 
 for (const parameter of [
   "ConnectionId",
@@ -66,6 +87,11 @@ assert.equal(broker.Properties.Environment.Variables.DEVICE_APPROVAL_PUBLIC_KEY_
 assert.equal(broker.Properties.Environment.Variables.COMMAND_RECEIPTS_TABLE.Ref, "CommandReceiptsTable");
 assert.equal(broker.Properties.Environment.Variables.APPROVAL_CHALLENGES_TABLE.Ref, "ApprovalChallengesTable");
 assert.equal(broker.Properties.Environment.Variables.CONNECTION_COUNTERS_TABLE.Ref, "ConnectionCountersTable");
+assert.equal(broker.Properties.Environment.Variables.STACK_ACCOUNT_ID.Ref, "AWS::AccountId");
+assert.equal(broker.Properties.Environment.Variables.STACK_REGION.Ref, "AWS::Region");
+assert.equal(broker.Properties.Environment.Variables.STACK_ARN.Ref, "AWS::StackId");
+assert.equal(broker.Properties.Environment.Variables.AWS_URL_SUFFIX.Ref, "AWS::URLSuffix");
+assert.equal(broker.Properties.Environment.Variables.BROKER_STAGE_NAME.Ref, "StageName");
 assert.equal(broker.Properties.Timeout, 20, "read-only price lookups must have a bounded network timeout");
 
 const rolePolicy = template.Resources.BrokerContractRole.Properties.Policies[0].PolicyDocument.Statement;
@@ -99,6 +125,16 @@ assert.doesNotMatch(resourceText, /AWS::EC2::|AWS::S3::|AWS::IAM::InstanceProfil
 assert.doesNotMatch(resourceText, /iam:PassRole|ec2:\*|ec2:RunInstances|iam:\*|secretsmanager:GetSecretValue/i);
 assert.doesNotMatch(resourceText, /ssh|keypair|user.?data/i);
 assert.ok(!Object.keys(template.Outputs).some((name) => /secret|token|private/i.test(name)), "the stack must not output secrets");
+assert.deepEqual(Object.keys(template.Outputs), [
+  "ConnectionId",
+  "ConnectionGeneration",
+  "AccountId",
+  "Region",
+  "NodeKeyId",
+  "BrokerCommandUrl",
+  "StackArn",
+], "the Stack must expose only the nonsecret registration-manifest values");
+assert.doesNotMatch(JSON.stringify(template.Outputs), /NodePublicKey|DeviceApproval|TableArn|ReceiptSigningKeyArn/);
 
 const handlerText = readFileSync(new URL("scripts/connection-stack-v2/src/handler.mjs", root), "utf8");
 assert.match(handlerText, /createV2ChallengeApprovalService/);
@@ -107,6 +143,7 @@ assert.match(handlerText, /@aws-sdk\/client-dynamodb/);
 assert.match(handlerText, /@aws-sdk\/client-ec2/);
 assert.match(handlerText, /@aws-sdk\/client-pricing/);
 assert.match(handlerText, /AwsOnDemandQuoteProvider/);
+assert.match(handlerText, /registrationRuntimeContext/);
 assert.doesNotMatch(handlerText, /@aws-sdk\/client-(?:s3|iam|secrets-manager)/);
 assert.doesNotMatch(handlerText, /RunInstances|TerminateInstances|PassRole|CreateRole|GetSecretValue/);
 

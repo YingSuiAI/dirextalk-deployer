@@ -30,6 +30,7 @@
     "action": {
       "enum": [
         "approval.challenge.request",
+        "connection.registration.verify",
         "quote.request",
         "artifact.put",
         "deployment.create",

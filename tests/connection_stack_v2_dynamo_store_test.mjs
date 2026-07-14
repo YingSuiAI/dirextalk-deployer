@@ -123,6 +123,34 @@ function quoteRequest(overrides = {}) {
   });
 }
 
+function registration() {
+  return {
+    schema: "dirextalk.aws.connection-registration/v1",
+    bootstrap_id: "bootstrap-v2-0001",
+    connection_id: CONNECTION_ID,
+    account_id: "123456789012",
+    region: "ap-south-1",
+    broker_command_url: "https://abcde12345.execute-api.ap-south-1.amazonaws.com/prod/v2/commands",
+    node_key_id: "node-key-v2",
+    connection_generation: 3,
+    stack_arn: "arn:aws:cloudformation:ap-south-1:123456789012:stack/DirextalkConnectionStackV2-001/01234567-89ab-cdef-0123-456789abcdef",
+    command_id: "command-v2-registration-01",
+    request_sha256: "d".repeat(64),
+  };
+}
+
+function registrationRequest(overrides = {}) {
+  return request({
+    action: "connection.registration.verify",
+    command_id: "command-v2-registration-01",
+    node_counter: 13,
+    request_sha256: "d".repeat(64),
+    challenge_to_issue: undefined,
+    registration: registration(),
+    ...overrides,
+  });
+}
+
 function receiptFor(input) {
   return {
     schema: "dirextalk.aws.command-receipt/v2",
@@ -135,6 +163,7 @@ function receiptFor(input) {
     action: input.action,
     ...(input.challenge_to_issue ? { challenge: input.challenge_to_issue } : {}),
     ...(input.action === "quote.request" ? { quote: quoteFor(input) } : {}),
+    ...(input.registration ? { registration: input.registration } : {}),
   };
 }
 
@@ -233,6 +262,18 @@ await assert.rejects(
 );
 assert.equal(expiredQuoteProviderCalls, 0, "an expired fresh quote must not query AWS pricing");
 assert.equal(expiredFreshQuoteClient.transactions.length, 0);
+
+const registrationClient = new ScriptedDynamo();
+const registrationReceipt = await store(registrationClient).commit(registrationRequest());
+assert.equal(registrationReceipt.action, "connection.registration.verify");
+assert.deepEqual(registrationReceipt.registration, registration());
+assert.equal(registrationClient.transactions.length, 1);
+assert.equal(registrationClient.transactions[0].TransactItems.length, 2, "registration must atomically advance its counter and persist the exact attestation");
+assert.deepEqual(
+  JSON.parse(registrationClient.transactions[0].TransactItems[1].Put.Item.receipt_json.S).registration,
+  registration(),
+  "the durable receipt must retain the stack-derived registration exactly",
+);
 
 const invalidQuoteClient = new ScriptedDynamo();
 await assert.rejects(

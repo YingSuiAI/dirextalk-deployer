@@ -239,6 +239,7 @@ function quoteForRequest(request) {
 
 assert.deepEqual(BROKER_V2_ACTIONS, [
   "approval.challenge.request",
+  "connection.registration.verify",
   "quote.request",
   "artifact.put",
   "deployment.create",

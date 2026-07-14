@@ -10,6 +10,12 @@ import {
   validateQuoteRequestPayload,
   validateStoredQuote,
 } from "./quote-contract.mjs";
+import {
+  CONNECTION_REGISTRATION_VERIFY_ACTION,
+  buildConnectionRegistration,
+  validateConnectionRegistration,
+  validateRegistrationVerifyPayload,
+} from "./registration-contract.mjs";
 
 export {
   ConnectionStackV2Error,
@@ -24,6 +30,7 @@ export const COMMAND_RECEIPT_V2_SCHEMA = "dirextalk.aws.command-receipt/v2";
 export const WORKER_BOOTSTRAP_V1_SCHEMA = "dirextalk.worker-bootstrap/v1";
 export const BROKER_V2_ACTIONS = Object.freeze([
   "approval.challenge.request",
+  CONNECTION_REGISTRATION_VERIFY_ACTION,
   "quote.request",
   "artifact.put",
   "deployment.create",
@@ -313,6 +320,9 @@ function validatePayload(action, payload, binding) {
       exactPayloadKeys(payload, ["challenge_request_id"]);
       requireId(payload, "challenge_request_id");
       break;
+    case CONNECTION_REGISTRATION_VERIFY_ACTION:
+      validateRegistrationVerifyPayload(payload);
+      break;
     case "quote.request":
       validateQuoteRequestPayload(payload);
       break;
@@ -506,7 +516,7 @@ function approvalChallengeReference(authenticated) {
   };
 }
 
-function buildReceiptCommit(authenticated, nowMs, { challengeToIssue } = {}) {
+function buildReceiptCommit(authenticated, nowMs, { challengeToIssue, registration } = {}) {
   return {
     schema: RECEIPT_COMMIT_V2_SCHEMA,
     connection_id: authenticated.connection_id,
@@ -519,6 +529,7 @@ function buildReceiptCommit(authenticated, nowMs, { challengeToIssue } = {}) {
     ...(authenticated.is_expired ? { is_expired: true } : {}),
     ...(authenticated.approval_binding_is_expired ? { approval_binding_is_expired: true } : {}),
     ...(authenticated.action === "quote.request" ? { quote_request: authenticated.payload } : {}),
+    ...(registration ? { registration } : {}),
     ...(challengeToIssue ? { challenge_to_issue: challengeToIssue } : {}),
     ...(SENSITIVE_ACTIONS.has(authenticated.action)
       ? { approval_challenge: approvalChallengeReference(authenticated) }
@@ -553,9 +564,9 @@ function validateStoredChallenge(challenge, authenticated, proposedChallenge) {
   return challenge;
 }
 
-function validateReceipt(receipt, authenticated, proposedChallenge) {
+function validateReceipt(receipt, authenticated, proposedChallenge, expectedRegistration) {
   if (!isRecord(receipt)) fail("receipt_store_invalid", "receipt store returned no receipt", 500);
-  const allowed = new Set([...RECEIPT_FIELDS, "challenge", "quote"]);
+  const allowed = new Set([...RECEIPT_FIELDS, "challenge", "quote", "registration"]);
   for (const key of Object.keys(receipt)) {
     if (!allowed.has(key)) fail("receipt_store_invalid", `receipt.${key} is not allowed`, 500);
   }
@@ -601,7 +612,30 @@ function validateReceipt(receipt, authenticated, proposedChallenge) {
       quote: validateStoredQuote(receipt.quote, authenticated),
     };
   }
-  if (Object.hasOwn(receipt, "challenge") || Object.hasOwn(receipt, "quote")) {
+  if (authenticated.action === CONNECTION_REGISTRATION_VERIFY_ACTION) {
+    if (!Object.hasOwn(receipt, "registration")) {
+      fail("receipt_store_invalid", "registration receipt is missing its registration", 500);
+    }
+    if (Object.hasOwn(receipt, "challenge") || Object.hasOwn(receipt, "quote")) {
+      fail("receipt_store_invalid", "registration receipt has an action-incompatible result", 500);
+    }
+    const registration = validateConnectionRegistration(receipt.registration, {
+      connectionId: authenticated.connection_id,
+      connectionGeneration: authenticated.expected_generation,
+      commandId: authenticated.command_id,
+      requestSha256: authenticated.request_sha256,
+      code: "receipt_store_invalid",
+      statusCode: 500,
+    });
+    if (expectedRegistration && JSON.stringify(registration) !== JSON.stringify(expectedRegistration)) {
+      fail("receipt_store_invalid", "registration receipt does not match this Stack-derived command", 500);
+    }
+    return {
+      ...receipt,
+      registration,
+    };
+  }
+  if (Object.hasOwn(receipt, "challenge") || Object.hasOwn(receipt, "quote") || Object.hasOwn(receipt, "registration")) {
     fail("receipt_store_invalid", "receipt has an action-incompatible result", 500);
   }
   return receipt;
@@ -625,6 +659,7 @@ export function createV2ChallengeApprovalService(options) {
     createChallengeId,
     receiptStore,
     quoteProvider,
+    registration: registrationConfig,
     // Challenge lookups must be owned by the store rather than a process-global
     // configured id. Ignore a caller-supplied value to avoid bypassing that lookup.
     expectedChallengeId: _expectedChallengeId,
@@ -632,7 +667,7 @@ export function createV2ChallengeApprovalService(options) {
   } = options;
 
   return {
-    async accept(command) {
+    async accept(command, registrationRuntimeContext) {
       const nowMs = clock();
       requireSafeMilliseconds(nowMs, "clock()");
       const authenticated = validateAndAuthenticateV2Command(command, {
@@ -659,10 +694,17 @@ export function createV2ChallengeApprovalService(options) {
           issued_at: new Date(nowMs).toISOString(),
         };
       }
+      const registration = authenticated.action === CONNECTION_REGISTRATION_VERIFY_ACTION
+        ? buildConnectionRegistration(authenticated, registrationConfig, registrationRuntimeContext)
+        : undefined;
       const receipt = validateReceipt(
-        await receiptStore.commit(buildReceiptCommit(authenticated, nowMs, { challengeToIssue: proposedChallenge }), quoteProvider),
+        await receiptStore.commit(buildReceiptCommit(authenticated, nowMs, {
+          challengeToIssue: proposedChallenge,
+          registration,
+        }), quoteProvider),
         authenticated,
         proposedChallenge,
+        registration,
       );
       if (receipt.disposition === "idempotent") {
         return {
@@ -670,6 +712,7 @@ export function createV2ChallengeApprovalService(options) {
           receipt,
           ...(authenticated.action === "approval.challenge.request" ? { challenge: receipt.challenge } : {}),
           ...(authenticated.action === "quote.request" ? { quote: receipt.quote } : {}),
+          ...(authenticated.action === CONNECTION_REGISTRATION_VERIFY_ACTION ? { registration: receipt.registration } : {}),
           ...(authenticated.action === "approval.challenge.request" ? {} : { command: authenticated }),
         };
       }
@@ -678,6 +721,9 @@ export function createV2ChallengeApprovalService(options) {
       }
       if (authenticated.action === "quote.request") {
         return { status: "quote_issued", quote: receipt.quote, receipt, command: authenticated };
+      }
+      if (authenticated.action === CONNECTION_REGISTRATION_VERIFY_ACTION) {
+        return { status: "connection_registered", registration: receipt.registration, receipt, command: authenticated };
       }
       if (SENSITIVE_ACTIONS.has(authenticated.action)) {
         return {

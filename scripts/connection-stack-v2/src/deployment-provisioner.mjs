@@ -126,7 +126,48 @@ function securityGroupEgressState(group, expected) {
   return "unsafe";
 }
 
-function candidateFromQuote(quote, payload, region, nowMs) {
+function requireApprovedCandidateScope(approvalProof, candidate, region, availabilityZone) {
+  const scope = approvalProof?.resource_scope;
+  if (!isRecord(scope)
+    || typeof scope.region !== "string"
+    || typeof scope.instance_type !== "string"
+    || typeof scope.architecture !== "string"
+    || !Number.isSafeInteger(scope.vcpu)
+    || !Number.isSafeInteger(scope.memory_mib)
+    || !Number.isSafeInteger(scope.disk_gib)
+    || typeof scope.purchase_option !== "string") {
+    fail("deployment_provider_invalid", "authenticated deployment approval proof has no valid resource scope", 500);
+  }
+  const approvedGPUCount = scope.gpu_count ?? 0;
+  const approvedGPUMemoryMiB = scope.gpu_memory_mib ?? 0;
+  if (!Number.isSafeInteger(approvedGPUCount) || !Number.isSafeInteger(approvedGPUMemoryMiB)) {
+    fail("deployment_provider_invalid", "authenticated deployment approval proof has invalid GPU scope", 500);
+  }
+  if (scope.region !== region
+    || scope.instance_type !== candidate.instance_type
+    || scope.architecture !== candidate.architecture
+    || scope.vcpu !== candidate.vcpu
+    || scope.memory_mib !== candidate.memory_mib
+    || scope.disk_gib !== candidate.estimated_disk_gib
+    || scope.purchase_option !== candidate.purchase_option
+    || approvedGPUCount !== candidate.gpu_count
+    || approvedGPUMemoryMiB !== candidate.gpu_memory_mib
+    || (scope.availability_zones !== undefined && (!Array.isArray(scope.availability_zones)
+      || !scope.availability_zones.includes(availabilityZone)))) {
+    fail("approval_proof_mismatch", "approval proof does not bind the selected dedicated Worker resource", 409);
+  }
+  const networkScope = approvalProof?.network_scope;
+  if (!isRecord(networkScope)
+    || networkScope.public_ingress !== false
+    || networkScope.entry_point !== "none"
+    || networkScope.tls_required !== false
+    || networkScope.authentication_required !== false
+    || (networkScope.ingress !== undefined && (!Array.isArray(networkScope.ingress) || networkScope.ingress.length !== 0))) {
+    fail("approval_proof_mismatch", "approval proof does not bind the isolated Worker network scope", 409);
+  }
+}
+
+function candidateFromQuote(quote, payload, region, nowMs, approvalProof) {
   // Stack quote.plan_digest is the pre-price QuoteRequestV1 digest. The final
   // PlanV1 hash is instead bound by the node signature and ApprovalV1 proof,
   // because it does not exist until after the quote is issued.
@@ -145,12 +186,22 @@ function candidateFromQuote(quote, payload, region, nowMs) {
     || typeof candidate.instance_type !== "string"
     || !AWS_ARCHITECTURE_BY_DIREXTALK_ARCHITECTURE.has(candidate.architecture)
     || candidate.purchase_option !== "on_demand"
+    || !Number.isSafeInteger(candidate.vcpu)
+    || candidate.vcpu < 1
+    || !Number.isSafeInteger(candidate.memory_mib)
+    || candidate.memory_mib < 1
+    || !Number.isSafeInteger(candidate.gpu_count)
+    || candidate.gpu_count < 0
+    || !Number.isSafeInteger(candidate.gpu_memory_mib)
+    || candidate.gpu_memory_mib < 0
+    || (candidate.gpu_count === 0) !== (candidate.gpu_memory_mib === 0)
     || !Number.isSafeInteger(candidate.estimated_disk_gib)
     || candidate.estimated_disk_gib < 8
     || !Array.isArray(candidate.availability_zones)
     || !candidate.availability_zones.includes(payload.network.availability_zone)) {
     fail("quote_mismatch", "the selected quoted candidate is invalid for this deployment", 409);
   }
+  requireApprovedCandidateScope(approvalProof, candidate, region, payload.network.availability_zone);
   return candidate;
 }
 
@@ -234,7 +285,7 @@ export class Ec2DedicatedWorkerProvisioner {
     const existing = await this.#getExisting(command);
     if (existing) return existing;
     const quote = await this.#getQuote(command);
-    const candidate = candidateFromQuote(quote, command.payload, this.region, nowMs);
+    const candidate = candidateFromQuote(quote, command.payload, this.region, nowMs, command.approval_proof);
     await this.#preflightNetwork(command);
     await this.#preflightImage(command, candidate);
     const groupId = await this.#ensureSecurityGroup(command);
@@ -253,6 +304,9 @@ export class Ec2DedicatedWorkerProvisioner {
     const requestSHA256 = requireString(command.request_sha256, "request_sha256", SHA256_PATTERN);
     if (connectionId !== this.connectionId || command.expected_generation !== this.connectionGeneration) {
       fail("wrong_connection", "authenticated command does not match this connection", 403);
+    }
+    if (!isRecord(command.approval_proof)) {
+      fail("deployment_provider_invalid", "authenticated deployment command is missing its Flutter approval proof", 500);
     }
     const payload = validateDeploymentCreatePayload(command.payload, {
       approvalBinding: command.approval_binding,

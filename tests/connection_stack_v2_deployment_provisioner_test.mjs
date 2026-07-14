@@ -58,11 +58,61 @@ const quote = {
     candidate_id: payload.candidate_id,
     instance_type: "t3.large",
     architecture: "amd64",
+    vcpu: 2,
+    memory_mib: 8192,
+    gpu_count: 0,
+    gpu_memory_mib: 0,
     purchase_option: "on_demand",
     estimated_disk_gib: 40,
     availability_zones: ["ap-south-1a"],
+  }, {
+    candidate_id: "candidate-performance-01",
+    instance_type: "m7i.xlarge",
+    architecture: "amd64",
+    vcpu: 4,
+    memory_mib: 16384,
+    gpu_count: 0,
+    gpu_memory_mib: 0,
+    purchase_option: "on_demand",
+    estimated_disk_gib: 80,
+    availability_zones: ["ap-south-1a"],
   }],
 };
+const approvalProof = {
+  schema_version: "cloud-orchestrator/v1",
+  approval_id: "approval-v2-0001",
+  challenge_id: "challenge-v2-0001",
+  signer_key_id: "owner-device-1",
+  plan_id: "plan-v2-0001",
+  plan_hash: payload.plan_hash,
+  plan_revision: payload.plan_revision,
+  quote_id: payload.quote_id,
+  quote_digest: payload.quote_digest,
+  quote_valid_until: "2026-07-14T07:15:00Z",
+  cloud_connection_id: command.connection_id,
+  recipe_digest: DIGEST("f"),
+  resource_scope: {
+    region: "ap-south-1",
+    availability_zones: ["ap-south-1a"],
+    instance_type: "t3.large",
+    architecture: "amd64",
+    vcpu: 2,
+    memory_mib: 8192,
+    disk_gib: 40,
+    purchase_option: "on_demand",
+  },
+  network_scope: {
+    public_ingress: false,
+    entry_point: "none",
+    tls_required: false,
+    authentication_required: false,
+  },
+  secret_scope: null,
+  integration_scope: null,
+  expires_at: "2026-07-14T07:10:00Z",
+  signature: "A".repeat(86),
+};
+command.approval_proof = approvalProof;
 
 const sent = [];
 const ec2Client = {
@@ -165,6 +215,17 @@ assert.deepEqual(outbound.IpPermissions.map((permission) => [permission.IpProtoc
   ["udp", 53, 53],
   ["tcp", 53, 53],
 ]);
+
+const sentBeforeMismatchedScope = sent.length;
+await assert.rejects(
+  () => provisioner.ensure({
+    ...command,
+    payload: { ...payload, candidate_id: "candidate-performance-01" },
+  }),
+  (error) => error?.code === "approval_proof_mismatch",
+  "a signed deployment command must not select a more expensive durable quote candidate outside the Flutter-approved resource scope",
+);
+assert.equal(sent.length, sentBeforeMismatchedScope, "a resource-scope mismatch must fail before any EC2 preflight or mutation");
 
 const trustedGroupTags = sent.find((item) => item instanceof CreateSecurityGroupCommand)?.input.TagSpecifications[0].Tags;
 const ipv6Egress = outbound.IpPermissions.map((permission, index) => ({

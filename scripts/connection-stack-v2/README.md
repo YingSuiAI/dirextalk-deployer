@@ -104,8 +104,14 @@ checkpoint/resume and interruption contract and cannot reuse this quote path.
 
 For a fresh signed quote command, the Broker first verifies that every requested
 instance type is offered in at least one availability zone in the requested
-region. It then queries the AWS Price List using the Linux, Shared-tenancy,
-used-capacity on-demand product filters. The Pricing client uses the `us-east-1`
+region. It then obtains the immutable instance metadata through
+`DescribeInstanceTypes`: the canonical Dirextalk architecture (`amd64` or
+`arm64`), default vCPU count, memory in MiB, GPU count, and total GPU memory in
+MiB. A response that does not bind exactly one supported Dirextalk architecture
+or a complete capacity record is rejected before price lookup; legacy `i386` is
+ignored when the same type also declares `x86_64`. It then queries the
+AWS Price List using the Linux, Shared-tenancy, used-capacity on-demand product
+filters. The Pricing client uses the `us-east-1`
 endpoint while the product filter retains the requested region; the EC2 client
 uses the Stack region. It accepts only an unambiguous hourly USD price and
 stores the result with the immutable command receipt. An exact idempotent replay
@@ -170,8 +176,9 @@ request, expired/replayed challenge, or unavailable durable store fails closed.
 
 The Lambda role has only `dynamodb:GetItem` and
 `dynamodb:TransactWriteItems` against the three Stack-owned tables,
-`pricing:GetProducts`, and `ec2:DescribeInstanceTypeOfferings`, plus its
-CloudWatch Logs permissions. Both provider actions require `Resource: "*"`;
+`pricing:GetProducts`, `ec2:DescribeInstanceTypeOfferings`, and
+`ec2:DescribeInstanceTypes`, plus its
+CloudWatch Logs permissions. All three provider actions require `Resource: "*"`;
 they are still read-only and no EC2 mutation or role-passing permission is
 present. The Lambda source pins DynamoDB, EC2, and Pricing SDK dependencies in
 `src/package-lock.json`; do not rely on a runtime-provided SDK version for a

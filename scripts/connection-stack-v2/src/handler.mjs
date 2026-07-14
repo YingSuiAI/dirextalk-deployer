@@ -153,6 +153,7 @@ async function productionHandler() {
       const {
         EC2Client,
         DescribeInstanceTypeOfferingsCommand,
+        DescribeInstanceTypesCommand,
       } = await import("@aws-sdk/client-ec2");
       const {
         PricingClient,
@@ -164,6 +165,7 @@ async function productionHandler() {
         ec2Client: new EC2Client({}),
         GetProductsCommand,
         DescribeInstanceTypeOfferingsCommand,
+        DescribeInstanceTypesCommand,
       });
       const receiptStore = new DynamoV2ReceiptStore({
         client: dynamodb,

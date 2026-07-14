@@ -101,6 +101,11 @@ function quoteFor(input) {
     valid_until: new Date(input.now_ms + 15 * 60 * 1000).toISOString(),
     candidates: input.quote_request.candidates.map((candidate) => ({
       ...candidate,
+      architecture: "amd64",
+      vcpu: 2,
+      memory_mib: 8192,
+      gpu_count: 0,
+      gpu_memory_mib: 0,
       hourly_minor: 5,
       thirty_day_minor: 2996,
       startup_upper_minor: 0,

@@ -115,7 +115,17 @@ assert.deepEqual(
     Action: "ec2:DescribeInstanceTypeOfferings",
     Resource: "*",
   },
-  "instance availability lookup must remain the only EC2 permission",
+  "instance availability lookup must remain read-only",
+);
+assert.deepEqual(
+  rolePolicy.find((statement) => statement.Action === "ec2:DescribeInstanceTypes"),
+  {
+    Sid: "ReadInstanceTypeCapacityOnly",
+    Effect: "Allow",
+    Action: "ec2:DescribeInstanceTypes",
+    Resource: "*",
+  },
+  "instance capacity lookup must remain read-only",
 );
 assert.doesNotMatch(JSON.stringify(rolePolicy), /dynamodb:(?:PutItem|UpdateItem|DeleteItem|Scan|Query)/);
 assert.doesNotMatch(JSON.stringify(rolePolicy), /pricing:\*|ec2:\*/i);

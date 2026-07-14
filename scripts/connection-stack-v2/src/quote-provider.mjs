@@ -10,6 +10,12 @@ import {
 } from "./quote-contract.mjs";
 
 const HOURS_PER_THIRTY_DAYS = 24 * 30;
+const MAX_UINT16 = 0xffff;
+const MAX_UINT32 = 0xffffffff;
+const DIREXTALK_ARCHITECTURE_BY_AWS_ARCHITECTURE = new Map([
+  ["x86_64", "amd64"],
+  ["arm64", "arm64"],
+]);
 
 function fail(code, message, statusCode = 409) {
   throw new ConnectionStackV2Error(code, message, statusCode);
@@ -84,6 +90,91 @@ function availabilityByInstance(output, candidates) {
   return result;
 }
 
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function invalidInstanceTypeCapacity() {
+  fail("instance_type_capacity_invalid", "AWS returned invalid immutable instance capacity", 502);
+}
+
+function boundedPositiveInteger(value, maximum) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+    invalidInstanceTypeCapacity();
+  }
+  return value;
+}
+
+function architectureForInstanceType(instanceType) {
+  const supported = instanceType?.ProcessorInfo?.SupportedArchitectures;
+  if (!Array.isArray(supported) || supported.length === 0 || !supported.every((architecture) => typeof architecture === "string")) {
+    invalidInstanceTypeCapacity();
+  }
+  const architectures = new Set(supported
+    .map((architecture) => DIREXTALK_ARCHITECTURE_BY_AWS_ARCHITECTURE.get(architecture))
+    .filter(Boolean));
+  if (architectures.size !== 1) invalidInstanceTypeCapacity();
+  return [...architectures][0];
+}
+
+function gpuCapacityForInstanceType(instanceType) {
+  const gpuInfo = instanceType?.GpuInfo;
+  if (gpuInfo === undefined) return { gpu_count: 0, gpu_memory_mib: 0 };
+  if (!isRecord(gpuInfo) || !Array.isArray(gpuInfo.Gpus) || gpuInfo.Gpus.length === 0) {
+    invalidInstanceTypeCapacity();
+  }
+  let gpuCount = 0;
+  let gpuMemoryMiB = 0;
+  for (const gpu of gpuInfo.Gpus) {
+    if (!isRecord(gpu)) invalidInstanceTypeCapacity();
+    const count = boundedPositiveInteger(gpu.Count, MAX_UINT16);
+    const memoryMiB = boundedPositiveInteger(gpu.MemoryInfo?.SizeInMiB, MAX_UINT32);
+    const totalMemoryMiB = count * memoryMiB;
+    if (!Number.isSafeInteger(totalMemoryMiB)
+      || gpuCount + count > MAX_UINT16
+      || gpuMemoryMiB + totalMemoryMiB > MAX_UINT32) {
+      invalidInstanceTypeCapacity();
+    }
+    gpuCount += count;
+    gpuMemoryMiB += totalMemoryMiB;
+  }
+  const reportedTotalMemoryMiB = boundedPositiveInteger(gpuInfo.TotalGpuMemoryInMiB, MAX_UINT32);
+  if (reportedTotalMemoryMiB !== gpuMemoryMiB) invalidInstanceTypeCapacity();
+  return { gpu_count: gpuCount, gpu_memory_mib: reportedTotalMemoryMiB };
+}
+
+function capacityForInstanceType(instanceType) {
+  if (!isRecord(instanceType) || typeof instanceType.InstanceType !== "string") {
+    invalidInstanceTypeCapacity();
+  }
+  return {
+    architecture: architectureForInstanceType(instanceType),
+    vcpu: boundedPositiveInteger(instanceType.VCpuInfo?.DefaultVCpus, MAX_UINT16),
+    memory_mib: boundedPositiveInteger(instanceType.MemoryInfo?.SizeInMiB, MAX_UINT32),
+    ...gpuCapacityForInstanceType(instanceType),
+  };
+}
+
+function capacitiesByInstance(output, candidates) {
+  if (output?.NextToken || !Array.isArray(output?.InstanceTypes)) {
+    invalidInstanceTypeCapacity();
+  }
+  const requested = new Set(candidates.map((candidate) => candidate.instance_type));
+  const result = new Map();
+  for (const instanceType of output.InstanceTypes) {
+    if (!isRecord(instanceType) || typeof instanceType.InstanceType !== "string") {
+      invalidInstanceTypeCapacity();
+    }
+    if (!requested.has(instanceType.InstanceType)) continue;
+    if (result.has(instanceType.InstanceType)) invalidInstanceTypeCapacity();
+    result.set(instanceType.InstanceType, capacityForInstanceType(instanceType));
+  }
+  for (const candidate of candidates) {
+    if (!result.has(candidate.instance_type)) invalidInstanceTypeCapacity();
+  }
+  return result;
+}
+
 function normalizedProviderRequest(request) {
   if (!request || typeof request !== "object") {
     fail("quote_provider_invalid_request", "quote provider request is invalid", 500);
@@ -104,14 +195,15 @@ function normalizedProviderRequest(request) {
 // create, change, or destroy resources. Its result explicitly excludes costs
 // that this stage cannot price accurately enough for an approval surface.
 export class AwsOnDemandQuoteProvider {
-  constructor({ pricingClient, ec2Client, GetProductsCommand, DescribeInstanceTypeOfferingsCommand }) {
-    if (!pricingClient?.send || !ec2Client?.send || !GetProductsCommand || !DescribeInstanceTypeOfferingsCommand) {
+  constructor({ pricingClient, ec2Client, GetProductsCommand, DescribeInstanceTypeOfferingsCommand, DescribeInstanceTypesCommand }) {
+    if (!pricingClient?.send || !ec2Client?.send || !GetProductsCommand || !DescribeInstanceTypeOfferingsCommand || !DescribeInstanceTypesCommand) {
       throw new TypeError("read-only Pricing and EC2 clients are required");
     }
     this.pricingClient = pricingClient;
     this.ec2Client = ec2Client;
     this.GetProductsCommand = GetProductsCommand;
     this.DescribeInstanceTypeOfferingsCommand = DescribeInstanceTypeOfferingsCommand;
+    this.DescribeInstanceTypesCommand = DescribeInstanceTypesCommand;
   }
 
   async quote(input) {
@@ -128,6 +220,17 @@ export class AwsOnDemandQuoteProvider {
       fail("quote_provider_unavailable", "AWS instance offering lookup is unavailable", 503);
     }
     const zones = availabilityByInstance(offerings, request.quote_request.candidates);
+    let instanceTypes;
+    try {
+      instanceTypes = await this.ec2Client.send(new this.DescribeInstanceTypesCommand({
+        InstanceTypes: request.quote_request.candidates.map((candidate) => candidate.instance_type),
+        MaxResults: 100,
+      }));
+    } catch (error) {
+      if (error instanceof ConnectionStackV2Error) throw error;
+      fail("quote_provider_unavailable", "AWS instance capacity lookup is unavailable", 503);
+    }
+    const capacities = capacitiesByInstance(instanceTypes, request.quote_request.candidates);
     const candidates = [];
     for (const candidate of request.quote_request.candidates) {
       let result;
@@ -148,6 +251,7 @@ export class AwsOnDemandQuoteProvider {
       const hourlyUSD = onDemandUSD(result.PriceList);
       candidates.push({
         ...candidate,
+        ...capacities.get(candidate.instance_type),
         hourly_minor: decimalMinorCeiling(hourlyUSD, 100),
         thirty_day_minor: decimalMinorCeiling(hourlyUSD, 100 * HOURS_PER_THIRTY_DAYS),
         // This is zero only because this stage models no one-off cost. The

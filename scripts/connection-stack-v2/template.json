@@ -251,6 +251,12 @@
                   "Resource": "*"
                 },
                 {
+                  "Sid": "ReadInstanceTypeCapacityOnly",
+                  "Effect": "Allow",
+                  "Action": "ec2:DescribeInstanceTypes",
+                  "Resource": "*"
+                },
+                {
                   "Sid": "WriteFunctionLogs",
                   "Effect": "Allow",
                   "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],

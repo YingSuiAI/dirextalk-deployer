@@ -16,6 +16,12 @@ class DescribeInstanceTypeOfferingsCommand {
   }
 }
 
+class DescribeInstanceTypesCommand {
+  constructor(input) {
+    this.input = input;
+  }
+}
+
 class ScriptedClient {
   constructor(handler) {
     this.handler = handler;
@@ -49,7 +55,7 @@ const REQUEST = {
       {
         candidate_id: "candidate-recommended-01",
         tier: "recommended",
-        instance_type: "t3.xlarge",
+        instance_type: "g5.xlarge",
         purchase_option: "on_demand",
         estimated_disk_gib: 80,
       },
@@ -77,10 +83,43 @@ function priceDocument(usd) {
   });
 }
 
-function provider({ offerings, pricing }) {
+function standardOfferings() {
+  return {
+    InstanceTypeOfferings: [
+      { InstanceType: "t3.large", Location: "ap-south-1a" },
+      { InstanceType: "g5.xlarge", Location: "ap-south-1a" },
+    ],
+  };
+}
+
+function standardInstanceTypes({ t3Architectures = ["x86_64"] } = {}) {
+  return {
+    InstanceTypes: [
+      {
+        InstanceType: "t3.large",
+        ProcessorInfo: { SupportedArchitectures: t3Architectures },
+        VCpuInfo: { DefaultVCpus: 2 },
+        MemoryInfo: { SizeInMiB: 8192 },
+      },
+      {
+        InstanceType: "g5.xlarge",
+        ProcessorInfo: { SupportedArchitectures: ["x86_64"] },
+        VCpuInfo: { DefaultVCpus: 4 },
+        MemoryInfo: { SizeInMiB: 16384 },
+        GpuInfo: {
+          Gpus: [{ Count: 1, MemoryInfo: { SizeInMiB: 24576 } }],
+          TotalGpuMemoryInMiB: 24576,
+        },
+      },
+    ],
+  };
+}
+
+function provider({ offerings, instanceTypes = () => { throw new Error("instance type capacity must not be queried"); }, pricing }) {
   const ec2Client = new ScriptedClient((command) => {
-    assert.ok(command instanceof DescribeInstanceTypeOfferingsCommand);
-    return offerings(command.input);
+    if (command instanceof DescribeInstanceTypeOfferingsCommand) return offerings(command.input);
+    if (command instanceof DescribeInstanceTypesCommand) return instanceTypes(command.input);
+    throw new Error("unexpected EC2 command");
   });
   const pricingClient = new ScriptedClient((command) => {
     assert.ok(command instanceof GetProductsCommand);
@@ -92,6 +131,7 @@ function provider({ offerings, pricing }) {
       pricingClient,
       GetProductsCommand,
       DescribeInstanceTypeOfferingsCommand,
+      DescribeInstanceTypesCommand,
     }),
     ec2Client,
     pricingClient,
@@ -104,7 +144,7 @@ const quoted = provider({
       LocationType: "availability-zone",
       Filters: [{
         Name: "instance-type",
-        Values: ["t3.large", "t3.xlarge"],
+        Values: ["t3.large", "g5.xlarge"],
       }],
       MaxResults: 100,
     });
@@ -113,9 +153,18 @@ const quoted = provider({
         { InstanceType: "t3.large", Location: "ap-south-1c" },
         { InstanceType: "t3.large", Location: "ap-south-1a" },
         { InstanceType: "t3.large", Location: "ap-south-1a" },
-        { InstanceType: "t3.xlarge", Location: "ap-south-1b" },
+        { InstanceType: "g5.xlarge", Location: "ap-south-1b" },
       ],
     };
+  },
+  instanceTypes(input) {
+    assert.deepEqual(input, {
+      InstanceTypes: ["t3.large", "g5.xlarge"],
+      MaxResults: 100,
+    });
+    const result = standardInstanceTypes();
+    result.InstanceTypes.reverse();
+    return result;
   },
   pricing(input) {
     assert.equal(input.ServiceCode, "AmazonEC2");
@@ -134,15 +183,15 @@ const quoted = provider({
     if (instanceType === "t3.large") {
       return { PriceList: [priceDocument("0.0416000000"), priceDocument("0.0416000000")] };
     }
-    if (instanceType === "t3.xlarge") {
-      return { PriceList: [priceDocument("0.0832000000")] };
+    if (instanceType === "g5.xlarge") {
+      return { PriceList: [priceDocument("1.0064000000")] };
     }
     throw new Error("unexpected instance type");
   },
 });
 
 const quote = await quoted.provider.quote(REQUEST);
-assert.equal(quoted.ec2Client.calls.length, 1);
+assert.equal(quoted.ec2Client.calls.length, 2);
 assert.equal(quoted.pricingClient.calls.length, 2);
 assert.deepEqual(quote, {
   schema: "dirextalk.aws.quote/v1",
@@ -159,6 +208,11 @@ assert.deepEqual(quote, {
   candidates: [
     {
       ...REQUEST.quote_request.candidates[0],
+      architecture: "amd64",
+      vcpu: 2,
+      memory_mib: 8192,
+      gpu_count: 0,
+      gpu_memory_mib: 0,
       hourly_minor: 5,
       thirty_day_minor: 2996,
       startup_upper_minor: 0,
@@ -166,8 +220,13 @@ assert.deepEqual(quote, {
     },
     {
       ...REQUEST.quote_request.candidates[1],
-      hourly_minor: 9,
-      thirty_day_minor: 5991,
+      architecture: "amd64",
+      vcpu: 4,
+      memory_mib: 16384,
+      gpu_count: 1,
+      gpu_memory_mib: 24576,
+      hourly_minor: 101,
+      thirty_day_minor: 72461,
       startup_upper_minor: 0,
       availability_zones: ["ap-south-1b"],
     },
@@ -177,8 +236,82 @@ assert.deepEqual(quote, {
 });
 assert.doesNotMatch(JSON.stringify(quote), /internal_test_price_marker|must-not-leave-provider/);
 
+const arm64Request = {
+  ...REQUEST,
+  command_id: "command-v2-quote-arm-001",
+  request_sha256: "d".repeat(64),
+  quote_request: {
+    ...REQUEST.quote_request,
+    quote_request_id: "quote-request-v2-arm-01",
+    candidates: [{
+      candidate_id: "candidate-arm64-01",
+      tier: "economy",
+      instance_type: "t4g.large",
+      purchase_option: "on_demand",
+      estimated_disk_gib: 40,
+    }],
+  },
+};
+const arm64 = provider({
+  offerings: () => ({ InstanceTypeOfferings: [
+    { InstanceType: "t4g.large", Location: "ap-south-1a" },
+  ] }),
+  instanceTypes: () => ({ InstanceTypes: [{
+    InstanceType: "t4g.large",
+    ProcessorInfo: { SupportedArchitectures: ["arm64"] },
+    VCpuInfo: { DefaultVCpus: 2 },
+    MemoryInfo: { SizeInMiB: 8192 },
+  }] }),
+  pricing: () => ({ PriceList: [priceDocument("0.0416000000")] }),
+});
+const arm64Quote = await arm64.provider.quote(arm64Request);
+assert.deepEqual(arm64Quote.candidates[0], {
+  ...arm64Request.quote_request.candidates[0],
+  architecture: "arm64",
+  vcpu: 2,
+  memory_mib: 8192,
+  gpu_count: 0,
+  gpu_memory_mib: 0,
+  hourly_minor: 5,
+  thirty_day_minor: 2996,
+  startup_upper_minor: 0,
+  availability_zones: ["ap-south-1a"],
+});
+
+const legacyX86Request = {
+  ...arm64Request,
+  command_id: "command-v2-quote-legacy-x86-001",
+  request_sha256: "e".repeat(64),
+  quote_request: {
+    ...arm64Request.quote_request,
+    quote_request_id: "quote-request-v2-legacy-x86-01",
+    candidates: [{
+      ...arm64Request.quote_request.candidates[0],
+      candidate_id: "candidate-legacy-x86-01",
+      instance_type: "t2.micro",
+    }],
+  },
+};
+const legacyX86 = provider({
+  offerings: () => ({ InstanceTypeOfferings: [
+    { InstanceType: "t2.micro", Location: "ap-south-1a" },
+  ] }),
+  instanceTypes: () => ({ InstanceTypes: [{
+    InstanceType: "t2.micro",
+    ProcessorInfo: { SupportedArchitectures: ["i386", "x86_64"] },
+    VCpuInfo: { DefaultVCpus: 1 },
+    MemoryInfo: { SizeInMiB: 1024 },
+  }] }),
+  pricing: () => ({ PriceList: [priceDocument("0.0116000000")] }),
+});
+const legacyX86Quote = await legacyX86.provider.quote(legacyX86Request);
+assert.equal(legacyX86Quote.candidates[0].architecture, "amd64");
+
 const unavailable = provider({
   offerings: () => ({ InstanceTypeOfferings: [] }),
+  instanceTypes: () => {
+    throw new Error("capacity must not be queried for an unavailable type");
+  },
   pricing: () => {
     throw new Error("pricing must not be queried for an unavailable type");
   },
@@ -190,16 +323,27 @@ await assert.rejects(
 assert.equal(unavailable.pricingClient.calls.length, 0);
 
 const ambiguous = provider({
-  offerings: () => ({ InstanceTypeOfferings: [
-    { InstanceType: "t3.large", Location: "ap-south-1a" },
-    { InstanceType: "t3.xlarge", Location: "ap-south-1a" },
-  ] }),
+  offerings: standardOfferings,
+  instanceTypes: standardInstanceTypes,
   pricing: () => ({ PriceList: [priceDocument("0.0416000000"), priceDocument("0.0512000000")] }),
 });
 await assert.rejects(
   () => ambiguous.provider.quote(REQUEST),
   (error) => error?.code === "quote_price_ambiguous" && error?.statusCode === 502,
 );
+
+const capacityAmbiguous = provider({
+  offerings: standardOfferings,
+  instanceTypes: () => standardInstanceTypes({ t3Architectures: ["x86_64", "arm64"] }),
+  pricing: () => {
+    throw new Error("pricing must not be queried when capacity cannot bind one architecture");
+  },
+});
+await assert.rejects(
+  () => capacityAmbiguous.provider.quote(REQUEST),
+  (error) => error?.code === "instance_type_capacity_invalid" && error?.statusCode === 502,
+);
+assert.equal(capacityAmbiguous.pricingClient.calls.length, 0);
 
 const spotRequest = structuredClone(REQUEST);
 spotRequest.quote_request.candidates[0].purchase_option = "spot";

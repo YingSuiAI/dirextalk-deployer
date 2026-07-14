@@ -22,6 +22,9 @@ const INSTANCE_TYPE_PATTERN = /^[a-z0-9][a-z0-9.-]{1,63}$/;
 const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const ITEM_PATTERN = /^[a-z][a-z0-9_.-]{1,63}$/;
 const TIERS = new Set(["economy", "recommended", "performance"]);
+const ARCHITECTURES = new Set(["amd64", "arm64"]);
+const MAX_UINT16 = 0xffff;
+const MAX_UINT32 = 0xffffffff;
 const QUOTE_REQUEST_FIELDS = ["quote_request_id", "plan_digest", "region", "candidates"];
 const QUOTE_CANDIDATE_REQUEST_FIELDS = [
   "candidate_id",
@@ -32,6 +35,11 @@ const QUOTE_CANDIDATE_REQUEST_FIELDS = [
 ];
 const QUOTE_CANDIDATE_FIELDS = [
   ...QUOTE_CANDIDATE_REQUEST_FIELDS,
+  "architecture",
+  "vcpu",
+  "memory_mib",
+  "gpu_count",
+  "gpu_memory_mib",
   "hourly_minor",
   "thirty_day_minor",
   "startup_upper_minor",
@@ -80,9 +88,9 @@ function requireString(record, field, pattern, code, statusCode) {
   return value;
 }
 
-function requireInteger(record, field, minimum, code, statusCode) {
+function requireInteger(record, field, minimum, code, statusCode, maximum = Number.MAX_SAFE_INTEGER) {
   const value = record[field];
-  if (!Number.isSafeInteger(value) || value < minimum) {
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
     fail(code, `${field} is invalid`, statusCode);
   }
   return value;
@@ -190,6 +198,11 @@ function normalizeQuoteCandidate(value, expected, code, statusCode) {
     candidate_id: requireString(value, "candidate_id", ID_PATTERN, code, statusCode),
     tier: requireString(value, "tier", /^[a-z]+$/, code, statusCode),
     instance_type: requireString(value, "instance_type", INSTANCE_TYPE_PATTERN, code, statusCode),
+    architecture: requireString(value, "architecture", /^[a-z0-9]+$/, code, statusCode),
+    vcpu: requireInteger(value, "vcpu", 1, code, statusCode, MAX_UINT16),
+    memory_mib: requireInteger(value, "memory_mib", 1, code, statusCode, MAX_UINT32),
+    gpu_count: requireInteger(value, "gpu_count", 0, code, statusCode, MAX_UINT16),
+    gpu_memory_mib: requireInteger(value, "gpu_memory_mib", 0, code, statusCode, MAX_UINT32),
     purchase_option: requireString(value, "purchase_option", /^[a-z_]+$/, code, statusCode),
     estimated_disk_gib: requireInteger(value, "estimated_disk_gib", 8, code, statusCode),
     hourly_minor: requireInteger(value, "hourly_minor", 0, code, statusCode),
@@ -197,6 +210,12 @@ function normalizeQuoteCandidate(value, expected, code, statusCode) {
     startup_upper_minor: requireInteger(value, "startup_upper_minor", 0, code, statusCode),
     availability_zones: canonicalStrings(value.availability_zones, "availability_zones", AVAILABILITY_ZONE_PATTERN, code, statusCode, { nonempty: true }),
   };
+  if (!ARCHITECTURES.has(candidate.architecture)) {
+    fail(code, "architecture is invalid", statusCode);
+  }
+  if ((candidate.gpu_count === 0) !== (candidate.gpu_memory_mib === 0)) {
+    fail(code, "gpu count and memory must agree", statusCode);
+  }
   if (candidate.candidate_id !== expected.candidate_id || candidate.tier !== expected.tier
     || candidate.instance_type !== expected.instance_type || candidate.purchase_option !== expected.purchase_option
     || candidate.estimated_disk_gib !== expected.estimated_disk_gib) {

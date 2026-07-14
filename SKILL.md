@@ -232,13 +232,25 @@ Record and report `cost_estimate` and billing reminders. Tell the operator that 
 
 Required first-time deployment confirmation. Fill in the concrete domain,
 profile, region, and cloud provider. Include the AWS credit/Lightsail trial
-sentence immediately before the confirmation line:
+sentence immediately before asking for approval. Accept a natural-language
+confirmation in their own words; do not require them to copy a fixed sentence
+or a command token.
+Accept the confirmation only when it clearly covers all of the following:
+
+- the intended Dirextalk deployment and final domain;
+- the AWS profile or account authority and selected region/provider; and
+- acknowledgement that billable resources can remain billed until destroyed.
+
+Short replies such as "confirm", "deploy", or "go ahead" are sufficient only
+when the immediately preceding deployment summary already states those facts
+and the user has not changed the plan. Otherwise ask one concise follow-up that
+identifies the missing fact. Record the semantic user decision in the operation
+report, then set any required machine-only environment flags yourself.
 
 ```text
 Please confirm before I deploy. New AWS customer accounts generally receive 100-200 USD in free credits, and users who have not used Lightsail generally receive three months of free Lightsail usage. Credits and trials are account-specific, actual coverage must be verified in AWS Billing Console, and AWS official real-time policy prevails.
 
-Reply with this exact sentence:
-I confirm that I have an active AWS account, the long-lived domain <domain>, and authorize the current <profile-or-identity> AWS profile in <region> to create the Dirextalk service using <cloud-provider>. I understand this can create billable AWS resources, credits or trials are not guaranteed to cover all usage, and resources keep billing until destroyed.
+For example: "I confirm deployment of <domain> in <region>; I authorize this AWS profile and understand the ongoing AWS charges."
 ```
 
 If any prerequisite is missing, stop deployment and guide the user through that
@@ -267,7 +279,9 @@ and message-server Release CI own cross-version compatibility evidence.
 The only legacy host adoption path is `scripts/adopt-legacy-node.sh`. It first
 requires a dry-run proof of the fixed d1 v0.15.2 Compose project, approved image
 digest, live health, binary version, and systemd Caddy identity. Mutation then
-requires the exact printed confirmation. It creates the updater-owned
+requires an explicit semantic user confirmation of the reviewed adoption. The
+script's printed confirmation token is machine-only: the agent supplies it
+after that approval and never asks the user to copy it. It creates the updater-owned
 `/var/dirextalk-message-server` view without pulling or recreating the running
 container, installs the pinned updater with `caddy_mode=systemd`, and
 transactionally adds only `/_dirextalk/updater/v1/jobs/*` to Caddy. Never use
@@ -278,8 +292,9 @@ Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
 zone; otherwise it chooses `user` and gives manual A-record guidance after IP
 allocation. Explicit `DOMAIN_MODE=user|route53` remains an advanced automation
 override. If an existing Route53 A record points elsewhere, require
-`DIREXTALK_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
-authoritative DNS before continuing.
+an explicit semantic user confirmation that identifies the domain and the
+replacement target. Then set `DIREXTALK_CONFIRM_DNS_OVERWRITE=1` internally.
+If Route53 delegation is needed, wait for authoritative DNS before continuing.
 
 Default cloud provider is Lightsail. If no AWS region is configured in state, `AWS_DEFAULT_REGION`/`AWS_REGION`, or the AWS profile, the deployer recommends a default region from the local timezone and uses it in non-interactive runs; `DIREXTALK_DEFAULT_REGION` is the explicit deployer override. S1 queries Lightsail bundle availability and Lightsail availability zones before provisioning, but it does not query AWS Free Tier or credit usage. For manual Lightsail zone checks, use `aws lightsail get-regions --include-availability-zones --output json`; plain `aws lightsail get-regions` can omit availability-zone details. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone in the same region. If Lightsail has no usable bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; ask the operator to choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2` after reviewing the estimate. EC2 remains supported explicitly with `DIREXTALK_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
 
@@ -405,7 +420,9 @@ DIREXTALK_CONFIRM_EVIDENCE="user completed app initialization" DOMAIN=<DOMAIN> b
 DIREXTALK_CONFIRM_RUNTIME_PROBE=1 DIREXTALK_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm agent_mcp_runtime
 ```
 
-Every `confirm` command requires `DIREXTALK_CONFIRM_EVIDENCE`; evidence must be
+Every `confirm` command requires `DIREXTALK_CONFIRM_EVIDENCE`; agents derive
+that machine-only note from the user's clear natural-language confirmation and
+must not make the user provide an exact phrase. The evidence must remain
 concrete and at least 12 characters. For `agent_mcp_runtime`, first require
 `runtime_checks.summary.status=passed`, then set `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`
 only after a real runtime/channel probe sees the service-scoped MCP tools.
@@ -447,13 +464,17 @@ Use `bash scripts/update.sh` for image-only refresh. It preserves infrastructure
 TLS storage, local credentials, confirmations, runtime checks, dirextalk-connect daemon
 state, and MCP artifacts unless verification proves credentials were regenerated.
 
-Use `bash scripts/reset-app-data.sh` only with `DIREXTALK_RESET_APP_DATA_CONFIRM=1`.
+Use `bash scripts/reset-app-data.sh` only after an explicit semantic user
+confirmation that application data will be cleared. Set
+`DIREXTALK_RESET_APP_DATA_CONFIRM=1` internally; never make the user copy it.
 It preserves the cloud instance, fixed public IP/static IP or Elastic IP, DNS, and Caddy TLS storage, clears
 application data, clears old user-confirmation/runtime-check evidence, sets
 `connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped dirextalk-connect daemon. The follow-up
 orchestrate run regenerates credentials and MCP snippets.
 
-Destroy uses `bash scripts/destroy.sh` on every supported local host. Destroy uses the same AWS identity boundary as deployment.
+Destroy uses `bash scripts/destroy.sh` on every supported local host. Require a
+clear natural-language user instruction to destroy or cancel the named service;
+do not require a copied confirmation string. Destroy uses the same AWS identity boundary as deployment.
 Root AWS access-key identity is allowed when the operator explicitly chose it.
 Destroy stops and uninstalls only the service-scoped daemon whose WorkDir
 matches `~/.dirextalk/nodes/<service_id>/dirextalk-connect`, then removes recorded AWS

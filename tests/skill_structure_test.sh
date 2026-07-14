@@ -354,7 +354,10 @@ grep -q 'Default tone for new users' SKILL.md
 grep -q 'Step-by-step onboarding flow' SKILL.md
 grep -q 'When a technical term is unavoidable' SKILL.md
 grep -q 'Please confirm before I deploy' SKILL.md
-grep -q 'Reply with this exact sentence' SKILL.md
+grep -q 'Accept a natural-language' SKILL.md
+grep -q 'confirmation in their own words' SKILL.md
+grep -q 'machine-only environment flags' SKILL.md
+! grep -q 'Reply with this exact sentence:' SKILL.md
 grep -q 'First question: do you already have an AWS account' scripts/phases/s0_prereq_aws.sh
 grep -q 'automatically checks the current AWS account' scripts/phases/s2_domain.sh
 grep -q 'not hosted in the current AWS account' scripts/phases/s2_domain.sh
@@ -435,8 +438,8 @@ grep -q 'orchestrate.sh verify mcp_tools' SKILL.md
 grep -q 'orchestrate.sh verify runtime' SKILL.md
 grep -q 'orchestrate.sh confirm app_initialization' references/deployment-workflow.md
 grep -q 'DIREXTALK_CONFIRM_RUNTIME_PROBE=1' references/deployment-workflow.md
-grep -q 'All `confirm` commands require `DIREXTALK_CONFIRM_EVIDENCE`' references/deployment-workflow.md
-grep -q 'at least 12 characters' references/deployment-workflow.md
+grep -q 'agent writes that machine-only note' references/deployment-workflow.md
+grep -q 'at least 12' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify connect_daemon' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify mcp_doctor' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify mcp_smoke' references/deployment-workflow.md

@@ -1,5 +1,17 @@
 # Deployment Workflow
 
+## Conversation Confirmation Policy
+
+For every user-facing confirmation in this workflow, accept a clear
+natural-language confirmation in the user's own words. Do not require the user
+to copy a fixed sentence, an environment variable, or a machine-generated
+token. A short confirmation such as "confirm" or "go ahead" is sufficient when
+the immediately preceding summary names the affected resource and its
+consequences; otherwise ask one concise question for the missing fact.
+
+The environment flags shown below remain machine-only safeguards. The agent
+sets them only after the semantic user confirmation has been established.
+
 ## Preflight
 
 1. Confirm `DOMAIN`, `DOMAIN_MODE`, and `CONFIRM_DOMAIN_BINDING=1`.
@@ -244,9 +256,11 @@ are both present. Use the flag only after the selected runtime/channel probe has
 actually loaded the service-scoped MCP tools; `verify runtime` alone is an
 internal non-polluting check, not the full product gate.
 All `confirm` commands require `DIREXTALK_CONFIRM_EVIDENCE` with a concrete
-user/runtime evidence note; do not write user-confirmation gates with generic
-default evidence. The evidence note must be at least 12 characters; avoid
-placeholders such as `ok`, `yes`, or `done`.
+user/runtime evidence note. The agent writes that machine-only note after a
+clear natural-language user confirmation; it must not ask the user to provide
+an exact phrase or environment variable. The evidence note must be at least 12
+characters; avoid generic defaults or placeholders such as `ok`, `yes`, or
+`done`.
 
 ## Existing Node Update
 

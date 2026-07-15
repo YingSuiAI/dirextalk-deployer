@@ -399,7 +399,7 @@ grep -q 'MCP capability: session' "$generic_service_dir/mcp/README.md"
 openclaw_service_dir="$tmp/openclaw-mcp-service"
 openclaw_credentials="$openclaw_service_dir/credentials.json"
 mkdir -p "$openclaw_service_dir"
-: > "$openclaw_credentials"
+_write_credentials_file "$openclaw_credentials" openclaw.example.test https://openclaw.example.test OPENCLAW_TOKEN 12345678 owner-token '!agents-real:openclaw.example.test' openclaw-node
 _write_mcp_config_artifacts "openclaw.example.test" "$openclaw_service_dir" "https://openclaw.example.test" "OPENCLAW_TOKEN" "$openclaw_credentials" "openclaw-node" openclaw
 [ -s "$openclaw_service_dir/mcp/openclaw.md" ]
 [ ! -e "$openclaw_service_dir/mcp/openclaw-server.json" ]
@@ -411,13 +411,13 @@ grep -Fq "$openclaw_credentials" "$openclaw_service_dir/mcp/openclaw.md"
 hermes_service_dir="$tmp/hermes-mcp-service"
 hermes_credentials="$hermes_service_dir/credentials.json"
 mkdir -p "$hermes_service_dir"
-: > "$hermes_credentials"
+_write_credentials_file "$hermes_credentials" hermes.example.test https://hermes.example.test HERMES_TOKEN 12345678 owner-token '!agents-real:hermes.example.test' hermes-node
 _write_mcp_config_artifacts "hermes.example.test" "$hermes_service_dir" "https://hermes.example.test" "HERMES_TOKEN" "$hermes_credentials" "hermes-node" hermes host-managed
 [ -s "$hermes_service_dir/mcp/hermes.md" ]
 [ ! -e "$hermes_service_dir/mcp/hermes.mcp.json" ]
 grep -q 'native `mcp_servers`' "$hermes_service_dir/mcp/hermes.md"
-grep -Fq "HERMES_HOME=$hermes_service_dir/hermes" "$hermes_service_dir/mcp/hermes.md"
-grep -q 'hermes -p dirextalk-hermes_example_test mcp test dirextalk-hermes_example_test' "$hermes_service_dir/mcp/hermes.md"
+grep -Fq "HERMES_HOME=$HERMES_HOME" "$hermes_service_dir/mcp/hermes.md"
+grep -q 'native live-tool probe automatically' "$hermes_service_dir/mcp/hermes.md"
 if grep -R -E 'HERMES_TOKEN|Authorization|Bearer' "$hermes_service_dir/mcp" >/dev/null; then
   echo "Hermes guidance artifacts must remain token-free" >&2
   exit 1
@@ -428,28 +428,77 @@ cat > "$fake_bin/openclaw" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$OPENCLAW_CALL_LOG"
+case "$*" in
+  *'config patch --stdin'*)
+    cat > "$OPENCLAW_PATCH_LOG"
+    exit "${OPENCLAW_REGISTER_EXIT:-0}"
+    ;;
+  *'mcp probe '*)
+    [ -s "$OPENCLAW_PATCH_LOG" ] || exit 1
+    exit "${OPENCLAW_PROBE_EXIT:-0}"
+    ;;
+esac
 EOF
 chmod +x "$fake_bin/openclaw"
-[ ! -e "$tmp/openclaw-set-payload.json" ]
 STATE_CALLS="$tmp/openclaw-confirmed-state-calls.log" \
 OPENCLAW_CALL_LOG="$tmp/openclaw-confirmed-calls.log" \
-PATH="$fake_bin:$PATH" \
+OPENCLAW_PATCH_LOG="$tmp/openclaw-confirmed-patch.json" \
+DIREXTALK_OPENCLAW_COMMAND="$fake_bin/openclaw" \
   _maybe_auto_install_mcp auto openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
-grep -q 'mcp_install_status=host_probe_passed' "$tmp/openclaw-confirmed-state-calls.log"
+grep -q 'mcp_host_registration_status=registered' "$tmp/openclaw-confirmed-state-calls.log"
+grep -q 'mcp_install_status=auto_installed' "$tmp/openclaw-confirmed-state-calls.log"
+grep -qx 'config patch --stdin' "$tmp/openclaw-confirmed-calls.log"
 grep -qx 'mcp probe dirextalk-openclaw_example_test --json' "$tmp/openclaw-confirmed-calls.log"
+json_test_check "$tmp/openclaw-confirmed-patch.json" 'data.mcp.servers["dirextalk-openclaw_example_test"].transport === "streamable-http" && data.mcp.servers["dirextalk-openclaw_example_test"].headers.Authorization === "Bearer ${DIREXTALK_MCP_DIREXTALK_OPENCLAW_EXAMPLE_TEST_AGENT_TOKEN}" && data.env.vars.DIREXTALK_MCP_DIREXTALK_OPENCLAW_EXAMPLE_TEST_AGENT_TOKEN === "OPENCLAW_TOKEN"'
 ! grep -q 'OPENCLAW_TOKEN\|agent-token\|Authorization\|Bearer' "$tmp/openclaw-confirmed-calls.log"
 OPENCLAW_CALL_LOG="$tmp/openclaw-profile-probe-calls.log" \
+OPENCLAW_PATCH_LOG="$tmp/openclaw-confirmed-patch.json" \
 DIREXTALK_OPENCLAW_PROFILE=service-isolated \
-PATH="$fake_bin:$PATH" \
+DIREXTALK_OPENCLAW_COMMAND="$fake_bin/openclaw" \
   _openclaw_mcp_probe "dirextalk-openclaw_example_test"
 grep -qx -- '--profile service-isolated mcp probe dirextalk-openclaw_example_test --json' "$tmp/openclaw-profile-probe-calls.log"
+set +e
+STATE_CALLS="$tmp/openclaw-registration-failed-state-calls.log" \
+OPENCLAW_CALL_LOG="$tmp/openclaw-registration-failed-calls.log" \
+OPENCLAW_PATCH_LOG="$tmp/openclaw-registration-failed-patch.json" \
+OPENCLAW_REGISTER_EXIT=1 \
+DIREXTALK_OPENCLAW_COMMAND="$fake_bin/openclaw" \
+  _maybe_auto_install_mcp auto openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
+openclaw_registration_failed_rc=$?
+set -e
+[ "$openclaw_registration_failed_rc" -eq 1 ]
+grep -q '^mcp_install_status=host_registration_failed$' "$tmp/openclaw-registration-failed-state-calls.log"
+if grep -q 'mcp probe' "$tmp/openclaw-registration-failed-calls.log"; then
+  echo "OpenClaw must not probe after failed registration" >&2
+  exit 1
+fi
+set +e
+STATE_CALLS="$tmp/openclaw-probe-failed-state-calls.log" \
+OPENCLAW_CALL_LOG="$tmp/openclaw-probe-failed-calls.log" \
+OPENCLAW_PATCH_LOG="$tmp/openclaw-probe-failed-patch.json" \
+OPENCLAW_PROBE_EXIT=1 \
+DIREXTALK_OPENCLAW_COMMAND="$fake_bin/openclaw" \
+  _maybe_auto_install_mcp auto openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
+openclaw_probe_failed_rc=$?
+set -e
+[ "$openclaw_probe_failed_rc" -eq 1 ]
+grep -q '^mcp_install_status=host_probe_failed$' "$tmp/openclaw-probe-failed-state-calls.log"
 cat > "$fake_bin/hermes" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'HERMES_HOME=%s\n' "${HERMES_HOME:-}" >> "$HERMES_CALL_LOG"
 printf '%s\n' "$@" >> "$HERMES_CALL_LOG"
+if [ "${1:-}" = profile ] && [ "${2:-}" = create ]; then
+  mkdir -p "$HERMES_HOME/profiles/${3:?profile}"
+  exit 0
+fi
+if [ "${1:-}" = -p ] && [ "${3:-}" = config ] && [ "${4:-}" = path ]; then
+  [ -d "$HERMES_HOME/profiles/${2:?profile}" ] || exit 1
+  printf '%s/profiles/%s/config.yaml\n' "$HERMES_HOME" "$2"
+  exit 0
+fi
 case "$*" in
-  *' status')
+  status|*' status')
     if [ "${HERMES_MODEL_NOT_SET:-0}" = 1 ]; then
       printf '  Model:        (not set)\n'
     else
@@ -457,40 +506,72 @@ case "$*" in
     fi
     ;;
 esac
-exit "${HERMES_PROBE_EXIT:-0}"
+exit 0
 EOF
 chmod 700 "$fake_bin/hermes"
+cat > "$fake_bin/hermes-python" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+kind=unknown
+case "${2:-}" in
+  *'_probe_single_server'*) kind=probe ;;
+  *'save_env_value'*) kind=upsert ;;
+esac
+printf 'kind=%s HERMES_HOME=%s name=%s url=%s env_key=%s\n' \
+  "$kind" "${HERMES_HOME:-}" "${DIREXTALK_MCP_NAME:-}" "${DIREXTALK_HERMES_ENDPOINT_URL:-}" "${DIREXTALK_MCP_ENV_KEY:-}" >> "$HERMES_PYTHON_CALL_LOG"
+if [ "$kind" = upsert ]; then
+  cat > "$HERMES_TOKEN_STDIN_LOG"
+  exit "${HERMES_UPSERT_EXIT:-0}"
+fi
+if [ "$kind" = probe ]; then
+  exit "${HERMES_PROBE_EXIT:-0}"
+fi
+exit 1
+EOF
+chmod 700 "$fake_bin/hermes-python"
 rm -f "$tmp/hermes-confirmed-calls.log"
 STATE_CALLS="$tmp/hermes-confirmed-state-calls.log" \
 HERMES_CALL_LOG="$tmp/hermes-confirmed-calls.log" \
+HERMES_PYTHON_CALL_LOG="$tmp/hermes-python-calls.log" \
+HERMES_TOKEN_STDIN_LOG="$tmp/hermes-token-stdin.log" \
 DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
+DIREXTALK_HERMES_PYTHON="$fake_bin/hermes-python" \
   _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
-grep -q '^mcp_install_status=host_probe_passed$' "$tmp/hermes-confirmed-state-calls.log"
-grep -Fxq "HERMES_HOME=$hermes_service_dir/hermes" "$tmp/hermes-confirmed-calls.log"
+grep -q '^mcp_install_status=auto_installed$' "$tmp/hermes-confirmed-state-calls.log"
+grep -q '^mcp_hermes_profile_owned=true$' "$tmp/hermes-confirmed-state-calls.log"
+grep -Fxq "HERMES_HOME=$HERMES_HOME" "$tmp/hermes-confirmed-calls.log"
+grep -Fxq 'profile' "$tmp/hermes-confirmed-calls.log"
+grep -Fxq 'create' "$tmp/hermes-confirmed-calls.log"
 grep -Fxq 'status' "$tmp/hermes-confirmed-calls.log"
-grep -Fxq 'mcp' "$tmp/hermes-confirmed-calls.log"
-grep -Fxq 'test' "$tmp/hermes-confirmed-calls.log"
 grep -Fxq 'dirextalk-hermes_example_test' "$tmp/hermes-confirmed-calls.log"
-! grep -q 'HERMES_TOKEN\|agent-token\|Authorization\|Bearer' "$tmp/hermes-confirmed-calls.log"
+grep -q '^kind=upsert ' "$tmp/hermes-python-calls.log"
+grep -q '^kind=probe ' "$tmp/hermes-python-calls.log"
+[ "$(cat "$tmp/hermes-token-stdin.log")" = HERMES_TOKEN ]
+! grep -q 'HERMES_TOKEN\|agent-token\|Authorization\|Bearer' "$tmp/hermes-confirmed-calls.log" "$tmp/hermes-python-calls.log"
+! grep -q 'HERMES_TOKEN\|agent-token' "$tmp/hermes-confirmed-calls.log" "$tmp/hermes-python-calls.log"
 set +e
 STATE_CALLS="$tmp/hermes-model-missing-state-calls.log" \
 HERMES_CALL_LOG="$tmp/hermes-model-missing-calls.log" \
 HERMES_MODEL_NOT_SET=1 \
 DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
+DIREXTALK_HERMES_PYTHON="$fake_bin/hermes-python" \
   _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
 hermes_model_missing_rc=$?
 set -e
-[ "$hermes_model_missing_rc" -eq 2 ]
-grep -q '^mcp_install_status=host_probe_failed$' "$tmp/hermes-model-missing-state-calls.log"
+[ "$hermes_model_missing_rc" -eq 1 ]
+grep -q '^mcp_install_status=host_registration_failed$' "$tmp/hermes-model-missing-state-calls.log"
 set +e
 STATE_CALLS="$tmp/hermes-failed-state-calls.log" \
 HERMES_CALL_LOG="$tmp/hermes-failed-calls.log" \
+HERMES_PYTHON_CALL_LOG="$tmp/hermes-failed-python-calls.log" \
+HERMES_TOKEN_STDIN_LOG="$tmp/hermes-failed-token-stdin.log" \
 HERMES_PROBE_EXIT=1 \
 DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
+DIREXTALK_HERMES_PYTHON="$fake_bin/hermes-python" \
   _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
 hermes_probe_failure_rc=$?
 set -e
-[ "$hermes_probe_failure_rc" -eq 2 ]
+[ "$hermes_probe_failure_rc" -eq 1 ]
 grep -q '^mcp_install_status=host_probe_failed$' "$tmp/hermes-failed-state-calls.log"
 STATE_CALLS="$tmp/openclaw-recommend-state-calls.log" \
   _maybe_auto_install_mcp recommend openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
@@ -824,7 +905,7 @@ openclaw_token_options=$(DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXTA
 
 hermes_options=$(DIREXTALK_HERMES_COMMAND=hermes _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
 [[ "$hermes_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-hermes_example_test", "acp"]'* ]]
-[[ "$hermes_options" == *"env = { HERMES_HOME = \"$hermes_service_dir/hermes\" }"* ]]
+[[ "$hermes_options" == *"env = { HERMES_HOME = \"$HERMES_HOME\" }"* ]]
 [[ "$hermes_options" == *'display_name = "Hermes ACP"'* ]]
 
 hermes_custom_command_options=$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
@@ -832,8 +913,8 @@ hermes_custom_command_options=$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes 
 
 hermes_custom_args_options=$(DIREXTALK_HERMES_COMMAND=hermes DIREXTALK_HERMES_ACP_ARGS_TOML='["acp", "--mode", "safe"]' _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
 [[ "$hermes_custom_args_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-hermes_example_test", "acp", "--mode", "safe"]'* ]]
-hermes_windows_options=$(DIREXTALK_HERMES_COMMAND=hermes DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_options_toml hermes acp /mnt/c/Users/alice/.dirextalk/nodes/hermes.example.test dirextalk-hermes_example_test)
-[[ "$hermes_windows_options" == *'env = { HERMES_HOME = "C:/Users/alice/.dirextalk/nodes/hermes.example.test/hermes" }'* ]]
+hermes_windows_options=$(HERMES_HOME=/mnt/c/Users/alice/.hermes DIREXTALK_HERMES_COMMAND=hermes DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_options_toml hermes acp /mnt/c/Users/alice/.dirextalk/nodes/hermes.example.test dirextalk-hermes_example_test)
+[[ "$hermes_windows_options" == *'env = { HERMES_HOME = "C:/Users/alice/.hermes" }'* ]]
 hermes_windows_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_command acp hermes /mnt/c/Users/alice/.dirextalk/nodes/hermes.example.test/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect.exe)
 [[ "$hermes_windows_command" = 'C:/Users/alice/.dirextalk/nodes/hermes.example.test/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect.exe' ]]
 
@@ -850,7 +931,7 @@ _write_connect_config "$hermes_config_path" "$tmp/dirextalk-connect/data-hermes"
 grep -q 'type = "acp"' "$hermes_config_path"
 grep -Fq "cmd = \"$hermes_adapter_binary\"" "$hermes_config_path"
 grep -q 'args = \["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-hermes_example_test", "acp"\]' "$hermes_config_path"
-grep -Fq "env = { HERMES_HOME = \"$hermes_service_dir/hermes\" }" "$hermes_config_path"
+grep -Fq "env = { HERMES_HOME = \"$HERMES_HOME\" }" "$hermes_config_path"
 grep -q 'display_name = "Hermes ACP"' "$hermes_config_path"
 
 guidance=$(
@@ -884,7 +965,7 @@ mcp_guidance=$(
 [[ "$mcp_guidance" == *"Selected MCP type:"* ]]
 [[ "$mcp_guidance" == *"Selected MCP config:"* ]]
 [[ "$mcp_guidance" == *"MCP capability:"* ]]
-[[ "$mcp_guidance" == *"never receive a generic or token-bearing fallback"* ]]
+[[ "$mcp_guidance" == *"never receive a generic fallback"* ]]
 [[ "$mcp_guidance" != *"MCP optional daemon"* ]]
 [[ "$mcp_guidance" != *"MCP daemon URL"* ]]
 [[ "$mcp_guidance" != *"MCP proxy command"* ]]

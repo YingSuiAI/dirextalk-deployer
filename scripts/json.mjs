@@ -429,6 +429,40 @@ function cmdBuild(args) {
       };
       break;
     }
+    case "openclaw-mcp-patch": {
+      const credentials = readJsonFile(required(args, 1, "credentials_file"));
+      const profile = credentials?.profiles?.default;
+      const serverName = required(args, 2, "server_name");
+      const envKey = required(args, 3, "env_key");
+      const endpoint = stringValue(profile?.mcp_url);
+      const token = stringValue(profile?.agent_token);
+      if (!/^https:\/\/[^\s]+\/mcp$/.test(endpoint) || token.length === 0) {
+        commandExit(2);
+        return;
+      }
+      data = {
+        mcp: {
+          servers: {
+            [serverName]: {
+              url: endpoint,
+              transport: "streamable-http",
+              headers: { Authorization: `Bearer \${${envKey}}` }
+            }
+          }
+        },
+        env: { vars: { [envKey]: token } }
+      };
+      break;
+    }
+    case "openclaw-mcp-cleanup-patch": {
+      const serverName = required(args, 1, "server_name");
+      const envKey = required(args, 2, "env_key");
+      data = {
+        mcp: { servers: { [serverName]: null } },
+        env: { vars: { [envKey]: null } }
+      };
+      break;
+    }
     case "pricing-estimate":
       data = buildPricingEstimate(args.slice(1));
       break;

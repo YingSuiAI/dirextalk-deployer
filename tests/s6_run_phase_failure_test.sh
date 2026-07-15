@@ -329,11 +329,11 @@ run_capability_case() {
     grep -q "^Effective connect-agent MCP capability: $expected_capability$" "$DIREXTALK_HOME/nodes/service.example.test/mcp/openclaw.md"
   fi
   if [ "$runtime" = "hermes" ]; then
-    grep -q '^mcp_hermes_home=.*/nodes/service.example.test/hermes$' "$STATE_CALLS"
+    grep -Fq "mcp_hermes_home=$HERMES_HOME" "$STATE_CALLS"
     grep -q '^mcp_hermes_profile=dirextalk-service_example_test$' "$STATE_CALLS"
     grep -q 'cmd = ".*/nodes/service.example.test/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect"' "$config_path"
     grep -q 'args = \["hermes-acp-adapter", "--", "[^"]*hermes", "-p", "dirextalk-service_example_test", "acp"\]' "$config_path"
-    grep -q 'env = { HERMES_HOME = ".*/nodes/service.example.test/hermes" }' "$config_path"
+    grep -Fq "env = { HERMES_HOME = \"$HERMES_HOME\" }" "$config_path"
   fi
   if [ "$expect_connect_mcp" = "true" ]; then
     grep -q '^mcp_url = "https://service.example.test/mcp"' "$config_path"
@@ -359,28 +359,40 @@ if [ "$mode" = --extended ]; then
 fi
 
 run_host_managed_auto_case() {
-  local probe_exit=$1 expected_phase=$2 expected_status=$3 case_dir="$tmp/host-managed-auto-$1" rc
+  local register_exit=$1 probe_exit=$2 expected_phase=$3 expected_status=$4 case_dir="$tmp/host-managed-auto-$1-$2" rc
   mkdir -p "$case_dir"
   DIREXTALK_HOME="$case_dir/dirextalk"
   PHASE_CALLS="$case_dir/phases.log"
   STATE_CALLS="$case_dir/state.log"
   STATE_JSON="$case_dir/state.json"
   CONNECT_START_CALLS="$case_dir/connect-start.log"
-  OPENCLAW_PROBE_CALLS="$case_dir/openclaw-probe.log"
-  export DIREXTALK_HOME PHASE_CALLS STATE_CALLS STATE_JSON CONNECT_START_CALLS OPENCLAW_PROBE_CALLS
+  OPENCLAW_CALLS="$case_dir/openclaw.calls.log"
+  OPENCLAW_PATCH="$case_dir/openclaw.patch.json"
+  export DIREXTALK_HOME PHASE_CALLS STATE_CALLS STATE_JSON CONNECT_START_CALLS OPENCLAW_CALLS OPENCLAW_PATCH
   dirextalk_test_assert_isolated_homes "$tmp"
   : > "$PHASE_CALLS"
   : > "$STATE_CALLS"
   : > "$CONNECT_START_CALLS"
-  : > "$OPENCLAW_PROBE_CALLS"
+  : > "$OPENCLAW_CALLS"
   printf '{}\n' > "$STATE_JSON"
-  use_json_mutate_recorder "$case_dir/json-mutations.log"
+  # Native OpenClaw registration reads generated credentials through json_get.
+  restore_real_json_mutate
   mkdir -p "$case_dir/bin"
   cat > "$case_dir/bin/openclaw" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$@" > "$OPENCLAW_PROBE_CALLS"
-exit "${OPENCLAW_PROBE_EXIT:-0}"
+printf '%s\n' "$*" >> "$OPENCLAW_CALLS"
+case "$*" in
+  *'config patch --stdin'*)
+    cat > "$OPENCLAW_PATCH"
+    exit "${OPENCLAW_REGISTER_EXIT:-0}"
+    ;;
+  *'mcp probe '*)
+    [ -s "$OPENCLAW_PATCH" ] || exit 1
+    exit "${OPENCLAW_PROBE_EXIT:-0}"
+    ;;
+esac
+exit 1
 EOF
   chmod 700 "$case_dir/bin/openclaw"
 
@@ -389,7 +401,11 @@ EOF
   unset DIREXTALK_OPENCLAW_ACP_URL DIREXTALK_OPENCLAW_ACP_TOKEN_FILE DIREXTALK_OPENCLAW_ACP_SESSION
   export DIREXTALK_AGENT_INSTALL=auto
   export DIREXTALK_AGENT_INSTALL_MODE=recommended
+  # The fake is a Bash script, whereas production Windows resolution invokes
+  # a native .cmd launcher. Keep this test fixture in POSIX command form.
+  export DIREXTALK_LOCAL_PATH_STYLE=posix
   export DIREXTALK_OPENCLAW_COMMAND="$case_dir/bin/openclaw"
+  export OPENCLAW_REGISTER_EXIT="$register_exit"
   export OPENCLAW_PROBE_EXIT="$probe_exit"
   unset DIREXTALK_MCP_HOST_READY
   _maybe_auto_install_agent() {
@@ -412,23 +428,31 @@ EOF
     [ "$rc" -eq 0 ]
     grep -q '^started$' "$CONNECT_START_CALLS"
   else
-    [ "$rc" -eq 2 ]
+    [ "$rc" -eq 1 ]
     [ ! -s "$CONNECT_START_CALLS" ] || {
-      echo "host-managed bridge must not start before explicit host enrollment confirmation" >&2
+      echo "host-managed bridge must not start after failed automatic MCP registration or probe" >&2
       return 1
     }
   fi
-  [ "$(sed -n '1p' "$OPENCLAW_PROBE_CALLS")" = "mcp" ]
-  [ "$(sed -n '2p' "$OPENCLAW_PROBE_CALLS")" = "probe" ]
-  [ "$(sed -n '3p' "$OPENCLAW_PROBE_CALLS")" = "dirextalk-service_example_test" ]
-  [ "$(sed -n '4p' "$OPENCLAW_PROBE_CALLS")" = "--json" ]
-  [ "$(wc -l < "$OPENCLAW_PROBE_CALLS" | tr -d ' ')" = "4" ]
-  ! grep -q 'agent-token\|Authorization\|Bearer' "$OPENCLAW_PROBE_CALLS"
+  grep -qx 'config patch --stdin' "$OPENCLAW_CALLS"
+  ! grep -q 'agent-token\|Authorization\|Bearer' "$OPENCLAW_CALLS"
+  if [ "$register_exit" -eq 0 ]; then
+    grep -q '^mcp_host_registration_status=registered$' "$STATE_CALLS"
+    grep -q '^mcp probe dirextalk-service_example_test --json$' "$OPENCLAW_CALLS"
+    json_test_check "$OPENCLAW_PATCH" 'data.mcp.servers["dirextalk-service_example_test"].transport === "streamable-http" && data.env.vars.DIREXTALK_MCP_DIREXTALK_SERVICE_EXAMPLE_TEST_AGENT_TOKEN === "agent-token"'
+  else
+    if grep -q '^mcp probe ' "$OPENCLAW_CALLS"; then
+      echo "OpenClaw probe must not run after registration failure" >&2
+      return 1
+    fi
+  fi
+  unset DIREXTALK_LOCAL_PATH_STYLE
 }
 
-run_host_managed_auto_case 0 done host_probe_passed
+run_host_managed_auto_case 0 0 done auto_installed
 if [ "$mode" = --extended ]; then
-  run_host_managed_auto_case 1 waiting_user host_probe_failed
+  run_host_managed_auto_case 1 0 failed host_registration_failed
+  run_host_managed_auto_case 0 1 failed host_probe_failed
 fi
 restore_real_json_mutate
 

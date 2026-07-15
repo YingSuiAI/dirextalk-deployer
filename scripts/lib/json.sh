@@ -25,6 +25,8 @@ json_normalize_file_arguments() {
     build)
       if [ "${1:-}" = "bootstrap-normalized" ] && [ "$#" -ge 2 ]; then
         set -- "$1" "$(json_native_file_path "$2")" "${@:3}"
+      elif [ "${1:-}" = "openclaw-mcp-patch" ] && [ "$#" -ge 2 ]; then
+        set -- "$1" "$(json_native_file_path "$2")" "${@:3}"
       fi
       ;;
   esac
@@ -109,10 +111,17 @@ json_worker_cli() {
 
 json_cli() {
   local node_bin helper command
+  local -a worker_args=()
   if [ -n "${DIREXTALK_TEST_ROOT:-}" ] && \
      [ -n "${DIREXTALK_JSON_WORKER_PORT:-}" ] && \
      [ -n "${DIREXTALK_JSON_WORKER_TOKEN:-}" ]; then
-    json_worker_cli "$@"
+    case "${1:-}" in
+      stdin-*) json_worker_cli "$@" ;;
+      *)
+        mapfile -d '' -t worker_args < <(json_normalize_file_arguments "$@")
+        json_worker_cli "${worker_args[@]}"
+        ;;
+    esac
     return $?
   fi
   node_bin=$(json_node) || return 1

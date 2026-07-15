@@ -269,17 +269,19 @@ no current backend uses them. S6 never generates a generic JSON fallback.
 
 Host-managed selection retains its guidance artifact but omits the canonical
 MCP URL/token fields from `dirextalk-connect/config.toml`. In `auto` mode,
-OpenClaw and Hermes run their secret-free native enrollment probe on every S6
-attempt and start the bridge as soon as it passes; no readiness flag is needed.
-OpenClaw uses `openclaw mcp probe <server-name> --json` before the bridge starts;
-`OPENCLAW_CONFIG_PATH` and optional `DIREXTALK_OPENCLAW_PROFILE` select an
-isolated native registry/profile. Other host-managed backends without an
-official probe remain operator-confirmed and require later runtime verification.
-Hermes uses a service-scoped HERMES_HOME/profile, writes `mcp/hermes.md` instead
-of JSON, and must pass `hermes -p <profile> mcp test <server-name>` in that same
-scope before bridge startup.
-S6 never runs `mcp set`, mutates global host config, generates a bearer-token
-server JSON, or places the token in process arguments.
+OpenClaw is registered through `openclaw config patch --stdin` and must pass
+`openclaw mcp probe <server-name> --json` before the bridge starts. An inherited
+`OPENCLAW_CONFIG_PATH` and optional `DIREXTALK_OPENCLAW_PROFILE` select the
+native registry/profile; destroy removes the managed entry and service token.
+Hermes clones the current configured native profile into a marked per-service
+profile (or uses an explicit `DIREXTALK_HERMES_PROFILE`), registers the endpoint
+through Hermes' native API, and requires a live tool probe before bridge startup.
+This preserves the source profile's model/provider authentication; destroy
+removes only a deployer-owned profile, or only the managed MCP entry from an
+explicit external profile. Other host-managed backends without a safe native
+adapter remain operator-confirmed and require later runtime verification.
+S6 never runs `mcp set`, generates a bearer-token server JSON, or places the
+token in process arguments.
 
 Voice input is supported when an STT provider key is available. Set `DIREXTALK_SPEECH_API_KEY` or provider-specific variables such as `DIREXTALK_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `dirextalk-connect/config.toml`.
 

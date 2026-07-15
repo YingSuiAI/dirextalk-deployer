@@ -46,6 +46,7 @@ extended_tests=(
   tests/s5_init_tokens_test.sh
   tests/s6_run_phase_failure_test.sh
   tests/destroy_lightsail_test.sh
+  tests/destroy_host_mcp_cleanup_test.sh
   tests/s7_http_mcp_acceptance_test.sh
   tests/operation_report_test.sh
 )

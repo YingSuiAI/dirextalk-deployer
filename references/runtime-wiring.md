@@ -67,19 +67,17 @@ selection, S6 writes `mcp_url`, `mcp_server_name`, `mcp_agent_token`,
 dirextalk-connect owns agent-specific injection. Conditional and unsupported
 selection then blocks S6 before bridge startup. For host-managed selection, S6
 retains the host guidance/artifact but omits all five canonical fields from
-connect options. In `auto`, OpenClaw and Hermes run their native secret-free
-probe on every S6 attempt, return `waiting_user` only while it fails, and start
-the bridge as soon as it succeeds without `DIREXTALK_MCP_HOST_READY=1`. The
-OpenClaw path must pass `openclaw mcp probe <server-name> --json` before
-bridge startup and records `host_probe_passed`. The probe receives no bearer
-token or credential path in argv. `OPENCLAW_CONFIG_PATH` is inherited, and
+connect options. In `auto`, OpenClaw is registered through `config patch --stdin`
+and must pass `openclaw mcp probe <server-name> --json` before bridge startup;
+the token is never in argv. `OPENCLAW_CONFIG_PATH` is inherited, and
 `DIREXTALK_OPENCLAW_PROFILE=<profile>` adds `--profile <profile>` for service
-isolation. S6 never runs `mcp set`. Other host-managed backends with no official
-probe record `operator_confirmed_host_managed`, which is not automated proof.
-Hermes uses a generated per-service HERMES_HOME and profile in both the ACP
-bridge args/env and `hermes -p <profile> mcp test <server-name>` probe. S6 only
-creates the empty home and guidance; the operator creates/clones the profile and
-enrolls native `mcp_servers` before setting the ready flag.
+isolation. Hermes clones the current configured native profile into a marked
+service profile (or uses an explicit `DIREXTALK_HERMES_PROFILE`), stores the
+token through Hermes' native API, and must pass its native live-tool probe.
+Both paths start the bridge automatically only after the probe succeeds; destroy
+removes the managed OpenClaw entry/token and any deployer-owned Hermes profile.
+Other host-managed backends with no safe native adapter record
+`operator_confirmed_host_managed`, which is not automated proof.
 Generated MCP client snippets do not install or launch a local MCP CLI. MCP does not require a local daemon, proxy endpoint, or listening port.
 
 Check MCP through the deployer runtime checks:
@@ -148,7 +146,7 @@ DIREXTALK_SPEECH_LANGUAGE=zh
 Defaults:
 
 - `DIREXTALK_CONNECT_AGENT` is the preferred explicit selector. It accepts every dirextalk-connect agent: `acp`, `antigravity`, `claudecode`, `codex`, `copilot`, `cursor`, `devin`, `gemini`, `iflow`, `kimi`, `opencode`, `pi`, `qoder`, `reasonix`, and `tmux`.
-- `DIREXTALK_AGENT_PLATFORM=auto` detects the local agent runtime and maps it to a `dirextalk-connect` agent type only when it can identify one unambiguously. OpenClaw and Hermes map exclusively to the generic `acp` connect agent. OpenClaw resolves its installed host CLI to an absolute path and uses the same optional `--profile`/`OPENCLAW_CONFIG_PATH` scope for ACP and its native MCP probe. Hermes uses the current node's absolute service-scoped native `dirextalk-connect` binary for `hermes-acp-adapter`, resolves the installed Hermes executable to an absolute path, and uses the same service HERMES_HOME/profile for native MCP and model-readiness checks. No global `dirextalk-connect` command or scheduled-task PATH inheritance is required.
+- `DIREXTALK_AGENT_PLATFORM=auto` detects the local agent runtime and maps it to a `dirextalk-connect` agent type only when it can identify one unambiguously. OpenClaw and Hermes map exclusively to the generic `acp` connect agent. OpenClaw resolves its installed host CLI to an absolute path and uses the same optional `--profile`/`OPENCLAW_CONFIG_PATH` scope for ACP and native MCP. Hermes uses the current node's absolute service-scoped native `dirextalk-connect` binary for `hermes-acp-adapter`, resolves the installed Hermes executable to an absolute path, and uses the same native Hermes home/profile for ACP and MCP. No global `dirextalk-connect` command or scheduled-task PATH inheritance is required.
 - `DIREXTALK_LOCAL_PATH_STYLE=windows` writes Windows-compatible `data_dir`, `work_dir`, config paths, and install commands. Git Bash detects Windows automatically and applies that style before invoking Windows-native Node.js or local agent processes; users should not set it manually. Linux and macOS retain the default `posix` style.
 - `DIREXTALK_CONNECT_AGENT_CMD` writes `cmd = "<path>"` into `[projects.agent.options]` for direct agents. It is rejected for OpenClaw/Hermes because their host-owned bridge shape must match the native MCP profile/probe. Agent-specific forms such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_CLAUDE_CODE_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, `DIREXTALK_OPENCODE_COMMAND`, `DIREXTALK_QODERCLI_COMMAND`, and `DIREXTALK_OPENCLAW_COMMAND` are accepted in their declared scope. For Hermes, `DIREXTALK_HERMES_COMMAND` selects the child Hermes executable behind the adapter, while `DIREXTALK_HERMES_ACP_ADAPTER_COMMAND` overrides the adapter command itself.
 - S6 writes `mode = "yolo"` by default under `[projects.agent.options]` for generated agent configs. A `mode` supplied through `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` or `DIREXTALK_CURSOR_MODE` overrides this default.

@@ -364,19 +364,18 @@ prematurely. `recommend` writes files and prints commands only; `skip` writes
 credentials and configs only. S6 no longer writes the retired service-level
 `env` file. Host-runtime artifacts remain reviewable even when the effective
 connect agent differs. For host-managed MCP, S6 omits all canonical MCP fields
-from connect agent options and never mutates user-global host config. With
-`DIREXTALK_AGENT_INSTALL=auto`, S6 writes the artifact and waits before bridge
-startup only while the native enrollment probe fails. OpenClaw and Hermes run
-their secret-free official probe on every S6 attempt and continue automatically
-as soon as it passes; they do not require `DIREXTALK_MCP_HOST_READY=1`. The
-current agent owns the resume attempt after enrollment and must not hand a
-resume command back to the user. OpenClaw uses
-`openclaw mcp probe <server-name> --json` and records `host_probe_passed`.
-`OPENCLAW_CONFIG_PATH` is inherited, and
-`DIREXTALK_OPENCLAW_PROFILE=<profile>` adds the native `--profile` selector for
-service isolation. S6 never runs `mcp set`. Other host-managed backends with no
-official probe record `operator_confirmed_host_managed` and still require later
-runtime verification; only those unprobeable runtimes use explicit
+from connect agent options. With `DIREXTALK_AGENT_INSTALL=auto`, OpenClaw is
+registered through `openclaw config patch --stdin`, then must pass
+`openclaw mcp probe <server-name> --json` before bridge startup. Its service
+token never appears in argv; inherited `OPENCLAW_CONFIG_PATH` and optional
+`DIREXTALK_OPENCLAW_PROFILE=<profile>` select the native scope. Hermes clones
+the current configured native profile into a marked service profile (or uses an
+explicit `DIREXTALK_HERMES_PROFILE`), stores the token through Hermes' native
+API, and requires a native live-tool probe. Both paths continue automatically
+only after their probe passes; no readiness flag is needed. Destroy removes the
+managed OpenClaw entry/token and any deployer-owned Hermes profile. Other
+host-managed backends without a safe native adapter record
+`operator_confirmed_host_managed`; only they use explicit
 `DIREXTALK_MCP_HOST_READY=1` confirmation. `recommend` and `skip` only write
 artifacts/guidance and retain `host_action_required` without running a host
 probe. Generated agent options
@@ -388,14 +387,12 @@ daemon. Explicit `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CURSOR_AGENT_COMMAND`,
 `DIREXTALK_OPENCODE_COMMAND`, `DIREXTALK_CONNECT_AGENT_CMD`,
 `DIREXTALK_CURSOR_MODE`, and `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides
 still win except where a host-owned OpenClaw/Hermes scope would be bypassed.
-Hermes writes `mcp/hermes.md`, creates a per-service HERMES_HOME, and uses the
-same profile/home in ACP args/env and the secret-free readiness gate. The
-operator must clone/import a working Hermes profile so its model/provider
-authentication is preserved, then enroll native `mcp_servers`. S6 requires
-both a configured model and a passing
-`hermes -p <profile> mcp test <server-name>` before bridge startup; the current
-agent then reruns S6 without a readiness flag. S6 never
-writes a generic Hermes JSON file or touches the real user Hermes home.
+Hermes writes `mcp/hermes.md` but stores its managed profile under the native
+Hermes home, so ACP and native registration share exactly one profile. The
+default service profile is cloned from the active configured profile, preserving
+model/provider authentication; an explicit `DIREXTALK_HERMES_PROFILE` remains
+user-owned and only its managed server entry is removed on destroy. S6 never
+writes a generic Hermes JSON file.
 
 State/report fields include `mcp_capability`, `mcp_config_dir`, `mcp_selected_config_type`,
 `mcp_selected_config`, token-free host-guidance fields such as

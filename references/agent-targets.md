@@ -146,20 +146,18 @@ DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_tools
 For host-managed selection, the host-specific artifact identifies the endpoint,
 node id, and service-scoped credential location. S6 omits `mcp_url`,
 `mcp_server_name`, `mcp_agent_token`, `mcp_node_id`, and `mcp_capability` from
-the connect agent options; it does not mutate global host config, generate a
-token-bearing server object, or put a bearer token in command arguments. With
-`auto`, S6 probes OpenClaw and Hermes native enrollment on every attempt and
-continues as soon as the probe succeeds; no readiness environment variable is
-required. For OpenClaw, S6 requires `openclaw mcp probe <server-name> --json`
-to pass without secret argv. `OPENCLAW_CONFIG_PATH` is inherited;
-`DIREXTALK_OPENCLAW_PROFILE=<profile>` adds `--profile <profile>` for service
-isolation. S6 never runs `mcp set`. Other host-managed backends with no official
-probe record operator confirmation, which does not replace runtime MCP checks.
-Hermes receives a service-isolated HERMES_HOME plus `hermes.md` guidance. The
-operator must clone/import the named profile from a working Hermes profile so
-model/provider configuration and authentication are present, enroll the server
-in native `mcp_servers`, and let S6 pass both its model-readiness check and
-`hermes -p <profile> mcp test <server-name>` in that same HERMES_HOME.
+the connect agent options; it does not generate a generic token-bearing server
+object or put a bearer token in command arguments. With `auto`, S6 registers
+OpenClaw through `config patch --stdin`, then requires
+`openclaw mcp probe <server-name> --json` to pass. `OPENCLAW_CONFIG_PATH` is
+inherited and `DIREXTALK_OPENCLAW_PROFILE=<profile>` adds native profile
+selection; destroy removes the managed entry and service token. Hermes clones
+the current configured native profile into a marked service profile (or uses an
+explicit user-owned `DIREXTALK_HERMES_PROFILE`), stores the service token through
+the native API, and requires a native live-tool probe. Destroy removes an owned
+profile, or only the managed entry from an explicit profile. Other host-managed
+backends without a safe native adapter record operator confirmation, which does
+not replace runtime MCP checks.
 With `recommend` or `skip`, output generation completes with
 `mcp_install_status=host_action_required` and does not run the native probe.
 

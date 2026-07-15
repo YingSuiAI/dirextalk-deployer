@@ -22,6 +22,10 @@ source "$HERE/lib/aws.sh"
 source "$HERE/lib/operation_report.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/local-paths.sh"
+# shellcheck disable=SC1090
+source "$HERE/lib/connect-agent-adapters.sh"
+# shellcheck disable=SC1090
+source "$HERE/lib/mcp-client-adapters.sh"
 DIREXTALK_WORKDIR=$(dirextalk_default_workdir)
 dirextalk_require_git_bash_on_windows || exit 1
 
@@ -247,6 +251,14 @@ CONNECT_BINARY=$(json_get "$SRC" connect_binary)
 CONNECT_RUNTIME_DIR=$(json_get "$SRC" connect_runtime_dir)
 AGENT_SERVICE_DIR=$(json_get "$SRC" agent_service_dir)
 AGENT_SERVICE_ID=$(json_get "$SRC" agent_service_id)
+MCP_HOST_REGISTRY_OWNER=$(json_get "$SRC" mcp_host_registry_owner)
+MCP_HOST_REGISTRY_SERVER=$(json_get "$SRC" mcp_host_registry_server)
+MCP_HOST_TOKEN_ENV_KEY=$(json_get "$SRC" mcp_host_token_env_key)
+MCP_OPENCLAW_PROFILE=$(json_get "$SRC" mcp_openclaw_profile)
+MCP_OPENCLAW_CONFIG_PATH=$(json_get "$SRC" mcp_openclaw_config_path)
+MCP_HERMES_HOME=$(json_get "$SRC" mcp_hermes_home)
+MCP_HERMES_PROFILE=$(json_get "$SRC" mcp_hermes_profile)
+MCP_HERMES_PROFILE_OWNED=$(json_get "$SRC" mcp_hermes_profile_owned)
 
 export NO_PROXY="*"; export no_proxy="*"
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy 2>/dev/null || true
@@ -549,6 +561,43 @@ cleanup_local_service_dir() {
   rm -rf -- "$src_real"
 }
 
+cleanup_host_mcp_registry() {
+  local owner=${MCP_HOST_REGISTRY_OWNER:-} server=${MCP_HOST_REGISTRY_SERVER:-} token_env=${MCP_HOST_TOKEN_ENV_KEY:-}
+  local command
+  case "$owner" in
+    openclaw)
+      if _openclaw_mcp_remove "$server" "$token_env" "${MCP_OPENCLAW_PROFILE:-}" "${MCP_OPENCLAW_CONFIG_PATH:-}"; then
+        log "removed managed OpenClaw MCP server entry"
+        destroy_evidence_set host_mcp_registry removed "managed OpenClaw MCP entry removed"
+      else
+        log "managed OpenClaw MCP entry could not be removed; inspect the selected OpenClaw config"
+        destroy_evidence_set host_mcp_registry cleanup_failed "managed OpenClaw MCP entry needs review"
+      fi
+      ;;
+    hermes)
+      if [ "${MCP_HERMES_PROFILE_OWNED:-false}" = "true" ]; then
+        command=$(_hermes_command 2>/dev/null || true)
+        if [ -n "$command" ] && [ -n "${MCP_HERMES_HOME:-}" ] && [ -n "${MCP_HERMES_PROFILE:-}" ] &&
+          HERMES_HOME="$MCP_HERMES_HOME" "$command" profile delete -y "$MCP_HERMES_PROFILE" >/dev/null 2>&1; then
+          log "removed managed Hermes service profile"
+          destroy_evidence_set host_mcp_registry removed "managed Hermes service profile removed"
+        else
+          log "managed Hermes service profile could not be removed; inspect the recorded native Hermes home"
+          destroy_evidence_set host_mcp_registry cleanup_failed "managed Hermes service profile needs review"
+        fi
+      elif _hermes_mcp_remove "$MCP_HERMES_HOME" "$MCP_HERMES_PROFILE" "$server" "$token_env"; then
+        log "removed managed Hermes MCP server entry"
+        destroy_evidence_set host_mcp_registry removed "managed Hermes MCP entry removed"
+      else
+        log "managed Hermes MCP entry could not be removed; inspect the selected Hermes profile"
+        destroy_evidence_set host_mcp_registry cleanup_failed "managed Hermes MCP entry needs review"
+      fi
+      ;;
+    *)
+      ;;
+  esac
+}
+
 # 0. Remove DNS record if ops created it through Route53 mode.
 CURRENT_SERVICE_DIR=$(current_service_dir "$AGENT_SERVICE_DIR" "$AS_URL" "$DOMAIN" "$CONNECT_CONFIG")
 CURRENT_SERVICE_NAME=$(connect_service_name "$AGENT_SERVICE_ID" "$CURRENT_SERVICE_DIR" "$AS_URL" "$DOMAIN")
@@ -634,6 +683,7 @@ else
   fi
 fi
 
+cleanup_host_mcp_registry
 log "Done. Processed resources recorded in $SRC."
 log "User-managed DNS and domain purchases are outside automatic destroy scope; handle them manually if needed."
 if REPORT_PATH=$(operation_report_write destroy destroy_processed "$SRC" 2>/dev/null); then

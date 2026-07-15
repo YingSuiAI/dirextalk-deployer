@@ -34,13 +34,31 @@ _mcp_hermes_config_path() {
 }
 
 _mcp_hermes_home() {
-  local service_dir=$1
-  printf '%s\n' "${DIREXTALK_HERMES_MCP_HOME:-$service_dir/hermes}"
+  local _service_dir=${1:-} configured
+  configured=${DIREXTALK_HERMES_MCP_HOME:-${HERMES_HOME:-$HOME/.hermes}}
+  dirextalk_normalize_local_path "$configured"
 }
 
 _mcp_hermes_profile() {
   local server_name=$1
   printf '%s\n' "${DIREXTALK_HERMES_PROFILE:-$server_name}"
+}
+
+_mcp_hermes_source_profile() {
+  printf '%s\n' "${DIREXTALK_HERMES_SOURCE_PROFILE:-}"
+}
+
+_mcp_host_token_env_key() {
+  local server_name=$1 normalized
+  normalized=$(printf '%s' "$server_name" | tr '[:lower:]-' '[:upper:]_')
+  normalized=$(printf '%s' "$normalized" | sed -E 's/[^A-Z0-9_]+/_/g; s/^_+//; s/_+$//')
+  [ -n "$normalized" ] || return 1
+  printf 'DIREXTALK_MCP_%s_AGENT_TOKEN\n' "$normalized"
+}
+
+_mcp_hermes_profile_marker_path() {
+  local profile_dir=$1
+  printf '%s/.dirextalk-host-profile.json\n' "$profile_dir"
 }
 
 _mcp_readme_path() {
@@ -207,16 +225,282 @@ _openclaw_mcp_probe() {
   fi
 }
 
+_mcp_credentials_value() {
+  local credentials_file=$1 key=$2 value
+  [ -f "$credentials_file" ] || return 1
+  value=$(json_get "$credentials_file" "profiles.default.$key" 2>/dev/null) || return 1
+  [ -n "$value" ] || return 1
+  printf '%s\n' "$value"
+}
+
+_openclaw_mcp_register() {
+  local server_name=$1 credentials_file=$2 command profile token_env
+  [ -n "$server_name" ] && [ -f "$credentials_file" ] || return 1
+  command=$(_openclaw_command) || return $?
+  token_env=$(_mcp_host_token_env_key "$server_name") || return 1
+  profile=${DIREXTALK_OPENCLAW_PROFILE:-}
+  if [ -n "$profile" ]; then
+    if ! (
+      set -o pipefail
+      json_build openclaw-mcp-patch "$credentials_file" "$server_name" "$token_env" 2>/dev/null |
+        "$command" --profile "$profile" config patch --stdin >/dev/null 2>&1
+    ); then
+      return 1
+    fi
+  elif ! (
+    set -o pipefail
+    json_build openclaw-mcp-patch "$credentials_file" "$server_name" "$token_env" 2>/dev/null |
+      "$command" config patch --stdin >/dev/null 2>&1
+  ); then
+    return 1
+  fi
+}
+
+_openclaw_mcp_remove() {
+  local server_name=$1 token_env=$2 profile=${3:-} config_path=${4:-} command
+  [ -n "$server_name" ] && [ -n "$token_env" ] || return 1
+  command=$(_openclaw_command) || return $?
+  if [ -n "$profile" ]; then
+    if [ -n "$config_path" ]; then
+      (
+        set -o pipefail
+        OPENCLAW_CONFIG_PATH="$config_path" json_build openclaw-mcp-cleanup-patch "$server_name" "$token_env" 2>/dev/null |
+          OPENCLAW_CONFIG_PATH="$config_path" "$command" --profile "$profile" config patch --stdin >/dev/null 2>&1
+      )
+    else
+      (
+        set -o pipefail
+        json_build openclaw-mcp-cleanup-patch "$server_name" "$token_env" 2>/dev/null |
+          "$command" --profile "$profile" config patch --stdin >/dev/null 2>&1
+      )
+    fi
+  elif [ -n "$config_path" ]; then
+    (
+      set -o pipefail
+      OPENCLAW_CONFIG_PATH="$config_path" json_build openclaw-mcp-cleanup-patch "$server_name" "$token_env" 2>/dev/null |
+        OPENCLAW_CONFIG_PATH="$config_path" "$command" config patch --stdin >/dev/null 2>&1
+    )
+  else
+    (
+      set -o pipefail
+      json_build openclaw-mcp-cleanup-patch "$server_name" "$token_env" 2>/dev/null |
+        "$command" config patch --stdin >/dev/null 2>&1
+    )
+  fi
+}
+
+_hermes_profile_config_path() {
+  local hermes_home=$1 profile=$2 command=$3 config_path
+  [ -n "$hermes_home" ] && [ -n "$profile" ] && [ -n "$command" ] || return 1
+  config_path=$(HERMES_HOME="$hermes_home" "$command" -p "$profile" config path 2>/dev/null) || return 1
+  [ -n "$config_path" ] || return 1
+  dirextalk_execution_path "$config_path"
+}
+
+_hermes_profile_dir() {
+  local hermes_home=$1 profile=$2 command=$3 config_path
+  config_path=$(_hermes_profile_config_path "$hermes_home" "$profile" "$command") || return 1
+  dirname "$config_path"
+}
+
+_hermes_profile_has_model() {
+  local hermes_home=$1 profile=${2:-} command=$3 status model
+  [ -n "$hermes_home" ] && [ -n "$command" ] || return 1
+  if [ -n "$profile" ]; then
+    status=$(HERMES_HOME="$hermes_home" "$command" -p "$profile" status 2>/dev/null) || return 1
+  else
+    status=$(HERMES_HOME="$hermes_home" "$command" status 2>/dev/null) || return 1
+  fi
+  model=$(printf '%s\n' "$status" | awk -F 'Model:' '/Model:/ { value=$2; sub(/^[[:space:]]+/, "", value); sub(/[[:space:]]+$/, "", value); print value; exit }')
+  if [ -z "$model" ] || [ "$model" = "(not set)" ]; then
+    return 1
+  fi
+  return 0
+}
+
+_hermes_profile_marker_matches() {
+  local marker=$1 server_name=$2
+  [ -f "$marker" ] || return 1
+  [ "$(json_get "$marker" server_name 2>/dev/null || true)" = "$server_name" ] &&
+    [ "$(json_get "$marker" managed_by 2>/dev/null || true)" = "dirextalk-deployer" ]
+}
+
+_ensure_hermes_mcp_profile() {
+  local server_name=$1 service_dir=$2 command hermes_home profile source_profile config_path profile_dir marker owned=false
+  [ -n "$server_name" ] && [ -n "$service_dir" ] || return 1
+  command=$(_hermes_command) || return $?
+  hermes_home=$(_mcp_hermes_home "$service_dir") || return 1
+  profile=$(_mcp_hermes_profile "$server_name") || return 1
+  [ -n "$profile" ] || return 1
+
+  if [ -n "${DIREXTALK_HERMES_PROFILE:-}" ]; then
+    profile_dir=$(_hermes_profile_dir "$hermes_home" "$profile" "$command") || return 1
+  elif profile_dir=$(_hermes_profile_dir "$hermes_home" "$profile" "$command" 2>/dev/null); then
+    marker=$(_mcp_hermes_profile_marker_path "$profile_dir") || return 1
+    _hermes_profile_marker_matches "$marker" "$server_name" || return 1
+    owned=true
+  else
+    source_profile=$(_mcp_hermes_source_profile) || return 1
+    _hermes_profile_has_model "$hermes_home" "$source_profile" "$command" || return 1
+    if [ -n "$source_profile" ]; then
+      HERMES_HOME="$hermes_home" "$command" profile create "$profile" --clone-from "$source_profile" --no-alias >/dev/null 2>&1 || return 1
+    else
+      HERMES_HOME="$hermes_home" "$command" profile create "$profile" --clone --no-alias >/dev/null 2>&1 || return 1
+    fi
+    profile_dir=$(_hermes_profile_dir "$hermes_home" "$profile" "$command") || return 1
+    dirextalk_restrict_private_directory "$profile_dir" || return 1
+    marker=$(_mcp_hermes_profile_marker_path "$profile_dir") || return 1
+    dirextalk_atomic_write "$marker" 600 json_build object \
+      managed_by=dirextalk-deployer \
+      "server_name=$server_name" \
+      "profile=$profile" || return 1
+    owned=true
+  fi
+
+  _hermes_profile_has_model "$hermes_home" "$profile" "$command" || return 1
+  printf '%s|%s|%s|%s\n' "$profile_dir" "$owned" "$hermes_home" "$profile"
+}
+
+_hermes_python_command() {
+  local command=$1 explicit=${DIREXTALK_HERMES_PYTHON:-} command_dir candidate shebang interpreter
+  [ -n "$command" ] || return 1
+  if [ -n "$explicit" ]; then
+    dirextalk_normalize_local_path "$explicit"
+    return 0
+  fi
+  command_dir=$(dirname "$command") || return 1
+  for candidate in "$command_dir/python.exe" "$command_dir/python"; do
+    if [ -x "$candidate" ]; then
+      dirextalk_normalize_local_path "$candidate"
+      return 0
+    fi
+  done
+  case "$command" in
+    *.exe|*.EXE) ;;
+    *)
+      if [ -r "$command" ]; then
+        IFS= read -r shebang < "$command" || true
+        case "$shebang" in
+          '#!'*)
+            interpreter=${shebang#\#!}
+            interpreter=${interpreter%% *}
+            if [ -x "$interpreter" ]; then
+              dirextalk_normalize_local_path "$interpreter"
+              return 0
+            fi
+            ;;
+        esac
+      fi
+      ;;
+  esac
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import hermes_cli' >/dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+  return 127
+}
+
+_hermes_native_upsert_script() {
+  cat <<'PY'
+import os
+import sys
+
+from hermes_cli.config import save_env_value
+from hermes_cli.mcp_config import _save_mcp_server
+
+name = os.environ["DIREXTALK_MCP_NAME"]
+url = os.environ["DIREXTALK_HERMES_ENDPOINT_URL"]
+env_key = os.environ["DIREXTALK_MCP_ENV_KEY"]
+token = sys.stdin.buffer.read().decode("utf-8").rstrip("\r\n")
+if not token or "\n" in token or "\r" in token:
+    raise SystemExit(2)
+save_env_value(env_key, token)
+ok = _save_mcp_server(name, {
+    "url": url,
+    "headers": {"Authorization": f"Bearer ${{{env_key}}}"},
+    "enabled": True,
+})
+raise SystemExit(0 if ok else 3)
+PY
+}
+
+_hermes_native_probe_script() {
+  cat <<'PY'
+import os
+
+from hermes_cli.mcp_config import _get_mcp_servers, _probe_single_server
+
+name = os.environ["DIREXTALK_MCP_NAME"]
+config = _get_mcp_servers().get(name)
+if not isinstance(config, dict):
+    raise SystemExit(2)
+tools = _probe_single_server(name, config)
+raise SystemExit(0 if tools else 3)
+PY
+}
+
+_hermes_native_remove_script() {
+  cat <<'PY'
+import os
+
+from hermes_cli.config import remove_env_value
+from hermes_cli.mcp_config import _remove_mcp_server
+
+_remove_mcp_server(os.environ["DIREXTALK_MCP_NAME"])
+remove_env_value(os.environ["DIREXTALK_MCP_ENV_KEY"])
+PY
+}
+
+_hermes_mcp_register() {
+  local server_name=$1 credentials_file=$2 service_dir=$3 profile_info profile_dir owned hermes_home profile command python token endpoint env_key
+  [ -n "$server_name" ] && [ -f "$credentials_file" ] && [ -n "$service_dir" ] || return 1
+  profile_info=$(_ensure_hermes_mcp_profile "$server_name" "$service_dir") || return 1
+  profile_dir=${profile_info%%|*}
+  profile_info=${profile_info#*|}
+  owned=${profile_info%%|*}
+  profile_info=${profile_info#*|}
+  hermes_home=${profile_info%%|*}
+  profile=${profile_info#*|}
+  command=$(_hermes_command) || return $?
+  python=$(_hermes_python_command "$command") || return $?
+  token=$(_mcp_credentials_value "$credentials_file" agent_token) || return 1
+  endpoint=$(_mcp_credentials_value "$credentials_file" mcp_url) || return 1
+  env_key=$(_mcp_host_token_env_key "$server_name") || return 1
+  case "$endpoint" in https://*/mcp) ;; *) return 1 ;; esac
+  if ! (
+    set -o pipefail
+    printf '%s' "$token" |
+      HERMES_HOME="$profile_dir" DIREXTALK_MCP_NAME="$server_name" DIREXTALK_HERMES_ENDPOINT_URL="$endpoint" DIREXTALK_MCP_ENV_KEY="$env_key" \
+        "$python" -c "$(_hermes_native_upsert_script)" >/dev/null 2>&1
+  ); then
+    return 1
+  fi
+  printf '%s|%s|%s|%s|%s\n' "$profile_dir" "$owned" "$hermes_home" "$profile" "$env_key"
+}
+
 _hermes_mcp_probe() {
-  local server_name=$1 service_dir=$2 command profile hermes_home status
+  local server_name=$1 service_dir=$2 command profile hermes_home profile_dir python
   [ -n "$server_name" ] && [ -n "$service_dir" ] || return 1
   command=$(_hermes_command) || return $?
   profile=$(_mcp_hermes_profile "$server_name") || return 1
   hermes_home=$(_mcp_hermes_home "$service_dir") || return 1
-  status=$(HERMES_HOME="$hermes_home" "$command" -p "$profile" status 2>/dev/null) || return 1
-  printf '%s\n' "$status" | grep -Eq 'Model:[[:space:]]+\(not set\)' && return 1
-  printf '%s\n' "$status" | grep -Eq 'Model:[[:space:]]+[^[:space:]]' || return 1
-  HERMES_HOME="$hermes_home" "$command" -p "$profile" mcp test "$server_name" >/dev/null 2>&1
+  profile_dir=$(_hermes_profile_dir "$hermes_home" "$profile" "$command") || return 1
+  _hermes_profile_has_model "$hermes_home" "$profile" "$command" || return 1
+  python=$(_hermes_python_command "$command") || return $?
+  HERMES_HOME="$profile_dir" DIREXTALK_MCP_NAME="$server_name" \
+    "$python" -c "$(_hermes_native_probe_script)" >/dev/null 2>&1
+}
+
+_hermes_mcp_remove() {
+  local hermes_home=$1 profile=$2 server_name=$3 env_key=$4 command profile_dir python
+  [ -n "$hermes_home" ] && [ -n "$profile" ] && [ -n "$server_name" ] && [ -n "$env_key" ] || return 1
+  command=$(_hermes_command) || return $?
+  profile_dir=$(_hermes_profile_dir "$hermes_home" "$profile" "$command") || return 1
+  python=$(_hermes_python_command "$command") || return $?
+  HERMES_HOME="$profile_dir" DIREXTALK_MCP_NAME="$server_name" DIREXTALK_MCP_ENV_KEY="$env_key" \
+    "$python" -c "$(_hermes_native_remove_script)" >/dev/null 2>&1
 }
 
 _render_openclaw_mcp_guidance() {
@@ -233,7 +517,7 @@ Effective connect-agent MCP capability: $capability
 EOF
   if [ "$capability" = "host-managed" ]; then
     cat <<'EOF' || return 1
-OpenClaw ACP does not accept per-session MCP servers. Enroll the endpoint in OpenClaw's native `mcp.servers` registry. On every S6 run, the deployer automatically checks `openclaw mcp probe <server-name> --json` and continues bridge startup as soon as that probe passes; no readiness environment variable is required. Use an inherited `OPENCLAW_CONFIG_PATH` or `DIREXTALK_OPENCLAW_PROFILE` when the service needs an isolated OpenClaw registry/profile.
+OpenClaw ACP does not accept per-session MCP servers. With `DIREXTALK_AGENT_INSTALL=auto`, S6 registers this endpoint in OpenClaw's native `mcp.servers` registry through `openclaw config patch --stdin`, stores the service token as a service-specific local config variable, and then requires `openclaw mcp probe <server-name> --json` to list tools before bridge startup. The token is never passed as a process argument or written to this guidance file. Use an inherited `OPENCLAW_CONFIG_PATH` or `DIREXTALK_OPENCLAW_PROFILE` when the service needs an isolated OpenClaw registry/profile; destroy removes the managed server entry and its service token variable.
 
 EOF
   else
@@ -243,7 +527,7 @@ The explicitly selected dirextalk-connect backend owns MCP handling for this cap
 EOF
   fi
   cat <<'EOF' || return 1
-S6 never runs `mcp set`, does not mutate OpenClaw's user-global configuration, and does not place bearer credentials in process arguments.
+S6 never runs `mcp set` and does not place bearer credentials in process arguments.
 EOF
 }
 
@@ -257,16 +541,15 @@ Hermes owns this endpoint through its native \`mcp_servers\` registry; dirextalk
 - Endpoint: $endpoint_url
 - Node id: $node_id
 - Service credentials: $credentials_file
-- Service-isolated home: HERMES_HOME=$hermes_home
-- Service-isolated profile: $profile
+- Native Hermes home: HERMES_HOME=$hermes_home
+- Service profile: $profile
 
-After enrolling the server in that exact home/profile, verify it without secret argv:
+S6 creates the generated service profile in this native Hermes home by cloning the currently configured Hermes profile, then writes the endpoint through Hermes's installed runtime API. It requires live tool discovery before bridge startup and deletes that generated profile on destroy. The cloned profile contains the model/provider configuration needed by Hermes and is private to the current local user.
 
-\`\`\`bash
-HERMES_HOME=$hermes_home hermes -p $profile mcp test $server_name
-\`\`\`
+S6 performs the native live-tool probe automatically; use the deployer's
+\`verify mcp_tools\` check for a later service-level confirmation.
 
-S6 only creates the service-isolated home and this guidance file. Use the installed Hermes version's official profile clone/export/import workflow to create \`$profile\` inside that HERMES_HOME from a working profile, preserving its model/provider configuration and authentication, then enroll the server in that profile's native \`mcp_servers\` registry. On every S6 run, the deployer checks that the isolated profile has a model and then executes the MCP test above; bridge startup continues only after both pass. S6 does not copy provider secrets, mutate the real user Hermes home, or generate a generic Hermes MCP JSON file.
+For an explicit \`DIREXTALK_HERMES_PROFILE\`, S6 uses that existing profile and removes only this deployment's MCP server and token on destroy. S6 never generates a generic Hermes MCP JSON file or passes bearer credentials in process arguments.
 EOF
 }
 
@@ -350,7 +633,7 @@ Config snippets:
 - MCP transport: http
 - MCP endpoint: $endpoint_url
 
-The deployer writes only token-free host guidance when the declarative runtime map names one. Session agents receive canonical MCP data through dirextalk-connect; host-managed, unsupported, and undeclared runtimes never receive a generic or token-bearing standalone fallback. No local MCP CLI, daemon, proxy, env artifact, or listening port is required.
+Session agents receive canonical MCP data through dirextalk-connect. With the automatic policy, OpenClaw and Hermes update their native host registries and require a live native tool probe; other host-managed, unsupported, and undeclared runtimes never receive a generic standalone fallback. No local MCP CLI, daemon, proxy, env artifact, or listening port is required.
 
 If a client already has the same MCP server name, replace or unset that old entry when its URL differs from this deployment. Otherwise the client can keep talking to a stale node even after this deployer writes fresh snippets.
 
@@ -378,28 +661,68 @@ _maybe_auto_install_mcp() {
         return 0
       fi
       if [ "$runtime" = "openclaw" ]; then
-        if _openclaw_mcp_probe "$server_name"; then
-          warn "OpenClaw host-managed MCP enrollment passed the secret-free live probe; S6 did not mutate user-global host configuration."
-          state_set mcp_host_probe_status "passed" 2>/dev/null || true
-          state_set mcp_install_status "host_probe_passed" 2>/dev/null || true
-          return 0
+        local openclaw_token_env
+        openclaw_token_env=$(_mcp_host_token_env_key "$server_name") || return 1
+        state_set mcp_host_registry_owner "openclaw" 2>/dev/null || true
+        state_set mcp_host_registry_server "$server_name" 2>/dev/null || true
+        state_set mcp_host_token_env_key "$openclaw_token_env" 2>/dev/null || true
+        state_set mcp_openclaw_profile "${DIREXTALK_OPENCLAW_PROFILE:-}" 2>/dev/null || true
+        state_set mcp_openclaw_config_path "$(dirextalk_normalize_local_path "${OPENCLAW_CONFIG_PATH:-}")" 2>/dev/null || true
+        if ! _openclaw_mcp_register "$server_name" "$credentials_file"; then
+          warn "OpenClaw native MCP registration failed; S6 will not start the bridge."
+          state_set mcp_host_registration_status "failed" 2>/dev/null || true
+          state_set mcp_host_probe_status "not_run" 2>/dev/null || true
+          state_set mcp_install_status "host_registration_failed" 2>/dev/null || true
+          return 1
         fi
-        warn "OpenClaw native MCP enrollment is not ready: the secret-free live probe failed. Complete enrollment, then let the current agent rerun the deployer; no readiness environment variable is needed."
-        state_set mcp_host_probe_status "failed" 2>/dev/null || true
-        state_set mcp_install_status "host_probe_failed" 2>/dev/null || true
-        return 2
+        state_set mcp_host_registration_status "registered" 2>/dev/null || true
+        if ! _openclaw_mcp_probe "$server_name"; then
+          warn "OpenClaw native MCP registration completed but its live tool probe failed; S6 will not start the bridge."
+          state_set mcp_host_probe_status "failed" 2>/dev/null || true
+          state_set mcp_install_status "host_probe_failed" 2>/dev/null || true
+          return 1
+        fi
+        ok "OpenClaw MCP server was registered and its native tool probe passed."
+        state_set mcp_host_probe_status "passed" 2>/dev/null || true
+        state_set mcp_install_status "auto_installed" 2>/dev/null || true
+        return 0
       fi
       if [ "$runtime" = "hermes" ]; then
-        if _hermes_mcp_probe "$server_name" "$service_dir"; then
-          warn "Hermes host-managed MCP enrollment passed the service-isolated secret-free live test; S6 did not mutate the real user Hermes home."
-          state_set mcp_host_probe_status "passed" 2>/dev/null || true
-          state_set mcp_install_status "host_probe_passed" 2>/dev/null || true
-          return 0
+        local hermes_registration hermes_profile_dir hermes_profile_owned hermes_home hermes_profile hermes_token_env
+        if ! hermes_registration=$(_hermes_mcp_register "$server_name" "$credentials_file" "$service_dir"); then
+          warn "Hermes MCP profile setup or native registration failed; S6 will not start the bridge."
+          state_set mcp_host_registry_owner "hermes" 2>/dev/null || true
+          state_set mcp_host_registration_status "failed" 2>/dev/null || true
+          state_set mcp_host_probe_status "not_run" 2>/dev/null || true
+          state_set mcp_install_status "host_registration_failed" 2>/dev/null || true
+          return 1
         fi
-        warn "Hermes native MCP enrollment is not ready: the service-isolated secret-free test failed. Complete enrollment, then let the current agent rerun the deployer; no readiness environment variable is needed."
-        state_set mcp_host_probe_status "failed" 2>/dev/null || true
-        state_set mcp_install_status "host_probe_failed" 2>/dev/null || true
-        return 2
+        hermes_profile_dir=${hermes_registration%%|*}
+        hermes_registration=${hermes_registration#*|}
+        hermes_profile_owned=${hermes_registration%%|*}
+        hermes_registration=${hermes_registration#*|}
+        hermes_home=${hermes_registration%%|*}
+        hermes_registration=${hermes_registration#*|}
+        hermes_profile=${hermes_registration%%|*}
+        hermes_token_env=${hermes_registration#*|}
+        state_set mcp_host_registry_owner "hermes" 2>/dev/null || true
+        state_set mcp_host_registry_server "$server_name" 2>/dev/null || true
+        state_set mcp_host_token_env_key "$hermes_token_env" 2>/dev/null || true
+        state_set mcp_hermes_home "$(dirextalk_normalize_local_path "$hermes_home")" 2>/dev/null || true
+        state_set mcp_hermes_profile "$hermes_profile" 2>/dev/null || true
+        state_set mcp_hermes_profile_dir "$(dirextalk_normalize_local_path "$hermes_profile_dir")" 2>/dev/null || true
+        state_set mcp_hermes_profile_owned "$hermes_profile_owned" 2>/dev/null || true
+        state_set mcp_host_registration_status "registered" 2>/dev/null || true
+        if ! _hermes_mcp_probe "$server_name" "$service_dir"; then
+          warn "Hermes MCP registration completed but its native tool probe failed; S6 will not start the bridge."
+          state_set mcp_host_probe_status "failed" 2>/dev/null || true
+          state_set mcp_install_status "host_probe_failed" 2>/dev/null || true
+          return 1
+        fi
+        ok "Hermes MCP profile was registered and its native tool probe passed."
+        state_set mcp_host_probe_status "passed" 2>/dev/null || true
+        state_set mcp_install_status "auto_installed" 2>/dev/null || true
+        return 0
       fi
       if [ "${DIREXTALK_MCP_HOST_READY:-}" = "1" ]; then
         warn "runtime=$runtime uses operator-confirmed host-managed MCP enrollment; no official live probe is available, S6 did not mutate user-global host configuration, and runtime MCP verification remains required."
@@ -453,11 +776,11 @@ MCP verify command:     $doctor_command
 Selected MCP type:     $selected_type
 Selected MCP config:   $selected_config
 
-S6 writes only token-free host guidance when the runtime map names one. Session agents rely on dirextalk-connect injection; host-managed, unsupported, and undeclared runtimes never receive a generic or token-bearing fallback. No local MCP CLI, daemon, proxy, or listening port is required.
+Session agents rely on dirextalk-connect injection. With the automatic policy, OpenClaw and Hermes register the endpoint in their native host registry and must pass a live tool probe; other host-managed, unsupported, and undeclared runtimes never receive a generic fallback. No local MCP CLI, daemon, proxy, or listening port is required.
 EOF
   if [ "$runtime" = "openclaw" ]; then
     if [ "$capability" = "host-managed" ]; then
-      warn "OpenClaw ACP is host-managed. Complete explicit host enrollment; S6 automatically probes it on each attempt and never mutates OpenClaw's user-global MCP configuration."
+      warn "OpenClaw ACP is host-managed. In auto mode S6 registers this deployment in the selected native registry, then requires its native tool probe to pass before bridge startup."
     else
       warn "OpenClaw host guidance is retained, but effective MCP capability=$capability follows the explicitly selected connect agent."
     fi

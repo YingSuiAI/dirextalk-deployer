@@ -81,21 +81,26 @@ validation set:
 find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
 git diff --check
 npm test
+npm run test:extended
 ```
 
-`npm test` is the fast cross-platform gate. At the end of a coherent delivery
-stage—and before release, deployment, or a broad orchestration/updater change—
-run `npm run test:extended`; it covers the slower deployment state, migration,
-full S6, credential/DNS gate, and remote-Ubuntu fixture scenarios.
+`npm test` is the fast cross-platform gate. `npm run test:extended` is the
+non-overlapping stage gate for the default Lightsail credential, provision,
+S5-S7, destroy, and operation-report workflow; keep it within a three-minute
+Windows feedback budget. Before publishing or changing optional EC2, legacy
+adoption, updater, or runtime compatibility matrices, run `npm run test:release`.
 
-CI runs `npm test` on all three supported platforms and runs the remaining
-extended-only suite once on Ubuntu for pull requests, default-branch pushes,
-and manual dispatches, without repeating the Ubuntu fast gate.
+CI runs `npm test` on all three supported platforms, then runs the stage-only
+and exhaustive release-only lanes once on Ubuntu without repeating the fast
+gate.
 
 On Windows, the npm test runner starts one Git for Windows Bash controller and
-runs test files sequentially. Do not add `wsl.exe`, WSL distributions, or
-parallel shell fan-out to the test entrypoint; WSL-backed IDE and Docker
-processes are outside this repository's test lifecycle.
+runs test files sequentially. Its isolated test root starts one authenticated,
+loopback-only Node JSON worker and reuses each shell connection instead of
+launching native `node.exe` for every JSON key. Production JSON calls retain
+the direct CLI fallback. Do not add `wsl.exe`, WSL distributions, or parallel
+shell fan-out to the test entrypoint; WSL-backed IDE and Docker processes are
+outside this repository's test lifecycle.
 
 On Windows-specific changes, run the Git Bash contract test and a direct status command from Git Bash.
 

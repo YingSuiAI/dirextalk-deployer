@@ -199,11 +199,11 @@ run_failure_case() {
 
 failure_cases=(
   invalid_runtime
-  mcp_enrollment
-  json_mutation
 )
 if [ "$mode" = --extended ]; then
   failure_cases+=(
+    mcp_enrollment
+    json_mutation
     state_persistence
     host_openclaw_override
     artifact_path_directory
@@ -345,8 +345,8 @@ run_capability_case() {
   fi
 }
 
-run_capability_case codex-pi codex pi unsupported true failed
 if [ "$mode" = --extended ]; then
+  run_capability_case codex-pi codex pi unsupported true failed
   run_capability_case hermes-acp hermes "" host-managed false
   run_capability_case openclaw-acp openclaw "" host-managed false
   run_capability_case codex-iflow codex iflow host-managed false

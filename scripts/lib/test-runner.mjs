@@ -10,6 +10,8 @@ const modeArguments = new Map([
   ["quick", []],
   ["extended", ["extended"]],
   ["extended-only", ["extended-only"]],
+  ["release", ["release"]],
+  ["release-only", ["release-only"]],
 ]);
 
 export function buildTestInvocation(mode = "quick") {

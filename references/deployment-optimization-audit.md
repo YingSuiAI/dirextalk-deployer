@@ -15,25 +15,27 @@ claim that every App or host-agent runtime has been proven in a real session.
 
 ## Test Profiles And Windows Feedback Time
 
-Windows Git Bash profiling on 2026-07-14 found that the former default suite
-ran 42 sequential scripts in roughly 18 minutes. The dominant cost was local
-fixture work: mocked deployment state machines repeatedly launched Git Bash
-processes and Windows-native Node JSON helpers. It did not create AWS resources
-or wait on live cloud APIs.
+Windows Git Bash profiling on 2026-07-15 found that the former exhaustive suite
+took roughly 27 minutes. A single three-status recovery fixture took 160
+seconds. The dominant cost was not AWS, Docker, WSL, or real waits: mocked
+deployment state machines repeatedly launched Windows-native Node JSON helpers
+for individual keys and repeated compatibility branches in the stage lane.
 
 The test runner is therefore split deliberately:
 
-- `npm test` runs the 11 fast cross-platform contracts for package contents,
+- `npm test` runs the fast cross-platform contracts for package contents,
   Git-Bash execution, local paths, JSON/atomic writes, permissions, region
-  selection, and updater replacement. On the profiled Windows host it finished
-  in 81 seconds.
-- `npm run test:extended` runs the complete 50-contract release suite.
-  `npm run test:extended-only` runs its 39 slower deployment-state contracts
-  without repeating the fast set, which is what CI uses after its Ubuntu fast
-  gate.
-- CI keeps the fast gate on Windows, Linux, and macOS, then runs the
-  extended-only set once on Ubuntu for pull requests, default-branch pushes,
-  and manual dispatches.
+  selection, and updater replacement.
+- The isolated runner starts one authenticated loopback Node JSON worker. Test
+  shells reuse it, while production retains the direct `scripts/json.mjs` CLI
+  fallback. The status recovery fixture fell from 160 seconds to 21 seconds.
+- `npm run test:extended` is a non-overlapping default Lightsail stage lane:
+  credentials, S3 provisioning, S5/S6, destroy, S7, and operation reporting.
+  It completed in about 136 seconds on the profiled Windows host.
+- `npm run test:release` adds optional EC2, legacy adoption, updater, detailed
+  DNS, and exhaustive runtime compatibility matrices. CI keeps the fast gate
+  on Windows, Linux, and macOS, then runs stage-only and release-only lanes once
+  on Ubuntu.
 
 The split does not discard credential, DNS, initialization, S6, updater, or
 destroy contracts. Redundant compatibility tests were merged into their

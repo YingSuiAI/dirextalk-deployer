@@ -14,6 +14,14 @@ assert.deepEqual(buildTestInvocation("extended-only"), {
   command: "bash",
   args: ["tests/lib/run_isolated.sh", "tests/npm_test_suite.sh", "extended-only"],
 });
+assert.deepEqual(buildTestInvocation("release"), {
+  command: "bash",
+  args: ["tests/lib/run_isolated.sh", "tests/npm_test_suite.sh", "release"],
+});
+assert.deepEqual(buildTestInvocation("release-only"), {
+  command: "bash",
+  args: ["tests/lib/run_isolated.sh", "tests/npm_test_suite.sh", "release-only"],
+});
 assert.throws(() => buildTestInvocation("unexpected"), /unsupported test mode/);
 
 const calls = [];

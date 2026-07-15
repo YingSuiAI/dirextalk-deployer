@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-let cliArgs = process.argv.slice(2);
-if (cliArgs.length === 1 && cliArgs[0] === "--args0") {
-  const input = readFileSync(0);
-  cliArgs = input.toString("utf8").split("\0");
-  if (cliArgs.at(-1) === "") cliArgs.pop();
+class JsonCommandExit extends Error {
+  constructor(status) {
+    super(`JSON command exited with status ${status}`);
+    this.status = status;
+  }
 }
-const [command, ...args] = cliArgs;
 
-try {
+let activeStdin;
+let activeStdout = (value) => process.stdout.write(value);
+let activeExitCode = 0;
+
+function dispatch(command, args) {
   switch (command) {
     case "get":
       cmdGet(args);
@@ -72,9 +76,47 @@ try {
     default:
       usage(command ? `unknown command: ${command}` : "missing command");
   }
-} catch (error) {
-  console.error(error.message);
-  process.exit(1);
+}
+
+export function executeJsonCommand(command, args = [], { stdin } = {}) {
+  let stdout = "";
+  const previousStdin = activeStdin;
+  const previousStdout = activeStdout;
+  const previousExitCode = activeExitCode;
+  activeStdin = stdin;
+  activeStdout = (value) => { stdout += String(value); };
+  activeExitCode = 0;
+  try {
+    dispatch(command, args);
+    return { status: activeExitCode, stdout, stderr: "" };
+  } catch (error) {
+    if (error instanceof JsonCommandExit) {
+      return { status: error.status, stdout, stderr: "" };
+    }
+    return { status: 1, stdout, stderr: `${error instanceof Error ? error.message : String(error)}\n` };
+  } finally {
+    activeStdin = previousStdin;
+    activeStdout = previousStdout;
+    activeExitCode = previousExitCode;
+  }
+}
+
+function parseCliArgs() {
+  let cliArgs = process.argv.slice(2);
+  if (cliArgs.length === 1 && cliArgs[0] === "--args0") {
+    const input = readFileSync(0);
+    cliArgs = input.toString("utf8").split("\0");
+    if (cliArgs.at(-1) === "") cliArgs.pop();
+  }
+  return cliArgs;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [command, ...args] = parseCliArgs();
+  const result = executeJsonCommand(command, args);
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  process.exitCode = result.status;
 }
 
 function cmdGet(args) {
@@ -99,8 +141,8 @@ function cmdLightsailAvailabilityZone(args) {
   const region = (Array.isArray(data.regions) ? data.regions : [])
     .find((item) => item.name === regionName);
   if (!region) {
-    process.stdout.write(["", defaultZone, "", "", `Lightsail region ${regionName} was not returned by get-regions`].join("|"));
-    process.exitCode = 2;
+    writeOutput(["", defaultZone, "", "", `Lightsail region ${regionName} was not returned by get-regions`].join("|"));
+    setExitCode(2);
     return;
   }
   const zones = Array.isArray(region.availabilityZones) ? region.availabilityZones : [];
@@ -114,8 +156,8 @@ function cmdLightsailAvailabilityZone(args) {
   const reason = selected
     ? (selected === defaultZone ? "" : `default Lightsail zone ${defaultZone} is unavailable; selected ${selected}`)
     : `no available Lightsail availability zone found for region ${regionName}`;
-  process.stdout.write([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("|"));
-  if (!selected) process.exitCode = 2;
+  writeOutput([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("|"));
+  if (!selected) setExitCode(2);
 }
 
 function cmdLightsailBundleSelect(args) {
@@ -144,10 +186,10 @@ function cmdLightsailBundleSelect(args) {
   const selected = (exact.length ? exact : fallback)
     .sort((left, right) => left.price - right.price || left.ram - right.ram || left.disk - right.disk)[0];
   if (!selected) {
-    process.exitCode = 1;
+    setExitCode(1);
     return;
   }
-  process.stdout.write([selected.id, selected.price, selected.ram, selected.disk, selected.transfer, selected.cpu].join("\t"));
+  writeOutput([selected.id, selected.price, selected.ram, selected.disk, selected.transfer, selected.cpu].join("\t"));
 }
 
 function cmdAssert(args) {
@@ -216,7 +258,7 @@ function assertPreset(data, preset, rest) {
       usage(`unknown assert preset: ${preset}`);
   }
 
-  if (!ok) process.exit(1);
+  if (!ok) commandExit(1);
 }
 
 function cmdCheck(args) {
@@ -224,7 +266,7 @@ function cmdCheck(args) {
   const expression = required(args, 1, "expression");
   const data = readJsonFile(file);
   const ok = Boolean(Function("data", `"use strict"; return (${expression});`)(data));
-  if (!ok) process.exit(1);
+  if (!ok) commandExit(1);
 }
 
 function cmdEntries(args) {
@@ -329,11 +371,11 @@ function cmdBuild(args) {
       break;
     case "matrix-session-create":
       data = { action: "agent.matrix_session.create", params: { device_id: required(args, 1, "device_id") } };
-      process.stdout.write(`${JSON.stringify(data)}\n`);
+      writeOutput(`${JSON.stringify(data)}\n`);
       return;
     case "portal-auth":
       data = { action: "portal.auth", params: { password: required(args, 1, "password") } };
-      process.stdout.write(`${JSON.stringify(data)}\n`);
+      writeOutput(`${JSON.stringify(data)}\n`);
       return;
     case "mcp-jsonrpc-initialize":
       data = {
@@ -349,11 +391,11 @@ function cmdBuild(args) {
           }
         }
       };
-      process.stdout.write(`${JSON.stringify(data)}\n`);
+      writeOutput(`${JSON.stringify(data)}\n`);
       return;
     case "mcp-jsonrpc-tools-list":
       data = { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} };
-      process.stdout.write(`${JSON.stringify(data)}\n`);
+      writeOutput(`${JSON.stringify(data)}\n`);
       return;
     case "mcp-jsonrpc-messages-list-call":
       data = {
@@ -368,7 +410,7 @@ function cmdBuild(args) {
           }
         }
       };
-      process.stdout.write(`${JSON.stringify(data)}\n`);
+      writeOutput(`${JSON.stringify(data)}\n`);
       return;
     case "credentials-profile": {
       const asUrl = required(args, 2, "as_url").replace(/\/+$/, "");
@@ -397,7 +439,7 @@ function cmdBuild(args) {
       usage(`unknown build preset: ${preset}`);
   }
 
-  process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
+  writeOutput(`${JSON.stringify(data, null, 2)}\n`);
 }
 
 function cmdMutate(args) {
@@ -524,7 +566,7 @@ function cmdOperationReport(args) {
   const stateFile = required(args, 2, "state");
   const generatedAt = required(args, 3, "generated_at");
   const st = readJsonFile(stateFile);
-  process.stdout.write(`${JSON.stringify(buildOperationReport(operation, status, stateFile, generatedAt, st), null, 2)}\n`);
+  writeOutput(`${JSON.stringify(buildOperationReport(operation, status, stateFile, generatedAt, st), null, 2)}\n`);
 }
 
 function buildOperationReport(operation, status, stateFile, generatedAt, st) {
@@ -748,7 +790,7 @@ function readJsonFileOrEmptyObject(file) {
 }
 
 function readJsonStdin() {
-  return JSON.parse(readFileSync(0, "utf8"));
+  return JSON.parse(typeof activeStdin === "string" ? activeStdin : readFileSync(0, "utf8"));
 }
 
 function atomicWriteJson(file, data) {
@@ -921,18 +963,18 @@ function unique(values) {
 
 function printValue(value) {
   if (value === null || typeof value === "undefined") {
-    process.stdout.write("\n");
+    writeOutput("\n");
     return;
   }
   if (typeof value === "object") {
-    process.stdout.write(`${JSON.stringify(value)}\n`);
+    writeOutput(`${JSON.stringify(value)}\n`);
     return;
   }
-  process.stdout.write(`${String(value)}\n`);
+  writeOutput(`${String(value)}\n`);
 }
 
 function printLine(value) {
-  process.stdout.write(`${value}\n`);
+  writeOutput(`${value}\n`);
 }
 
 function formatEntryValue(value) {
@@ -960,6 +1002,18 @@ function isObject(value) {
 
 function usage(message) {
   throw new Error(`${message}\nUsage: scripts/json.mjs <get|stdin-get|assert|stdin-assert|check|entries|stdin-tsv|stdin-join|stdin-route53-a-values|stdin-route53-a-present|stdin-price-usd|lightsail-availability-zone|lightsail-bundle-select|length|type|build|mutate|operation-report|valid> ...`);
+}
+
+function writeOutput(value) {
+  activeStdout(String(value));
+}
+
+function setExitCode(status) {
+  activeExitCode = Number(status) || 0;
+}
+
+function commandExit(status) {
+  throw new JsonCommandExit(Number(status) || 1);
 }
 
 function compact(values) {

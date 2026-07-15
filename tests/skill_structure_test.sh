@@ -107,9 +107,10 @@ grep -q '"test:extended-only"' package.json
 grep -q '^quick_tests=(' tests/npm_test_suite.sh
 grep -q '^extended_tests=(' tests/npm_test_suite.sh
 grep -q 'extended-only' tests/npm_test_suite.sh
-grep -q 'ubuntu-extended:' .github/workflows/ci.yml
+grep -q 'ubuntu-release:' .github/workflows/ci.yml
 quick_suite=$(sed -n '/^quick_tests=(/,/^)/p' tests/npm_test_suite.sh)
 extended_suite=$(sed -n '/^extended_tests=(/,/^)/p' tests/npm_test_suite.sh)
+release_suite=$(sed -n '/^release_tests=(/,/^)/p' tests/npm_test_suite.sh)
 for test_file in \
   tests/git_bash_windows_contract_test.sh \
   tests/local_paths_test.sh \
@@ -120,19 +121,31 @@ do
 done
 for test_file in \
   tests/aws_credentials_test.sh \
-  tests/domain_authoritative_dns_test.sh \
-  tests/route53_zone_required_test.sh \
+  tests/s3_lightsail_provision_test.sh \
   tests/s5_init_tokens_test.sh \
   tests/s6_run_phase_failure_test.sh \
+  tests/s7_http_mcp_acceptance_test.sh \
+  tests/destroy_lightsail_test.sh
+do
+  case "$extended_suite" in *"$test_file"*) ;; *) echo "extended suite must include $test_file" >&2; exit 1 ;; esac
+done
+for test_file in \
+  tests/domain_authoritative_dns_test.sh \
+  tests/s6_run_phase_failure_test.sh \
+  tests/domain_dns_mode_detection_test.sh \
+  tests/route53_zone_required_test.sh \
+  tests/s1_lightsail_availability_fallback_test.sh \
+  tests/lightsail_static_ip_quota_test.sh \
   tests/user_confirmation_gates_test.sh \
   tests/destroy_local_bridge_test.sh \
   tests/destroy_root_identity_test.sh \
   tests/pricing_estimate_test.sh \
   tests/update_reset_ops_test.sh \
   tests/server_release_test.sh \
-  tests/destroy_lightsail_test.sh
+  tests/final_delivery_runtime_gate_test.sh \
+  tests/s6_wire_local_test.sh
 do
-  case "$extended_suite" in *"$test_file"*) ;; *) echo "extended suite must include $test_file" >&2; exit 1 ;; esac
+  case "$release_suite" in *"$test_file"*) ;; *) echo "release suite must include $test_file" >&2; exit 1 ;; esac
 done
 case "$quick_suite" in
   *tests/server_release_test.sh*|*tests/destroy_lightsail_test.sh*)

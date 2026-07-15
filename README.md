@@ -297,9 +297,10 @@ make build AGENTS=<dirextalk-connect-agent> PLATFORMS_INCLUDE=matrix
 
 ```bash
 npm test
-# At the end of a delivery stage, and before a release, deployment, or broad
-# orchestration/updater change:
+# Non-overlapping default Lightsail stage gate (target: under three minutes on Windows):
 npm run test:extended
+# Before publishing or changing EC2, legacy adoption, updater, or runtime matrices:
+npm run test:release
 find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
 git diff --check
 ```

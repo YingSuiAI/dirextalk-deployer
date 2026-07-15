@@ -40,10 +40,16 @@ bash scripts/destroy.sh "C:/Users/<you>/.dirextalk/nodes/<service_id>/state.json
 ```
 
 The npm test runner also uses Git Bash only. It keeps one controller shell and
-runs test files sequentially; it never invokes `wsl.exe`. If Task Manager shows
-many WSL processes during a test, inspect their parent process: IntelliJ WSL
-toolchains and Docker Desktop commonly own those processes and must be managed
-in those applications rather than killed by the deployer test suite.
+runs test files sequentially; it never invokes `wsl.exe`. The isolated suite
+starts one authenticated loopback Node JSON worker so repeated Bash JSON calls
+reuse one native Node process and one connection per shell. `npm run
+test:extended` is the non-overlapping default Lightsail stage gate and completed
+in about 136 seconds on the profiled Windows host. Exhaustive EC2, legacy,
+updater, and runtime matrices use `npm run test:release` and Ubuntu CI. If Task
+Manager shows many WSL processes during a test, inspect their parent process:
+IntelliJ WSL toolchains and Docker Desktop commonly own those processes and
+must be managed in those applications rather than killed by the deployer test
+suite.
 
 ## Background Process Output Buffering
 

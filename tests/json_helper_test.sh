@@ -16,7 +16,20 @@ trap 'rm -rf "$tmp"' EXIT
 # The deployer must not depend on that implicit rewrite because Hermes and
 # other parent runtimes may export MSYS_NO_PATHCONV=1.
 MSYS_NO_PATHCONV=1 json_build object path_boundary=explicit > "$tmp/no-path-conversion.json"
-[ "$(MSYS_NO_PATHCONV=1 json_get "$tmp/no-path-conversion.json" path_boundary)" = "explicit" ]
+[ "$(MSYS_NO_PATHCONV=1 NODE=/missing/node json_get "$tmp/no-path-conversion.json" path_boundary)" = "explicit" ]
+[ -n "${DIREXTALK_JSON_WORKER_PORT:-}" ]
+(
+  cd "$tmp"
+  [ "$(NODE=/missing/node json_get no-path-conversion.json path_boundary)" = "explicit" ]
+)
+(
+  unset DIREXTALK_JSON_WORKER_SOCKET
+  DIREXTALK_JSON_WORKER_TOKEN=invalid-test-token
+  if json_get "$tmp/no-path-conversion.json" path_boundary >/dev/null 2>&1; then
+    echo "JSON worker must reject an invalid loopback token" >&2
+    exit 1
+  fi
+)
 
 mkdir -p "$tmp/bin"
 cat > "$tmp/bin/node-no-secret-argv" <<EOF
@@ -25,7 +38,10 @@ printf '%s\n' "\$*" >> "\${NODE_ARGV_LOG:?}"
 exec "$NODE_BIN" "\$@"
 EOF
 chmod 700 "$tmp/bin/node-no-secret-argv"
-NODE_ARGV_LOG="$tmp/node-argv.log" NODE="$tmp/bin/node-no-secret-argv" json_build object agent_token=SECRET_ARGV_SENTINEL > "$tmp/argv-safe.json"
+(
+  unset DIREXTALK_JSON_WORKER_PORT DIREXTALK_JSON_WORKER_TOKEN DIREXTALK_JSON_WORKER_SOCKET
+  NODE_ARGV_LOG="$tmp/node-argv.log" NODE="$tmp/bin/node-no-secret-argv" json_build object agent_token=SECRET_ARGV_SENTINEL > "$tmp/argv-safe.json"
+)
 if grep -q 'SECRET_ARGV_SENTINEL' "$tmp/node-argv.log"; then
   echo "JSON secret values must be delivered over stdin, not Node argv" >&2
   exit 1

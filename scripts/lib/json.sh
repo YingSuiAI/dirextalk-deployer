@@ -70,8 +70,51 @@ json_node() {
   return 1
 }
 
+json_worker_connect() {
+  [ -n "${DIREXTALK_JSON_WORKER_SOCKET:-}" ] && return 0
+  if ! exec {DIREXTALK_JSON_WORKER_SOCKET}<>"/dev/tcp/127.0.0.1/${DIREXTALK_JSON_WORKER_PORT}"; then
+    unset DIREXTALK_JSON_WORKER_SOCKET
+    return 1
+  fi
+}
+
+json_worker_cli() {
+  local stdin_payload= status stdout stderr
+  local -a normalized_args=("$@")
+  case "${1:-}" in
+    stdin-*)
+      IFS= read -r -d '' stdin_payload || true
+      ;;
+  esac
+
+  if ! json_worker_connect; then
+    echo "Dirextalk test JSON worker is unavailable on its isolated loopback port." >&2
+    return 125
+  fi
+  printf '%s\0%s\0%s\0%s\0' \
+    "$DIREXTALK_JSON_WORKER_TOKEN" "$stdin_payload" "$PWD" "${#normalized_args[@]}" >&$DIREXTALK_JSON_WORKER_SOCKET
+  printf '%s\0' "${normalized_args[@]}" >&$DIREXTALK_JSON_WORKER_SOCKET
+
+  IFS= read -r -d '' status <&$DIREXTALK_JSON_WORKER_SOCKET || status=125
+  IFS= read -r -d '' stdout <&$DIREXTALK_JSON_WORKER_SOCKET || stdout=
+  IFS= read -r -d '' stderr <&$DIREXTALK_JSON_WORKER_SOCKET || stderr="JSON worker returned an incomplete response."
+
+  [ -z "$stdout" ] || printf '%s' "$stdout"
+  [ -z "$stderr" ] || printf '%s' "$stderr" >&2
+  case "$status" in
+    ''|*[!0-9]*) return 125 ;;
+    *) return "$status" ;;
+  esac
+}
+
 json_cli() {
   local node_bin helper command
+  if [ -n "${DIREXTALK_TEST_ROOT:-}" ] && \
+     [ -n "${DIREXTALK_JSON_WORKER_PORT:-}" ] && \
+     [ -n "${DIREXTALK_JSON_WORKER_TOKEN:-}" ]; then
+    json_worker_cli "$@"
+    return $?
+  fi
   node_bin=$(json_node) || return 1
   helper=$(dirextalk_native_tool_path "$JSON_HELPER") || return 1
   command=${1:-}
@@ -157,3 +200,9 @@ json_mutate() {
 json_valid() {
   json_cli valid "$@"
 }
+
+if [ -n "${DIREXTALK_TEST_ROOT:-}" ] && \
+   [ -n "${DIREXTALK_JSON_WORKER_PORT:-}" ] && \
+   [ -n "${DIREXTALK_JSON_WORKER_TOKEN:-}" ]; then
+  json_worker_connect || true
+fi

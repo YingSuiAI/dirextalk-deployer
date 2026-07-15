@@ -764,7 +764,7 @@ cmd_verify_mcp_doctor() {
     return 1
   }
 
-  local endpoint token node_id out code payload protocol_version server_name tools_type tools_capable headers
+  local endpoint token node_id out out_curl code payload protocol_version server_name tools_type tools_capable headers headers_arg
   endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
@@ -775,13 +775,15 @@ cmd_verify_mcp_doctor() {
 
   out=$(mktemp "$DIREXTALK_WORKDIR/.mcp-doctor.XXXXXX")
   headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
+  out_curl=$(dirextalk_native_tool_path "$out") || { rm -f "$headers" "$out"; return 1; }
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$out"; return 1; }
   payload=$(json_build mcp-jsonrpc-initialize)
-  code=$(curl -sk -o "$out" -w '%{http_code}' \
+  code=$(curl -sk -o "$out_curl" -w '%{http_code}' \
     -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-06-18' \
-    -H "@$headers" \
+    -H "$headers_arg" \
     -d "$payload" 2>/dev/null)
   rm -f "$headers"
   if [ "$code" != "200" ] || ! json_valid "$out" >/dev/null 2>&1; then
@@ -811,7 +813,7 @@ cmd_verify_mcp_smoke() {
     return 1
   }
 
-  local endpoint token room_id body code payload response_content_type is_error headers node_id
+  local endpoint token room_id body body_curl code payload response_content_type is_error headers headers_arg node_id
   endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   room_id=$(json_get "$STATE_JSON" agent_room_id)
@@ -823,13 +825,15 @@ cmd_verify_mcp_smoke() {
   body=$(mktemp "$DIREXTALK_WORKDIR/.mcp-smoke.XXXXXX")
   node_id=$(json_get "$STATE_JSON" agent_node_id)
   headers=$(dirextalk_curl_secret_headers "$(dirname "$body")" "$token" "$node_id") || return 1
+  body_curl=$(dirextalk_native_tool_path "$body") || { rm -f "$headers" "$body"; return 1; }
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$body"; return 1; }
   payload=$(json_build mcp-jsonrpc-messages-list-call "$room_id")
-  code=$(curl -sk -o "$body" -w '%{http_code}' \
+  code=$(curl -sk -o "$body_curl" -w '%{http_code}' \
     -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-06-18' \
-    -H "@$headers" \
+    -H "$headers_arg" \
     -d "$payload" 2>/dev/null)
   rm -f "$headers"
   response_content_type=$(json_type "$body" result.content 2>/dev/null || true)
@@ -865,7 +869,7 @@ cmd_verify_mcp_tools() {
     return 1
   }
 
-  local endpoint token node_id out code payload tools_type headers
+  local endpoint token node_id out out_curl code payload tools_type headers headers_arg
   endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
@@ -876,13 +880,15 @@ cmd_verify_mcp_tools() {
 
   out=$(mktemp "$DIREXTALK_WORKDIR/.mcp-tools.XXXXXX")
   headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
+  out_curl=$(dirextalk_native_tool_path "$out") || { rm -f "$headers" "$out"; return 1; }
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$out"; return 1; }
   payload=$(json_build mcp-jsonrpc-tools-list)
-  code=$(curl -sk -o "$out" -w '%{http_code}' \
+  code=$(curl -sk -o "$out_curl" -w '%{http_code}' \
     -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-06-18' \
-    -H "@$headers" \
+    -H "$headers_arg" \
     -d "$payload" 2>/dev/null)
   rm -f "$headers"
   tools_type=$(json_type "$out" result.tools 2>/dev/null || true)
@@ -923,34 +929,8 @@ _node_command() {
 }
 
 _node_script_path() {
-  local node_cmd=$1 script=$2
-  case "$node_cmd" in
-    *.exe|*.EXE)
-      if command -v cygpath >/dev/null 2>&1; then
-        cygpath -w "$script"
-        return 0
-      fi
-      case "$script" in
-        /mnt/[A-Za-z]/*)
-          local drive rest
-          drive=${script#/mnt/}
-          drive=${drive%%/*}
-          rest=${script#/mnt/$drive/}
-          printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-          return 0
-          ;;
-        /[A-Za-z]/*)
-          local drive rest
-          drive=${script#/}
-          drive=${drive%%/*}
-          rest=${script#/$drive/}
-          printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-          return 0
-          ;;
-      esac
-      ;;
-  esac
-  printf '%s\n' "$script"
+  local _node_cmd=$1 script=$2
+  dirextalk_native_tool_path "$script"
 }
 
 path_dirname() {

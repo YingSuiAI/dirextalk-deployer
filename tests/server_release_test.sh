@@ -30,6 +30,11 @@ set -euo pipefail
 if [ "${1##*/}" != server-release-resolver.mjs ] || [ "${2:-}" != resolve-release ]; then
   exec "$REAL_NODE" "$@"
 fi
+case "$(uname -s 2>/dev/null || printf unknown)" in
+  *MINGW*|*MSYS*|*CYGWIN*)
+    case "$1" in [A-Za-z]:/*) ;; *) echo "release resolver must receive a native Windows script path" >&2; exit 96 ;; esac
+    ;;
+esac
 [ "${HTTP_PROXY:-}" = "http://release-proxy.example.test:8080" ] || {
   echo "release resolver must receive the original HTTP proxy" >&2
   exit 97
@@ -72,6 +77,7 @@ export PATH="$tmp/bin:$PATH"
 # Git Bash can resolve a native node.exe before an extensionless shim on PATH.
 # Pin the JSON/runtime selector to the shim so this test is fully offline.
 export NODE="$tmp/bin/node"
+export MSYS_NO_PATHCONV=1
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/server-release.sh"

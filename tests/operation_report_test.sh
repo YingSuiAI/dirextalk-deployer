@@ -6,6 +6,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 source "$ROOT/tests/lib/json_test.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+export MSYS_NO_PATHCONV=1
 
 export HOME="$tmp/home"
 export DIREXTALK_HOME="$HOME/.dirextalk"
@@ -137,6 +138,11 @@ assert_not_contains_secret "$destroy_report"
 json_test_check "$destroy_report" "data.operation_type === 'destroy' && data.status === 'destroy_processed' && data.domain === 'report.example.test' && data.resources.instance_id === 'i-report' && data.resources.root_volume_id === 'vol-report-root' && data.resources.eip_id === 'eipalloc-report' && data.security.secrets_included === false && data.destroy.user_managed_dns_not_removed === true && data.destroy.purchased_domain_not_removed === true && data.destroy.evidence.ec2_instance.status === 'terminated' && data.destroy.evidence.ebs_root_volume.status === 'deleted' && data.destroy.evidence.elastic_ip.status === 'released' && data.destroy.evidence.security_group.status === 'deleted' && data.destroy.evidence.key_pair.status === 'deleted' && data.destroy.evidence.route53_a_record.status === 'deleted' && data.destroy.evidence.route53_hosted_zone.status === 'deleted' && data.billing.destroy_cleanup_status === 'no_recorded_billable_resource_residue' && data.billing.possible_remaining_billable_resources.length === 0"
 grep -q '^aws route53 change-resource-record-sets --hosted-zone-id ZREPORT' "$AWS_CALLS"
 grep -q '^aws route53 delete-hosted-zone --id ZREPORT$' "$AWS_CALLS"
+case "$(uname -s 2>/dev/null || printf unknown)" in
+  *MINGW*|*MSYS*|*CYGWIN*)
+    grep -Eq -- '--change-batch file://[A-Za-z]:/' "$AWS_CALLS"
+    ;;
+esac
 
 residual_dir="$HOME/.dirextalk/nodes/residual.example.test"
 mkdir -p "$residual_dir"

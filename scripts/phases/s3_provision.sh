@@ -137,10 +137,8 @@ _run_phase_ec2() {
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
     > "$userdata"
-  local userdata_aws="$userdata"
-  if command -v cygpath >/dev/null 2>&1; then
-    userdata_aws=$(cygpath -w "$userdata")
-  fi
+  local userdata_aws
+  userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
 
   # 4) Launch EC2 (idempotent: reuse running/pending instance).
   local iid
@@ -286,10 +284,7 @@ _run_phase_lightsail() {
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
     > "$userdata"
-  userdata_aws="$userdata"
-  if command -v cygpath >/dev/null 2>&1; then
-    userdata_aws=$(cygpath -w "$userdata")
-  fi
+  userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
   res_set user_data "$userdata"
 
   if [ -n "$(res_get instance_id)" ] && aws lightsail get-instance --instance-name "$instance_name" >/dev/null 2>&1; then
@@ -583,27 +578,7 @@ _lightsail_default_zone() {
     return 1
   fi
   rc=0
-  line=$("$(json_node)" - "$tmp" "$region" "$DEFAULT_LIGHTSAIL_ZONE_SUFFIX" <<'NODE'
-const fs = require("fs");
-const [file, regionName, suffix] = process.argv.slice(2);
-const data = JSON.parse(fs.readFileSync(file, "utf8"));
-const defaultZone = `${regionName}${suffix || "a"}`;
-const region = (Array.isArray(data.regions) ? data.regions : []).find((item) => item.name === regionName);
-if (!region) {
-  process.stdout.write(["", defaultZone, "", "", `Lightsail region ${regionName} was not returned by get-regions`].join("\t"));
-  process.exit(2);
-}
-const zones = Array.isArray(region.availabilityZones) ? region.availabilityZones : [];
-const available = zones.filter((item) => String(item.zoneName || "") && String(item.state || "").toLowerCase() !== "unavailable").map((item) => String(item.zoneName));
-const unavailable = zones.filter((item) => String(item.zoneName || "") && String(item.state || "").toLowerCase() === "unavailable").map((item) => String(item.zoneName));
-const selected = available.includes(defaultZone) ? defaultZone : (available[0] || "");
-const reason = selected
-  ? (selected === defaultZone ? "" : `default Lightsail zone ${defaultZone} is unavailable; selected ${selected}`)
-  : `no available Lightsail availability zone found for region ${regionName}`;
-process.stdout.write([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("|"));
-if (!selected) process.exit(2);
-NODE
-  ) || rc=$?
+  line=$(json_lightsail_availability_zone "$tmp" "$region" "$DEFAULT_LIGHTSAIL_ZONE_SUFFIX") || rc=$?
   rm -f "$tmp"
   IFS='|' read -r zone default_zone available unavailable reason <<EOF
 $line
@@ -635,33 +610,7 @@ _select_lightsail_bundle() {
     rm -f "$tmp"
     return 1
   }
-  selected=$("$(json_node)" - "$tmp" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB" <<'NODE'
-const fs = require("fs");
-const [file, targetPrice, targetRam, targetDisk] = process.argv.slice(2);
-const data = JSON.parse(fs.readFileSync(file, "utf8"));
-const num = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
-const platformOk = (bundle) => {
-  const text = String(bundle.supportedPlatforms || bundle.supportedPlatform || bundle.platform || "").toLowerCase();
-  return !text || text.includes("linux") || text.includes("unix");
-};
-const candidates = (Array.isArray(data.bundles) ? data.bundles : [])
-  .filter(platformOk)
-  .map((bundle) => ({
-    id: String(bundle.bundleId || ""),
-    price: num(bundle.price),
-    ram: num(bundle.ramSizeInGb),
-    disk: num(bundle.diskSizeInGb),
-    transfer: num(bundle.transferPerMonthInGb),
-    cpu: num(bundle.cpuCount)
-  }))
-  .filter((bundle) => bundle.id && bundle.price > 0);
-const exact = candidates.filter((bundle) => Math.abs(bundle.price - Number(targetPrice)) < 0.01 && bundle.ram >= Number(targetRam) && bundle.disk >= Number(targetDisk));
-const fallback = candidates.filter((bundle) => bundle.price >= Number(targetPrice) && bundle.ram >= Number(targetRam));
-const selected = (exact.length ? exact : fallback).sort((a, b) => a.price - b.price || a.ram - b.ram || a.disk - b.disk)[0];
-if (!selected) process.exit(1);
-process.stdout.write([selected.id, selected.price, selected.ram, selected.disk, selected.transfer, selected.cpu].join("\t"));
-NODE
-  ) || {
+  selected=$(json_lightsail_bundle_select "$tmp" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB") || {
     rm -f "$tmp"
     return 1
   }
@@ -764,10 +713,8 @@ _upsert_route53_record() {
   ]
 }
 EOF
-  local change_file_aws="$change_file"
-  if command -v cygpath >/dev/null 2>&1; then
-    change_file_aws=$(cygpath -w "$change_file")
-  fi
+  local change_file_aws
+  change_file_aws=$(dirextalk_native_tool_path "$change_file") || { rm -f "$change_file"; return 1; }
   change_id=$(aws route53 change-resource-record-sets \
     --hosted-zone-id "$zone_id" \
     --change-batch "file://$change_file_aws" \

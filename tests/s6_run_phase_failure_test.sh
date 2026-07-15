@@ -358,7 +358,7 @@ if [ "$mode" = --extended ]; then
 fi
 
 run_host_managed_auto_case() {
-  local ready=$1 probe_exit=$2 expected_phase=$3 expected_status=$4 case_dir="$tmp/host-managed-auto-$1-$2" rc
+  local probe_exit=$1 expected_phase=$2 expected_status=$3 case_dir="$tmp/host-managed-auto-$1" rc
   mkdir -p "$case_dir"
   DIREXTALK_HOME="$case_dir/dirextalk"
   PHASE_CALLS="$case_dir/phases.log"
@@ -390,11 +390,7 @@ EOF
   export DIREXTALK_AGENT_INSTALL_MODE=recommended
   export DIREXTALK_OPENCLAW_COMMAND="$case_dir/bin/openclaw"
   export OPENCLAW_PROBE_EXIT="$probe_exit"
-  if [ "$ready" = "1" ]; then
-    export DIREXTALK_MCP_HOST_READY=1
-  else
-    unset DIREXTALK_MCP_HOST_READY
-  fi
+  unset DIREXTALK_MCP_HOST_READY
   _maybe_auto_install_agent() {
     printf 'started\n' >> "$CONNECT_START_CALLS"
   }
@@ -421,22 +417,17 @@ EOF
       return 1
     }
   fi
-  if [ "$ready" = "1" ]; then
-    [ "$(sed -n '1p' "$OPENCLAW_PROBE_CALLS")" = "mcp" ]
-    [ "$(sed -n '2p' "$OPENCLAW_PROBE_CALLS")" = "probe" ]
-    [ "$(sed -n '3p' "$OPENCLAW_PROBE_CALLS")" = "dirextalk-service_example_test" ]
-    [ "$(sed -n '4p' "$OPENCLAW_PROBE_CALLS")" = "--json" ]
-    [ "$(wc -l < "$OPENCLAW_PROBE_CALLS" | tr -d ' ')" = "4" ]
-    ! grep -q 'agent-token\|Authorization\|Bearer' "$OPENCLAW_PROBE_CALLS"
-  else
-    [ ! -s "$OPENCLAW_PROBE_CALLS" ]
-  fi
+  [ "$(sed -n '1p' "$OPENCLAW_PROBE_CALLS")" = "mcp" ]
+  [ "$(sed -n '2p' "$OPENCLAW_PROBE_CALLS")" = "probe" ]
+  [ "$(sed -n '3p' "$OPENCLAW_PROBE_CALLS")" = "dirextalk-service_example_test" ]
+  [ "$(sed -n '4p' "$OPENCLAW_PROBE_CALLS")" = "--json" ]
+  [ "$(wc -l < "$OPENCLAW_PROBE_CALLS" | tr -d ' ')" = "4" ]
+  ! grep -q 'agent-token\|Authorization\|Bearer' "$OPENCLAW_PROBE_CALLS"
 }
 
-run_host_managed_auto_case 0 0 waiting_user host_action_required
+run_host_managed_auto_case 0 done host_probe_passed
 if [ "$mode" = --extended ]; then
-  run_host_managed_auto_case 1 0 done host_probe_passed
-  run_host_managed_auto_case 1 1 waiting_user host_probe_failed
+  run_host_managed_auto_case 1 waiting_user host_probe_failed
 fi
 restore_real_json_mutate
 

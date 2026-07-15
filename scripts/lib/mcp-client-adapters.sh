@@ -236,7 +236,7 @@ Effective connect-agent MCP capability: $capability
 EOF
   if [ "$capability" = "host-managed" ]; then
     cat <<'EOF' || return 1
-OpenClaw ACP does not accept per-session MCP servers. Enroll the endpoint in OpenClaw's native `mcp.servers` registry. With automatic installation, complete that enrollment before rerunning S6 with `DIREXTALK_MCP_HOST_READY=1`; S6 then requires `openclaw mcp probe <server-name> --json` to pass before bridge startup. Use an inherited `OPENCLAW_CONFIG_PATH` or `DIREXTALK_OPENCLAW_PROFILE` when the service needs an isolated OpenClaw registry/profile.
+OpenClaw ACP does not accept per-session MCP servers. Enroll the endpoint in OpenClaw's native `mcp.servers` registry. On every S6 run, the deployer automatically checks `openclaw mcp probe <server-name> --json` and continues bridge startup as soon as that probe passes; no readiness environment variable is required. Use an inherited `OPENCLAW_CONFIG_PATH` or `DIREXTALK_OPENCLAW_PROFILE` when the service needs an isolated OpenClaw registry/profile.
 
 EOF
   else
@@ -269,7 +269,7 @@ After enrolling the server in that exact home/profile, verify it without secret 
 HERMES_HOME=$hermes_home hermes -p $profile mcp test $server_name
 \`\`\`
 
-S6 only creates the empty service-isolated home and this guidance file. Before setting \`DIREXTALK_MCP_HOST_READY=1\`, use the installed Hermes version's official profile create/clone workflow to create \`$profile\` inside that HERMES_HOME, then enroll the server in that profile's native \`mcp_servers\` registry. S6 does not assume the profile exists, mutate the real user Hermes home, or generate a generic Hermes MCP JSON file.
+S6 only creates the empty service-isolated home and this guidance file. Use the installed Hermes version's official profile create/clone workflow to create \`$profile\` inside that HERMES_HOME, then enroll the server in that profile's native \`mcp_servers\` registry. On every S6 run, the deployer automatically executes the test above and continues bridge startup as soon as it passes; no readiness environment variable is required. S6 does not assume the profile exists, mutate the real user Hermes home, or generate a generic Hermes MCP JSON file.
 EOF
 }
 
@@ -375,43 +375,45 @@ _maybe_auto_install_mcp() {
   fi
   case "$capability" in
     host-managed)
-      if [ "${DIREXTALK_MCP_HOST_READY:-}" = "1" ]; then
-        if [ "$runtime" = "openclaw" ]; then
-          if ! _openclaw_mcp_probe "$server_name"; then
-            warn "OpenClaw host enrollment was declared ready, but the secret-free live MCP probe failed. S6 will not start the bridge or mutate OpenClaw configuration."
-            state_set mcp_host_probe_status "failed" 2>/dev/null || true
-            state_set mcp_install_status "host_probe_failed" 2>/dev/null || true
-            return 2
-          fi
+      if [ "$policy" != "auto" ]; then
+        state_set mcp_host_probe_status "not_run_host_action_required" 2>/dev/null || true
+        state_set mcp_install_status "host_action_required" 2>/dev/null || true
+        return 0
+      fi
+      if [ "$runtime" = "openclaw" ]; then
+        if _openclaw_mcp_probe "$server_name"; then
           warn "OpenClaw host-managed MCP enrollment passed the secret-free live probe; S6 did not mutate user-global host configuration."
           state_set mcp_host_probe_status "passed" 2>/dev/null || true
           state_set mcp_install_status "host_probe_passed" 2>/dev/null || true
           return 0
         fi
-        if [ "$runtime" = "hermes" ]; then
-          if ! _hermes_mcp_probe "$server_name" "$service_dir"; then
-            warn "Hermes host enrollment was declared ready, but the service-isolated secret-free MCP test failed. S6 will not start the bridge or mutate the real user Hermes home."
-            state_set mcp_host_probe_status "failed" 2>/dev/null || true
-            state_set mcp_install_status "host_probe_failed" 2>/dev/null || true
-            return 2
-          fi
+        warn "OpenClaw native MCP enrollment is not ready: the secret-free live probe failed. Complete enrollment, then let the current agent rerun the deployer; no readiness environment variable is needed."
+        state_set mcp_host_probe_status "failed" 2>/dev/null || true
+        state_set mcp_install_status "host_probe_failed" 2>/dev/null || true
+        return 2
+      fi
+      if [ "$runtime" = "hermes" ]; then
+        if _hermes_mcp_probe "$server_name" "$service_dir"; then
           warn "Hermes host-managed MCP enrollment passed the service-isolated secret-free live test; S6 did not mutate the real user Hermes home."
           state_set mcp_host_probe_status "passed" 2>/dev/null || true
           state_set mcp_install_status "host_probe_passed" 2>/dev/null || true
           return 0
         fi
+        warn "Hermes native MCP enrollment is not ready: the service-isolated secret-free test failed. Complete enrollment, then let the current agent rerun the deployer; no readiness environment variable is needed."
+        state_set mcp_host_probe_status "failed" 2>/dev/null || true
+        state_set mcp_install_status "host_probe_failed" 2>/dev/null || true
+        return 2
+      fi
+      if [ "${DIREXTALK_MCP_HOST_READY:-}" = "1" ]; then
         warn "runtime=$runtime uses operator-confirmed host-managed MCP enrollment; no official live probe is available, S6 did not mutate user-global host configuration, and runtime MCP verification remains required."
         state_set mcp_host_probe_status "not_available_operator_confirmed" 2>/dev/null || true
         state_set mcp_install_status "operator_confirmed_host_managed" 2>/dev/null || true
         return 0
       fi
-      warn "runtime=$runtime requires explicit host-managed MCP enrollment before the dirextalk-connect bridge starts; S6 will not mutate user-global host configuration. Complete enrollment, set DIREXTALK_MCP_HOST_READY=1, and rerun."
+      warn "runtime=$runtime requires explicit host-managed MCP enrollment before the dirextalk-connect bridge starts; S6 will not mutate user-global host configuration. Complete enrollment, set DIREXTALK_MCP_HOST_READY=1, and let the current agent rerun the deployer."
       state_set mcp_host_probe_status "not_run_host_action_required" 2>/dev/null || true
       state_set mcp_install_status "host_action_required" 2>/dev/null || true
-      if [ "$policy" = "auto" ]; then
-        return 2
-      fi
-      return 0
+      return 2
       ;;
     conditional)
       state_set mcp_host_probe_status "not_applicable" 2>/dev/null || true
@@ -458,7 +460,7 @@ S6 writes only token-free host guidance when the runtime map names one. Session 
 EOF
   if [ "$runtime" = "openclaw" ]; then
     if [ "$capability" = "host-managed" ]; then
-      warn "OpenClaw ACP is host-managed. Complete explicit host enrollment before setting DIREXTALK_MCP_HOST_READY=1; S6 never mutates OpenClaw's user-global MCP configuration automatically."
+      warn "OpenClaw ACP is host-managed. Complete explicit host enrollment; S6 automatically probes it on each attempt and never mutates OpenClaw's user-global MCP configuration."
     else
       warn "OpenClaw host guidance is retained, but effective MCP capability=$capability follows the explicitly selected connect agent."
     fi

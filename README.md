@@ -270,10 +270,10 @@ Unsupported and unknown selections fail closed. The vocabulary retains `project`
 no current backend uses them. S6 never generates a generic JSON fallback.
 
 Host-managed selection retains its guidance artifact but omits the canonical
-MCP URL/token fields from `dirextalk-connect/config.toml`. In `auto` mode, S6
-waits before starting the bridge until the operator enrolls the host and reruns
-with `DIREXTALK_MCP_HOST_READY=1`. OpenClaw must then pass the secret-free
-`openclaw mcp probe <server-name> --json` check before the bridge starts;
+MCP URL/token fields from `dirextalk-connect/config.toml`. In `auto` mode,
+OpenClaw and Hermes run their secret-free native enrollment probe on every S6
+attempt and start the bridge as soon as it passes; no readiness flag is needed.
+OpenClaw uses `openclaw mcp probe <server-name> --json` before the bridge starts;
 `OPENCLAW_CONFIG_PATH` and optional `DIREXTALK_OPENCLAW_PROFILE` select an
 isolated native registry/profile. Other host-managed backends without an
 official probe remain operator-confirmed and require later runtime verification.

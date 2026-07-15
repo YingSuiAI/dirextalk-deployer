@@ -7,19 +7,14 @@ JSON_HELPER="$JSON_LIB_DIR/../json.mjs"
 source "$JSON_LIB_DIR/local-paths.sh"
 
 json_native_file_path() {
-  local file=${1:-} uname_s
-  uname_s=$(uname -s 2>/dev/null || printf unknown)
-  case "$uname_s" in
-    *MINGW*|*MSYS*|*CYGWIN*) dirextalk_to_windows_local_path "$file" ;;
-    *) printf '%s\n' "$file" ;;
-  esac
+  dirextalk_native_tool_path "${1:-}"
 }
 
 json_normalize_file_arguments() {
   local command=${1:-}
   shift || true
   case "$command" in
-    get|assert|check|entries|length|type|mutate|valid)
+    get|assert|check|entries|length|type|mutate|valid|lightsail-availability-zone|lightsail-bundle-select)
       [ "$#" -gt 0 ] || return 0
       set -- "$(json_native_file_path "$1")" "${@:2}"
       ;;
@@ -76,12 +71,13 @@ json_node() {
 }
 
 json_cli() {
-  local node_bin command
+  local node_bin helper command
   node_bin=$(json_node) || return 1
+  helper=$(dirextalk_native_tool_path "$JSON_HELPER") || return 1
   command=${1:-}
   case "$command" in
-    stdin-*) "$node_bin" "$JSON_HELPER" "$@" ;;
-    *) json_normalize_file_arguments "$@" | "$node_bin" "$JSON_HELPER" --args0 ;;
+    stdin-*) "$node_bin" "$helper" "$@" ;;
+    *) json_normalize_file_arguments "$@" | "$node_bin" "$helper" --args0 ;;
   esac
 }
 
@@ -127,6 +123,14 @@ json_stdin_route53_a_present() {
 
 json_stdin_price_usd() {
   json_cli stdin-price-usd "$@"
+}
+
+json_lightsail_availability_zone() {
+  json_cli lightsail-availability-zone "$@"
+}
+
+json_lightsail_bundle_select() {
+  json_cli lightsail-bundle-select "$@"
 }
 
 json_length() {

@@ -19,7 +19,9 @@ export function buildTestInvocation(mode = "quick") {
   }
   return {
     command: "bash",
-    args: ["tests/lib/run_isolated.sh", "bash", "tests/npm_test_suite.sh", ...modeArgs],
+    // Keep one Git Bash controller. run_isolated.sh sources the suite instead
+    // of launching a second shell, while individual test files remain isolated.
+    args: ["tests/lib/run_isolated.sh", "tests/npm_test_suite.sh", ...modeArgs],
   };
 }
 

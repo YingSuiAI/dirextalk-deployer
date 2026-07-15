@@ -14,4 +14,15 @@ dirextalk_test_isolate_homes "$isolation_root"
   echo "usage: run_isolated.sh <command> [args...]" >&2
   exit 2
 }
-"$@"
+
+case "$1" in
+  *.sh)
+    script=$1
+    shift
+    # Reuse this Git Bash controller for the suite entrypoint. Test cases are
+    # still launched sequentially by npm_test_suite.sh for state isolation.
+    # shellcheck disable=SC1090
+    source "$script" "$@"
+    ;;
+  *) "$@" ;;
+esac

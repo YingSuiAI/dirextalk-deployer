@@ -4,6 +4,8 @@
 
 SERVER_RELEASE_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SERVER_RELEASE_SCRIPTS_DIR=$(cd "$SERVER_RELEASE_LIB_DIR/.." && pwd)
+# shellcheck disable=SC1090
+source "$SERVER_RELEASE_LIB_DIR/local-paths.sh"
 server_release_validate_override() {
   if [ -n "${MESSAGE_SERVER_IMAGE:-}" ] && [ "${DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE:-0}" != "1" ]; then
     warn "MESSAGE_SERVER_IMAGE is a debug/legacy override and is disabled for normal production installs."
@@ -131,6 +133,7 @@ server_release_prepare_state() {
   node_binary=$(json_node) || { warn "Node.js is required to resolve the formal server Release."; return 1; }
   resolver_script="$SERVER_RELEASE_SCRIPTS_DIR/lib/server-release-resolver.mjs"
   [ -f "$resolver_script" ] || { warn "Server Release resolver is missing: $resolver_script"; return 1; }
+  resolver_script=$(dirextalk_native_tool_path "$resolver_script") || return 1
   if ! resolved_json=$(server_release_resolver_with_network_env "$node_binary" "$resolver_script" resolve-release); then
     warn "No usable formal Dirextalk message-server GitHub Release is available."
     return 1

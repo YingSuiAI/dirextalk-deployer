@@ -42,6 +42,7 @@ chmod 700 "$fakebin/aws"
 export PATH="$fakebin:$PATH"
 export CALLS="$tmp/aws.calls"
 export AWS_DEFAULT_REGION=us-east-1
+export MSYS_NO_PATHCONV=1
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"

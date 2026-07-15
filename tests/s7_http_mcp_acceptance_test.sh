@@ -9,6 +9,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
 export DIREXTALK_HOME="$HOME/.dirextalk"
+export MSYS_NO_PATHCONV=1
 mkdir -p "$HOME"
 
 fakebin="$tmp/bin"
@@ -56,6 +57,7 @@ header_path=""
 secret_headers=""
 request_body=""
 write_code=0
+discard_body=0
 args=("$@")
 for ((i = 0; i < ${#args[@]}; i++)); do
   case "${args[$i]}" in
@@ -136,7 +138,15 @@ case "$url" in
     ;;
 esac
 
-[ -n "$body_path" ] && printf '%s\n' "$body" > "$body_path" || printf '%s\n' "$body"
+if [ "$body_path" = "NUL" ]; then
+  body_path=""
+  discard_body=1
+fi
+if [ -n "$body_path" ]; then
+  printf '%s\n' "$body" > "$body_path"
+elif [ "$discard_body" -eq 0 ]; then
+  printf '%s\n' "$body"
+fi
 [ "$write_code" -eq 1 ] && printf '%s' "$code"
 EOF
 chmod 700 "$fakebin/curl"
@@ -184,5 +194,15 @@ if grep -q 'AGENT_TOKEN_S7\|OWNER_ACCESS\|12345678' "$calls"; then
   echo "S7 secrets must not appear in curl argv" >&2
   exit 1
 fi
+case "$(uname -s 2>/dev/null || printf unknown)" in
+  *MINGW*|*MSYS*|*CYGWIN*)
+    if grep -Eq '(^|[[:space:]])(@?/tmp/|/dev/null([[:space:]]|$))' "$calls"; then
+      echo "S7 must convert Git Bash temp/null arguments before invoking native curl" >&2
+      exit 1
+    fi
+    grep -Eq '(^|[[:space:]])NUL([[:space:]]|$)' "$calls"
+    grep -Eq '@[A-Za-z]:/' "$calls"
+    ;;
+esac
 
 echo "s7 http mcp acceptance ok"

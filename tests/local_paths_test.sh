@@ -54,6 +54,26 @@ declare -F dirextalk_render_local_command >/dev/null || {
   echo "missing unified local command renderer" >&2
   exit 1
 }
+declare -F dirextalk_native_tool_path >/dev/null || {
+  echo "missing native tool path normalizer" >&2
+  exit 1
+}
+declare -F dirextalk_native_tool_at_path >/dev/null || {
+  echo "missing native tool @file path normalizer" >&2
+  exit 1
+}
+case "$(uname -s 2>/dev/null || printf unknown)" in
+  *MINGW*|*MSYS*|*CYGWIN*)
+    assert_equal "$(dirextalk_native_tool_path "$tmp/native-tool.json")" "$(cygpath -m "$tmp/native-tool.json")" "native Windows tools receive a path to the shell-created temp file"
+    assert_equal "$(dirextalk_native_tool_at_path "$tmp/native-tool.json")" "@$(cygpath -m "$tmp/native-tool.json")" "native Windows @file arguments target the shell-created temp file"
+    assert_equal "$(dirextalk_native_null_device)" "NUL" "native Windows tools use the Windows null device"
+    ;;
+  *)
+    assert_equal "$(dirextalk_native_tool_path "$tmp/native-tool.json")" "$tmp/native-tool.json" "POSIX native tools retain the shell temp path"
+    assert_equal "$(dirextalk_native_tool_at_path "$tmp/native-tool.json")" "@$tmp/native-tool.json" "POSIX @file arguments retain the shell temp path"
+    assert_equal "$(dirextalk_native_null_device)" "/dev/null" "POSIX native tools use the POSIX null device"
+    ;;
+esac
 assert_equal "$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_render_local_command "C:/Program Files/O'Brien/connect.cmd" daemon status --service-name service.example.test)" "C:/Program\\ Files/O\\'Brien/connect.cmd daemon status --service-name service.example.test" "Windows Git Bash commands use Bash argv quoting"
 assert_equal "$(DIREXTALK_LOCAL_PATH_STYLE=posix dirextalk_render_local_command "/opt/Agent O'Brien/connect" daemon status --service-name service.example.test)" "/opt/Agent\\ O\\'Brien/connect daemon status --service-name service.example.test" "POSIX commands use Bash argv quoting"
 assert_equal "$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_render_env_command DOMAIN service.example.test bash scripts/orchestrate.sh verify runtime)" "DOMAIN=service.example.test bash scripts/orchestrate.sh verify runtime" "Windows Git Bash env commands use Bash syntax"

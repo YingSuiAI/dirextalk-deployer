@@ -196,27 +196,7 @@ _select_lightsail_availability_zone() {
     return 1
   fi
   rc=0
-  line=$("$(json_node)" - "$tmp" "$region" "$DEFAULT_LIGHTSAIL_ZONE_SUFFIX" <<'NODE'
-const fs = require("fs");
-const [file, regionName, suffix] = process.argv.slice(2);
-const data = JSON.parse(fs.readFileSync(file, "utf8"));
-const defaultZone = `${regionName}${suffix || "a"}`;
-const region = (Array.isArray(data.regions) ? data.regions : []).find((item) => item.name === regionName);
-if (!region) {
-  process.stdout.write(["", defaultZone, "", "", `Lightsail region ${regionName} was not returned by get-regions`].join("\t"));
-  process.exit(2);
-}
-const zones = Array.isArray(region.availabilityZones) ? region.availabilityZones : [];
-const available = zones.filter((item) => String(item.zoneName || "") && String(item.state || "").toLowerCase() !== "unavailable").map((item) => String(item.zoneName));
-const unavailable = zones.filter((item) => String(item.zoneName || "") && String(item.state || "").toLowerCase() === "unavailable").map((item) => String(item.zoneName));
-const selected = available.includes(defaultZone) ? defaultZone : (available[0] || "");
-const reason = selected
-  ? (selected === defaultZone ? "" : `default Lightsail zone ${defaultZone} is unavailable; selected ${selected}`)
-  : `no available Lightsail availability zone found for region ${regionName}`;
-process.stdout.write([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("|"));
-if (!selected) process.exit(2);
-NODE
-  ) || rc=$?
+  line=$(json_lightsail_availability_zone "$tmp" "$region" "$DEFAULT_LIGHTSAIL_ZONE_SUFFIX") || rc=$?
   rm -f "$tmp"
   IFS='|' read -r zone default_zone available unavailable reason <<EOF
 $line
@@ -248,29 +228,7 @@ _select_lightsail_bundle() {
     rm -f "$tmp"
     return 1
   }
-  selected=$("$(json_node)" - "$tmp" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB" <<'NODE'
-const fs = require("fs");
-const [file, targetPrice, targetRam, targetDisk] = process.argv.slice(2);
-const data = JSON.parse(fs.readFileSync(file, "utf8"));
-const num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
-const platformOk = (b) => String(b.supportedPlatforms || b.supportedPlatform || b.platform || "").toLowerCase().includes("linux")
-  || String(b.supportedPlatforms || b.supportedPlatform || b.platform || "") === "";
-const bundles = Array.isArray(data.bundles) ? data.bundles : [];
-const candidates = bundles.filter(platformOk).map((b) => ({
-  id: String(b.bundleId || ""),
-  price: num(b.price),
-  ram: num(b.ramSizeInGb),
-  disk: num(b.diskSizeInGb),
-  transfer: num(b.transferPerMonthInGb),
-  cpu: num(b.cpuCount)
-})).filter((b) => b.id && b.price > 0);
-const exact = candidates.filter((b) => Math.abs(b.price - Number(targetPrice)) < 0.01 && b.ram >= Number(targetRam) && b.disk >= Number(targetDisk));
-const fallback = candidates.filter((b) => b.price >= Number(targetPrice) && b.ram >= Number(targetRam));
-const selected = (exact.length ? exact : fallback).sort((a, b) => a.price - b.price || a.ram - b.ram || a.disk - b.disk)[0];
-if (!selected) process.exit(1);
-process.stdout.write([selected.id, selected.price, selected.ram, selected.disk, selected.transfer, selected.cpu].join("\t"));
-NODE
-  ) || {
+  selected=$(json_lightsail_bundle_select "$tmp" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB") || {
     rm -f "$tmp"
     return 1
   }

@@ -430,19 +430,8 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$OPENCLAW_CALL_LOG"
 EOF
 chmod +x "$fake_bin/openclaw"
-set +e
-OPENCLAW_CALL_LOG="$tmp/openclaw-calls.log" \
-STATE_CALLS="$tmp/openclaw-state-calls.log" \
-PATH="$fake_bin:$PATH" \
-  _maybe_auto_install_mcp auto openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
-openclaw_unconfirmed_rc=$?
-set -e
-[ "$openclaw_unconfirmed_rc" -eq 2 ]
-[ ! -s "$tmp/openclaw-calls.log" ]
 [ ! -e "$tmp/openclaw-set-payload.json" ]
-grep -q 'mcp_install_status=host_action_required' "$tmp/openclaw-state-calls.log"
 STATE_CALLS="$tmp/openclaw-confirmed-state-calls.log" \
-DIREXTALK_MCP_HOST_READY=1 \
 OPENCLAW_CALL_LOG="$tmp/openclaw-confirmed-calls.log" \
 PATH="$fake_bin:$PATH" \
   _maybe_auto_install_mcp auto openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
@@ -464,7 +453,6 @@ EOF
 chmod 700 "$fake_bin/hermes"
 STATE_CALLS="$tmp/hermes-confirmed-state-calls.log" \
 HERMES_CALL_LOG="$tmp/hermes-confirmed-calls.log" \
-DIREXTALK_MCP_HOST_READY=1 \
 DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
   _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
 grep -q '^mcp_install_status=host_probe_passed$' "$tmp/hermes-confirmed-state-calls.log"
@@ -479,7 +467,6 @@ set +e
 STATE_CALLS="$tmp/hermes-failed-state-calls.log" \
 HERMES_CALL_LOG="$tmp/hermes-failed-calls.log" \
 HERMES_PROBE_EXIT=1 \
-DIREXTALK_MCP_HOST_READY=1 \
 DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
   _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
 hermes_probe_failure_rc=$?

@@ -4,15 +4,15 @@ import { buildTestInvocation, runTestSuite } from "../scripts/lib/test-runner.mj
 
 assert.deepEqual(buildTestInvocation("quick"), {
   command: "bash",
-  args: ["tests/lib/run_isolated.sh", "bash", "tests/npm_test_suite.sh"],
+  args: ["tests/lib/run_isolated.sh", "tests/npm_test_suite.sh"],
 });
 assert.deepEqual(buildTestInvocation("extended"), {
   command: "bash",
-  args: ["tests/lib/run_isolated.sh", "bash", "tests/npm_test_suite.sh", "extended"],
+  args: ["tests/lib/run_isolated.sh", "tests/npm_test_suite.sh", "extended"],
 });
 assert.deepEqual(buildTestInvocation("extended-only"), {
   command: "bash",
-  args: ["tests/lib/run_isolated.sh", "bash", "tests/npm_test_suite.sh", "extended-only"],
+  args: ["tests/lib/run_isolated.sh", "tests/npm_test_suite.sh", "extended-only"],
 });
 assert.throws(() => buildTestInvocation("unexpected"), /unsupported test mode/);
 
@@ -30,9 +30,10 @@ runTestSuite({
 });
 assert.deepEqual(calls, [{
   command: "C:\\Tools\\Git\\bin\\bash.exe",
-  args: ["tests/lib/run_isolated.sh", "bash", "tests/npm_test_suite.sh"],
+  args: ["tests/lib/run_isolated.sh", "tests/npm_test_suite.sh"],
   options: { cwd: "C:\\repo", stdio: "inherit", shell: false },
 }]);
+assert.doesNotMatch(JSON.stringify(calls), /wsl(?:\.exe)?/i, "Windows tests must never invoke WSL");
 
 assert.throws(() => runTestSuite({
   platform: "win32",

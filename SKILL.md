@@ -82,6 +82,12 @@ every lifecycle action from that same Git Bash session:
 DOMAIN=<domain> bash scripts/orchestrate.sh
 ```
 
+The deployer explicitly normalizes file paths passed to native Node.js, AWS CLI,
+curl, and local agent tools. It does not depend on implicit MSYS argument
+conversion, so a parent runtime that sets `MSYS_NO_PATHCONV=1` cannot turn a
+Git Bash `/c/...` or `/tmp/...` path into an unrelated `C:\c\...` or `C:\tmp\...`
+lookup.
+
 Do not manually mix PowerShell, WSL, and Git Bash for one local service.
 
 ## Prerequisites And Confirmation
@@ -359,17 +365,21 @@ credentials and configs only. S6 no longer writes the retired service-level
 `env` file. Host-runtime artifacts remain reviewable even when the effective
 connect agent differs. For host-managed MCP, S6 omits all canonical MCP fields
 from connect agent options and never mutates user-global host config. With
-`DIREXTALK_AGENT_INSTALL=auto`, S6 writes the artifact, records
-`mcp_install_status=host_action_required`, and waits before bridge startup.
-After the operator enrolls the remote endpoint in the host, rerun with
-`DIREXTALK_MCP_HOST_READY=1`. OpenClaw must then pass the secret-free official
-`openclaw mcp probe <server-name> --json` check before S6 starts the bridge and
-records `host_probe_passed`. `OPENCLAW_CONFIG_PATH` is inherited, and
+`DIREXTALK_AGENT_INSTALL=auto`, S6 writes the artifact and waits before bridge
+startup only while the native enrollment probe fails. OpenClaw and Hermes run
+their secret-free official probe on every S6 attempt and continue automatically
+as soon as it passes; they do not require `DIREXTALK_MCP_HOST_READY=1`. The
+current agent owns the resume attempt after enrollment and must not hand a
+resume command back to the user. OpenClaw uses
+`openclaw mcp probe <server-name> --json` and records `host_probe_passed`.
+`OPENCLAW_CONFIG_PATH` is inherited, and
 `DIREXTALK_OPENCLAW_PROFILE=<profile>` adds the native `--profile` selector for
 service isolation. S6 never runs `mcp set`. Other host-managed backends with no
 official probe record `operator_confirmed_host_managed` and still require later
-runtime verification. `recommend` and `skip` retain `host_action_required`
-until explicitly confirmed. Generated agent options
+runtime verification; only those unprobeable runtimes use explicit
+`DIREXTALK_MCP_HOST_READY=1` confirmation. `recommend` and `skip` only write
+artifacts/guidance and retain `host_action_required` without running a host
+probe. Generated agent options
 write `mode = "yolo"` by default unless an explicit `mode` is supplied.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
@@ -381,8 +391,9 @@ still win except where a host-owned OpenClaw/Hermes scope would be bypassed.
 Hermes writes `mcp/hermes.md`, creates an empty per-service HERMES_HOME, and
 uses the same profile/home in ACP args/env and the secret-free
 `hermes -p <profile> mcp test <server-name>` gate. The operator must first
-create/clone that profile and enroll native `mcp_servers`; S6 never writes a
-generic Hermes JSON file or touches the real user Hermes home.
+create/clone that profile and enroll native `mcp_servers`; the current agent
+then reruns S6, which probes and resumes without a readiness flag. S6 never
+writes a generic Hermes JSON file or touches the real user Hermes home.
 
 State/report fields include `mcp_capability`, `mcp_config_dir`, `mcp_selected_config_type`,
 `mcp_selected_config`, token-free host-guidance fields such as

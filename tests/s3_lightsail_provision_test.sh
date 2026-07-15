@@ -76,6 +76,7 @@ export CALLS="$tmp/aws.calls"
 export TMPDIR="$tmp"
 export AWS_DEFAULT_REGION=us-east-1
 export DIREXTALK_CLOUD_PROVIDER=lightsail
+export MSYS_NO_PATHCONV=1
 export HTTP_PROXY=http://release-proxy.example.test:8080
 export HTTPS_PROXY=http://release-proxy.example.test:8080
 
@@ -126,6 +127,11 @@ grep -q -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$key_file" || {
   exit 1
 }
 grep -q 'lightsail create-instances' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+case "$(uname -s 2>/dev/null || printf unknown)" in
+  *MINGW*|*MSYS*|*CYGWIN*)
+    grep -Eq -- '--user-data file://[A-Za-z]:/' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+    ;;
+esac
 grep -q 'lightsail get-instance' "$CALLS" || {
   echo "Lightsail provisioning should wait for instance state before port/static IP operations" >&2
   cat "$CALLS" >&2

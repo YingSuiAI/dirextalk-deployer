@@ -22,6 +22,13 @@ rejects PowerShell, WSL, MSYS2, and Cygwin. Git Bash automatically stores
 Windows-compatible consumer paths in `C:/...` form before invoking
 Windows-native Node.js or local agent processes.
 
+Path conversion at native-tool boundaries is explicit. The deployer converts
+Node script/input paths, AWS CLI `file://` paths, curl output/header paths, and
+local agent paths before invocation rather than relying on MSYS argv rewriting.
+This matters when Hermes or another parent runtime exports
+`MSYS_NO_PATHCONV=1`: Bash may redirect output into its real `/tmp` directory
+while an unnormalized Windows process would otherwise look under `C:/tmp`.
+
 Use the same Bash entrypoints as Linux/macOS. Destroy can use `DOMAIN` or an
 explicit Windows-native state path:
 
@@ -31,6 +38,12 @@ DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
 DOMAIN=__DOMAIN__ bash scripts/destroy.sh
 bash scripts/destroy.sh "C:/Users/<you>/.dirextalk/nodes/<service_id>/state.json"
 ```
+
+The npm test runner also uses Git Bash only. It keeps one controller shell and
+runs test files sequentially; it never invokes `wsl.exe`. If Task Manager shows
+many WSL processes during a test, inspect their parent process: IntelliJ WSL
+toolchains and Docker Desktop commonly own those processes and must be managed
+in those applications rather than killed by the deployer test suite.
 
 ## Background Process Output Buffering
 

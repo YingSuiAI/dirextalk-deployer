@@ -8,6 +8,8 @@
 S7_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
 source "$S7_DIR/../lib/http-secrets.sh"
+# shellcheck disable=SC1090
+source "$S7_DIR/../lib/local-paths.sh"
 
 run_phase() {
   phase_set S7_VERIFY_E2E in_progress "running end-to-end acceptance"
@@ -42,7 +44,7 @@ _check_mcp_agent_auth() {
 }
 
 _p2p_access_token() {
-  local domain=$1 password=$2 at payload_file
+  local domain=$1 password=$2 at payload_file payload_arg
   local args=()
   while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
   payload_file=$(dirextalk_private_temp_file "${TMPDIR:-/tmp}" portal-auth) || return 1
@@ -50,8 +52,9 @@ _p2p_access_token() {
     rm -f "$payload_file"
     return 1
   fi
+  payload_arg=$(dirextalk_native_tool_at_path "$payload_file") || { rm -f "$payload_file"; return 1; }
   at=$(curl -sk "${args[@]}" -X POST "https://$domain/_p2p/command" -H 'Content-Type: application/json' \
-        --data-binary "@$payload_file" 2>/dev/null | json_stdin_get access_token)
+        --data-binary "$payload_arg" 2>/dev/null | json_stdin_get access_token)
   rm -f "$payload_file"
   printf '%s' "$at"
 }
@@ -65,11 +68,13 @@ curl_resolve_args() {
 # Web client reads owner.json from the local dev origin. HTTP 200 without CORS
 # still fails in the browser, so S7 validates the response header.
 _check_owner_cors() {
-  local domain=$1 tmp code cors
+  local domain=$1 tmp tmp_curl null_device code cors
   tmp=$(mktemp)
+  tmp_curl=$(dirextalk_native_tool_path "$tmp") || { rm -f "$tmp"; return 1; }
+  null_device=$(dirextalk_native_null_device) || { rm -f "$tmp"; return 1; }
   local args=()
   while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
-  code=$(curl -sk "${args[@]}" -o /dev/null -D "$tmp" -w '%{http_code}' \
+  code=$(curl -sk "${args[@]}" -o "$null_device" -D "$tmp_curl" -w '%{http_code}' \
     -H 'Origin: http://127.0.0.1:51820' \
     "https://$domain/.well-known/portal/owner.json" 2>/dev/null)
   cors=$(grep -i '^Access-Control-Allow-Origin:' "$tmp" | tr -d '\r' | head -n 1 || true)
@@ -96,16 +101,18 @@ _check_matrix_server_wellknown() {
 
 # _check <name> <url> <bearer-token-or-empty> <expected-code>
 _check() {
-  local name=$1 url=$2 tok=$3 want=$4 code headers
+  local name=$1 url=$2 tok=$3 want=$4 code headers headers_arg null_device
   local domain args=()
   domain=$(state_get domain)
+  null_device=$(dirextalk_native_null_device) || return 1
   while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
   if [ -n "$tok" ]; then
     headers=$(dirextalk_curl_secret_headers "${TMPDIR:-/tmp}" "$tok") || return 1
-    code=$(curl -sk "${args[@]}" -o /dev/null -w '%{http_code}' -H "@$headers" "$url" 2>/dev/null)
+    headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers"; return 1; }
+    code=$(curl -sk "${args[@]}" -o "$null_device" -w '%{http_code}' -H "$headers_arg" "$url" 2>/dev/null)
     rm -f "$headers"
   else
-    code=$(curl -sk "${args[@]}" -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)
+    code=$(curl -sk "${args[@]}" -o "$null_device" -w '%{http_code}' "$url" 2>/dev/null)
   fi
   if [ "$code" = "$want" ]; then ok "  ✓ $name ($code)"; return 0
   else warn "  ✗ $name (got $code, want $want)"; return 1; fi
@@ -114,14 +121,15 @@ _check() {
 # TURN acceptance: exchange the backend password/init-code field for Matrix access_token, then verify
 # /voip/turnServer returns non-empty valid TURN credentials.
 _check_turn() {
-  local domain=$1 password=$2 at turn headers
+  local domain=$1 password=$2 at turn headers headers_arg
   local args=()
   while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
   at=$(_p2p_access_token "$domain" "$password")
   if [ -z "$at" ]; then warn "  x TURN (failed to exchange access_token; cannot verify turnServer)"; return 1; fi
   headers=$(dirextalk_curl_secret_headers "${TMPDIR:-/tmp}" "$at") || return 1
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers"; return 1; }
   turn=$(curl -sk "${args[@]}" "https://$domain/_matrix/client/v3/voip/turnServer" \
-          -H "@$headers" 2>/dev/null)
+          -H "$headers_arg" 2>/dev/null)
   rm -f "$headers"
   if printf '%s' "$turn" | json_stdin_assert turn-credentials >/dev/null 2>&1; then
     ok "  ✓ TURN turnServer non-empty and valid"; return 0

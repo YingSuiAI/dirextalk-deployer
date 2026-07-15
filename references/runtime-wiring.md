@@ -67,10 +67,10 @@ selection, S6 writes `mcp_url`, `mcp_server_name`, `mcp_agent_token`,
 dirextalk-connect owns agent-specific injection. Conditional and unsupported
 selection then blocks S6 before bridge startup. For host-managed selection, S6
 retains the host guidance/artifact but omits all five canonical fields from
-connect options. In `auto`, it records `host_action_required` and returns
-`waiting_user` before starting the bridge. After explicit host enrollment,
-rerun with `DIREXTALK_MCP_HOST_READY=1`; the
-OpenClaw path must then pass `openclaw mcp probe <server-name> --json` before
+connect options. In `auto`, OpenClaw and Hermes run their native secret-free
+probe on every S6 attempt, return `waiting_user` only while it fails, and start
+the bridge as soon as it succeeds without `DIREXTALK_MCP_HOST_READY=1`. The
+OpenClaw path must pass `openclaw mcp probe <server-name> --json` before
 bridge startup and records `host_probe_passed`. The probe receives no bearer
 token or credential path in argv. `OPENCLAW_CONFIG_PATH` is inherited, and
 `DIREXTALK_OPENCLAW_PROFILE=<profile>` adds `--profile <profile>` for service

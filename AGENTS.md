@@ -19,7 +19,7 @@
 Every deployer change must classify paths and commands by the platform that will consume them:
 
 - **Remote server paths** are Linux paths inside EC2/cloud-init/Docker, such as `/var/dirextalk-message-server`, `/var/dirextalk-message-server/p2p/bootstrap.json`, and `/etc/dirextalk-message-server`.
-- **Deployer execution paths** are used by the orchestration engine. On Git Bash, normalize paths before passing them to Windows-native Node.js or agent executables.
+- **Deployer execution paths** are used by the orchestration engine. On Git Bash, normalize paths before passing them to Windows-native Node.js, AWS CLI, curl, or agent executables. Do not rely on implicit MSYS argv conversion: parent runtimes may set `MSYS_NO_PATHCONV=1`, and `/tmp` redirections otherwise diverge from native-tool file arguments.
 - **Local bridge paths** are consumed by `dirextalk-connect` and the local agent process. On Windows they must be Windows-compatible paths, not `/mnt/c/...` or Git Bash-only `/c/...` paths.
 - **Documentation paths** must be portable examples using `$HOME`, `%USERPROFILE%`, `$env:USERPROFILE`, `<service_id>`, or `<domain>`, not machine-specific absolute paths.
 
@@ -41,7 +41,7 @@ Use `scripts/lib/git-bash.sh`, `scripts/lib/local-paths.sh`, and `scripts/lib/pa
 - Remote server commands may assume Linux because the EC2 host is Linux. Local commands must not assume Linux.
 - Version 1 cloud hosts may run Ubuntu 22.04 or 24.04 on x86_64. New cloud hosts still default to Ubuntu 24.04; bootstrap must verify the supported host set before downloading the pinned updater or starting Compose.
 - Pre-updater d1 adoption is never inferred by normal resume. Use only `scripts/adopt-legacy-node.sh` after its fixed v0.15.2/digest/Compose/systemd-Caddy dry run and an explicit semantic user confirmation; the agent supplies the script's machine confirmation token and it must not pull or recreate the running image.
-- Use Git Bash path normalization before Windows-native process and path behavior, especially for `dirextalk-connect.exe`, local agent executables, Windows user profile paths, or npm global binaries.
+- Use `dirextalk_native_tool_path` at every shell-to-native file-path boundary and `dirextalk_normalize_local_path` for persisted consumer paths. This includes Node scripts and input files, AWS `file://` arguments, curl output/header files, `dirextalk-connect.exe`, local agent executables, Windows user profile paths, and npm global binaries.
 - When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXTALK_CONNECT_AGENT`, `DIREXTALK_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, or `DIREXTALK_CLAUDE_CODE_COMMAND`. Host-owned OpenClaw/Hermes bridges reject generic child command/args overrides.
 - Do not make Codex, Claude, Gemini, Cursor, or any other provider the semantic default for an unknown runtime. Unknown or ambiguous detection should require an explicit `DIREXTALK_CONNECT_AGENT`.
 
@@ -53,7 +53,7 @@ Use `scripts/lib/git-bash.sh`, `scripts/lib/local-paths.sh`, and `scripts/lib/pa
 - The generated agent config must preserve the selected connect agent type and optional agent-specific TOML. Some providers require more than `cmd`; for example `reasonix` needs `serve_url`, `tmux` needs `session`, and generic `acp` may need command/args.
 - `DIREXTALK_AGENT_INSTALL=auto` is the default and installs `dirextalk-connect@latest` into the current service directory, not into the npm global prefix, unless an explicit binary/command override is set. It installs the service-scoped `dirextalk-connect` daemon. The canonical MCP description points to the deployed message server HTTP MCP endpoint; do not install or launch a local MCP CLI, daemon, proxy, or listening port.
 - Keep the declarative MCP registry aligned with dirextalk-connect. Resolve capability from the effective connect agent except that detected OpenClaw and Hermes hosts own authoritative native MCP registries and are always `host-managed`. They require the ACP bridge; reject non-ACP `DIREXTALK_CONNECT_AGENT` overrides. Antigravity, Cursor, and iFlow are also `host-managed`; Pi, tmux, Devin, and Reasonix are `unsupported`. Unsupported and unknown runtimes fail closed. Do not generate a generic JSON artifact.
-- Host-runtime artifact selection is separate from effective connect-agent capability. Preserve reviewable host guidance, but omit canonical MCP fields from host-managed connect options. With `auto`, require explicit host enrollment plus `DIREXTALK_MCP_HOST_READY=1` before starting the bridge. OpenClaw must then pass `openclaw mcp probe <server-name> --json`; Hermes must pass the service-isolated `hermes -p <profile> mcp test <server-name>`. Neither probe receives secrets in argv. Other host-managed backends remain explicitly operator-confirmed when no official probe exists.
+- Host-runtime artifact selection is separate from effective connect-agent capability. Preserve reviewable host guidance, but omit canonical MCP fields from host-managed connect options. With `auto`, OpenClaw and Hermes automatically run their secret-free official probe on every S6 attempt and continue as soon as it passes; they do not require `DIREXTALK_MCP_HOST_READY=1`. Other host-managed backends remain explicitly operator-confirmed with that variable when no official probe exists. Neither probe receives secrets in argv.
 - `recommend` must only write files and print commands; `skip` writes credentials, connect config, and canonical MCP artifacts only. S6 must not recreate the retired service-level `env` file.
 - Do not pin old package versions in runtime defaults. Keep `@latest` defaults and preserve env overrides only for explicit debugging or rollback.
 
@@ -91,6 +91,11 @@ full S6, credential/DNS gate, and remote-Ubuntu fixture scenarios.
 CI runs `npm test` on all three supported platforms and runs the remaining
 extended-only suite once on Ubuntu for pull requests, default-branch pushes,
 and manual dispatches, without repeating the Ubuntu fast gate.
+
+On Windows, the npm test runner starts one Git for Windows Bash controller and
+runs test files sequentially. Do not add `wsl.exe`, WSL distributions, or
+parallel shell fan-out to the test entrypoint; WSL-backed IDE and Docker
+processes are outside this repository's test lifecycle.
 
 On Windows-specific changes, run the Git Bash contract test and a direct status command from Git Bash.
 

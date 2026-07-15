@@ -12,6 +12,12 @@ JSON="$NODE_BIN scripts/json.mjs"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+# Git Bash normally rewrites /c and /tmp arguments for Windows executables.
+# The deployer must not depend on that implicit rewrite because Hermes and
+# other parent runtimes may export MSYS_NO_PATHCONV=1.
+MSYS_NO_PATHCONV=1 json_build object path_boundary=explicit > "$tmp/no-path-conversion.json"
+[ "$(MSYS_NO_PATHCONV=1 json_get "$tmp/no-path-conversion.json" path_boundary)" = "explicit" ]
+
 mkdir -p "$tmp/bin"
 cat > "$tmp/bin/node-no-secret-argv" <<EOF
 #!/usr/bin/env bash

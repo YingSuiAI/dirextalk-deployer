@@ -637,7 +637,7 @@ _local_connect_path() {
 
 _create_connect_matrix_session() {
   local asurl=$1 agent_auth_token=$2 device_id=$3 out=$4 body code http_body
-  local max_attempts interval max_interval attempt preview sleep_for headers
+  local max_attempts interval max_interval attempt preview sleep_for headers http_body_curl headers_arg
   body=$(json_build matrix-session-create "$device_id") || return 1
   mkdir -p "$(dirname "$out")" || return 1
   max_attempts=${DIREXTALK_MATRIX_SESSION_CREATE_MAX:-12}
@@ -655,12 +655,14 @@ _create_connect_matrix_session() {
       rm -f "$http_body" 2>/dev/null || true
       return 1
     }
+    http_body_curl=$(dirextalk_native_tool_path "$http_body") || { rm -f "$headers" "$http_body"; return 1; }
+    headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$http_body"; return 1; }
     code=$(curl -sk \
       --connect-timeout "${DIREXTALK_MATRIX_SESSION_CURL_CONNECT_TIMEOUT:-10}" \
       --max-time "${DIREXTALK_MATRIX_SESSION_CURL_MAX_TIME:-20}" \
-      -o "$http_body" -w '%{http_code}' -X POST "$asurl/_p2p/command" \
+      -o "$http_body_curl" -w '%{http_code}' -X POST "$asurl/_p2p/command" \
       -H 'Content-Type: application/json' \
-      -H "@$headers" \
+      -H "$headers_arg" \
       -d "$body" 2>/dev/null || true)
     rm -f "$headers"
     if [ "$code" = "200" ]; then

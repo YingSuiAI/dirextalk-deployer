@@ -318,10 +318,8 @@ delete_route53_record() {
   ]
 }
 EOF
-  local change_file_aws="$change_file"
-  if command -v cygpath >/dev/null 2>&1; then
-    change_file_aws=$(cygpath -w "$change_file")
-  fi
+  local change_file_aws
+  change_file_aws=$(dirextalk_native_tool_path "$change_file") || { rm -f "$change_file"; return 1; }
   change_json=$(aws route53 change-resource-record-sets \
     --hosted-zone-id "$zone_id" \
     --change-batch "file://$change_file_aws" \

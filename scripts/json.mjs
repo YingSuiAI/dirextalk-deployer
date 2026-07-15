@@ -45,6 +45,12 @@ try {
     case "stdin-price-usd":
       cmdStdinPriceUsd();
       break;
+    case "lightsail-availability-zone":
+      cmdLightsailAvailabilityZone(args);
+      break;
+    case "lightsail-bundle-select":
+      cmdLightsailBundleSelect(args);
+      break;
     case "length":
       cmdLength(args);
       break;
@@ -82,6 +88,66 @@ function cmdStdinGet(args) {
   const jsonPath = required(args, 0, "path");
   const fallback = args.length > 1 ? args[1] : "";
   printValue(getPath(readJsonStdin(), jsonPath, fallback));
+}
+
+function cmdLightsailAvailabilityZone(args) {
+  const file = required(args, 0, "file");
+  const regionName = required(args, 1, "region");
+  const suffix = args[2] || "a";
+  const data = readJsonFile(file);
+  const defaultZone = `${regionName}${suffix}`;
+  const region = (Array.isArray(data.regions) ? data.regions : [])
+    .find((item) => item.name === regionName);
+  if (!region) {
+    process.stdout.write(["", defaultZone, "", "", `Lightsail region ${regionName} was not returned by get-regions`].join("|"));
+    process.exitCode = 2;
+    return;
+  }
+  const zones = Array.isArray(region.availabilityZones) ? region.availabilityZones : [];
+  const available = zones
+    .filter((zone) => String(zone.zoneName || "") && String(zone.state || "").toLowerCase() !== "unavailable")
+    .map((zone) => String(zone.zoneName));
+  const unavailable = zones
+    .filter((zone) => String(zone.zoneName || "") && String(zone.state || "").toLowerCase() === "unavailable")
+    .map((zone) => String(zone.zoneName));
+  const selected = available.includes(defaultZone) ? defaultZone : (available[0] || "");
+  const reason = selected
+    ? (selected === defaultZone ? "" : `default Lightsail zone ${defaultZone} is unavailable; selected ${selected}`)
+    : `no available Lightsail availability zone found for region ${regionName}`;
+  process.stdout.write([selected, defaultZone, available.join(","), unavailable.join(","), reason].join("|"));
+  if (!selected) process.exitCode = 2;
+}
+
+function cmdLightsailBundleSelect(args) {
+  const file = required(args, 0, "file");
+  const targetPrice = numberValue(required(args, 1, "target price"));
+  const targetRam = numberValue(required(args, 2, "target RAM"));
+  const targetDisk = numberValue(required(args, 3, "target disk"));
+  const data = readJsonFile(file);
+  const platformOk = (bundle) => {
+    const platform = String(bundle.supportedPlatforms || bundle.supportedPlatform || bundle.platform || "").toLowerCase();
+    return platform === "" || platform.includes("linux") || platform.includes("unix");
+  };
+  const candidates = (Array.isArray(data.bundles) ? data.bundles : [])
+    .filter(platformOk)
+    .map((bundle) => ({
+      id: String(bundle.bundleId || ""),
+      price: numberValue(bundle.price),
+      ram: numberValue(bundle.ramSizeInGb),
+      disk: numberValue(bundle.diskSizeInGb),
+      transfer: numberValue(bundle.transferPerMonthInGb),
+      cpu: numberValue(bundle.cpuCount)
+    }))
+    .filter((bundle) => bundle.id && bundle.price > 0);
+  const exact = candidates.filter((bundle) => Math.abs(bundle.price - targetPrice) < 0.01 && bundle.ram >= targetRam && bundle.disk >= targetDisk);
+  const fallback = candidates.filter((bundle) => bundle.price >= targetPrice && bundle.ram >= targetRam);
+  const selected = (exact.length ? exact : fallback)
+    .sort((left, right) => left.price - right.price || left.ram - right.ram || left.disk - right.disk)[0];
+  if (!selected) {
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write([selected.id, selected.price, selected.ram, selected.disk, selected.transfer, selected.cpu].join("\t"));
 }
 
 function cmdAssert(args) {
@@ -893,7 +959,7 @@ function isObject(value) {
 }
 
 function usage(message) {
-  throw new Error(`${message}\nUsage: scripts/json.mjs <get|stdin-get|assert|stdin-assert|check|entries|stdin-tsv|stdin-join|stdin-route53-a-values|stdin-route53-a-present|stdin-price-usd|length|type|build|mutate|operation-report|valid> ...`);
+  throw new Error(`${message}\nUsage: scripts/json.mjs <get|stdin-get|assert|stdin-assert|check|entries|stdin-tsv|stdin-join|stdin-route53-a-values|stdin-route53-a-present|stdin-price-usd|lightsail-availability-zone|lightsail-bundle-select|length|type|build|mutate|operation-report|valid> ...`);
 }
 
 function compact(values) {

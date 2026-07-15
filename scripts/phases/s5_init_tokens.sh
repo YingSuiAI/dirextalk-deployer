@@ -110,8 +110,9 @@ _normalize_bootstrap_output() {
 }
 
 _healthz_ok_ownerjson() {
-  local domain=$1 pubip args=()
+  local domain=$1 pubip null_device args=()
   pubip=$(res_get public_ip)
+  null_device=$(dirextalk_native_null_device) || return 1
   [ -n "$pubip" ] && args=(--resolve "$domain:443:$pubip")
-  [ "$(curl -sk "${args[@]}" -o /dev/null -w '%{http_code}' "https://$domain/.well-known/portal/owner.json" 2>/dev/null)" = "200" ]
+  [ "$(curl -sk "${args[@]}" -o "$null_device" -w '%{http_code}' "https://$domain/.well-known/portal/owner.json" 2>/dev/null)" = "200" ]
 }

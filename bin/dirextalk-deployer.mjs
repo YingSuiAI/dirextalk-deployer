@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, release } from "node:os";
 import path from "node:path";
@@ -10,11 +9,6 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const packageJson = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8"));
 const packageName = packageJson.name || "dirextalk-deployer";
 const packageVersion = packageJson.version || "0.0.0";
-const require = createRequire(import.meta.url);
-const runtimeDependencyRoots = {
-  semver: path.dirname(require.resolve("semver/package.json")),
-};
-
 const skillFiles = [
   "AGENTS.md",
   "LICENSE",
@@ -281,7 +275,7 @@ function resolveTarget({ agent, scope, project, home }) {
 }
 
 function installSkill({ agent, scope, target, dryRun, force }) {
-  if (dryRun) return { action: "would-install", fileCount: skillFiles.length, runtimeDependencyCount: Object.keys(runtimeDependencyRoots).length };
+  if (dryRun) return { action: "would-install", fileCount: skillFiles.length, runtimeDependencyCount: 0 };
 
   let action = "installed";
   if (existsSync(target)) {
@@ -299,10 +293,6 @@ function installSkill({ agent, scope, target, dryRun, force }) {
     if (!existsSync(source)) continue;
     copyRecursive(source, path.join(target, relative));
   }
-  for (const [name, source] of Object.entries(runtimeDependencyRoots)) {
-    copyRecursive(source, path.join(target, "node_modules", name));
-  }
-
   const manifest = {
     package: packageName,
     version: packageVersion,

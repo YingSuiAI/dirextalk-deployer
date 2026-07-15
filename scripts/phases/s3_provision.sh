@@ -23,11 +23,9 @@ run_phase() {
     return 1
   fi
   if ! server_release_prepare_state; then
-    phase_set S3_PROVISION failed "formal server release resolution failed"
+    phase_set S3_PROVISION failed "message-server image selection failed"
     return 1
   fi
-  # Release resolution may need the operator's GitHub proxy. Restrict AWS
-  # proxy bypass to the cloud calls that follow the immutable release choice.
   aws_env_prep
   local cloud_provider
   cloud_provider=$(_resolve_cloud_provider)

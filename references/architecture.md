@@ -17,7 +17,7 @@ message-server -> PostgreSQL 18
 coturn         -> TURN 3478 + 49160-49200/udp
 ```
 
-- **message-server**: 使用正式 GitHub Release 解析得到的不可变 `tag@sha256`，同时承载 Matrix homeserver 和 `/_p2p/query`/`/_p2p/command`；只读挂 updater socket 目录和 control-token file，不挂 Docker socket。
+- **message-server**: 新部署直接使用 `dirextalk/message-server:latest`，不在本地部署器中访问 message-server GitHub Release；同时承载 Matrix homeserver 和 `/_p2p/query`/`/_p2p/command`，只读挂 updater socket 目录和 control-token file，不挂 Docker socket。
 - **PostgreSQL 18**: Matrix 与 Dirextalk 业务表共库持久化，compose 使用 `/var/lib/postgresql`。
 - **Caddy**: 唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
 - **dirextalk-updater**: 独立 GitHub 仓库/Release 的 linux/amd64 binary，支持 Ubuntu 22.04 和 24.04；deployer 固定 version/commit/SHA-256，宿主下载校验后作为 root-owned systemd service 安装。它独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token。

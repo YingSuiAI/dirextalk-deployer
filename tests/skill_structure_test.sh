@@ -87,11 +87,8 @@ if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md SKILL.md ref
   exit 1
 fi
 
-grep -q 'latest published stable GitHub Release' SKILL.md
-if grep -q 'dirextalk/message-server:latest' SKILL.md; then
-  echo "normal deployment guidance must not pin production to mutable latest" >&2
-  exit 1
-fi
+grep -q 'dirextalk/message-server:latest' SKILL.md
+grep -q 'does not query message-server GitHub Releases' SKILL.md
 grep -q 'dirextalk-deployer' package.json
 grep -q 'bin/dirextalk-deployer.mjs' package.json
 grep -q 'compact agent-facing entrypoint' AGENTS.md
@@ -149,7 +146,7 @@ do
 done
 case "$quick_suite" in
   *tests/server_release_test.sh*|*tests/destroy_lightsail_test.sh*)
-    echo "release resolution and destroy integration must remain extended-only" >&2
+    echo "server image selection and destroy integration must remain extended-only" >&2
     exit 1
     ;;
 esac

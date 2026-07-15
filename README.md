@@ -118,18 +118,16 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-Normal deployment resolves the latest published stable GitHub Release, verifies
-its manifest checksum, and records an immutable version, image digest, image
-reference, and manifest digest in `state.json`. The host updater is a separate
+Normal deployment uses `dirextalk/message-server:latest` directly and records
+that selection in `state.json`; it does not query message-server GitHub Releases
+before provisioning. Each new deployment therefore pulls the image currently
+published under `latest`. The host updater is a separate
 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release:
 the supported Ubuntu 22.04 or 24.04 x86_64 host downloads the deployer-pinned updater asset and
 verifies the deployer-pinned SHA-256 before atomic installation. The local
 machine does not need Go, and S3 never copies an updater binary over SSH.
-The deployer-side Node selector validates every `upgrade_from` entry with the
-pinned mature `semver` package and rejects constraints that include the target.
-Its accepted/rejected corpus covers the constraint forms used by the canonical
-Go validators; the independent updater and message-server Release CI remain
-authoritative for cross-version compatibility evidence.
+The updater remains independently pinned and checksum-verified; this change
+does not alter its remote download or upgrade-discovery contract.
 
 One pre-updater node can be adopted only through the explicit, fixed d1
 contract. Run `scripts/adopt-legacy-node.sh --dry-run <state.json>` with

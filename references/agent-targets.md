@@ -67,7 +67,7 @@ The bridge agent type is selected independently from the host operating system. 
 acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode pi qoder reasonix tmux
 ```
 
-`DIREXTALK_AGENT_PLATFORM=auto` is a convenience detector. If it detects OpenClaw or Hermes, S6 wires `dirextalk-connect` through the generic `acp` agent and rejects a non-ACP override. OpenClaw writes `cmd = "openclaw"` and keeps an explicit profile/config path aligned between its ACP process and native MCP probe. Hermes writes `cmd = "dirextalk-connect"` with service-scoped `HERMES_HOME` and `args = ["hermes-acp-adapter", "--", "hermes", "-p", "<service-profile>", "acp"]`. The adapter can buffer and clean Hermes output before it reaches the Matrix room. To bridge directly to another backend, select that backend as `DIREXTALK_AGENT_PLATFORM` instead of overriding an OpenClaw/Hermes host.
+`DIREXTALK_AGENT_PLATFORM=auto` is a convenience detector. If it detects OpenClaw or Hermes, S6 wires `dirextalk-connect` through the generic `acp` agent and rejects a non-ACP override. OpenClaw resolves its installed host CLI to an absolute local path and keeps an explicit profile/config path aligned between its ACP process and native MCP probe. Hermes writes the absolute service-scoped native `dirextalk-connect` binary path as `cmd`, resolves the installed Hermes CLI used in adapter args, and keeps service-scoped `HERMES_HOME` plus `args = ["hermes-acp-adapter", "--", "<absolute-hermes-command>", "-p", "<service-profile>", "acp"]`. Neither runtime relies on a Windows scheduled task inheriting the interactive shell's PATH. The adapter can buffer and clean Hermes output before it reaches the Matrix room. To bridge directly to another backend, select that backend as `DIREXTALK_AGENT_PLATFORM` instead of overriding an OpenClaw/Hermes host.
 
 S6 writes service-specific files to `~/.dirextalk/nodes/<service_id>/`, where `service_id` is derived from the deployed domain:
 
@@ -155,10 +155,11 @@ to pass without secret argv. `OPENCLAW_CONFIG_PATH` is inherited;
 `DIREXTALK_OPENCLAW_PROFILE=<profile>` adds `--profile <profile>` for service
 isolation. S6 never runs `mcp set`. Other host-managed backends with no official
 probe record operator confirmation, which does not replace runtime MCP checks.
-Hermes receives an empty service-isolated HERMES_HOME plus `hermes.md` guidance.
-The operator must create/clone the named profile with the installed Hermes
-version's official workflow, enroll the server in native `mcp_servers`, and let
-S6 pass `hermes -p <profile> mcp test <server-name>` in that same HERMES_HOME.
+Hermes receives a service-isolated HERMES_HOME plus `hermes.md` guidance. The
+operator must clone/import the named profile from a working Hermes profile so
+model/provider configuration and authentication are present, enroll the server
+in native `mcp_servers`, and let S6 pass both its model-readiness check and
+`hermes -p <profile> mcp test <server-name>` in that same HERMES_HOME.
 With `recommend` or `skip`, output generation completes with
 `mcp_install_status=host_action_required` and does not run the native probe.
 

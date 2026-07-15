@@ -331,7 +331,8 @@ run_capability_case() {
   if [ "$runtime" = "hermes" ]; then
     grep -q '^mcp_hermes_home=.*/nodes/service.example.test/hermes$' "$STATE_CALLS"
     grep -q '^mcp_hermes_profile=dirextalk-service_example_test$' "$STATE_CALLS"
-    grep -q 'args = \["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-service_example_test", "acp"\]' "$config_path"
+    grep -q 'cmd = ".*/nodes/service.example.test/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect"' "$config_path"
+    grep -q 'args = \["hermes-acp-adapter", "--", "[^"]*hermes", "-p", "dirextalk-service_example_test", "acp"\]' "$config_path"
     grep -q 'env = { HERMES_HOME = ".*/nodes/service.example.test/hermes" }' "$config_path"
   fi
   if [ "$expect_connect_mcp" = "true" ]; then

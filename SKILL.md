@@ -270,17 +270,17 @@ CONFIRM_DOMAIN_BINDING=1
 DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
-Normal server selection resolves the latest published stable GitHub Release and
-persists its immutable digest in deployment state. `MESSAGE_SERVER_IMAGE` is
-disabled unless `DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1` explicitly
-marks a debug/legacy deployment. The independent `YingSuiAI/dirextalk-updater`
+Normal server selection uses `dirextalk/message-server:latest` directly and
+does not query message-server GitHub Releases before provisioning. Each new
+deployment therefore pulls the image currently published under `latest`.
+`MESSAGE_SERVER_IMAGE` is disabled unless
+`DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1` explicitly marks a
+debug/legacy deployment. The independent `YingSuiAI/dirextalk-updater`
 host binary is downloaded only on a verified Ubuntu 22.04 or 24.04 x86_64 server from
 the deployer-pinned Release URL and must match the deployer-pinned SHA-256.
 The local deployer host does not need Go and does not SCP updater artifacts.
-The deployer Node selector uses the pinned mature `semver` dependency to reject
-invalid `upgrade_from` ranges and ranges that include the target. Its constraint
-corpus mirrors the forms accepted by the canonical Go validators; the updater
-and message-server Release CI own cross-version compatibility evidence.
+The updater pin and checksum contract remains independent from the default
+message-server image selection.
 
 The only legacy host adoption path is `scripts/adopt-legacy-node.sh`. It first
 requires a dry-run proof of the fixed d1 v0.15.2 Compose project, approved image
@@ -388,11 +388,13 @@ daemon. Explicit `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CURSOR_AGENT_COMMAND`,
 `DIREXTALK_OPENCODE_COMMAND`, `DIREXTALK_CONNECT_AGENT_CMD`,
 `DIREXTALK_CURSOR_MODE`, and `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides
 still win except where a host-owned OpenClaw/Hermes scope would be bypassed.
-Hermes writes `mcp/hermes.md`, creates an empty per-service HERMES_HOME, and
-uses the same profile/home in ACP args/env and the secret-free
-`hermes -p <profile> mcp test <server-name>` gate. The operator must first
-create/clone that profile and enroll native `mcp_servers`; the current agent
-then reruns S6, which probes and resumes without a readiness flag. S6 never
+Hermes writes `mcp/hermes.md`, creates a per-service HERMES_HOME, and uses the
+same profile/home in ACP args/env and the secret-free readiness gate. The
+operator must clone/import a working Hermes profile so its model/provider
+authentication is preserved, then enroll native `mcp_servers`. S6 requires
+both a configured model and a passing
+`hermes -p <profile> mcp test <server-name>` before bridge startup; the current
+agent then reruns S6 without a readiness flag. S6 never
 writes a generic Hermes JSON file or touches the real user Hermes home.
 
 State/report fields include `mcp_capability`, `mcp_config_dir`, `mcp_selected_config_type`,

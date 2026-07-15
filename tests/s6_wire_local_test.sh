@@ -446,23 +446,42 @@ grep -qx -- '--profile service-isolated mcp probe dirextalk-openclaw_example_tes
 cat > "$fake_bin/hermes" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'HERMES_HOME=%s\n' "${HERMES_HOME:-}" > "$HERMES_CALL_LOG"
+printf 'HERMES_HOME=%s\n' "${HERMES_HOME:-}" >> "$HERMES_CALL_LOG"
 printf '%s\n' "$@" >> "$HERMES_CALL_LOG"
+case "$*" in
+  *' status')
+    if [ "${HERMES_MODEL_NOT_SET:-0}" = 1 ]; then
+      printf '  Model:        (not set)\n'
+    else
+      printf '  Model:        test-model\n'
+    fi
+    ;;
+esac
 exit "${HERMES_PROBE_EXIT:-0}"
 EOF
 chmod 700 "$fake_bin/hermes"
+rm -f "$tmp/hermes-confirmed-calls.log"
 STATE_CALLS="$tmp/hermes-confirmed-state-calls.log" \
 HERMES_CALL_LOG="$tmp/hermes-confirmed-calls.log" \
 DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
   _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
 grep -q '^mcp_install_status=host_probe_passed$' "$tmp/hermes-confirmed-state-calls.log"
 grep -Fxq "HERMES_HOME=$hermes_service_dir/hermes" "$tmp/hermes-confirmed-calls.log"
-[ "$(sed -n '2p' "$tmp/hermes-confirmed-calls.log")" = "-p" ]
-[ "$(sed -n '3p' "$tmp/hermes-confirmed-calls.log")" = "dirextalk-hermes_example_test" ]
-[ "$(sed -n '4p' "$tmp/hermes-confirmed-calls.log")" = "mcp" ]
-[ "$(sed -n '5p' "$tmp/hermes-confirmed-calls.log")" = "test" ]
-[ "$(sed -n '6p' "$tmp/hermes-confirmed-calls.log")" = "dirextalk-hermes_example_test" ]
+grep -Fxq 'status' "$tmp/hermes-confirmed-calls.log"
+grep -Fxq 'mcp' "$tmp/hermes-confirmed-calls.log"
+grep -Fxq 'test' "$tmp/hermes-confirmed-calls.log"
+grep -Fxq 'dirextalk-hermes_example_test' "$tmp/hermes-confirmed-calls.log"
 ! grep -q 'HERMES_TOKEN\|agent-token\|Authorization\|Bearer' "$tmp/hermes-confirmed-calls.log"
+set +e
+STATE_CALLS="$tmp/hermes-model-missing-state-calls.log" \
+HERMES_CALL_LOG="$tmp/hermes-model-missing-calls.log" \
+HERMES_MODEL_NOT_SET=1 \
+DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
+  _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
+hermes_model_missing_rc=$?
+set -e
+[ "$hermes_model_missing_rc" -eq 2 ]
+grep -q '^mcp_install_status=host_probe_failed$' "$tmp/hermes-model-missing-state-calls.log"
 set +e
 STATE_CALLS="$tmp/hermes-failed-state-calls.log" \
 HERMES_CALL_LOG="$tmp/hermes-failed-calls.log" \
@@ -597,7 +616,6 @@ grep -q 'model = "whisper-test"' "$speech_config_path"
 [ "$(DIREXTALK_QODERCLI_COMMAND=/opt/qoder/qodercli _connect_agent_command qoder)" = "/opt/qoder/qodercli" ]
 [ "$(DIREXTALK_OPENCODE_AI_COMMAND=/opt/opencode-ai/bin/opencode _connect_agent_command opencode)" = "/opt/opencode-ai/bin/opencode" ]
 [ "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/agent _connect_agent_command codex)" = "/custom/agent" ]
-[ "$(_connect_agent_command acp openclaw)" = "openclaw" ]
 [ "$(_connect_agent_command acp hermes)" = "dirextalk-connect" ]
 [ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp openclaw 2>/dev/null || true)" ]
 [ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp hermes 2>/dev/null || true)" ]
@@ -804,7 +822,7 @@ openclaw_posix_token_options=$(DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 D
 openclaw_token_options=$(DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXTALK_OPENCLAW_ACP_SESSION=agent:main:main _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_token_options" == *'args = ["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "C:/Users/alice/.openclaw/token.json", "--session", "agent:main:main"]'* ]]
 
-hermes_options=$(_connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
+hermes_options=$(DIREXTALK_HERMES_COMMAND=hermes _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
 [[ "$hermes_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-hermes_example_test", "acp"]'* ]]
 [[ "$hermes_options" == *"env = { HERMES_HOME = \"$hermes_service_dir/hermes\" }"* ]]
 [[ "$hermes_options" == *'display_name = "Hermes ACP"'* ]]
@@ -812,22 +830,25 @@ hermes_options=$(_connect_agent_options_toml hermes acp "$hermes_service_dir" di
 hermes_custom_command_options=$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
 [[ "$hermes_custom_command_options" == *'args = ["hermes-acp-adapter", "--", "/opt/hermes/bin/hermes", "-p", "dirextalk-hermes_example_test", "acp"]'* ]]
 
-hermes_custom_args_options=$(DIREXTALK_HERMES_ACP_ARGS_TOML='["acp", "--mode", "safe"]' _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
+hermes_custom_args_options=$(DIREXTALK_HERMES_COMMAND=hermes DIREXTALK_HERMES_ACP_ARGS_TOML='["acp", "--mode", "safe"]' _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
 [[ "$hermes_custom_args_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-hermes_example_test", "acp", "--mode", "safe"]'* ]]
-hermes_windows_options=$(DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_options_toml hermes acp /mnt/c/Users/alice/.dirextalk/nodes/hermes.example.test dirextalk-hermes_example_test)
+hermes_windows_options=$(DIREXTALK_HERMES_COMMAND=hermes DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_options_toml hermes acp /mnt/c/Users/alice/.dirextalk/nodes/hermes.example.test dirextalk-hermes_example_test)
 [[ "$hermes_windows_options" == *'env = { HERMES_HOME = "C:/Users/alice/.dirextalk/nodes/hermes.example.test/hermes" }'* ]]
+hermes_windows_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_command acp hermes /mnt/c/Users/alice/.dirextalk/nodes/hermes.example.test/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect.exe)
+[[ "$hermes_windows_command" = 'C:/Users/alice/.dirextalk/nodes/hermes.example.test/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect.exe' ]]
 
 openclaw_config_path="$tmp/dirextalk-connect/config-openclaw.toml"
-_write_connect_config "$openclaw_config_path" "$tmp/dirextalk-connect/data-openclaw" "openclaw-node" "$(_connect_agent_type openclaw)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp openclaw)" "$openclaw_options"
+_write_connect_config "$openclaw_config_path" "$tmp/dirextalk-connect/data-openclaw" "openclaw-node" "$(_connect_agent_type openclaw)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(DIREXTALK_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _connect_agent_command acp openclaw)" "$openclaw_options"
 grep -q 'type = "acp"' "$openclaw_config_path"
-grep -q 'cmd = "openclaw"' "$openclaw_config_path"
+grep -q 'cmd = "/opt/openclaw/bin/openclaw"' "$openclaw_config_path"
 grep -q 'args = \["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "/mnt/c/Users/alice/.openclaw/gateway.token", "--session", "agent:main:main"\]' "$openclaw_config_path"
 grep -q 'display_name = "OpenClaw ACP"' "$openclaw_config_path"
 
 hermes_config_path="$tmp/dirextalk-connect/config-hermes.toml"
-_write_connect_config "$hermes_config_path" "$tmp/dirextalk-connect/data-hermes" "hermes-node" "$(_connect_agent_type hermes)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp hermes)" "$hermes_options"
+hermes_adapter_binary="$hermes_service_dir/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect"
+_write_connect_config "$hermes_config_path" "$tmp/dirextalk-connect/data-hermes" "hermes-node" "$(_connect_agent_type hermes)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp hermes "$hermes_adapter_binary")" "$hermes_options"
 grep -q 'type = "acp"' "$hermes_config_path"
-grep -q 'cmd = "dirextalk-connect"' "$hermes_config_path"
+grep -Fq "cmd = \"$hermes_adapter_binary\"" "$hermes_config_path"
 grep -q 'args = \["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-hermes_example_test", "acp"\]' "$hermes_config_path"
 grep -Fq "env = { HERMES_HOME = \"$hermes_service_dir/hermes\" }" "$hermes_config_path"
 grep -q 'display_name = "Hermes ACP"' "$hermes_config_path"

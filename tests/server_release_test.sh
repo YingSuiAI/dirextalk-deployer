@@ -10,57 +10,22 @@ trap 'rm -rf "$tmp"' EXIT
 export DIREXTALK_WORKDIR="$tmp/work"
 export RUN_ID=ticket3-release-test
 export AWS_DEFAULT_REGION=us-east-1
-unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy
-unset NODE_USE_ENV_PROXY
-export DIREXTALK_RELEASE_HTTP_PROXY_INPUT=http://release-proxy.example.test:8080
-export DIREXTALK_RELEASE_HTTPS_PROXY_INPUT=http://release-proxy.example.test:8080
-export DIREXTALK_RELEASE_NO_PROXY_INPUT=localhost,127.0.0.1
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null
-# shellcheck disable=SC1091
-source "$ROOT/scripts/lib/aws.sh"
-aws_env_prep
 
 mkdir -p "$tmp/bin"
 export REAL_NODE=$(json_node)
 cat > "$tmp/bin/node" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [ "${1##*/}" != server-release-resolver.mjs ] || [ "${2:-}" != resolve-release ]; then
-  exec "$REAL_NODE" "$@"
-fi
-case "$(uname -s 2>/dev/null || printf unknown)" in
-  *MINGW*|*MSYS*|*CYGWIN*)
-    case "$1" in [A-Za-z]:/*) ;; *) echo "release resolver must receive a native Windows script path" >&2; exit 96 ;; esac
+case "${1:-}" in
+  *server-release-resolver.mjs*)
+    echo "default image selection must not invoke a GitHub release resolver" >&2
+    exit 97
     ;;
 esac
-[ "${HTTP_PROXY:-}" = "http://release-proxy.example.test:8080" ] || {
-  echo "release resolver must receive the original HTTP proxy" >&2
-  exit 97
-}
-[ "${HTTPS_PROXY:-}" = "http://release-proxy.example.test:8080" ] || {
-  echo "release resolver must receive the original HTTPS proxy" >&2
-  exit 97
-}
-[ "${NO_PROXY:-}" = "localhost,127.0.0.1" ] || {
-  echo "release resolver must receive the original NO_PROXY value" >&2
-  exit 97
-}
-[ "${NODE_USE_ENV_PROXY:-}" = "1" ] || {
-  echo "release resolver must enable Node proxy support when a proxy is configured" >&2
-  exit 97
-}
-cat <<'JSON'
-{
-  "source": "github_release",
-  "version": "v1.1.0",
-  "image": "dirextalk/message-server:v1.1.0",
-  "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "image_ref": "dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-}
-JSON
+exec "$REAL_NODE" "$@"
 EOF
 cat > "$tmp/bin/go" <<'EOF'
 #!/usr/bin/env bash
@@ -83,18 +48,24 @@ export MSYS_NO_PATHCONV=1
 source "$ROOT/scripts/lib/server-release.sh"
 
 server_release_prepare_state
-json_test_check "$STATE_JSON" 'data.server_release.source === "github_release" && data.server_release.version === "v1.1.0" && data.server_release.image === "dirextalk/message-server:v1.1.0" && data.server_release.digest === "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" && data.server_release.image_ref === "dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" && data.server_release.manifest_digest === "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+json_test_check "$STATE_JSON" 'data.server_release.source === "default_latest" && data.server_release.version === "latest" && data.server_release.image === "dirextalk/message-server:latest" && data.server_release.image_ref === "dirextalk/message-server:latest" && data.server_release.digest === "" && data.server_release.manifest_digest === ""'
 
 state_set server_release.image attacker/image:v1.1.0
 server_release_prepare_state
-json_test_check "$STATE_JSON" 'data.server_release.image === "dirextalk/message-server:v1.1.0" && data.server_release.image_ref === "dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+json_test_check "$STATE_JSON" 'data.server_release.source === "default_latest" && data.server_release.image === "dirextalk/message-server:latest" && data.server_release.image_ref === "dirextalk/message-server:latest"'
 
 res_set instance_id i-existing
 if MESSAGE_SERVER_IMAGE=dirextalk/message-server:debug DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
-  server_release_prepare_state 2>"$tmp/frozen-formal.err"; then
-  echo "existing infrastructure must freeze the formal release choice" >&2
+  server_release_prepare_state 2>"$tmp/frozen-latest.err"; then
+  echo "existing infrastructure must freeze the selected latest image" >&2
   exit 1
 fi
+json_test_check "$STATE_JSON" 'data.server_release.source === "default_latest" && data.server_release.image_ref === "dirextalk/message-server:latest"'
+
+# Existing nodes created by older deployer versions remain resumable without
+# performing release discovery or switching their recorded image.
+state_set_raw server_release '{"source":"github_release","version":"v1.1.0","image":"dirextalk/message-server:v1.1.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+server_release_prepare_state
 json_test_check "$STATE_JSON" 'data.server_release.source === "github_release" && data.server_release.version === "v1.1.0"'
 
 res_set instance_id ""
@@ -114,7 +85,7 @@ fi
 state_set_raw server_release '{}'
 res_set instance_id ""
 if MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest server_release_prepare_state 2>"$tmp/override.err"; then
-  echo "MESSAGE_SERVER_IMAGE must not silently bypass formal release resolution" >&2
+  echo "MESSAGE_SERVER_IMAGE must not silently replace the default image policy" >&2
   exit 1
 fi
 grep -q 'DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1' "$tmp/override.err"
@@ -131,4 +102,4 @@ MESSAGE_SERVER_IMAGE=dirextalk/message-server:debug \
   server_release_prepare_state
 json_test_check "$STATE_JSON" 'data.server_release.source === "debug_override" && data.server_release.image === "dirextalk/message-server:debug" && data.server_release.image_ref === "dirextalk/message-server:debug" && data.server_release.digest === "" && data.server_release.manifest_digest === ""'
 
-echo "server release resolution ok"
+echo "server image selection ok"

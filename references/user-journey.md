@@ -16,7 +16,7 @@ Confirm these items before calling `scripts/orchestrate.sh`:
 4. Node.js, AWS CLI v2, `ssh`, and `curl` are available. Go is not required.
 5. AWS credentials are configured through `AWS_PROFILE` or environment variables.
 6. `AWS_DEFAULT_REGION` is explicit.
-7. The latest stable GitHub Release is available with a matching manifest and checksum; normal production state is pinned to its immutable image digest.
+7. Docker Hub can pull `dirextalk/message-server:latest`; new deployments do not require message-server GitHub Release access.
 8. Existing state handling is explicit: continue, destroy, or new workdir.
 
 On Windows, first open Git Bash and verify Git before a lifecycle action:

@@ -146,19 +146,15 @@ DIREXTALK_CLOUD_PROVIDER=lightsail \
 bash scripts/orchestrate.sh
 ```
 
-S3 resolves the latest published stable GitHub Release, verifies the manifest
-checksum, and persists `server_release.version/image/digest/image_ref/manifest_digest`
-before provisioning. The rendered Compose runtime uses the immutable image ref.
-It also records the deployer-owned independent updater version, commit, and
+S3 selects `dirextalk/message-server:latest` without querying message-server
+GitHub Releases and persists `server_release.source=default_latest`,
+`version=latest`, and the image reference before provisioning. Each new
+deployment pulls the image currently published under `latest`. S3 also records
+the deployer-owned independent updater version, commit, and
 SHA-256 pin. User-data on the verified Ubuntu 22.04 or 24.04 x86_64 host downloads that
 fixed Release asset, verifies the local pin, and atomically installs it; no
 local Go toolchain or updater SCP step is required.
-The deployer-side Node Release selector validates unique non-empty `upgrade_from`
-entries with the exact pinned `semver` dependency, rejects invalid ranges and any
-range containing the target, and runs a corpus covering comparator, tilde, caret,
-wildcard, hyphen and OR forms used by the canonical Go validators. The independent
-Go updater and message-server Release CI remain authoritative for tested upgrade
-compatibility.
+The updater's fixed Release download and checksum contract is unchanged.
 
 ### Fixed legacy d1 adoption
 

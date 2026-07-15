@@ -80,7 +80,6 @@ release_tests=(
   tests/s6_wire_local_test.sh
   tests/render_userdata_remote_nodes_test.sh
   tests/init_tokens_resume_test.sh
-  tests/server_release_resolver_test.sh
   tests/updater_release_pin_test.sh
   tests/updater_bundle_test.sh
   tests/updater_bootstrap_resume_test.sh

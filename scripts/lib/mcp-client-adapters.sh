@@ -198,11 +198,8 @@ EOF
 _openclaw_mcp_probe() {
   local server_name=$1 command profile
   [ -n "$server_name" ] || return 1
-  command=${DIREXTALK_OPENCLAW_COMMAND:-openclaw}
+  command=$(_openclaw_command) || return $?
   profile=${DIREXTALK_OPENCLAW_PROFILE:-}
-  if ! command -v "$command" >/dev/null 2>&1 && [ ! -f "$command" ]; then
-    return 127
-  fi
   if [ -n "$profile" ]; then
     "$command" --profile "$profile" mcp probe "$server_name" --json >/dev/null 2>&1
   else
@@ -211,14 +208,14 @@ _openclaw_mcp_probe() {
 }
 
 _hermes_mcp_probe() {
-  local server_name=$1 service_dir=$2 command profile hermes_home
+  local server_name=$1 service_dir=$2 command profile hermes_home status
   [ -n "$server_name" ] && [ -n "$service_dir" ] || return 1
-  command=${DIREXTALK_HERMES_COMMAND:-hermes}
+  command=$(_hermes_command) || return $?
   profile=$(_mcp_hermes_profile "$server_name") || return 1
   hermes_home=$(_mcp_hermes_home "$service_dir") || return 1
-  if ! command -v "$command" >/dev/null 2>&1 && [ ! -f "$command" ]; then
-    return 127
-  fi
+  status=$(HERMES_HOME="$hermes_home" "$command" -p "$profile" status 2>/dev/null) || return 1
+  printf '%s\n' "$status" | grep -Eq 'Model:[[:space:]]+\(not set\)' && return 1
+  printf '%s\n' "$status" | grep -Eq 'Model:[[:space:]]+[^[:space:]]' || return 1
   HERMES_HOME="$hermes_home" "$command" -p "$profile" mcp test "$server_name" >/dev/null 2>&1
 }
 
@@ -269,7 +266,7 @@ After enrolling the server in that exact home/profile, verify it without secret 
 HERMES_HOME=$hermes_home hermes -p $profile mcp test $server_name
 \`\`\`
 
-S6 only creates the empty service-isolated home and this guidance file. Use the installed Hermes version's official profile create/clone workflow to create \`$profile\` inside that HERMES_HOME, then enroll the server in that profile's native \`mcp_servers\` registry. On every S6 run, the deployer automatically executes the test above and continues bridge startup as soon as it passes; no readiness environment variable is required. S6 does not assume the profile exists, mutate the real user Hermes home, or generate a generic Hermes MCP JSON file.
+S6 only creates the service-isolated home and this guidance file. Use the installed Hermes version's official profile clone/export/import workflow to create \`$profile\` inside that HERMES_HOME from a working profile, preserving its model/provider configuration and authentication, then enroll the server in that profile's native \`mcp_servers\` registry. On every S6 run, the deployer checks that the isolated profile has a model and then executes the MCP test above; bridge startup continues only after both pass. S6 does not copy provider secrets, mutate the real user Hermes home, or generate a generic Hermes MCP JSON file.
 EOF
 }
 

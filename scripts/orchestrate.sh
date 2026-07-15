@@ -9,7 +9,7 @@
 #
 # Usage:
 #   export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-east-1
-#   # Normal server selection resolves a stable GitHub Release to an immutable digest.
+#   # Normal server selection uses dirextalk/message-server:latest directly.
 #   # First run asks for region, production domain, instance size, and existing-state handling.
 #   # Non-interactive:
 #   #   DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=t3.small

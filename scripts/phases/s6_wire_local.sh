@@ -520,6 +520,16 @@ _connect_package_bin_path() {
   fi
 }
 
+_connect_package_native_binary_path() {
+  local service_dir=$1 package_dir
+  package_dir=$(_connect_package_dir "$service_dir")
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    printf '%s/node_modules/dirextalk-connect/bin/dirextalk-connect.exe\n' "$package_dir"
+  else
+    printf '%s/node_modules/dirextalk-connect/bin/dirextalk-connect\n' "$package_dir"
+  fi
+}
+
 _render_connect_wrapper() {
   local style=$1
   if [ "$style" = "windows" ]; then
@@ -1150,7 +1160,7 @@ _clear_mcp_daemon_state() {
 run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and dirextalk-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id runtime install_policy install_mode install_command
-  local node_id service_dir service_dir_local node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_runtime_dir_local cc_config cc_config_local cc_data cc_data_local cc_binary cc_binary_local cc_session cc_session_local cc_source cc_package_dir
+  local node_id service_dir service_dir_local node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_runtime_dir_local cc_config cc_config_local cc_data cc_data_local cc_binary cc_binary_local cc_native_binary cc_native_binary_local cc_session cc_session_local cc_source cc_package_dir
   local mcp_dir mcp_dir_local mcp_capability mcp_server_name mcp_endpoint_url mcp_install_command mcp_doctor_command mcp_openclaw_config mcp_hermes_config mcp_readme
   local mcp_selected_config_type mcp_selected_config mcp_selected_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_hermes_home_local mcp_hermes_profile mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
@@ -1180,10 +1190,6 @@ run_phase() {
   fi
   if ! cc_agent=$(_connect_agent_type "$runtime"); then
     phase_set S6_WIRE_LOCAL failed "invalid or unsupported dirextalk-connect agent"
-    return 1
-  fi
-  if ! cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime"); then
-    phase_set S6_WIRE_LOCAL failed "invalid dirextalk-connect agent command"
     return 1
   fi
   if ! install_policy=$(_connect_install_policy); then
@@ -1226,6 +1232,12 @@ run_phase() {
   cc_data_local=$(_local_connect_path "$cc_data")
   cc_binary=$(_connect_binary_path "$service_dir")
   cc_binary_local=$(_local_connect_path "$cc_binary")
+  cc_native_binary=$(_connect_package_native_binary_path "$service_dir")
+  cc_native_binary_local=$(_local_connect_path "$cc_native_binary")
+  if ! cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime" "$cc_native_binary_local"); then
+    phase_set S6_WIRE_LOCAL failed "invalid dirextalk-connect agent command"
+    return 1
+  fi
   cc_package_dir=$(_connect_package_dir "$service_dir")
   if ! _ensure_connect_wrapper "$service_dir"; then
     phase_set S6_WIRE_LOCAL failed "dirextalk-connect wrapper generation failed"
@@ -1316,7 +1328,7 @@ run_phase() {
       fi
       warn "Cursor Agent CLI is not ready; continuing in $install_policy_preview mode."
     else
-      cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime")
+      cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime" "$cc_native_binary_local")
     fi
   fi
   connect_mcp_url=$mcp_endpoint_url

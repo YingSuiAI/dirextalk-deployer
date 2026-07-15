@@ -77,7 +77,6 @@ if (pkg.name !== "dirextalk-deployer") throw new Error("unexpected package name"
 if (!pkg.bin || pkg.bin["dirextalk-deployer"] !== "bin/dirextalk-deployer.mjs") {
   throw new Error("missing dirextalk-deployer bin");
 }
-if (pkg.dependencies?.semver !== "7.8.5") throw new Error("server Release constraint validator must be pinned");
 '
 
 npm pack --dry-run --json > "$tmp/pack.json"
@@ -85,7 +84,7 @@ npm pack --dry-run --json > "$tmp/pack.json"
 const fs = require("node:fs");
 const pack = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))[0];
 const files = pack.files.map((entry) => entry.path);
-for (const required of ["SKILL.md", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh", "scripts/run-tests.mjs", "scripts/lib/test-runner.mjs", "scripts/lib/git-bash.sh", "scripts/updater/release.env", "scripts/lib/server-release-resolver.mjs"]) {
+for (const required of ["SKILL.md", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh", "scripts/run-tests.mjs", "scripts/lib/test-runner.mjs", "scripts/lib/git-bash.sh", "scripts/lib/server-release.sh", "scripts/updater/release.env"]) {
   if (!files.includes(required)) throw new Error(`missing package file: ${required}`);
 }
 if (files.includes("README_zh.md")) {
@@ -119,7 +118,6 @@ target="$project/.codex/skills/dirextalk-deployer"
 assert_file_exists "$target/SKILL.md"
 assert_file_exists "$target/references/agent-targets.md"
 assert_file_exists "$target/scripts/orchestrate.sh"
-assert_file_exists "$target/node_modules/semver/package.json"
 assert_file_exists "$target/.dirextalk-skill-install.json"
 [ ! -e "$target/tests" ] || {
   echo "installed skill should not include tests/" >&2
@@ -127,11 +125,6 @@ assert_file_exists "$target/.dirextalk-skill-install.json"
 }
 assert_contains "$target/.dirextalk-skill-install.json" '"agent": "codex"'
 assert_contains "$target/.dirextalk-skill-install.json" '"scope": "project"'
-"$NODE_BIN" --input-type=module -e '
-import { pathToFileURL } from "node:url";
-await import(pathToFileURL(process.argv[2]));
-' import-check "$target/scripts/lib/server-release-resolver.mjs"
-
 printf 'stale\n' > "$target/STALE.txt"
 "$NODE_BIN" bin/dirextalk-deployer.mjs skill update --agent codex --scope project --project "$project" > "$tmp/update.out"
 if [ -f "$target/STALE.txt" ]; then

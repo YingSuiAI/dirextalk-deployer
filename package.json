@@ -1,6 +1,6 @@
 {
   "name": "dirextalk-deployer",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "description": "Versioned Dirextalk deployer agent skill and portable deployment orchestration tools.",
   "type": "module",
   "bin": {

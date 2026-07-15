@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Resolve the normal server target through a formal GitHub Release. A mutable
-# MESSAGE_SERVER_IMAGE is accepted only behind the explicit debug/legacy gate.
+# Select the normal server target without a release-discovery network request.
+# MESSAGE_SERVER_IMAGE remains an explicit debug/legacy override.
 
-SERVER_RELEASE_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-SERVER_RELEASE_SCRIPTS_DIR=$(cd "$SERVER_RELEASE_LIB_DIR/.." && pwd)
+DEFAULT_MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
+
 server_release_validate_override() {
   if [ -n "${MESSAGE_SERVER_IMAGE:-}" ] && [ "${DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE:-0}" != "1" ]; then
     warn "MESSAGE_SERVER_IMAGE is a debug/legacy override and is disabled for normal production installs."
-    warn "Use formal GitHub Release resolution, or explicitly set DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 for a debug/legacy deployment."
+    warn "Use the default latest image, or explicitly set DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 for a debug/legacy deployment."
     return 1
   fi
   if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
@@ -25,23 +25,14 @@ server_release_image_is_safe() {
   printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$'
 }
 
-server_release_resolver_with_network_env() {
-  (
-    export HTTP_PROXY="${DIREXTALK_RELEASE_HTTP_PROXY-${HTTP_PROXY-}}"
-    export HTTPS_PROXY="${DIREXTALK_RELEASE_HTTPS_PROXY-${HTTPS_PROXY-}}"
-    export http_proxy="${DIREXTALK_RELEASE_http_proxy-${http_proxy-}}"
-    export https_proxy="${DIREXTALK_RELEASE_https_proxy-${https_proxy-}}"
-    export NO_PROXY="${DIREXTALK_RELEASE_NO_PROXY-${NO_PROXY-}}"
-    export no_proxy="${DIREXTALK_RELEASE_no_proxy-${no_proxy-}}"
-    if [ -n "${HTTP_PROXY:-}${HTTPS_PROXY:-}${http_proxy:-}${https_proxy:-}" ] && [ -z "${NODE_USE_ENV_PROXY+x}" ]; then
-      export NODE_USE_ENV_PROXY=1
-    fi
-    unset DIREXTALK_RELEASE_NETWORK_CAPTURED DIREXTALK_RELEASE_HTTP_PROXY \
-      DIREXTALK_RELEASE_HTTPS_PROXY DIREXTALK_RELEASE_http_proxy \
-      DIREXTALK_RELEASE_https_proxy DIREXTALK_RELEASE_NO_PROXY \
-      DIREXTALK_RELEASE_no_proxy
-    "$@"
-  )
+server_release_state_is_default_latest() {
+  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
+  [ "$source" = "default_latest" ] \
+    && [ "$version" = "latest" ] \
+    && [ "$image" = "$DEFAULT_MESSAGE_SERVER_IMAGE" ] \
+    && [ "$image_ref" = "$DEFAULT_MESSAGE_SERVER_IMAGE" ] \
+    && [ -z "$digest" ] \
+    && [ -z "$manifest_digest" ]
 }
 
 server_release_state_is_formal() {
@@ -76,7 +67,7 @@ server_release_state_is_legacy_adopted() {
 
 server_release_prepare_state() {
   server_release_validate_override || return 1
-  local source version image digest image_ref manifest_digest node_binary resolver_script resolved_json instance_id
+  local source version image digest image_ref manifest_digest resolved_json instance_id
 
   source=$(state_get server_release.source)
   version=$(state_get server_release.version)
@@ -87,6 +78,16 @@ server_release_prepare_state() {
   instance_id=$(state_get resources.instance_id)
 
   if [ -n "$instance_id" ]; then
+    if server_release_state_is_default_latest "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
+      if [ -z "${MESSAGE_SERVER_IMAGE:-}" ] || [ "$MESSAGE_SERVER_IMAGE" = "$image_ref" ]; then
+        return 0
+      fi
+      warn "Server image is frozen after infrastructure creation; the existing default latest image cannot be replaced by an override."
+      return 1
+    fi
+    # Preserve already-created nodes that were deployed before the default
+    # switched away from formal GitHub Release resolution. This compatibility
+    # check never performs a GitHub request.
     if server_release_state_is_formal "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
       if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
         warn "Server release is frozen after infrastructure creation; the existing formal release cannot be replaced by an image override."
@@ -124,32 +125,13 @@ server_release_prepare_state() {
     return 0
   fi
 
-  if server_release_state_is_formal "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
-    return 0
-  fi
-
-  node_binary=$(json_node) || { warn "Node.js is required to resolve the formal server Release."; return 1; }
-  resolver_script="$SERVER_RELEASE_SCRIPTS_DIR/lib/server-release-resolver.mjs"
-  [ -f "$resolver_script" ] || { warn "Server Release resolver is missing: $resolver_script"; return 1; }
-  if ! resolved_json=$(server_release_resolver_with_network_env "$node_binary" "$resolver_script" resolve-release); then
-    warn "No usable formal Dirextalk message-server GitHub Release is available."
-    return 1
-  fi
-  source=$(printf '%s\n' "$resolved_json" | json_stdin_get source 2>/dev/null) || source=
-  version=$(printf '%s\n' "$resolved_json" | json_stdin_get version 2>/dev/null) || version=
-  image=$(printf '%s\n' "$resolved_json" | json_stdin_get image 2>/dev/null) || image=
-  digest=$(printf '%s\n' "$resolved_json" | json_stdin_get digest 2>/dev/null) || digest=
-  image_ref=$(printf '%s\n' "$resolved_json" | json_stdin_get image_ref 2>/dev/null) || image_ref=
-  manifest_digest=$(printf '%s\n' "$resolved_json" | json_stdin_get manifest_digest 2>/dev/null) || manifest_digest=
-  if [ "$source" != "github_release" ] \
-    || ! server_release_is_version "$version" \
-    || [ "$image" != "dirextalk/message-server:$version" ] \
-    || ! server_release_is_digest "$digest" \
-    || [ "$image_ref" != "$image@$digest" ] \
-    || ! server_release_is_digest "$manifest_digest"; then
-    warn "The release resolver returned an inconsistent immutable target."
-    return 1
-  fi
+  resolved_json=$(json_build object \
+    source=default_latest \
+    version=latest \
+    "image=$DEFAULT_MESSAGE_SERVER_IMAGE" \
+    digest= \
+    "image_ref=$DEFAULT_MESSAGE_SERVER_IMAGE" \
+    manifest_digest=) || return 1
   state_set_raw server_release "$resolved_json"
 }
 

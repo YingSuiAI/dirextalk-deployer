@@ -1,12 +1,12 @@
 display_name: Dirextalk Deployer
 short_description: Deploy, resume, verify, destroy, and wire dirextalk-connect plus capability-driven remote HTTP MCP for a production Dirextalk message server on AWS.
-default_prompt: Deploy a Dirextalk message server using my production domain, following SKILL.md and scripts/orchestrate.sh.
+default_prompt: Deploy a Dirextalk message server using my production domain, following SKILL.md and the Bash entrypoint for the current host.
 entrypoint: ../SKILL.md
 runtime_notes:
   - Read SKILL.md before running deployment commands.
   - When installing or updating this skill itself, read references/agent-targets.md and use the npm-managed global skill install by default.
   - Do not clone the GitHub repository to install or use the skill unless the user explicitly asks for deployer development, local patching, or a project-local install.
-  - On POSIX use scripts/orchestrate.sh and scripts/destroy.sh; on Windows use the PowerShell wrappers.
+  - Use bash scripts/orchestrate.sh and bash scripts/destroy.sh on every supported host. On Windows, first run the matching-install-root MINGW/cygpath/.windows. Git preflight in references/agent-targets.md, then run only from Git Bash; if it fails, tell the user to install Git for Windows and stop.
   - Version 1 cloud hosts may be Ubuntu 22.04 or 24.04 x86_64; new hosts default to 24.04. The host downloads the independent pinned dirextalk-updater Release and verifies the deployer-pinned SHA-256; do not build it locally or transfer its binary from the deployer.
   - S6 writes service-scoped credentials, dirextalk-connect config, and explicit MCP capability/artifact state; it does not write retired or unconsumed env files.
   - Antigravity, Cursor, iFlow, and every detected OpenClaw or Hermes host are host-managed; Devin, Pi, Reasonix, and tmux are unsupported. Unknown runtimes fail closed without a generic artifact.

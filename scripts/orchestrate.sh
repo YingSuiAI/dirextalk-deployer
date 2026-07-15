@@ -9,7 +9,7 @@
 #
 # Usage:
 #   export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-east-1
-#   # Normal server selection resolves a stable GitHub Release to an immutable digest.
+#   # Normal server selection uses dirextalk/message-server:latest directly.
 #   # First run asks for region, production domain, instance size, and existing-state handling.
 #   # Non-interactive:
 #   #   DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=t3.small
@@ -33,6 +33,7 @@ fi
 DIREXTALK_WORKDIR_WAS_SET=${DIREXTALK_WORKDIR+x}
 
 source "$HERE/lib/state.sh"
+source "$HERE/lib/git-bash.sh"
 source "$HERE/lib/aws.sh"
 source "$HERE/lib/domain.sh"
 source "$HERE/lib/operation_report.sh"
@@ -76,7 +77,7 @@ check_deps() {
       warn "See references/user-journey.md for the AWS CLI setup guide."
       ;;
   esac
-  warn "On Windows, use a working POSIX Bash environment such as Git Bash, MSYS2, Cygwin, or WSL. Do not assume C:\\Windows\\System32\\bash.exe is usable; verify with: bash -lc 'echo ok'."
+  warn "On Windows, install Git for Windows, open Git Bash, and rerun. PowerShell and WSL are not supported lifecycle entrypoints."
   fail "Install the missing dependencies and rerun."
 }
 
@@ -93,7 +94,7 @@ run_one_phase() {
 # Print current state summary.
 cmd_status_inventory() {
   local nodes state found=0 domain phase current instance service_dir
-  nodes="${DIREXTALK_HOME:-$HOME/.dirextalk}/nodes"
+  nodes="$(dirextalk_home)/nodes"
   if [ ! -d "$nodes" ]; then
     warn "No local service directory found: $nodes"
     warn "Set DOMAIN=<service domain> when running or inspecting a specific deployment."
@@ -247,11 +248,7 @@ status_stop_loss() {
     echo "no recorded cloud resources need destroy from this state"
   else
     echo "ask the agent to run destroy, or run:"
-    if [ "${DIREXTALK_LOCAL_PATH_STYLE:-}" = "windows" ] || [ -n "${DIREXTALK_WINDOWS_HOME:-}" ]; then
-      command=$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_render_env_command DOMAIN "${domain:-__DOMAIN__}" '.\scripts\destroy.ps1') || return 1
-    else
-      command=$(dirextalk_render_env_command DOMAIN "${domain:-__DOMAIN__}" bash "$HERE/destroy.sh") || return 1
-    fi
+    command=$(dirextalk_render_env_command DOMAIN "${domain:-__DOMAIN__}" bash "$HERE/destroy.sh") || return 1
     echo "  $command"
     echo "  Purchased domains, third-party DNS records, and retained hosted zones are not automatically removed."
   fi
@@ -336,11 +333,7 @@ ensure_delivery_runtime_checks() {
   fi
 
   warn "Final delivery blocked because runtime checks did not all pass: $(delivery_runtime_checks_summary)"
-  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
-    retry_command=$(dirextalk_render_env_command DOMAIN "$(state_get domain)" '.\scripts\orchestrate.ps1' verify runtime) || return 1
-  else
-    retry_command=$(dirextalk_render_env_command DOMAIN "$(state_get domain)" bash "$0" verify runtime) || return 1
-  fi
+  retry_command=$(dirextalk_render_env_command DOMAIN "$(state_get domain)" bash "$0" verify runtime) || return 1
   warn "Fix the failed check, then rerun: $retry_command"
   return 1
 }
@@ -419,11 +412,7 @@ print_delivery() {
   if report_path=$(operation_report_write new_deploy automated_gates_complete_user_confirmation_pending "$STATE_JSON" 2>/dev/null); then
     echo "  report       : $report_path"
   else
-    if [ "$(dirextalk_local_path_style)" = "windows" ]; then
-      report_command=$(dirextalk_render_local_command '.\scripts\orchestrate.ps1' report new_deploy) || return 1
-    else
-      report_command=$(dirextalk_render_local_command bash "$0" report new_deploy) || return 1
-    fi
+    report_command=$(dirextalk_render_local_command bash "$0" report new_deploy) || return 1
     echo "  report       : not written; run $report_command"
   fi
 }
@@ -775,7 +764,7 @@ cmd_verify_mcp_doctor() {
     return 1
   }
 
-  local endpoint token node_id out code payload protocol_version server_name tools_type tools_capable headers
+  local endpoint token node_id out out_curl code payload protocol_version server_name tools_type tools_capable headers headers_arg
   endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
@@ -786,13 +775,15 @@ cmd_verify_mcp_doctor() {
 
   out=$(mktemp "$DIREXTALK_WORKDIR/.mcp-doctor.XXXXXX")
   headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
+  out_curl=$(dirextalk_native_tool_path "$out") || { rm -f "$headers" "$out"; return 1; }
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$out"; return 1; }
   payload=$(json_build mcp-jsonrpc-initialize)
-  code=$(curl -sk -o "$out" -w '%{http_code}' \
+  code=$(curl -sk -o "$out_curl" -w '%{http_code}' \
     -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-06-18' \
-    -H "@$headers" \
+    -H "$headers_arg" \
     -d "$payload" 2>/dev/null)
   rm -f "$headers"
   if [ "$code" != "200" ] || ! json_valid "$out" >/dev/null 2>&1; then
@@ -822,7 +813,7 @@ cmd_verify_mcp_smoke() {
     return 1
   }
 
-  local endpoint token room_id body code payload response_content_type is_error headers node_id
+  local endpoint token room_id body body_curl code payload response_content_type is_error headers headers_arg node_id
   endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   room_id=$(json_get "$STATE_JSON" agent_room_id)
@@ -834,13 +825,15 @@ cmd_verify_mcp_smoke() {
   body=$(mktemp "$DIREXTALK_WORKDIR/.mcp-smoke.XXXXXX")
   node_id=$(json_get "$STATE_JSON" agent_node_id)
   headers=$(dirextalk_curl_secret_headers "$(dirname "$body")" "$token" "$node_id") || return 1
+  body_curl=$(dirextalk_native_tool_path "$body") || { rm -f "$headers" "$body"; return 1; }
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$body"; return 1; }
   payload=$(json_build mcp-jsonrpc-messages-list-call "$room_id")
-  code=$(curl -sk -o "$body" -w '%{http_code}' \
+  code=$(curl -sk -o "$body_curl" -w '%{http_code}' \
     -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-06-18' \
-    -H "@$headers" \
+    -H "$headers_arg" \
     -d "$payload" 2>/dev/null)
   rm -f "$headers"
   response_content_type=$(json_type "$body" result.content 2>/dev/null || true)
@@ -876,7 +869,7 @@ cmd_verify_mcp_tools() {
     return 1
   }
 
-  local endpoint token node_id out code payload tools_type headers
+  local endpoint token node_id out out_curl code payload tools_type headers headers_arg
   endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
@@ -887,13 +880,15 @@ cmd_verify_mcp_tools() {
 
   out=$(mktemp "$DIREXTALK_WORKDIR/.mcp-tools.XXXXXX")
   headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
+  out_curl=$(dirextalk_native_tool_path "$out") || { rm -f "$headers" "$out"; return 1; }
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$out"; return 1; }
   payload=$(json_build mcp-jsonrpc-tools-list)
-  code=$(curl -sk -o "$out" -w '%{http_code}' \
+  code=$(curl -sk -o "$out_curl" -w '%{http_code}' \
     -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-06-18' \
-    -H "@$headers" \
+    -H "$headers_arg" \
     -d "$payload" 2>/dev/null)
   rm -f "$headers"
   tools_type=$(json_type "$out" result.tools 2>/dev/null || true)
@@ -934,34 +929,8 @@ _node_command() {
 }
 
 _node_script_path() {
-  local node_cmd=$1 script=$2
-  case "$node_cmd" in
-    *.exe|*.EXE)
-      if command -v cygpath >/dev/null 2>&1; then
-        cygpath -w "$script"
-        return 0
-      fi
-      case "$script" in
-        /mnt/[A-Za-z]/*)
-          local drive rest
-          drive=${script#/mnt/}
-          drive=${drive%%/*}
-          rest=${script#/mnt/$drive/}
-          printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-          return 0
-          ;;
-        /[A-Za-z]/*)
-          local drive rest
-          drive=${script#/}
-          drive=${drive%%/*}
-          rest=${script#/$drive/}
-          printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-          return 0
-          ;;
-      esac
-      ;;
-  esac
-  printf '%s\n' "$script"
+  local _node_cmd=$1 script=$2
+  dirextalk_native_tool_path "$script"
 }
 
 path_dirname() {
@@ -1162,6 +1131,8 @@ cmd_verify() {
 if [ "${DIREXTALK_ORCHESTRATE_LIB_ONLY:-0}" = "1" ]; then
   return 0 2>/dev/null || exit 0
 fi
+
+dirextalk_require_git_bash_on_windows || exit 1
 
 # Entry point.
 case "${1:-run}" in

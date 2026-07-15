@@ -6,13 +6,28 @@ Use this file when installing or updating this skill and when reviewing S6 local
 
 Prefer the npm-managed global install for normal users. Install the versioned package, then let the CLI copy the skill bundle into the selected runtime's host-level skill directory:
 
+On Windows, first open Git Bash and run this preflight before npm installs the
+package:
+
+```bash
+git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
+case "$(uname -s)" in
+  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  *) false ;;
+esac
+```
+
+If it fails, install Git for Windows from <https://git-scm.com/download/win>,
+reopen Git Bash, and stop. This rejects WSL, PowerShell, MSYS2, and Cygwin.
+
 Do not use a generic "install skills <GitHub URL>" instruction for normal users. That can invoke a host's GitHub skill installer instead of the npm-managed installer. A short user prompt should give the repository URL for reading only and point the agent back to this npm install rule:
 
 ```text
 Read https://github.com/YingSuiAI/dirextalk-deployer README and follow its npm install rule, then deploy Dirextalk with domain __DOMAIN__.
 ```
 
-POSIX shells:
+All supported hosts use Bash. On Windows, install Git for Windows, open Git
+Bash, and run the same commands:
 
 ```bash
 npm install -g dirextalk-deployer@latest
@@ -20,13 +35,6 @@ dirextalk-deployer skill install --agent codex
 dirextalk-deployer skill update --agent codex
 ```
 
-Windows PowerShell:
-
-```powershell
-npm install -g dirextalk-deployer@latest
-dirextalk-deployer skill install --agent codex
-dirextalk-deployer skill update --agent codex
-```
 
 Use `--scope project --project PROJECT_ROOT` only when the user explicitly asks for a repository-local install. Use a Git clone only for deployer development or local patching, not as the normal end-user installation path. The npm installer writes `.dirextalk-skill-install.json` and refuses to overwrite unmanaged existing target directories unless `--force` is passed.
 
@@ -59,7 +67,7 @@ The bridge agent type is selected independently from the host operating system. 
 acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode pi qoder reasonix tmux
 ```
 
-`DIREXTALK_AGENT_PLATFORM=auto` is a convenience detector. If it detects OpenClaw or Hermes, S6 wires `dirextalk-connect` through the generic `acp` agent and rejects a non-ACP override. OpenClaw writes `cmd = "openclaw"` and keeps an explicit profile/config path aligned between its ACP process and native MCP probe. Hermes writes `cmd = "dirextalk-connect"` with service-scoped `HERMES_HOME` and `args = ["hermes-acp-adapter", "--", "hermes", "-p", "<service-profile>", "acp"]`. The adapter can buffer and clean Hermes output before it reaches the Matrix room. To bridge directly to another backend, select that backend as `DIREXTALK_AGENT_PLATFORM` instead of overriding an OpenClaw/Hermes host.
+`DIREXTALK_AGENT_PLATFORM=auto` is a convenience detector. If it detects OpenClaw or Hermes, S6 wires `dirextalk-connect` through the generic `acp` agent and rejects a non-ACP override. OpenClaw resolves its installed host CLI to an absolute local path and keeps an explicit profile/config path aligned between its ACP process and native MCP probe. Hermes writes the absolute service-scoped native `dirextalk-connect` binary path as `cmd`, resolves the installed Hermes CLI used in adapter args, and keeps service-scoped `HERMES_HOME` plus `args = ["hermes-acp-adapter", "--", "<absolute-hermes-command>", "-p", "<service-profile>", "acp"]`. Neither runtime relies on a Windows scheduled task inheriting the interactive shell's PATH. The adapter can buffer and clean Hermes output before it reaches the Matrix room. To bridge directly to another backend, select that backend as `DIREXTALK_AGENT_PLATFORM` instead of overriding an OpenClaw/Hermes host.
 
 S6 writes service-specific files to `~/.dirextalk/nodes/<service_id>/`, where `service_id` is derived from the deployed domain:
 
@@ -140,19 +148,20 @@ node id, and service-scoped credential location. S6 omits `mcp_url`,
 `mcp_server_name`, `mcp_agent_token`, `mcp_node_id`, and `mcp_capability` from
 the connect agent options; it does not mutate global host config, generate a
 token-bearing server object, or put a bearer token in command arguments. With
-`auto`, complete host enrollment first and rerun with
-`DIREXTALK_MCP_HOST_READY=1`; only then does S6 start and verify the bridge.
-For OpenClaw, S6 additionally requires `openclaw mcp probe <server-name> --json`
+`auto`, S6 probes OpenClaw and Hermes native enrollment on every attempt and
+continues as soon as the probe succeeds; no readiness environment variable is
+required. For OpenClaw, S6 requires `openclaw mcp probe <server-name> --json`
 to pass without secret argv. `OPENCLAW_CONFIG_PATH` is inherited;
 `DIREXTALK_OPENCLAW_PROFILE=<profile>` adds `--profile <profile>` for service
 isolation. S6 never runs `mcp set`. Other host-managed backends with no official
 probe record operator confirmation, which does not replace runtime MCP checks.
-Hermes receives an empty service-isolated HERMES_HOME plus `hermes.md` guidance.
-The operator must create/clone the named profile with the installed Hermes
-version's official workflow, enroll the server in native `mcp_servers`, and let
-S6 pass `hermes -p <profile> mcp test <server-name>` in that same HERMES_HOME.
-With `recommend` or `skip`, output generation completes but
-`mcp_install_status=host_action_required` remains explicit until confirmation.
+Hermes receives a service-isolated HERMES_HOME plus `hermes.md` guidance. The
+operator must clone/import the named profile from a working Hermes profile so
+model/provider configuration and authentication are present, enroll the server
+in native `mcp_servers`, and let S6 pass both its model-readiness check and
+`hermes -p <profile> mcp test <server-name>` in that same HERMES_HOME.
+With `recommend` or `skip`, output generation completes with
+`mcp_install_status=host_action_required` and does not run the native probe.
 
 ## Installation Policy
 
@@ -162,5 +171,5 @@ With `recommend` or `skip`, output generation completes but
 
 Prefer `DIREXTALK_CONNECT_AGENT=<agent>` to choose the local agent that `dirextalk-connect` should run. Keep `DIREXTALK_AGENT_PLATFORM=<runtime>` for auto-detection overrides and legacy host-runtime naming. Use `DIREXTALK_AGENT_INSTALL_MODE=dirextalk-connect` only when overriding the default `recommended` mapping explicitly.
 Use `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXTALK_CONNECT_AGENT_CMD` is not enough.
-For OpenCode, use `DIREXTALK_OPENCODE_COMMAND` when PATH lookup does not find the right CLI. The Windows wrapper also checks the global `opencode-ai` npm package under the npm global prefix.
+For OpenCode, use `DIREXTALK_OPENCODE_COMMAND` when PATH lookup does not find the right CLI. On Windows, Git Bash also checks the global `opencode-ai` npm package under the npm global prefix.
 For OpenClaw Gateway ACP, S6 defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-discover the Gateway from `~/.openclaw/openclaw.json`. To force an explicit Gateway, complete OpenClaw pairing first, then set all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime. S6 writes `["acp", "--url", <url>, "--token-file", <local path>, "--session", <session>]` and converts the token-file with `DIREXTALK_LOCAL_PATH_STYLE`. Fully replaceable OpenClaw args are rejected so the host ACP shape cannot be bypassed. `DIREXTALK_HERMES_ACP_ARGS_TOML` supplies child Hermes args and keeps the Dirextalk adapter/profile prefix.

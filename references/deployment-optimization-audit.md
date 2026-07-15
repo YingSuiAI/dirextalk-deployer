@@ -13,6 +13,37 @@ claim that every App or host-agent runtime has been proven in a real session.
   provide final evidence.
 - Deferred by design: intentionally outside the current deployer-side scope.
 
+## Test Profiles And Windows Feedback Time
+
+Windows Git Bash profiling on 2026-07-15 found that the former exhaustive suite
+took roughly 27 minutes. A single three-status recovery fixture took 160
+seconds. The dominant cost was not AWS, Docker, WSL, or real waits: mocked
+deployment state machines repeatedly launched Windows-native Node JSON helpers
+for individual keys and repeated compatibility branches in the stage lane.
+
+The test runner is therefore split deliberately:
+
+- `npm test` runs the fast cross-platform contracts for package contents,
+  Git-Bash execution, local paths, JSON/atomic writes, permissions, region
+  selection, and updater replacement.
+- The isolated runner starts one authenticated loopback Node JSON worker. Test
+  shells reuse it, while production retains the direct `scripts/json.mjs` CLI
+  fallback. The status recovery fixture fell from 160 seconds to 21 seconds.
+- `npm run test:extended` is a non-overlapping default Lightsail stage lane:
+  credentials, S3 provisioning, S5/S6, destroy, S7, and operation reporting.
+  It completed in about 136 seconds on the profiled Windows host.
+- `npm run test:release` adds optional EC2, legacy adoption, updater, detailed
+  DNS, and exhaustive runtime compatibility matrices. CI keeps the fast gate
+  on Windows, Linux, and macOS, then runs stage-only and release-only lanes once
+  on Ubuntu.
+
+The split does not discard credential, DNS, initialization, S6, updater, or
+destroy contracts. Redundant compatibility tests were merged into their
+owning tests: default path inventory, runtime summary details, S5 timeout and
+code-shape checks, root-volume tracking, Route53 overwrite protection, and
+Route53 destroy calls. PowerShell-wrapper tests were removed with the retired
+wrappers; Windows behavior is now covered by the Git Bash contract test.
+
 ## Current Best Plan
 
 Current best plan is the stricter plan now encoded in this branch:

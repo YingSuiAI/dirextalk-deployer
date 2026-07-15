@@ -3,6 +3,8 @@
 
 OPERATION_REPORT_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
+source "$OPERATION_REPORT_LIB_DIR/paths.sh"
+# shellcheck disable=SC1090
 source "$OPERATION_REPORT_LIB_DIR/json.sh"
 
 operation_report_now() {
@@ -23,7 +25,7 @@ operation_report_default_path() {
   [ -n "$service_dir" ] || service_dir=$(dirname "$state")
   case "$operation" in
     destroy)
-      root=${DIREXTALK_HOME:-$HOME/.dirextalk}
+      root=$(dirextalk_home)
       printf '%s/reports/%s/operation-report.json\n' "$root" "$service_id"
       ;;
     *)

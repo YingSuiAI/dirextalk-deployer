@@ -1,5 +1,17 @@
 # Deployment Workflow
 
+## Conversation Confirmation Policy
+
+For every user-facing confirmation in this workflow, accept a clear
+natural-language confirmation in the user's own words. Do not require the user
+to copy a fixed sentence, an environment variable, or a machine-generated
+token. A short confirmation such as "confirm" or "go ahead" is sufficient when
+the immediately preceding summary names the affected resource and its
+consequences; otherwise ask one concise question for the missing fact.
+
+The environment flags shown below remain machine-only safeguards. The agent
+sets them only after the semantic user confirmation has been established.
+
 ## Preflight
 
 1. Confirm `DOMAIN`, `DOMAIN_MODE`, and `CONFIRM_DOMAIN_BINDING=1`.
@@ -109,13 +121,9 @@ From the repository root:
 DOMAIN=__DOMAIN__ bash scripts/destroy.sh
 ```
 
-On Windows, run destroy from PowerShell so local service paths stay in Windows
-form and the wrapper selects Git for Windows Bash instead of WSL:
-
-```powershell
-$env:DOMAIN = "__DOMAIN__"
-.\scripts\destroy.ps1
-```
+On Windows, install Git for Windows and run the same command from Git Bash.
+The deployer automatically records Windows-native local paths for Node.js and
+local agent processes.
 
 Destroy stops and uninstalls the local `dirextalk-connect` daemon only when `dirextalk-connect daemon status --service-name <service_id>` reports a `WorkDir` matching the current service directory, `~/.dirextalk/nodes/<service_id>/dirextalk-connect`. It then removes resources based on `cloud_provider`: Lightsail destroy releases the recorded static IP, deletes the Lightsail instance and key pair; EC2 destroy terminates the recorded EC2 instance, verifies the recorded EBS root volume, releases the Elastic IP, deletes the security group and key pair. Both paths remove Route53 records/zones created by the deployer, record AWS read-back results under `destroy.evidence`, and remove the corresponding local service directory under `~/.dirextalk/nodes/<service_id>`.
 
@@ -123,7 +131,7 @@ Destroy allows root AWS access-key identity when the operator explicitly chose
 root credentials. Use the same deployment profile for teardown that was used
 for provisioning.
 
-Use `DIREXTALK_KEEP_WORKDIR=1 DOMAIN=__DOMAIN__ bash scripts/destroy.sh` on POSIX, or set `$env:DIREXTALK_KEEP_WORKDIR = "1"` before `.\scripts\destroy.ps1` on Windows, only when preserving local state files for debugging; if used, report that the service directory still exists.
+Use `DIREXTALK_KEEP_WORKDIR=1 DOMAIN=__DOMAIN__ bash scripts/destroy.sh` only when preserving local state files for debugging; if used, report that the service directory still exists. This Bash command is the same on Windows Git Bash, Linux, and macOS.
 
 ## Run
 
@@ -138,19 +146,15 @@ DIREXTALK_CLOUD_PROVIDER=lightsail \
 bash scripts/orchestrate.sh
 ```
 
-S3 resolves the latest published stable GitHub Release, verifies the manifest
-checksum, and persists `server_release.version/image/digest/image_ref/manifest_digest`
-before provisioning. The rendered Compose runtime uses the immutable image ref.
-It also records the deployer-owned independent updater version, commit, and
+S3 selects `dirextalk/message-server:latest` without querying message-server
+GitHub Releases and persists `server_release.source=default_latest`,
+`version=latest`, and the image reference before provisioning. Each new
+deployment pulls the image currently published under `latest`. S3 also records
+the deployer-owned independent updater version, commit, and
 SHA-256 pin. User-data on the verified Ubuntu 22.04 or 24.04 x86_64 host downloads that
 fixed Release asset, verifies the local pin, and atomically installs it; no
 local Go toolchain or updater SCP step is required.
-The deployer-side Node Release selector validates unique non-empty `upgrade_from`
-entries with the exact pinned `semver` dependency, rejects invalid ranges and any
-range containing the target, and runs a corpus covering comparator, tilde, caret,
-wildcard, hyphen and OR forms used by the canonical Go validators. The independent
-Go updater and message-server Release CI remain authoritative for tested upgrade
-compatibility.
+The updater's fixed Release download and checksum contract is unchanged.
 
 ### Fixed legacy d1 adoption
 
@@ -248,9 +252,11 @@ are both present. Use the flag only after the selected runtime/channel probe has
 actually loaded the service-scoped MCP tools; `verify runtime` alone is an
 internal non-polluting check, not the full product gate.
 All `confirm` commands require `DIREXTALK_CONFIRM_EVIDENCE` with a concrete
-user/runtime evidence note; do not write user-confirmation gates with generic
-default evidence. The evidence note must be at least 12 characters; avoid
-placeholders such as `ok`, `yes`, or `done`.
+user/runtime evidence note. The agent writes that machine-only note after a
+clear natural-language user confirmation; it must not ask the user to provide
+an exact phrase or environment variable. The evidence note must be at least 12
+characters; avoid generic defaults or placeholders such as `ok`, `yes`, or
+`done`.
 
 ## Existing Node Update
 
@@ -328,7 +334,7 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
    ```bash
    bash scripts/destroy.sh
    ```
-   On Windows, use `.\scripts\destroy.ps1` from PowerShell.
+   On Windows, run the same command from Git Bash.
    Then start again with a fresh domain.
 
 3. **Force Caddy staging CA** (development only) — Set the environment

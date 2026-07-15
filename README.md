@@ -25,6 +25,21 @@ For local agent-room wiring, use this npm-installed [dirextalk-deployer skill](h
 
 Install the deployer skill from npm, then place it into the current agent runtime's skill directory. The default install is global for the selected agent runtime. Use a project-local install only when you explicitly want the skill copied into a specific repository or workspace.
 
+On Windows, open Git Bash before installing or refreshing the skill and run this
+preflight before npm writes anything:
+
+```bash
+git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
+case "$(uname -s)" in
+  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  *) false ;;
+esac
+```
+
+If it fails, install Git for Windows from <https://git-scm.com/download/win>,
+reopen Git Bash, and stop. It deliberately rejects PowerShell, WSL, MSYS2, and
+Cygwin; the skill CLI performs the same check before it can copy a skill.
+
 The GitHub repository keeps tests for maintainers and CI, but the published npm package and installed skill copy exclude `tests/` to keep user installs small.
 
 For normal users, the GitHub repository is documentation and source code, not the skill installation path. Do not clone `YingSuiAI/dirextalk-deployer` just to install or use the skill. Clone this repository only for deployer development, local patching, or an explicitly requested project-local install.
@@ -39,16 +54,10 @@ After reading this instruction, the agent should run the npm install commands be
 
 If Codex already lists `dirextalk-deployer` in its available skills, ask it to use that installed skill directly. If it does not, install or refresh it first:
 
-POSIX shells:
+All supported hosts use Bash. On Windows, install Git for Windows, open Git
+Bash, and run the same commands:
 
 ```bash
-npm install -g dirextalk-deployer@latest
-dirextalk-deployer skill install --agent codex
-```
-
-Windows PowerShell:
-
-```powershell
 npm install -g dirextalk-deployer@latest
 dirextalk-deployer skill install --agent codex
 ```
@@ -73,7 +82,7 @@ npm install -g dirextalk-deployer@latest
 dirextalk-deployer skill update --agent codex
 ```
 
-The CLI is implemented in Node and uses native paths for the host it runs on. On Windows it writes Windows-compatible paths; on Linux, macOS, Git Bash, or WSL it writes paths for that runtime.
+The CLI is implemented in Node and uses native paths for the host it runs on. On Windows, run it from Git Bash; it writes Windows-compatible `C:/...` paths for Windows-native consumers. Linux and macOS use their native Bash paths.
 
 ## Minimal Command
 
@@ -109,18 +118,16 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-Normal deployment resolves the latest published stable GitHub Release, verifies
-its manifest checksum, and records an immutable version, image digest, image
-reference, and manifest digest in `state.json`. The host updater is a separate
+Normal deployment uses `dirextalk/message-server:latest` directly and records
+that selection in `state.json`; it does not query message-server GitHub Releases
+before provisioning. Each new deployment therefore pulls the image currently
+published under `latest`. The host updater is a separate
 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release:
 the supported Ubuntu 22.04 or 24.04 x86_64 host downloads the deployer-pinned updater asset and
 verifies the deployer-pinned SHA-256 before atomic installation. The local
 machine does not need Go, and S3 never copies an updater binary over SSH.
-The deployer-side Node selector validates every `upgrade_from` entry with the
-pinned mature `semver` package and rejects constraints that include the target.
-Its accepted/rejected corpus covers the constraint forms used by the canonical
-Go validators; the independent updater and message-server Release CI remain
-authoritative for cross-version compatibility evidence.
+The updater remains independently pinned and checksum-verified; this change
+does not alter its remote download or upgrade-discovery contract.
 
 One pre-updater node can be adopted only through the explicit, fixed d1
 contract. Run `scripts/adopt-legacy-node.sh --dry-run <state.json>` with
@@ -135,16 +142,14 @@ and existing formal release state are rejected.
 
 `DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
 
-On Windows, use the PowerShell entrypoint so the deployer selects Git Bash for the cloud phases while writing Windows-compatible local `dirextalk-connect` paths:
+On Windows, install Git for Windows, open **Git Bash**, and use the same commands as Linux/macOS. Run the Git Bash preflight in **Skill Installation And Updates** before any lifecycle command; if it fails, install Git from `https://git-scm.com/download/win` and reopen Git Bash. Do not mix PowerShell or WSL with a Git-Bash-owned service directory.
 
-The wrapper accepts Git for Windows or MSYS2 Bash from `PATH`; for a custom installation, set `DIREXTALK_BASH_COMMAND` to the working Bash executable. It does not silently select the Windows WSL alias.
-
-```powershell
-$env:AWS_DEFAULT_REGION = "us-east-1"
-$env:DOMAIN = "__DOMAIN__"
-$env:CONFIRM_DOMAIN_BINDING = "1"
-$env:DIREXTALK_CLOUD_PROVIDER = "lightsail"
-.\scripts\orchestrate.ps1
+```bash
+export AWS_DEFAULT_REGION=us-east-1
+export DOMAIN=__DOMAIN__
+export CONFIRM_DOMAIN_BINDING=1
+export DIREXTALK_CLOUD_PROVIDER=lightsail
+bash scripts/orchestrate.sh
 ```
 
 Recommendation-only local bridge and MCP wiring:
@@ -165,7 +170,7 @@ bash scripts/orchestrate.sh
 Supported install modes: `recommended` and `dirextalk-connect`.
 If `DIREXTALK_AGENT_PLATFORM=auto` cannot identify a single supported runtime, set `DIREXTALK_CONNECT_AGENT` explicitly. S6 writes `mode = "yolo"` by default for generated agent options; an explicit `mode` in `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` or `DIREXTALK_CURSOR_MODE` still overrides it. On Windows, Cursor wiring uses Cursor Agent CLI at `%LOCALAPPDATA%\cursor-agent\agent.cmd`; OpenCode wiring searches `opencode` on PATH and the global `opencode-ai` npm package, or accepts `DIREXTALK_OPENCODE_COMMAND`. If `agent.cmd status` is not logged in, run `agent.cmd login` once, then rerun the deployer. An active OpenClaw or Hermes host owns MCP even when it launches Codex or another child; only explicit `DIREXTALK_AGENT_PLATFORM=<child>` bypasses host auto-detection. OpenClaw Gateway ACP defaults to `["acp", "--session", "agent:main:main"]` and auto-detects its Gateway. Explicit settings require all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION`. Fully replaceable OpenClaw args and generic host command overrides are rejected. `DIREXTALK_HERMES_ACP_ARGS_TOML` may add child Hermes args while S6 preserves the required adapter/profile prefix.
 
-Check status:
+Check status from the same Bash session:
 
 ```bash
 bash scripts/orchestrate.sh status
@@ -176,13 +181,6 @@ Destroy recorded resources:
 
 ```bash
 DOMAIN=<domain> bash scripts/destroy.sh
-```
-
-On Windows, use the PowerShell destroy entrypoint:
-
-```powershell
-$env:DOMAIN = "<domain>"
-.\scripts\destroy.ps1
 ```
 
 Destroy stops and uninstalls the local `dirextalk-connect` daemon only when its reported `WorkDir`
@@ -227,7 +225,7 @@ mcp/openclaw.md
 mcp/hermes.md
 ```
 
-POSIX Bash manual install:
+Linux/macOS Bash manual install:
 
 ```bash
 npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk-connect@latest
@@ -236,16 +234,16 @@ npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon logs --service-name <service_id> -n 120
 ```
 
-Windows PowerShell manual install:
+Windows Git Bash manual install:
 
-```powershell
-$serviceDir = Join-Path $env:USERPROFILE '.dirextalk\nodes\<service_id>'
-$runtimeDir = Join-Path $serviceDir 'dirextalk-connect'
-$connect = Join-Path $runtimeDir 'dirextalk-connect.cmd'
-npm install --prefix $runtimeDir dirextalk-connect@latest
-& $connect daemon install --config (Join-Path $runtimeDir 'config.toml') --service-name '<service_id>' --force
-& $connect daemon status --service-name '<service_id>'
-& $connect daemon logs --service-name '<service_id>' -n 120
+```bash
+service_dir=$(cygpath -m "$HOME/.dirextalk/nodes/<service_id>")
+runtime_dir="$service_dir/dirextalk-connect"
+connect="$runtime_dir/dirextalk-connect.cmd"
+npm install --prefix "$runtime_dir" dirextalk-connect@latest
+"$connect" daemon install --config "$runtime_dir/config.toml" --service-name <service_id> --force
+"$connect" daemon status --service-name <service_id>
+"$connect" daemon logs --service-name <service_id> -n 120
 ```
 
 With the default `DIREXTALK_AGENT_INSTALL=auto`, S6 waits for daemon status
@@ -270,10 +268,10 @@ Unsupported and unknown selections fail closed. The vocabulary retains `project`
 no current backend uses them. S6 never generates a generic JSON fallback.
 
 Host-managed selection retains its guidance artifact but omits the canonical
-MCP URL/token fields from `dirextalk-connect/config.toml`. In `auto` mode, S6
-waits before starting the bridge until the operator enrolls the host and reruns
-with `DIREXTALK_MCP_HOST_READY=1`. OpenClaw must then pass the secret-free
-`openclaw mcp probe <server-name> --json` check before the bridge starts;
+MCP URL/token fields from `dirextalk-connect/config.toml`. In `auto` mode,
+OpenClaw and Hermes run their secret-free native enrollment probe on every S6
+attempt and start the bridge as soon as it passes; no readiness flag is needed.
+OpenClaw uses `openclaw mcp probe <server-name> --json` before the bridge starts;
 `OPENCLAW_CONFIG_PATH` and optional `DIREXTALK_OPENCLAW_PROFILE` select an
 isolated native registry/profile. Other host-managed backends without an
 official probe remain operator-confirmed and require later runtime verification.
@@ -296,11 +294,16 @@ make build AGENTS=<dirextalk-connect-agent> PLATFORMS_INCLUDE=matrix
 ## Validation
 
 ```bash
-bash tests/skill_structure_test.sh
-bash tests/default_paths_test.sh
-bash tests/s6_wire_local_test.sh
-bash tests/destroy_local_bridge_test.sh
-bash tests/render_userdata_remote_nodes_test.sh
-find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+npm test
+# Non-overlapping default Lightsail stage gate (target: under three minutes on Windows):
+npm run test:extended
+# Before publishing or changing EC2, legacy adoption, updater, or runtime matrices:
+npm run test:release
+find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
 git diff --check
 ```
+
+On Windows these `npm` test commands may be launched directly from PowerShell,
+Command Prompt, or Git Bash. The test launcher finds Git for Windows Bash and
+runs the Bash-only suite there; lifecycle deployment commands themselves still
+run from Git Bash.

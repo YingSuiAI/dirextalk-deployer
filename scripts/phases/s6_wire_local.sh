@@ -69,11 +69,17 @@ source "$S6_DIR/../lib/mcp-client-adapters.sh"
 
 _detect_agent_runtime() {
   local active_runtime explicit_agent home_runtime host_runtime
+  # Runtime detection asks several predicates about the same inherited
+  # environment. Snapshot exported names once so Windows Git Bash does not
+  # repeatedly launch env/sed/grep for every candidate runtime.
+  local _dirextalk_env_names _dirextalk_env_names_ready=0
   if [ -n "${DIREXTALK_AGENT_PLATFORM:-}" ] && [ "${DIREXTALK_AGENT_PLATFORM:-}" != "auto" ]; then
     _validate_agent_platform "$DIREXTALK_AGENT_PLATFORM" || return 1
     printf '%s\n' "$DIREXTALK_AGENT_PLATFORM"
     return 0
   fi
+  _dirextalk_env_names=$(compgen -e)
+  _dirextalk_env_names_ready=1
   # Host orchestrators own their native MCP registry even when a child process
   # advertises another agent runtime. Only an explicit platform may bypass it.
   host_runtime=$(_active_mcp_host_runtime)
@@ -87,7 +93,7 @@ _detect_agent_runtime() {
     return 0
   fi
   # Active-process signals are stronger than stale config directories from
-  # other agents that have used this WSL home before.
+  # other local agent runtimes that have used this home before.
   active_runtime=$(_active_agent_runtime)
   if [ -n "$active_runtime" ]; then printf '%s\n' "$active_runtime"; return 0; fi
   home_runtime=$(_single_runtime_from_home_vars)
@@ -369,7 +375,17 @@ _runtime_config_dir_exists() {
 }
 
 _env_name_matches() {
-  env | sed -E 's/=.*$//' | grep -Eq "$1"
+  local pattern=$1 env_name
+  # _detect_agent_runtime supplies a dynamically scoped snapshot. Keep a
+  # standalone fallback for direct callers and tests.
+  if [ "${_dirextalk_env_names_ready:-0}" != 1 ]; then
+    _dirextalk_env_names=$(compgen -e)
+    _dirextalk_env_names_ready=1
+  fi
+  while IFS= read -r env_name; do
+    [[ "$env_name" =~ $pattern ]] && return 0
+  done <<< "${_dirextalk_env_names:-}"
+  return 1
 }
 
 _active_text_contains() {
@@ -504,6 +520,16 @@ _connect_package_bin_path() {
   fi
 }
 
+_connect_package_native_binary_path() {
+  local service_dir=$1 package_dir
+  package_dir=$(_connect_package_dir "$service_dir")
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    printf '%s/node_modules/dirextalk-connect/bin/dirextalk-connect.exe\n' "$package_dir"
+  else
+    printf '%s/node_modules/dirextalk-connect/bin/dirextalk-connect\n' "$package_dir"
+  fi
+}
+
 _render_connect_wrapper() {
   local style=$1
   if [ "$style" = "windows" ]; then
@@ -621,7 +647,7 @@ _local_connect_path() {
 
 _create_connect_matrix_session() {
   local asurl=$1 agent_auth_token=$2 device_id=$3 out=$4 body code http_body
-  local max_attempts interval max_interval attempt preview sleep_for headers
+  local max_attempts interval max_interval attempt preview sleep_for headers http_body_curl headers_arg
   body=$(json_build matrix-session-create "$device_id") || return 1
   mkdir -p "$(dirname "$out")" || return 1
   max_attempts=${DIREXTALK_MATRIX_SESSION_CREATE_MAX:-12}
@@ -639,12 +665,14 @@ _create_connect_matrix_session() {
       rm -f "$http_body" 2>/dev/null || true
       return 1
     }
+    http_body_curl=$(dirextalk_native_tool_path "$http_body") || { rm -f "$headers" "$http_body"; return 1; }
+    headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$http_body"; return 1; }
     code=$(curl -sk \
       --connect-timeout "${DIREXTALK_MATRIX_SESSION_CURL_CONNECT_TIMEOUT:-10}" \
       --max-time "${DIREXTALK_MATRIX_SESSION_CURL_MAX_TIME:-20}" \
-      -o "$http_body" -w '%{http_code}' -X POST "$asurl/_p2p/command" \
+      -o "$http_body_curl" -w '%{http_code}' -X POST "$asurl/_p2p/command" \
       -H 'Content-Type: application/json' \
-      -H "@$headers" \
+      -H "$headers_arg" \
       -d "$body" 2>/dev/null || true)
     rm -f "$headers"
     if [ "$code" = "200" ]; then
@@ -799,31 +827,16 @@ _write_connect_config() {
 
 _connect_daemon_install_command() {
   local binary=$1 config=$2 service_name=$3 package_dir=${4:-}
-  local binary_local config_local package_dir_local package package_q binary_q config_q service_q package_dir_q
   [ -n "$service_name" ] || service_name=dirextalk-connect
   if [ "$(dirextalk_local_path_style)" = "windows" ]; then
-    binary_local=$(_local_connect_path "$binary")
-    config_local=$(_local_connect_path "$config")
-    package_dir_local=${package_dir:+$(_local_connect_path "$package_dir")}
-    package=$(_connect_npm_package)
-    binary_q=$(dirextalk_quote_powershell "$binary_local")
-    config_q=$(dirextalk_quote_powershell "$config_local")
-    service_q=$(dirextalk_quote_powershell "$service_name")
-    package_q=$(dirextalk_quote_powershell "$package")
-    if [ -n "$package_dir_local" ]; then
-      package_dir_q=$(dirextalk_quote_powershell "$package_dir_local")
-      printf "if (Test-Path -LiteralPath '%s') { & '%s' daemon stop --service-name '%s'; if (\$LASTEXITCODE -ne 0) { Write-Warning 'dirextalk-connect daemon stop failed; continuing refresh' } }; npm install --prefix '%s' '%s'; if (\$LASTEXITCODE -ne 0) { throw 'dirextalk-connect npm install failed' }; & '%s' daemon install --config '%s' --service-name '%s' --force" \
-        "$binary_q" "$binary_q" "$service_q" "$package_dir_q" "$package_q" "$binary_q" "$config_q" "$service_q"
-    else
-      printf "if (-not (Get-Command '%s' -ErrorAction SilentlyContinue)) { npm install -g '%s'; if (\$LASTEXITCODE -ne 0) { throw 'dirextalk-connect npm install failed' } }; & '%s' daemon install --config '%s' --service-name '%s' --force" \
-        "$binary_q" "$package_q" "$binary_q" "$config_q" "$service_q"
-    fi
-    return 0
+    binary=$(_local_connect_path "$binary")
+    config=$(_local_connect_path "$config")
+    package_dir=${package_dir:+$(_local_connect_path "$package_dir")}
   fi
   if [ -n "$package_dir" ]; then
-    printf 'if [ -x %q ]; then %q daemon stop --service-name %q || true; fi; npm install --prefix %q %q && %q daemon install --config %q --service-name %q --force' "$binary" "$binary" "$service_name" "$package_dir" "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
+    printf 'if [ -x %q ]; then %q daemon stop --service-name %q || true; fi; npm install --prefix %q %q && %q daemon install --config %q --service-name %q --force' "$binary" "$binary" "$service_name" "$package_dir" "$(_connect_npm_package)" "$binary" "$config" "$service_name"
   else
-    printf 'if ! command -v %q >/dev/null 2>&1; then npm install -g %q; fi && %q daemon install --config %q --service-name %q --force' "$binary" "$(_connect_npm_package)" "$binary" "$(_local_connect_path "$config")" "$service_name"
+    printf 'if ! command -v %q >/dev/null 2>&1; then npm install -g %q; fi && %q daemon install --config %q --service-name %q --force' "$binary" "$(_connect_npm_package)" "$binary" "$config" "$service_name"
   fi
 }
 
@@ -1147,7 +1160,7 @@ _clear_mcp_daemon_state() {
 run_phase() {
   phase_set S6_WIRE_LOCAL in_progress "writing credentials and dirextalk-connect Matrix bridge config"
   local domain asurl token access_token password agent_room_id runtime install_policy install_mode install_command
-  local node_id service_dir service_dir_local node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_runtime_dir_local cc_config cc_config_local cc_data cc_data_local cc_binary cc_binary_local cc_session cc_session_local cc_source cc_package_dir
+  local node_id service_dir service_dir_local node_cred workspace workspace_local service_id cc_agent cc_agent_cmd cc_agent_options_toml cc_runtime_dir cc_runtime_dir_local cc_config cc_config_local cc_data cc_data_local cc_binary cc_binary_local cc_native_binary cc_native_binary_local cc_session cc_session_local cc_source cc_package_dir
   local mcp_dir mcp_dir_local mcp_capability mcp_server_name mcp_endpoint_url mcp_install_command mcp_doctor_command mcp_openclaw_config mcp_hermes_config mcp_readme
   local mcp_selected_config_type mcp_selected_config mcp_selected_config_local mcp_openclaw_config_local mcp_hermes_config_local mcp_hermes_home_local mcp_hermes_profile mcp_readme_local node_cred_local
   local matrix_token matrix_user matrix_device matrix_homeserver
@@ -1177,10 +1190,6 @@ run_phase() {
   fi
   if ! cc_agent=$(_connect_agent_type "$runtime"); then
     phase_set S6_WIRE_LOCAL failed "invalid or unsupported dirextalk-connect agent"
-    return 1
-  fi
-  if ! cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime"); then
-    phase_set S6_WIRE_LOCAL failed "invalid dirextalk-connect agent command"
     return 1
   fi
   if ! install_policy=$(_connect_install_policy); then
@@ -1223,6 +1232,12 @@ run_phase() {
   cc_data_local=$(_local_connect_path "$cc_data")
   cc_binary=$(_connect_binary_path "$service_dir")
   cc_binary_local=$(_local_connect_path "$cc_binary")
+  cc_native_binary=$(_connect_package_native_binary_path "$service_dir")
+  cc_native_binary_local=$(_local_connect_path "$cc_native_binary")
+  if ! cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime" "$cc_native_binary_local"); then
+    phase_set S6_WIRE_LOCAL failed "invalid dirextalk-connect agent command"
+    return 1
+  fi
   cc_package_dir=$(_connect_package_dir "$service_dir")
   if ! _ensure_connect_wrapper "$service_dir"; then
     phase_set S6_WIRE_LOCAL failed "dirextalk-connect wrapper generation failed"
@@ -1313,7 +1328,7 @@ run_phase() {
       fi
       warn "Cursor Agent CLI is not ready; continuing in $install_policy_preview mode."
     else
-      cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime")
+      cc_agent_cmd=$(_connect_agent_command "$cc_agent" "$runtime" "$cc_native_binary_local")
     fi
   fi
   connect_mcp_url=$mcp_endpoint_url

@@ -70,7 +70,12 @@ assert_contains "$billable_output" "Next action: inspect cloud-init, Docker, Cad
 assert_contains "$billable_output" "Stop-loss: ask the agent to run destroy, or run:"
 assert_contains "$billable_output" "destroy.sh"
 windows_billable_output=$(DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_WORKDIR="$billable_workdir" bash "$ROOT/scripts/orchestrate.sh" status)
-assert_contains "$windows_billable_output" "\$env:DOMAIN = 'status.example.test'; & '.\\scripts\\destroy.ps1'"
+assert_contains "$windows_billable_output" "DOMAIN=status.example.test"
+assert_contains "$windows_billable_output" "destroy.sh"
+if printf '%s\n' "$windows_billable_output" | grep -q 'destroy.ps1'; then
+  echo "Git Bash recovery output must not reference PowerShell wrappers" >&2
+  exit 1
+fi
 
 refresh_workdir="$tmp/refresh-pending"
 write_state "$refresh_workdir" "S4_BOOTSTRAP_STACK" "pending" '{"instance_id":"i-refresh","root_volume_id":"vol-refresh-root","public_ip":"203.0.113.20"}'

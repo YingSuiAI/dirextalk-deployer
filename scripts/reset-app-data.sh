@@ -6,9 +6,13 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1090
 source "$HERE/lib/paths.sh"
 # shellcheck disable=SC1090
+source "$HERE/lib/git-bash.sh"
+# shellcheck disable=SC1090
 source "$HERE/lib/operation_report.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/ops.sh"
+
+dirextalk_require_git_bash_on_windows || exit 1
 
 STATE_JSON=$(ops_state_path "${1:-}")
 ops_require_state "$STATE_JSON"

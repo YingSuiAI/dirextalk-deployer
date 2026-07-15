@@ -59,6 +59,33 @@ cat > "$tmp/bin/docker" <<'EOF'
 printf 'docker' >> "$BOOTSTRAP_CALLS"; printf ' %s' "$@" >> "$BOOTSTRAP_CALLS"; printf '\n' >> "$BOOTSTRAP_CALLS"
 EOF
 chmod 0755 "$tmp/bin/"*
+case "$(uname -s 2>/dev/null || true)" in
+  *MINGW*|*MSYS*|*CYGWIN*)
+    cp "$ROOT/tests/lib/linux-flock.sh" "$tmp/bin/flock"
+    chmod 0755 "$tmp/bin/flock"
+    export DIREXTALK_TEST_FLOCK_DIR="$tmp/flock.lock"
+    ;;
+esac
+
+# Git Bash's NTFS fixture cannot mark an extensionless downloaded file as
+# executable. Preserve the production Linux assertion by representing only the
+# fixture's committed updater with Git Bash's executable-suffix lookup.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    cat > "$tmp/bin/mv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+destination=${!#}
+/bin/mv "$@"
+case "$destination" in
+  */dirextalk-updater)
+    /bin/mv "$destination" "$destination.exe"
+    ;;
+esac
+EOF
+    chmod 0755 "$tmp/bin/mv"
+    ;;
+esac
 
 printf 'x86_64\n' > "$tmp/uname.value"
 printf bad > "$base/dirextalk-updater"
@@ -68,7 +95,15 @@ export PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRA
 bash "$script" 203.0.113.20
 
 [ "$(cat "$base/dirextalk-updater")" = good ]
-[ "$(stat -c '%a' "$base/dirextalk-updater")" = 755 ]
+assert_linux_mode() {
+  local expected=$1 path=$2
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+  esac
+  [ "$(stat -c '%a' "$path")" = "$expected" ]
+}
+
+assert_linux_mode 755 "$base/dirextalk-updater"
 grep -F -q "$UPDATER_PIN_URL" "$calls"
 if grep -qi latest "$calls"; then
   echo "bootstrap downloaded a mutable updater URL" >&2
@@ -83,7 +118,7 @@ chmod 0644 "$base/dirextalk-updater"
 bash "$script" 203.0.113.20
 after=$(grep -c '^curl' "$calls")
 [ "$before" = "$after" ] || { echo "matching updater binary should be reused" >&2; exit 1; }
-[ "$(stat -c '%a' "$base/dirextalk-updater")" = 755 ]
+assert_linux_mode 755 "$base/dirextalk-updater"
 
 printf corrupt > "$base/dirextalk-updater"
 DOWNLOAD_MODE=bad bash "$script" 203.0.113.20 >"$tmp/bad.out" 2>&1 && {

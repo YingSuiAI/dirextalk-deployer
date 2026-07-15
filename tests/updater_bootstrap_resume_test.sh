@@ -63,6 +63,13 @@ exit 99
 EOF
 chmod 0755 "$tmp/bin/docker"
 chmod 0755 "$tmp/bin/uname" "$tmp/bin/sha256sum" "$tmp/bin/curl"
+case "$(uname -s 2>/dev/null || true)" in
+  *MINGW*|*MSYS*|*CYGWIN*)
+    cp "$ROOT/tests/lib/linux-flock.sh" "$tmp/bin/flock"
+    chmod 0755 "$tmp/bin/flock"
+    export DIREXTALK_TEST_FLOCK_DIR="$tmp/flock.lock"
+    ;;
+esac
 
 export BOOTSTRAP_CALLS="$calls" BOOTSTRAP_ENV="$root/var/dirextalk-message-server/.env"
 source "$ROOT/scripts/updater/release.env"

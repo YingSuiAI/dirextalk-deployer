@@ -54,6 +54,30 @@ dirextalk_to_windows_local_path() {
   printf '%s\n' "$path"
 }
 
+# Paths passed as argv to a native local tool must not rely on MSYS automatic
+# conversion. Parent runtimes may disable it while Bash redirections still
+# resolve paths such as /tmp in the Git Bash filesystem.
+dirextalk_native_tool_path() {
+  local path=${1:-}
+  case "$(uname -s 2>/dev/null || printf unknown)" in
+    *MINGW*|*MSYS*|*CYGWIN*) dirextalk_to_windows_local_path "$path" ;;
+    *) printf '%s\n' "$path" ;;
+  esac
+}
+
+dirextalk_native_tool_at_path() {
+  local path
+  path=$(dirextalk_native_tool_path "${1:-}") || return 1
+  printf '@%s\n' "$path"
+}
+
+dirextalk_native_null_device() {
+  case "$(uname -s 2>/dev/null || printf unknown)" in
+    *MINGW*|*MSYS*|*CYGWIN*) printf 'NUL\n' ;;
+    *) printf '/dev/null\n' ;;
+  esac
+}
+
 dirextalk_normalize_local_path() {
   local path=${1:-}
   case "$(dirextalk_local_path_style)" in
@@ -77,21 +101,9 @@ dirextalk_paths_equal() {
   esac
 }
 
-dirextalk_quote_powershell() {
-  printf '%s' "$1" | sed "s/'/''/g"
-}
-
 dirextalk_render_local_command() {
   local first=1 argument quoted
   [ "$#" -gt 0 ] || return 1
-  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
-    printf '&'
-    for argument in "$@"; do
-      quoted=$(dirextalk_quote_powershell "$argument") || return 1
-      printf " '%s'" "$quoted" || return 1
-    done
-    return 0
-  fi
   for argument in "$@"; do
     [ "$first" -eq 1 ] || printf ' ' || return 1
     printf '%q' "$argument" || return 1
@@ -100,19 +112,14 @@ dirextalk_render_local_command() {
 }
 
 dirextalk_render_env_command() {
-  local name=$1 value=$2 quoted
+  local name=$1 value=$2
   shift 2
   case "$name" in
     ""|[!A-Za-z_]*|*[!A-Za-z0-9_]*) return 1 ;;
     *) ;;
   esac
-  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
-    quoted=$(dirextalk_quote_powershell "$value") || return 1
-    printf "\$env:%s = '%s'; " "$name" "$quoted" || return 1
-  else
-    printf '%s=' "$name" || return 1
-    printf '%q ' "$value" || return 1
-  fi
+  printf '%s=' "$name" || return 1
+  printf '%q ' "$value" || return 1
   dirextalk_render_local_command "$@"
 }
 

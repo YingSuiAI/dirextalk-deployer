@@ -8,23 +8,6 @@ AWS_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
 source "$AWS_LIB_DIR/json.sh"
 
-# Preserve the caller's release-download network settings before AWS phases
-# force direct AWS API access. These shell-only values are never persisted or
-# logged; server-release.sh restores them only in its resolver subprocess.
-if [ "${DIREXTALK_RELEASE_NETWORK_CAPTURED:-0}" != "1" ]; then
-  DIREXTALK_RELEASE_HTTP_PROXY=${DIREXTALK_RELEASE_HTTP_PROXY_INPUT-${HTTP_PROXY-}}
-  DIREXTALK_RELEASE_HTTPS_PROXY=${DIREXTALK_RELEASE_HTTPS_PROXY_INPUT-${HTTPS_PROXY-}}
-  DIREXTALK_RELEASE_http_proxy=${http_proxy-${DIREXTALK_RELEASE_HTTP_PROXY-}}
-  DIREXTALK_RELEASE_https_proxy=${https_proxy-${DIREXTALK_RELEASE_HTTPS_PROXY-}}
-  DIREXTALK_RELEASE_NO_PROXY=${DIREXTALK_RELEASE_NO_PROXY_INPUT-${NO_PROXY-}}
-  DIREXTALK_RELEASE_no_proxy=${no_proxy-${DIREXTALK_RELEASE_NO_PROXY-}}
-  unset DIREXTALK_RELEASE_HTTP_PROXY_INPUT DIREXTALK_RELEASE_HTTPS_PROXY_INPUT DIREXTALK_RELEASE_NO_PROXY_INPUT
-  export -n DIREXTALK_RELEASE_HTTP_PROXY DIREXTALK_RELEASE_HTTPS_PROXY \
-    DIREXTALK_RELEASE_http_proxy DIREXTALK_RELEASE_https_proxy \
-    DIREXTALK_RELEASE_NO_PROXY DIREXTALK_RELEASE_no_proxy 2>/dev/null || true
-  DIREXTALK_RELEASE_NETWORK_CAPTURED=1
-fi
-
 aws_env_prep() {
   local region=${AWS_DEFAULT_REGION:-${AWS_REGION:-}}
   if [ -n "${STATE_JSON:-}" ] && [ -f "$STATE_JSON" ]; then

@@ -22,8 +22,9 @@ _connect_agent_type() {
 }
 
 _connect_agent_command() {
-  local agent runtime raw_key var value
+  local agent runtime service_binary raw_key var value
   runtime=${2:-$1}
+  service_binary=${3:-}
   agent=$(_connect_agent_alias "$1" 2>/dev/null || printf '%s\n' "$1")
   if [ -n "${DIREXTALK_CONNECT_AGENT_CMD:-}" ]; then
     case "$runtime" in
@@ -36,8 +37,13 @@ _connect_agent_command() {
     return 0
   fi
   if [ "$runtime" = "hermes" ] && [ "$agent" = "acp" ]; then
-    dirextalk_normalize_local_path "${DIREXTALK_HERMES_ACP_ADAPTER_COMMAND:-${DIREXTALK_CONNECT_BIN:-dirextalk-connect}}"
+    value=${DIREXTALK_HERMES_ACP_ADAPTER_COMMAND:-${DIREXTALK_CONNECT_BIN:-$service_binary}}
+    dirextalk_normalize_local_path "${value:-dirextalk-connect}"
     return 0
+  fi
+  if [ "$runtime" = "openclaw" ] && [ "$agent" = "acp" ]; then
+    _openclaw_command
+    return $?
   fi
   for raw_key in $(_connect_runtime_command_aliases "$runtime") "$agent" $(_connect_agent_command_aliases "$agent"); do
     var="DIREXTALK_$(printf '%s' "$raw_key" | tr '[:lower:]-' '[:upper:]_')_COMMAND"
@@ -53,6 +59,38 @@ _connect_agent_command() {
   case "$runtime" in
     openclaw|hermes) printf '%s\n' "$runtime" ;;
   esac
+}
+
+_resolve_installed_command() {
+  local explicit=$1 candidate resolved
+  shift
+  if [ -n "$explicit" ]; then
+    dirextalk_normalize_local_path "$explicit"
+    return 0
+  fi
+  for candidate in "$@"; do
+    resolved=$(command -v "$candidate" 2>/dev/null || true)
+    [ -n "$resolved" ] || continue
+    dirextalk_normalize_local_path "$resolved"
+    return 0
+  done
+  return 127
+}
+
+_openclaw_command() {
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    _resolve_installed_command "${DIREXTALK_OPENCLAW_COMMAND:-}" openclaw.cmd openclaw
+  else
+    _resolve_installed_command "${DIREXTALK_OPENCLAW_COMMAND:-}" openclaw
+  fi
+}
+
+_hermes_command() {
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    _resolve_installed_command "${DIREXTALK_HERMES_COMMAND:-}" hermes.exe hermes
+  else
+    _resolve_installed_command "${DIREXTALK_HERMES_COMMAND:-}" hermes
+  fi
 }
 
 _connect_runtime_command_aliases() {
@@ -102,9 +140,9 @@ _cursor_agent_prepare_windows() {
   local latest
 
   if [ ! -f "$agent_root/agent.cmd" ]; then
-    warn "Cursor Agent CLI is missing at $agent_root/agent.cmd. Install it before S6 auto wiring:"
-    warn "  powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm 'https://cursor.com/install?win32=true' | iex\""
-    warn "Then run: & \"\$env:LOCALAPPDATA\\cursor-agent\\agent.cmd\" login"
+    warn "Cursor Agent CLI is missing at $agent_root/agent.cmd. Install it with Cursor's official Windows installer, then reopen Git Bash before S6 auto wiring."
+    warn 'Then run: cursor_agent=$(cygpath -m "$LOCALAPPDATA/cursor-agent/agent.cmd")'
+    warn '          "$cursor_agent" login'
     return 1
   fi
 
@@ -209,8 +247,7 @@ _openclaw_acp_args_toml() {
 
 _hermes_acp_args_toml() {
   local service_dir=$1 server_name=$2 hermes_cmd profile
-  hermes_cmd=${DIREXTALK_HERMES_COMMAND:-hermes}
-  hermes_cmd=$(dirextalk_normalize_local_path "$hermes_cmd")
+  hermes_cmd=$(_hermes_command) || return 1
   profile=$(_mcp_hermes_profile "$server_name") || return 1
   if [ -n "${DIREXTALK_HERMES_ACP_ARGS_TOML:-}" ]; then
     _toml_array_prepend "$DIREXTALK_HERMES_ACP_ARGS_TOML" hermes-acp-adapter -- "$hermes_cmd" -p "$profile"

@@ -76,8 +76,7 @@ export CALLS="$tmp/aws.calls"
 export TMPDIR="$tmp"
 export AWS_DEFAULT_REGION=us-east-1
 export DIREXTALK_CLOUD_PROVIDER=lightsail
-export HTTP_PROXY=http://release-proxy.example.test:8080
-export HTTPS_PROXY=http://release-proxy.example.test:8080
+export MSYS_NO_PATHCONV=1
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
@@ -85,23 +84,11 @@ state_init >/dev/null 2>&1
 state_set region us-east-1
 state_set domain lightsail.example.test
 state_set domain_mode user
-state_set_raw server_release '{"source":"github_release","version":"v1.1.0","image":"dirextalk/message-server:v1.1.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/aws.sh"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/phases/s3_provision.sh"
-server_release_prepare_state() {
-  [ "${HTTP_PROXY:-}" = "http://release-proxy.example.test:8080" ] || {
-    echo "formal release resolution must retain the configured HTTP proxy" >&2
-    return 1
-  }
-  [ "${HTTPS_PROXY:-}" = "http://release-proxy.example.test:8080" ] || {
-    echo "formal release resolution must retain the configured HTTPS proxy" >&2
-    return 1
-  }
-  return 0
-}
 domain_resolves_to_ip() {
   printf 'dns-check %s %s\n' "$1" "$2" >> "$CALLS"
   return 0
@@ -112,7 +99,7 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'github_release' && data.server_release.digest === 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' && data.server_release.image_ref.endsWith('@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') && data.updater_release.version === 'v1.0.6' && data.updater_release.sha256 === 'fc25f8ff811313dfc18c2b4e0f01b46802697385b24395f9c78e634e5ac426e4'"
+json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'default_latest' && data.server_release.version === 'latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.updater_release.version === 'v1.0.6' && data.updater_release.sha256 === 'fc25f8ff811313dfc18c2b4e0f01b46802697385b24395f9c78e634e5ac426e4'"
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
 grep -q '^#!/usr/bin/env bash' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
@@ -126,6 +113,11 @@ grep -q -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$key_file" || {
   exit 1
 }
 grep -q 'lightsail create-instances' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+case "$(uname -s 2>/dev/null || printf unknown)" in
+  *MINGW*|*MSYS*|*CYGWIN*)
+    grep -Eq -- '--user-data file://[A-Za-z]:/' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+    ;;
+esac
 grep -q 'lightsail get-instance' "$CALLS" || {
   echo "Lightsail provisioning should wait for instance state before port/static IP operations" >&2
   cat "$CALLS" >&2

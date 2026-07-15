@@ -3,6 +3,33 @@
 
 JSON_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 JSON_HELPER="$JSON_LIB_DIR/../json.mjs"
+# shellcheck disable=SC1090
+source "$JSON_LIB_DIR/local-paths.sh"
+
+json_native_file_path() {
+  dirextalk_native_tool_path "${1:-}"
+}
+
+json_normalize_file_arguments() {
+  local command=${1:-}
+  shift || true
+  case "$command" in
+    get|assert|check|entries|length|type|mutate|valid|lightsail-availability-zone|lightsail-bundle-select)
+      [ "$#" -gt 0 ] || return 0
+      set -- "$(json_native_file_path "$1")" "${@:2}"
+      ;;
+    operation-report)
+      [ "$#" -ge 3 ] || return 0
+      set -- "$1" "$2" "$(json_native_file_path "$3")" "${@:4}"
+      ;;
+    build)
+      if [ "${1:-}" = "bootstrap-normalized" ] && [ "$#" -ge 2 ]; then
+        set -- "$1" "$(json_native_file_path "$2")" "${@:3}"
+      fi
+      ;;
+  esac
+  printf '%s\0' "$command" "$@"
+}
 
 json_node() {
   local uname_s node_path
@@ -31,7 +58,7 @@ json_node() {
           return 0
         fi
       done
-      echo "POSIX node is required for JSON processing in Linux/WSL; Windows node.exe cannot read POSIX paths." >&2
+      echo "POSIX node is required for JSON processing on Linux; Windows node.exe cannot read POSIX paths." >&2
       return 1
       ;;
   esac
@@ -43,12 +70,57 @@ json_node() {
   return 1
 }
 
-json_cli() {
-  local node_bin
-  node_bin=$(json_node) || return 1
+json_worker_connect() {
+  [ -n "${DIREXTALK_JSON_WORKER_SOCKET:-}" ] && return 0
+  if ! exec {DIREXTALK_JSON_WORKER_SOCKET}<>"/dev/tcp/127.0.0.1/${DIREXTALK_JSON_WORKER_PORT}"; then
+    unset DIREXTALK_JSON_WORKER_SOCKET
+    return 1
+  fi
+}
+
+json_worker_cli() {
+  local stdin_payload= status stdout stderr
+  local -a normalized_args=("$@")
   case "${1:-}" in
-    stdin-*) "$node_bin" "$JSON_HELPER" "$@" ;;
-    *) printf '%s\0' "$@" | "$node_bin" "$JSON_HELPER" --args0 ;;
+    stdin-*)
+      IFS= read -r -d '' stdin_payload || true
+      ;;
+  esac
+
+  if ! json_worker_connect; then
+    echo "Dirextalk test JSON worker is unavailable on its isolated loopback port." >&2
+    return 125
+  fi
+  printf '%s\0%s\0%s\0%s\0' \
+    "$DIREXTALK_JSON_WORKER_TOKEN" "$stdin_payload" "$PWD" "${#normalized_args[@]}" >&$DIREXTALK_JSON_WORKER_SOCKET
+  printf '%s\0' "${normalized_args[@]}" >&$DIREXTALK_JSON_WORKER_SOCKET
+
+  IFS= read -r -d '' status <&$DIREXTALK_JSON_WORKER_SOCKET || status=125
+  IFS= read -r -d '' stdout <&$DIREXTALK_JSON_WORKER_SOCKET || stdout=
+  IFS= read -r -d '' stderr <&$DIREXTALK_JSON_WORKER_SOCKET || stderr="JSON worker returned an incomplete response."
+
+  [ -z "$stdout" ] || printf '%s' "$stdout"
+  [ -z "$stderr" ] || printf '%s' "$stderr" >&2
+  case "$status" in
+    ''|*[!0-9]*) return 125 ;;
+    *) return "$status" ;;
+  esac
+}
+
+json_cli() {
+  local node_bin helper command
+  if [ -n "${DIREXTALK_TEST_ROOT:-}" ] && \
+     [ -n "${DIREXTALK_JSON_WORKER_PORT:-}" ] && \
+     [ -n "${DIREXTALK_JSON_WORKER_TOKEN:-}" ]; then
+    json_worker_cli "$@"
+    return $?
+  fi
+  node_bin=$(json_node) || return 1
+  helper=$(dirextalk_native_tool_path "$JSON_HELPER") || return 1
+  command=${1:-}
+  case "$command" in
+    stdin-*) "$node_bin" "$helper" "$@" ;;
+    *) json_normalize_file_arguments "$@" | "$node_bin" "$helper" --args0 ;;
   esac
 }
 
@@ -96,6 +168,14 @@ json_stdin_price_usd() {
   json_cli stdin-price-usd "$@"
 }
 
+json_lightsail_availability_zone() {
+  json_cli lightsail-availability-zone "$@"
+}
+
+json_lightsail_bundle_select() {
+  json_cli lightsail-bundle-select "$@"
+}
+
 json_length() {
   json_cli length "$@"
 }
@@ -120,3 +200,9 @@ json_mutate() {
 json_valid() {
   json_cli valid "$@"
 }
+
+if [ -n "${DIREXTALK_TEST_ROOT:-}" ] && \
+   [ -n "${DIREXTALK_JSON_WORKER_PORT:-}" ] && \
+   [ -n "${DIREXTALK_JSON_WORKER_TOKEN:-}" ]; then
+  json_worker_connect || true
+fi

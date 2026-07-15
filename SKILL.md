@@ -13,14 +13,30 @@ Entrypoints:
 
 ```text
 scripts/orchestrate.sh
-scripts/orchestrate.ps1
 scripts/destroy.sh
-scripts/destroy.ps1
 scripts/update.sh
 scripts/reset-app-data.sh
 ```
 
 ## Freshness Gate
+
+On Windows, this check comes first, including before skill installation or
+refresh. Run it from Git Bash:
+
+```bash
+git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
+case "$(uname -s)" in
+  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  *) false ;;
+esac
+```
+
+Continue only when that command succeeds. It verifies that the current shell's
+`EXEPATH` is under the same Git for Windows installation as `git`, and rejects
+PowerShell, WSL, MSYS2, and Cygwin. Otherwise tell the user to install Git for
+Windows from `https://git-scm.com/download/win`, reopen Git Bash, and stop. The
+skill CLI repeats and strengthens this gate before `install`, `update`, or
+`refresh` can write a target.
 
 Before deployment, repair, verification, teardown, runtime wiring, or skill
 installation, make one freshness attempt:
@@ -54,14 +70,25 @@ Classify every path by consumer before writing it to `state.json`,
 - Documentation paths must be portable examples using `$HOME`, `%USERPROFILE%`,
   `$env:USERPROFILE`, `<service_id>`, or `<domain>`.
 
-Windows users run `.\scripts\orchestrate.ps1` and `.\scripts\destroy.ps1` from
-Windows PowerShell. These wrappers may use Git Bash internally, but must set
-`DIREXTALK_LOCAL_PATH_STYLE=windows`. POSIX users run `bash scripts/orchestrate.sh`
-and `bash scripts/destroy.sh`. Do not tell Windows users to use WSL unless they
-explicitly choose WSL as the host runtime.
-The Windows wrappers accept a working Git for Windows or MSYS2 Bash from
-`PATH`; `DIREXTALK_BASH_COMMAND` selects a custom executable. They reject the
-implicit Windows WSL aliases so local path ownership cannot change silently.
+Windows, Linux, and macOS users run the same Bash entrypoints. On Windows,
+Git for Windows is required: use the exact preflight above before any deployment
+action. If it fails, tell the user to install Git for Windows from
+`https://git-scm.com/download/win`, open **Git Bash**, and rerun; do not
+substitute PowerShell or WSL. Git Bash automatically writes native `C:/...`
+paths for Windows-native Node.js, `dirextalk-connect`, and agent processes. Run
+every lifecycle action from that same Git Bash session:
+
+```bash
+DOMAIN=<domain> bash scripts/orchestrate.sh
+```
+
+The deployer explicitly normalizes file paths passed to native Node.js, AWS CLI,
+curl, and local agent tools. It does not depend on implicit MSYS argument
+conversion, so a parent runtime that sets `MSYS_NO_PATHCONV=1` cannot turn a
+Git Bash `/c/...` or `/tmp/...` path into an unrelated `C:\c\...` or `C:\tmp\...`
+lookup.
+
+Do not manually mix PowerShell, WSL, and Git Bash for one local service.
 
 ## Prerequisites And Confirmation
 
@@ -211,13 +238,25 @@ Record and report `cost_estimate` and billing reminders. Tell the operator that 
 
 Required first-time deployment confirmation. Fill in the concrete domain,
 profile, region, and cloud provider. Include the AWS credit/Lightsail trial
-sentence immediately before the confirmation line:
+sentence immediately before asking for approval. Accept a natural-language
+confirmation in their own words; do not require them to copy a fixed sentence
+or a command token.
+Accept the confirmation only when it clearly covers all of the following:
+
+- the intended Dirextalk deployment and final domain;
+- the AWS profile or account authority and selected region/provider; and
+- acknowledgement that billable resources can remain billed until destroyed.
+
+Short replies such as "confirm", "deploy", or "go ahead" are sufficient only
+when the immediately preceding deployment summary already states those facts
+and the user has not changed the plan. Otherwise ask one concise follow-up that
+identifies the missing fact. Record the semantic user decision in the operation
+report, then set any required machine-only environment flags yourself.
 
 ```text
 Please confirm before I deploy. New AWS customer accounts generally receive 100-200 USD in free credits, and users who have not used Lightsail generally receive three months of free Lightsail usage. Credits and trials are account-specific, actual coverage must be verified in AWS Billing Console, and AWS official real-time policy prevails.
 
-Reply with this exact sentence:
-I confirm that I have an active AWS account, the long-lived domain <domain>, and authorize the current <profile-or-identity> AWS profile in <region> to create the Dirextalk service using <cloud-provider>. I understand this can create billable AWS resources, credits or trials are not guaranteed to cover all usage, and resources keep billing until destroyed.
+For example: "I confirm deployment of <domain> in <region>; I authorize this AWS profile and understand the ongoing AWS charges."
 ```
 
 If any prerequisite is missing, stop deployment and guide the user through that
@@ -231,22 +270,24 @@ CONFIRM_DOMAIN_BINDING=1
 DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
-Normal server selection resolves the latest published stable GitHub Release and
-persists its immutable digest in deployment state. `MESSAGE_SERVER_IMAGE` is
-disabled unless `DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1` explicitly
-marks a debug/legacy deployment. The independent `YingSuiAI/dirextalk-updater`
+Normal server selection uses `dirextalk/message-server:latest` directly and
+does not query message-server GitHub Releases before provisioning. Each new
+deployment therefore pulls the image currently published under `latest`.
+`MESSAGE_SERVER_IMAGE` is disabled unless
+`DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1` explicitly marks a
+debug/legacy deployment. The independent `YingSuiAI/dirextalk-updater`
 host binary is downloaded only on a verified Ubuntu 22.04 or 24.04 x86_64 server from
 the deployer-pinned Release URL and must match the deployer-pinned SHA-256.
 The local deployer host does not need Go and does not SCP updater artifacts.
-The deployer Node selector uses the pinned mature `semver` dependency to reject
-invalid `upgrade_from` ranges and ranges that include the target. Its constraint
-corpus mirrors the forms accepted by the canonical Go validators; the updater
-and message-server Release CI own cross-version compatibility evidence.
+The updater pin and checksum contract remains independent from the default
+message-server image selection.
 
 The only legacy host adoption path is `scripts/adopt-legacy-node.sh`. It first
 requires a dry-run proof of the fixed d1 v0.15.2 Compose project, approved image
 digest, live health, binary version, and systemd Caddy identity. Mutation then
-requires the exact printed confirmation. It creates the updater-owned
+requires an explicit semantic user confirmation of the reviewed adoption. The
+script's printed confirmation token is machine-only: the agent supplies it
+after that approval and never asks the user to copy it. It creates the updater-owned
 `/var/dirextalk-message-server` view without pulling or recreating the running
 container, installs the pinned updater with `caddy_mode=systemd`, and
 transactionally adds only `/_dirextalk/updater/v1/jobs/*` to Caddy. Never use
@@ -257,8 +298,9 @@ Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
 zone; otherwise it chooses `user` and gives manual A-record guidance after IP
 allocation. Explicit `DOMAIN_MODE=user|route53` remains an advanced automation
 override. If an existing Route53 A record points elsewhere, require
-`DIREXTALK_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
-authoritative DNS before continuing.
+an explicit semantic user confirmation that identifies the domain and the
+replacement target. Then set `DIREXTALK_CONFIRM_DNS_OVERWRITE=1` internally.
+If Route53 delegation is needed, wait for authoritative DNS before continuing.
 
 Default cloud provider is Lightsail. If no AWS region is configured in state, `AWS_DEFAULT_REGION`/`AWS_REGION`, or the AWS profile, the deployer recommends a default region from the local timezone and uses it in non-interactive runs; `DIREXTALK_DEFAULT_REGION` is the explicit deployer override. S1 queries Lightsail bundle availability and Lightsail availability zones before provisioning, but it does not query AWS Free Tier or credit usage. For manual Lightsail zone checks, use `aws lightsail get-regions --include-availability-zones --output json`; plain `aws lightsail get-regions` can omit availability-zone details. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone in the same region. If Lightsail has no usable bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; ask the operator to choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2` after reviewing the estimate. EC2 remains supported explicitly with `DIREXTALK_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
 
@@ -323,17 +365,21 @@ credentials and configs only. S6 no longer writes the retired service-level
 `env` file. Host-runtime artifacts remain reviewable even when the effective
 connect agent differs. For host-managed MCP, S6 omits all canonical MCP fields
 from connect agent options and never mutates user-global host config. With
-`DIREXTALK_AGENT_INSTALL=auto`, S6 writes the artifact, records
-`mcp_install_status=host_action_required`, and waits before bridge startup.
-After the operator enrolls the remote endpoint in the host, rerun with
-`DIREXTALK_MCP_HOST_READY=1`. OpenClaw must then pass the secret-free official
-`openclaw mcp probe <server-name> --json` check before S6 starts the bridge and
-records `host_probe_passed`. `OPENCLAW_CONFIG_PATH` is inherited, and
+`DIREXTALK_AGENT_INSTALL=auto`, S6 writes the artifact and waits before bridge
+startup only while the native enrollment probe fails. OpenClaw and Hermes run
+their secret-free official probe on every S6 attempt and continue automatically
+as soon as it passes; they do not require `DIREXTALK_MCP_HOST_READY=1`. The
+current agent owns the resume attempt after enrollment and must not hand a
+resume command back to the user. OpenClaw uses
+`openclaw mcp probe <server-name> --json` and records `host_probe_passed`.
+`OPENCLAW_CONFIG_PATH` is inherited, and
 `DIREXTALK_OPENCLAW_PROFILE=<profile>` adds the native `--profile` selector for
 service isolation. S6 never runs `mcp set`. Other host-managed backends with no
 official probe record `operator_confirmed_host_managed` and still require later
-runtime verification. `recommend` and `skip` retain `host_action_required`
-until explicitly confirmed. Generated agent options
+runtime verification; only those unprobeable runtimes use explicit
+`DIREXTALK_MCP_HOST_READY=1` confirmation. `recommend` and `skip` only write
+artifacts/guidance and retain `host_action_required` without running a host
+probe. Generated agent options
 write `mode = "yolo"` by default unless an explicit `mode` is supplied.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
@@ -342,11 +388,14 @@ daemon. Explicit `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CURSOR_AGENT_COMMAND`,
 `DIREXTALK_OPENCODE_COMMAND`, `DIREXTALK_CONNECT_AGENT_CMD`,
 `DIREXTALK_CURSOR_MODE`, and `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides
 still win except where a host-owned OpenClaw/Hermes scope would be bypassed.
-Hermes writes `mcp/hermes.md`, creates an empty per-service HERMES_HOME, and
-uses the same profile/home in ACP args/env and the secret-free
-`hermes -p <profile> mcp test <server-name>` gate. The operator must first
-create/clone that profile and enroll native `mcp_servers`; S6 never writes a
-generic Hermes JSON file or touches the real user Hermes home.
+Hermes writes `mcp/hermes.md`, creates a per-service HERMES_HOME, and uses the
+same profile/home in ACP args/env and the secret-free readiness gate. The
+operator must clone/import a working Hermes profile so its model/provider
+authentication is preserved, then enroll native `mcp_servers`. S6 requires
+both a configured model and a passing
+`hermes -p <profile> mcp test <server-name>` before bridge startup; the current
+agent then reruns S6 without a readiness flag. S6 never
+writes a generic Hermes JSON file or touches the real user Hermes home.
 
 State/report fields include `mcp_capability`, `mcp_config_dir`, `mcp_selected_config_type`,
 `mcp_selected_config`, token-free host-guidance fields such as
@@ -384,7 +433,9 @@ DIREXTALK_CONFIRM_EVIDENCE="user completed app initialization" DOMAIN=<DOMAIN> b
 DIREXTALK_CONFIRM_RUNTIME_PROBE=1 DIREXTALK_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm agent_mcp_runtime
 ```
 
-Every `confirm` command requires `DIREXTALK_CONFIRM_EVIDENCE`; evidence must be
+Every `confirm` command requires `DIREXTALK_CONFIRM_EVIDENCE`; agents derive
+that machine-only note from the user's clear natural-language confirmation and
+must not make the user provide an exact phrase. The evidence must remain
 concrete and at least 12 characters. For `agent_mcp_runtime`, first require
 `runtime_checks.summary.status=passed`, then set `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`
 only after a real runtime/channel probe sees the service-scoped MCP tools.
@@ -422,18 +473,21 @@ or disable temporary credentials and rotate/remove root access keys if used.
 
 ## Update, Reset, And Destroy
 
-Use `scripts/update.sh` for image-only refresh. It preserves infrastructure,
+Use `bash scripts/update.sh` for image-only refresh. It preserves infrastructure,
 TLS storage, local credentials, confirmations, runtime checks, dirextalk-connect daemon
 state, and MCP artifacts unless verification proves credentials were regenerated.
 
-Use `scripts/reset-app-data.sh` only with `DIREXTALK_RESET_APP_DATA_CONFIRM=1`.
+Use `bash scripts/reset-app-data.sh` only after an explicit semantic user
+confirmation that application data will be cleared. Set
+`DIREXTALK_RESET_APP_DATA_CONFIRM=1` internally; never make the user copy it.
 It preserves the cloud instance, fixed public IP/static IP or Elastic IP, DNS, and Caddy TLS storage, clears
 application data, clears old user-confirmation/runtime-check evidence, sets
 `connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped dirextalk-connect daemon. The follow-up
 orchestrate run regenerates credentials and MCP snippets.
 
-Destroy uses `scripts/destroy.sh` on POSIX and `.\scripts\destroy.ps1` on
-Windows PowerShell. Destroy uses the same AWS identity boundary as deployment.
+Destroy uses `bash scripts/destroy.sh` on every supported local host. Require a
+clear natural-language user instruction to destroy or cancel the named service;
+do not require a copied confirmation string. Destroy uses the same AWS identity boundary as deployment.
 Root AWS access-key identity is allowed when the operator explicitly chose it.
 Destroy stops and uninstalls only the service-scoped daemon whose WorkDir
 matches `~/.dirextalk/nodes/<service_id>/dirextalk-connect`, then removes recorded AWS

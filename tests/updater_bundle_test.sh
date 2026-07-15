@@ -128,13 +128,28 @@ compose_line=$(grep -n 'docker compose --env-file .env up -d' "$tmp/bundle/updat
 [ -n "$install_line" ] && [ -n "$compose_line" ] && [ "$install_line" -lt "$compose_line" ] \
   || { echo "host bootstrap must install updater before Compose starts" >&2; exit 1; }
 
-DESTDIR="$tmp/root" DIREXTALK_UPDATER_SKIP_SYSTEMD=1 \
+mkdir "$tmp/install-bin"
+cp "$ROOT/tests/lib/linux-install.sh" "$tmp/install-bin/install"
+chmod 0755 "$tmp/install-bin/install"
+PATH="$tmp/install-bin:$PATH" DESTDIR="$tmp/root" DIREXTALK_UPDATER_SKIP_SYSTEMD=1 \
   bash "$tmp/bundle/updater/install.sh" "$fake_updater"
-[ "$(stat -c '%a' "$tmp/root/etc/dirextalk-updater")" = 700 ]
-[ "$(stat -c '%a' "$tmp/root/etc/dirextalk-updater/config.json")" = 600 ]
-[ "$(stat -c '%a' "$tmp/root/etc/dirextalk-updater/control-token")" = 600 ]
-[ "$(stat -c '%a' "$tmp/root/var/lib/dirextalk-updater")" = 700 ]
-[ "$(stat -c '%a' "$tmp/root/usr/local/bin/dirextalk-updater")" = 755 ]
+
+# The installer executes on Ubuntu in production. Git Bash's NTFS test
+# filesystem cannot represent owner-only modes, so retain the assertions where
+# the underlying filesystem has Unix permissions.
+assert_linux_mode() {
+  local expected=$1 path=$2
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+  esac
+  [ "$(stat -c '%a' "$path")" = "$expected" ]
+}
+
+assert_linux_mode 700 "$tmp/root/etc/dirextalk-updater"
+assert_linux_mode 600 "$tmp/root/etc/dirextalk-updater/config.json"
+assert_linux_mode 600 "$tmp/root/etc/dirextalk-updater/control-token"
+assert_linux_mode 700 "$tmp/root/var/lib/dirextalk-updater"
+assert_linux_mode 755 "$tmp/root/usr/local/bin/dirextalk-updater"
 [ "$(wc -c < "$tmp/root/etc/dirextalk-updater/control-token")" -ge 32 ]
 grep -q 'chown root:root' "$tmp/bundle/updater/install.sh"
 grep -q 'systemctl start dirextalk-updater-discovery.service' "$tmp/bundle/updater/install.sh"

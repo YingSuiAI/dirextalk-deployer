@@ -38,7 +38,11 @@ _connect_agent_command() {
   fi
   if [ "$runtime" = "hermes" ] && [ "$agent" = "acp" ]; then
     value=${DIREXTALK_HERMES_ACP_ADAPTER_COMMAND:-${DIREXTALK_CONNECT_BIN:-$service_binary}}
-    dirextalk_normalize_local_path "${value:-dirextalk-connect}"
+    if [ -z "$value" ]; then
+      fail "Hermes ACP requires the absolute service-scoped dirextalk-connect binary; refusing to write a PATH-dependent cmd."
+      return 1
+    fi
+    dirextalk_normalize_local_path "$value"
     return 0
   fi
   if [ "$runtime" = "openclaw" ] && [ "$agent" = "acp" ]; then

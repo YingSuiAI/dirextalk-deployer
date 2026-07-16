@@ -701,11 +701,11 @@ grep -q 'model = "whisper-test"' "$speech_config_path"
 [ "$(DIREXTALK_QODERCLI_COMMAND=/opt/qoder/qodercli _connect_agent_command qoder)" = "/opt/qoder/qodercli" ]
 [ "$(DIREXTALK_OPENCODE_AI_COMMAND=/opt/opencode-ai/bin/opencode _connect_agent_command opencode)" = "/opt/opencode-ai/bin/opencode" ]
 [ "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/agent _connect_agent_command codex)" = "/custom/agent" ]
-[ "$(_connect_agent_command acp hermes)" = "dirextalk-connect" ]
+[ -z "$(_connect_agent_command acp hermes 2>/dev/null || true)" ]
 [ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp openclaw 2>/dev/null || true)" ]
 [ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp hermes 2>/dev/null || true)" ]
 [ "$(DIREXTALK_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _connect_agent_command acp openclaw)" = "/opt/openclaw/bin/openclaw" ]
-[ "$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_command acp hermes)" = "dirextalk-connect" ]
+[ "$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_command acp hermes /opt/dirextalk/bin/dirextalk-connect)" = "/opt/dirextalk/bin/dirextalk-connect" ]
 
 fake_cursor_agent="$tmp/localapp/cursor-agent"
 mkdir -p "$fake_cursor_agent"

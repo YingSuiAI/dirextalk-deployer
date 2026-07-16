@@ -29,7 +29,7 @@ jobs:
 
       - name: Run fast deployer tests
         shell: bash
-        run: npm test
+        run: npm run test:quick
 
       - name: Check Bash syntax
         shell: bash
@@ -49,11 +49,12 @@ jobs:
 
       - name: Run stage deployer tests
         shell: bash
-        run: npm run test:extended-only
+        run: npm run test:stage
 
-      - name: Run exhaustive release tests
+      - name: Run exhaustive full tests on explicit request
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
-        run: npm run test:release-only
+        run: npm run test:full
 
       - name: Check Bash syntax
         shell: bash

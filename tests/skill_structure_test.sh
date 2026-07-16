@@ -98,23 +98,26 @@ grep -q 'scripts/json.mjs' AGENTS.md
 grep -q 'dirextalk-connect@latest' AGENTS.md
 grep -q 'HTTP MCP endpoint' AGENTS.md
 grep -q 'npm test' AGENTS.md
-grep -q 'npm run test:extended' AGENTS.md
-grep -q '"test:extended"' package.json
-grep -q '"test:extended-only"' package.json
-grep -q '^quick_tests=(' tests/npm_test_suite.sh
-grep -q '^extended_tests=(' tests/npm_test_suite.sh
-grep -q 'extended-only' tests/npm_test_suite.sh
+grep -q 'npm run test:release' AGENTS.md
+grep -q 'npm run test:full' AGENTS.md
+grep -q '"test:quick"' package.json
+grep -q '"test:stage"' package.json
+grep -q '"test:full"' package.json
+grep -q 'selectAffectedTests' scripts/lib/test-runner.mjs
+grep -q 'slowTests' scripts/lib/test-runner.mjs
+grep -q 'The Node runner owns the test plan' tests/npm_test_suite.sh
 grep -q 'ubuntu-release:' .github/workflows/ci.yml
-quick_suite=$(sed -n '/^quick_tests=(/,/^)/p' tests/npm_test_suite.sh)
-extended_suite=$(sed -n '/^extended_tests=(/,/^)/p' tests/npm_test_suite.sh)
-release_suite=$(sed -n '/^release_tests=(/,/^)/p' tests/npm_test_suite.sh)
+grep -q 'npm run test:quick' .github/workflows/ci.yml
+grep -q 'npm run test:stage' .github/workflows/ci.yml
+grep -q "github.event_name == 'workflow_dispatch'" .github/workflows/ci.yml
+test_plan=$(cat scripts/lib/test-runner.mjs)
 for test_file in \
   tests/git_bash_windows_contract_test.sh \
   tests/local_paths_test.sh \
   tests/region_recommendation_test.sh \
   tests/updater_atomic_install_test.sh
 do
-  case "$quick_suite" in *"$test_file"*) ;; *) echo "quick suite must include $test_file" >&2; exit 1 ;; esac
+  case "$test_plan" in *"$test_file"*) ;; *) echo "test plan must include $test_file" >&2; exit 1 ;; esac
 done
 for test_file in \
   tests/aws_credentials_test.sh \
@@ -124,7 +127,7 @@ for test_file in \
   tests/s7_http_mcp_acceptance_test.sh \
   tests/destroy_lightsail_test.sh
 do
-  case "$extended_suite" in *"$test_file"*) ;; *) echo "extended suite must include $test_file" >&2; exit 1 ;; esac
+  case "$test_plan" in *"$test_file"*) ;; *) echo "test plan must include $test_file" >&2; exit 1 ;; esac
 done
 for test_file in \
   tests/domain_authoritative_dns_test.sh \
@@ -142,14 +145,8 @@ for test_file in \
   tests/final_delivery_runtime_gate_test.sh \
   tests/s6_wire_local_test.sh
 do
-  case "$release_suite" in *"$test_file"*) ;; *) echo "release suite must include $test_file" >&2; exit 1 ;; esac
+  case "$test_plan" in *"$test_file"*) ;; *) echo "full test plan must include $test_file" >&2; exit 1 ;; esac
 done
-case "$quick_suite" in
-  *tests/server_release_test.sh*|*tests/destroy_lightsail_test.sh*)
-    echo "server image selection and destroy integration must remain extended-only" >&2
-    exit 1
-    ;;
-esac
 for retired_test in \
   tests/phase_timeout_test.sh \
   tests/root_volume_tracking_test.sh \

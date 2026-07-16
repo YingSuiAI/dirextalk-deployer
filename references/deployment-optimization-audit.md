@@ -15,26 +15,26 @@ claim that every App or host-agent runtime has been proven in a real session.
 
 ## Test Profiles And Windows Feedback Time
 
-Windows Git Bash profiling on 2026-07-15 found that the former exhaustive suite
-took roughly 27 minutes. A single three-status recovery fixture took 160
-seconds. The dominant cost was not AWS, Docker, WSL, or real waits: mocked
-deployment state machines repeatedly launched Windows-native Node JSON helpers
-for individual keys and repeated compatibility branches in the stage lane.
+Windows Git Bash profiling on 2026-07-16 measured the release suite at 1313.3
+seconds. The S6 extended failure matrix alone took 260 seconds; S6 wiring took
+119 seconds, final delivery 78 seconds, status recovery 69 seconds, and runtime
+summary 64 seconds. These were valid but mostly unrelated matrices being run
+unconditionally, not AWS, Docker, WSL, or real deployment waits.
 
 The test runner is therefore split deliberately:
 
-- `npm test` runs the fast cross-platform contracts for package contents,
-  Git-Bash execution, local paths, JSON/atomic writes, permissions, region
-  selection, and updater replacement.
+- `npm test` discovers uncommitted files and commits ahead of `origin/main`,
+  then runs only mapped boundary tests and their neighboring contracts.
+- `npm run test:release` uses that affected plan plus LF, npm package, and skill
+  structure checks. It no longer expands into unrelated cloud/runtime matrices.
 - The isolated runner starts one authenticated loopback Node JSON worker. Test
   shells reuse it, while production retains the direct `scripts/json.mjs` CLI
-  fallback. The status recovery fixture fell from 160 seconds to 21 seconds.
-- `npm run test:extended` is a non-overlapping default Lightsail stage lane:
-  credentials, S3 provisioning, S5/S6, destroy, S7, and operation reporting.
-  It completed in about 136 seconds on the profiled Windows host.
-- `npm run test:release` adds optional EC2, legacy adoption, updater, detailed
-  DNS, and exhaustive runtime compatibility matrices. CI keeps the fast gate
-  on Windows, Linux, and macOS, then runs stage-only and release-only lanes once
+  fallback, avoiding one native Node process per JSON key on Windows.
+- `npm run test:quick` and `npm run test:stage` retain the portable baseline and
+  default Lightsail workflow for explicit broader checks.
+- `npm run test:full` retains optional EC2, legacy adoption, updater, detailed
+  DNS, and exhaustive runtime compatibility matrices. It runs only on explicit
+  manual request; CI keeps quick coverage cross-platform and the stage lane once
   on Ubuntu.
 
 The split does not discard credential, DNS, initialization, S6, updater, or

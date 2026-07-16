@@ -74,25 +74,32 @@ Use `scripts/lib/git-bash.sh`, `scripts/lib/local-paths.sh`, and `scripts/lib/pa
 ## Validation
 
 During one coherent delivery stage, use only the smallest immediate check that
-answers a real safety question. At the stage boundary, run this consolidated
-validation set:
+answers a real safety question. The test runner selects tests from uncommitted
+files plus commits ahead of `origin/main`. At the stage boundary, run:
 
 ```bash
-find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
 git diff --check
 npm test
-npm run test:extended
 ```
 
-`npm test` is the fast cross-platform gate. `npm run test:extended` is the
-non-overlapping stage gate for the default Lightsail credential, provision,
-S5-S7, destroy, and operation-report workflow; keep it within a three-minute
-Windows feedback budget. Before publishing or changing optional EC2, legacy
-adoption, updater, or runtime compatibility matrices, run `npm run test:release`.
+`npm test` runs only directly affected tests and their declared neighboring
+contracts. `npm run test:release` uses the same affected plan plus package,
+skill-structure, and LF checks; it is the normal pre-publish gate. Use
+`DIREXTALK_TEST_BASE=<ref>` or newline/comma-separated
+`DIREXTALK_TEST_CHANGED_FILES=<paths>` only when automatic Git discovery needs
+an explicit boundary.
 
-CI runs `npm test` on all three supported platforms, then runs the stage-only
-and exhaustive release-only lanes once on Ubuntu without repeating the fast
-gate.
+`npm run test:quick` runs the portable baseline, and `npm run test:stage` runs
+the default Lightsail workflow lane. Run them only when that whole boundary is
+actually affected. `npm run test:full` retains EC2, legacy adoption, updater,
+DNS, S6, and runtime compatibility matrices for explicit manual validation or
+a genuinely broad cross-cutting change; it is not a routine development or
+publishing requirement. For changed shell files, run focused `bash -n` checks;
+CI retains one repository-wide syntax check because it is inexpensive.
+
+CI runs `npm run test:quick` on all three supported platforms and the stage lane
+once on Ubuntu. The exhaustive full lane runs only through explicit
+`workflow_dispatch`.
 
 On Windows, the npm test runner starts one Git for Windows Bash controller and
 runs test files sequentially. Its isolated test root starts one authenticated,

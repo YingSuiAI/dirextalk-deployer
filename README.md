@@ -298,14 +298,22 @@ make build AGENTS=<dirextalk-connect-agent> PLATFORMS_INCLUDE=matrix
 ## Validation
 
 ```bash
+# Default development check: changed files plus declared neighboring contracts.
 npm test
-# Non-overlapping default Lightsail stage gate (target: under three minutes on Windows):
-npm run test:extended
-# Before publishing or changing EC2, legacy adoption, updater, or runtime matrices:
+# Normal pre-publish check: affected tests plus package/skill structure.
 npm run test:release
-find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
+# Explicit broader lanes; do not run routinely.
+npm run test:quick
+npm run test:stage
+npm run test:full
 git diff --check
 ```
+
+The affected selector reads uncommitted files and commits ahead of
+`origin/main`. Override the comparison only when needed with
+`DIREXTALK_TEST_BASE=<ref>` or `DIREXTALK_TEST_CHANGED_FILES=<paths>`. The full
+EC2, legacy, updater, DNS, S6, and runtime matrices are retained for explicit
+manual validation, not every development stage or release.
 
 On Windows these `npm` test commands may be launched directly from PowerShell,
 Command Prompt, or Git Bash. The test launcher finds Git for Windows Bash and

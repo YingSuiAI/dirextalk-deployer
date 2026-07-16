@@ -17,11 +17,11 @@
     "scripts/"
   ],
   "scripts": {
-    "test": "node scripts/run-tests.mjs",
-    "test:extended": "node scripts/run-tests.mjs extended",
-    "test:extended-only": "node scripts/run-tests.mjs extended-only",
+    "test": "node scripts/run-tests.mjs affected",
+    "test:quick": "node scripts/run-tests.mjs quick",
+    "test:stage": "node scripts/run-tests.mjs stage",
     "test:release": "node scripts/run-tests.mjs release",
-    "test:release-only": "node scripts/run-tests.mjs release-only"
+    "test:full": "node scripts/run-tests.mjs full"
   },
   "engines": {
     "node": ">=18"

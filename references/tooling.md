@@ -16,13 +16,15 @@ aws --version
 
 ## Windows
 
-Git Bash from Git for Windows is the only supported lifecycle shell. Before a
-Windows lifecycle action, run the Git Bash preflight from
+Git Bash from Git for Windows is the only supported lifecycle shell on native
+Windows. Before a native Windows lifecycle action, run the Git Bash preflight from
 `references/agent-targets.md`. It must find `cygpath`, a `.windows.` Git
 version, a `MINGW*` shell, and one shared Git for Windows installation root;
 otherwise tell the user to install Git for Windows from
 <https://git-scm.com/download/win>, reopen Git Bash, and stop. Do not substitute
-PowerShell, MSYS2, Cygwin, or WSL.
+PowerShell, MSYS2, or Cygwin. Native WSL is supported as a Linux host: run Bash
+and install prerequisites inside the distribution, and do not reuse a
+Git-Bash-owned service directory.
 
 Standard Git Bash usually does not include `dig`. Use `nslookup` for DNS checks
 instead of blocking deployment on `dig`.

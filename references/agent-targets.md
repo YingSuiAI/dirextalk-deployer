@@ -10,15 +10,16 @@ On Windows, first open Git Bash and run this preflight before npm installs the
 package:
 
 ```bash
-git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
 case "$(uname -s)" in
-  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  MINGW*) git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##'); command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  Linux*|Darwin*) true ;;
   *) false ;;
 esac
 ```
 
 If it fails, install Git for Windows from <https://git-scm.com/download/win>,
-reopen Git Bash, and stop. This rejects WSL, PowerShell, MSYS2, and Cygwin.
+reopen Git Bash, and stop. This rejects PowerShell, MSYS2, and Cygwin on native
+Windows. Native WSL is a Linux host and runs the POSIX CLI directly.
 
 Do not use a generic "install skills <GitHub URL>" instruction for normal users. That can invoke a host's GitHub skill installer instead of the npm-managed installer. A short user prompt should give the repository URL for reading only and point the agent back to this npm install rule:
 

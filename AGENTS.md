@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`dirextalk-deployer` is a cross-platform deployment product and agent skill, not a Linux-only script collection. Maintain it as a portable orchestration layer driven by Git Bash on Windows and Bash on Linux/macOS while deploying a Linux-based Dirextalk server.
+`dirextalk-deployer` is a cross-platform deployment product and agent skill, not a Linux-only script collection. Maintain it as a portable orchestration layer driven by Git Bash on native Windows and Bash on Linux/macOS/WSL while deploying a Linux-based Dirextalk server.
 
 ## Product Scope
 
@@ -29,8 +29,8 @@ Use `scripts/lib/git-bash.sh`, `scripts/lib/local-paths.sh`, and `scripts/lib/pa
 ## Entrypoints
 
 - All supported hosts run `bash scripts/orchestrate.sh`, `bash scripts/destroy.sh`, `bash scripts/update.sh`, and `bash scripts/reset-app-data.sh`.
-- Windows users must install Git for Windows and run those commands from Git Bash. The skill CLI and lifecycle scripts require a `MINGW*` shell, `cygpath`, a `.windows.` Git version, and a matching Git for Windows installation root; otherwise they must tell the user to install Git for Windows and stop.
-- Do not tell Windows users to run PowerShell wrappers or WSL. Keep lifecycle commands, recovery output, documentation, and generated recommendations in Bash syntax.
+- Native Windows users must install Git for Windows and run those commands from Git Bash. On native Windows, the skill CLI and lifecycle scripts require a `MINGW*` shell, `cygpath`, a `.windows.` Git version, and a matching Git for Windows installation root; otherwise they must tell the user to install Git for Windows and stop. Native WSL sessions are Linux hosts and run Bash directly.
+- Do not tell native Windows users to run PowerShell wrappers or launch WSL as a command runner. Keep one service directory owned by one environment, and keep lifecycle commands, recovery output, documentation, and generated recommendations in Bash syntax.
 
 ## Script Architecture
 
@@ -69,7 +69,7 @@ Use `scripts/lib/git-bash.sh`, `scripts/lib/local-paths.sh`, and `scripts/lib/pa
 
 - Keep `README.md`, `SKILL.md`, `AGENTS.md`, `agents/README.md`, `agents/openai.yaml`, and `references/*` synchronized when changing deployment contracts, local bridge behavior, install commands, or platform support.
 - Keep user-facing docs focused on operating the deployer. Put implementation details and edge cases in `references/`.
-- Use the same Bash command examples on Windows, Linux, and macOS; explain that Windows runs them from Git Bash.
+- Use the same Bash command examples on Windows, Linux, macOS, and WSL; explain that native Windows runs them from Git Bash while WSL runs them directly.
 
 ## Validation
 

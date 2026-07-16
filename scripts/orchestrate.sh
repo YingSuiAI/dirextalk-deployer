@@ -77,7 +77,7 @@ check_deps() {
       warn "See references/user-journey.md for the AWS CLI setup guide."
       ;;
   esac
-  warn "On Windows, install Git for Windows, open Git Bash, and rerun. PowerShell and WSL are not supported lifecycle entrypoints."
+  warn "On native Windows, install Git for Windows, open Git Bash, and rerun. Native WSL is supported as Linux, but do not mix WSL and Git Bash paths for one service."
   fail "Install the missing dependencies and rerun."
 }
 

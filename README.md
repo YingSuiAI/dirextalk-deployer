@@ -29,16 +29,18 @@ On Windows, open Git Bash before installing or refreshing the skill and run this
 preflight before npm writes anything:
 
 ```bash
-git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
 case "$(uname -s)" in
-  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  MINGW*) git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##'); command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  Linux*|Darwin*) true ;;
   *) false ;;
 esac
 ```
 
 If it fails, install Git for Windows from <https://git-scm.com/download/win>,
-reopen Git Bash, and stop. It deliberately rejects PowerShell, WSL, MSYS2, and
-Cygwin; the skill CLI performs the same check before it can copy a skill.
+reopen Git Bash, and stop. This Windows-only gate deliberately rejects
+PowerShell, MSYS2, and Cygwin; native WSL is treated as Linux and uses its own
+Bash and POSIX paths. The skill CLI performs the same platform check before it
+can copy a skill.
 
 The GitHub repository keeps tests for maintainers and CI, but the published npm package and installed skill copy exclude `tests/` to keep user installs small.
 
@@ -54,8 +56,8 @@ After reading this instruction, the agent should run the npm install commands be
 
 If Codex already lists `dirextalk-deployer` in its available skills, ask it to use that installed skill directly. If it does not, install or refresh it first:
 
-All supported hosts use Bash. On Windows, install Git for Windows, open Git
-Bash, and run the same commands:
+All supported hosts use Bash. On native Windows, install Git for Windows, open
+Git Bash, and run the same commands. Native WSL runs them directly as Linux:
 
 ```bash
 npm install -g dirextalk-deployer@latest
@@ -82,7 +84,7 @@ npm install -g dirextalk-deployer@latest
 dirextalk-deployer skill update --agent codex
 ```
 
-The CLI is implemented in Node and uses native paths for the host it runs on. On Windows, run it from Git Bash; it writes Windows-compatible `C:/...` paths for Windows-native consumers. Linux and macOS use their native Bash paths.
+The CLI is implemented in Node and uses native paths for the host it runs on. On Windows, run it from Git Bash; it writes Windows-compatible `C:/...` paths for Windows-native consumers. Linux, macOS, and native WSL use their own Bash and POSIX paths.
 
 ## Minimal Command
 
@@ -142,7 +144,7 @@ and existing formal release state are rejected.
 
 `DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
 
-On Windows, install Git for Windows, open **Git Bash**, and use the same commands as Linux/macOS. Run the Git Bash preflight in **Skill Installation And Updates** before any lifecycle command; if it fails, install Git from `https://git-scm.com/download/win` and reopen Git Bash. Do not mix PowerShell or WSL with a Git-Bash-owned service directory.
+On native Windows, install Git for Windows, open **Git Bash**, and use the same commands as Linux/macOS. Run the Git Bash preflight in **Skill Installation And Updates** before any lifecycle command; if it fails, install Git from `https://git-scm.com/download/win` and reopen Git Bash. Native WSL is supported as Linux, but a service directory must stay owned by one environment: do not switch a Git-Bash-owned service directory into WSL or a WSL-owned directory into Windows tooling.
 
 ```bash
 export AWS_DEFAULT_REGION=us-east-1
@@ -225,7 +227,7 @@ mcp/openclaw.md
 mcp/hermes.md
 ```
 
-Linux/macOS Bash manual install:
+Linux/macOS/WSL Bash manual install:
 
 ```bash
 npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk-connect@latest

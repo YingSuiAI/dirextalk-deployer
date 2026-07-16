@@ -8,14 +8,18 @@ cd "$ROOT"
 source scripts/lib/git-bash.sh
 ORIGINAL_EXEPATH=${EXEPATH-}
 
-if wsl_output=$(WSL_INTEROP=1 dirextalk_require_git_bash_on_windows 2>&1); then
-  echo "WSL must not be accepted as a Windows lifecycle shell" >&2
+uname() {
+  case "${1:-}" in
+    -r) printf '%s\n' '6.6.87.2-microsoft-standard-WSL2' ;;
+    -s) printf '%s\n' 'Linux' ;;
+    *) printf '%s\n' 'Linux' ;;
+  esac
+}
+if ! WSL_INTEROP=1 WSL_DISTRO_NAME=Ubuntu dirextalk_require_git_bash_on_windows; then
+  echo "a native WSL2 session must be accepted as a Linux lifecycle host" >&2
   exit 1
 fi
-printf '%s\n' "$wsl_output" | grep -q 'Git for Windows' || {
-  echo "WSL rejection must tell Windows users to install Git for Windows" >&2
-  exit 1
-}
+unset -f uname
 
 uname() {
   case "${1:-}" in

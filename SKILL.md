@@ -24,19 +24,20 @@ On Windows, this check comes first, including before skill installation or
 refresh. Run it from Git Bash:
 
 ```bash
-git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
 case "$(uname -s)" in
-  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  MINGW*) git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##'); command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  Linux*|Darwin*) true ;;
   *) false ;;
 esac
 ```
 
-Continue only when that command succeeds. It verifies that the current shell's
-`EXEPATH` is under the same Git for Windows installation as `git`, and rejects
-PowerShell, WSL, MSYS2, and Cygwin. Otherwise tell the user to install Git for
-Windows from `https://git-scm.com/download/win`, reopen Git Bash, and stop. The
-skill CLI repeats and strengthens this gate before `install`, `update`, or
-`refresh` can write a target.
+Continue only when that command succeeds. Native Linux, macOS, and WSL sessions
+use their own Bash environment directly. On native Windows, it verifies that
+the current shell's `EXEPATH` is under the same Git for Windows installation as
+`git`, and rejects PowerShell, MSYS2, and Cygwin. Otherwise tell the Windows
+user to install Git for Windows from `https://git-scm.com/download/win`, reopen
+Git Bash, and stop. The skill CLI repeats and strengthens the Windows gate
+before `install`, `update`, or `refresh` can write a target.
 
 Before deployment, repair, verification, teardown, runtime wiring, or skill
 installation, make one freshness attempt:
@@ -70,11 +71,14 @@ Classify every path by consumer before writing it to `state.json`,
 - Documentation paths must be portable examples using `$HOME`, `%USERPROFILE%`,
   `$env:USERPROFILE`, `<service_id>`, or `<domain>`.
 
-Windows, Linux, and macOS users run the same Bash entrypoints. On Windows,
+Windows, Linux, macOS, and WSL users run the same Bash entrypoints. A process
+running inside WSL is a Linux deployment host and uses its distribution's
+Node.js, AWS CLI, paths, and Bash directly. On native Windows,
 Git for Windows is required: use the exact preflight above before any deployment
 action. If it fails, tell the user to install Git for Windows from
 `https://git-scm.com/download/win`, open **Git Bash**, and rerun; do not
-substitute PowerShell or WSL. Git Bash automatically writes native `C:/...`
+substitute PowerShell or launch WSL as a command runner for a Windows-owned
+deployment. Git Bash automatically writes native `C:/...`
 paths for Windows-native Node.js, `dirextalk-connect`, and agent processes. Run
 every lifecycle action from that same Git Bash session:
 
@@ -88,7 +92,9 @@ conversion, so a parent runtime that sets `MSYS_NO_PATHCONV=1` cannot turn a
 Git Bash `/c/...` or `/tmp/...` path into an unrelated `C:\c\...` or `C:\tmp\...`
 lookup.
 
-Do not manually mix PowerShell, WSL, and Git Bash for one local service.
+Keep each local service in one environment: either native WSL/Linux paths or
+native Windows Git Bash paths. Do not switch the same service directory between
+PowerShell, WSL, and Git Bash.
 
 ## Prerequisites And Confirmation
 

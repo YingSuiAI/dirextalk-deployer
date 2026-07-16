@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# git-bash.sh - public Windows shell contract.
+# git-bash.sh - public Windows shell contract; POSIX hosts pass through.
 
 dirextalk_git_bash_tools_available() {
   local git_version git_exec_path git_root exe_path bash_path git_path cygpath_path
@@ -36,18 +36,6 @@ dirextalk_git_bash_tools_available() {
 }
 
 dirextalk_require_git_bash_on_windows() {
-  case "${WSL_INTEROP:-}${WSL_DISTRO_NAME:-}" in
-    ?*)
-      printf '%s\n' "Dirextalk on Windows uses Git Bash only. Install Git for Windows from https://git-scm.com/download/win, open Git Bash, and rerun this command." >&2
-      return 1
-      ;;
-  esac
-  case "$(uname -r 2>/dev/null || printf unknown)" in
-    *[Mm]icrosoft*|*[Ww][Ss][Ll]*)
-      printf '%s\n' "Dirextalk on Windows uses Git Bash only. Install Git for Windows from https://git-scm.com/download/win, open Git Bash, and rerun this command." >&2
-      return 1
-      ;;
-  esac
   case "$(uname -s 2>/dev/null || printf unknown)" in
     *MSYS*|*CYGWIN*)
       printf '%s\n' "Dirextalk on Windows uses Git Bash only. Install Git for Windows from https://git-scm.com/download/win, open Git Bash, and rerun this command." >&2

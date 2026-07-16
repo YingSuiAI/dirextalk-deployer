@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { homedir, release } from "node:os";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -94,10 +94,6 @@ function main() {
 }
 
 function requireGitBashForWindowsSkillCommand() {
-  const osRelease = release();
-  if (process.env.WSL_INTEROP || process.env.WSL_DISTRO_NAME || /microsoft|wsl/i.test(osRelease)) {
-    throwUserError(gitForWindowsRequiredMessage);
-  }
   if (process.platform !== "win32") return;
 
   if (!/^MINGW/i.test(process.env.MSYSTEM || "")) {

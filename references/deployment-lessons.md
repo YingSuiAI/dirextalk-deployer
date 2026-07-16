@@ -38,13 +38,14 @@ Portal owner discovery is served by message-server's dynamic
 
 ## Windows Runtime Pitfalls
 
-Windows deployment uses Git for Windows Git Bash only. From Git Bash, verify
-the installation before running a lifecycle command:
+Native Windows deployment uses Git for Windows Git Bash only. Native WSL is a
+separate supported Linux host and runs Bash directly. From Git Bash, verify the
+Windows installation before running a lifecycle command:
 
 ```bash
-git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
 case "$(uname -s)" in
-  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  MINGW*) git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##'); command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  Linux*|Darwin*) true ;;
   *) false ;;
 esac
 command -v node aws ssh curl
@@ -52,7 +53,8 @@ command -v node aws ssh curl
 
 If the Git Bash preflight fails, install Git for Windows from
 <https://git-scm.com/download/win>, reopen Git Bash, and stop. Do not substitute
-PowerShell, MSYS2, Cygwin, or WSL.
+PowerShell, MSYS2, or Cygwin. Do not switch the same service state between
+native Windows Git Bash and WSL.
 
 The orchestrator uses the repository's Node.js JSON helper for local JSON
 processing, so Git Bash must be able to run `node` against the same path style

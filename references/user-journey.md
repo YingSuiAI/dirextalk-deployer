@@ -19,12 +19,13 @@ Confirm these items before calling `scripts/orchestrate.sh`:
 7. Docker Hub can pull `dirextalk/message-server:latest`; new deployments do not require message-server GitHub Release access.
 8. Existing state handling is explicit: continue, destroy, or new workdir.
 
-On Windows, first open Git Bash and verify Git before a lifecycle action:
+On native Windows, first open Git Bash and verify Git before a lifecycle
+action. Native WSL follows the Linux path and runs Bash directly:
 
 ```bash
-git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
 case "$(uname -s)" in
-  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  MINGW*) git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##'); command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  Linux*|Darwin*) true ;;
   *) false ;;
 esac
 command -v node aws ssh curl
@@ -32,7 +33,8 @@ command -v node aws ssh curl
 
 If the Git Bash preflight fails, install Git for Windows from
 <https://git-scm.com/download/win>, reopen Git Bash, and stop. Do not use
-PowerShell or WSL for deployer lifecycle commands.
+PowerShell as the native Windows lifecycle shell, and do not switch the same
+service state between Git Bash and WSL.
 
 ## Domain Modes
 

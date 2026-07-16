@@ -9,16 +9,18 @@ deployments.
 From Git Bash at the repository root, verify Git before every lifecycle action:
 
 ```bash
-git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##')
 case "$(uname -s)" in
-  MINGW*) command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  MINGW*) git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##'); command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  Linux*|Darwin*) true ;;
   *) false ;;
 esac
 ```
 
 If the preflight fails, install Git for Windows from
 <https://git-scm.com/download/win>, reopen Git Bash, and stop. The preflight
-rejects PowerShell, WSL, MSYS2, and Cygwin. Git Bash automatically stores
+rejects PowerShell, MSYS2, and Cygwin on native Windows. Native WSL is supported
+as a Linux host and uses its distribution's Bash, tools, and POSIX paths; do not
+use it to operate a Git-Bash-owned service directory. Git Bash automatically stores
 Windows-compatible consumer paths in `C:/...` form before invoking
 Windows-native Node.js or local agent processes.
 

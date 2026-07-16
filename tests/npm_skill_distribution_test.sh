@@ -39,20 +39,25 @@ case "$(uname -s 2>/dev/null || printf unknown)" in
 esac
 export PATH="$NODE_DIR:$PATH"
 
-# A Windows user must not create a second skill copy from WSL. Exercise every
-# lifecycle command in dry-run mode before any target is written.
-for skill_command in install update refresh; do
-  wsl_home="$tmp/wsl-$skill_command"
-  if WSL_INTEROP=1 "$NODE_BIN" bin/dirextalk-deployer.mjs skill "$skill_command" --agent codex --home "$wsl_home" --dry-run >"$tmp/wsl-$skill_command.out" 2>"$tmp/wsl-$skill_command.err"; then
-    echo "skill $skill_command must reject a WSL environment" >&2
-    exit 1
-  fi
-  assert_contains "$tmp/wsl-$skill_command.err" 'Git for Windows'
-  if [ -e "$wsl_home" ]; then
-    echo "WSL dry-run must not create a skill target" >&2
-    exit 1
-  fi
-done
+# Native WSL runs Linux Node.js and follows the normal POSIX skill path. Merely
+# exporting WSL variables inside Git Bash does not turn Windows Node.js into a
+# WSL process, so exercise this contract only on Linux hosts (including WSL).
+case "$(uname -s 2>/dev/null || printf unknown)" in
+  Linux*)
+    for skill_command in install update refresh; do
+      wsl_home="$tmp/wsl-$skill_command"
+      WSL_INTEROP=1 WSL_DISTRO_NAME=Ubuntu "$NODE_BIN" bin/dirextalk-deployer.mjs skill "$skill_command" --agent codex --home "$wsl_home" --dry-run >"$tmp/wsl-$skill_command.out" 2>"$tmp/wsl-$skill_command.err" || {
+        echo "skill $skill_command must accept native WSL as a Linux host" >&2
+        cat "$tmp/wsl-$skill_command.err" >&2
+        exit 1
+      }
+      if [ -e "$wsl_home" ]; then
+        echo "WSL dry-run must not create a skill target" >&2
+        exit 1
+      fi
+    done
+    ;;
+esac
 
 case "$(uname -s 2>/dev/null || true)" in
   MINGW*|MSYS*|CYGWIN*)

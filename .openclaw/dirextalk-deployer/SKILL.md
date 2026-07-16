@@ -6,7 +6,6 @@ metadata:
     requires:
       bins:
         - npm
-        - git
         - bash
     install:
       - kind: node
@@ -36,9 +35,11 @@ Use the installed CLI to refresh the host-level skill when needed:
 dirextalk-deployer skill refresh --agent openclaw
 ```
 
-On Windows, use Git for Windows Git Bash for every lifecycle command. Do not
-mix PowerShell, WSL, and Git Bash in a single local service workflow. On Linux
-and macOS, use Bash.
+On native Windows, use Git for Windows Git Bash for every lifecycle command.
+Native WSL is a Linux host and runs Bash directly with its own Node.js, AWS CLI,
+and POSIX paths. Keep each service directory owned by one environment; do not
+switch the same service state between PowerShell, Git Bash, and WSL. On Linux,
+macOS, and WSL, use Bash.
 
 Read the npm package's `SKILL.md` and `README.md` before acting. They define the
 required AWS billing confirmation, domain ownership confirmation, DNS handling,

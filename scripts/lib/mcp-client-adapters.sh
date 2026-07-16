@@ -33,9 +33,28 @@ _mcp_hermes_config_path() {
   printf '%s/hermes.md\n' "$(_mcp_runtime_dir "$service_dir")"
 }
 
+_mcp_hermes_default_home() {
+  if [ "$(dirextalk_local_path_style)" = "windows" ] && [ -n "${LOCALAPPDATA:-}" ]; then
+    dirextalk_normalize_local_path "$LOCALAPPDATA/hermes"
+  else
+    dirextalk_normalize_local_path "$HOME/.hermes"
+  fi
+}
+
 _mcp_hermes_home() {
-  local _service_dir=${1:-} configured
-  configured=${DIREXTALK_HERMES_MCP_HOME:-${HERMES_HOME:-$HOME/.hermes}}
+  local service_dir=${1:-} configured service_home default_home
+  default_home=$(_mcp_hermes_default_home) || return 1
+  if [ -n "${DIREXTALK_HERMES_MCP_HOME:-}" ]; then
+    configured=$DIREXTALK_HERMES_MCP_HOME
+  else
+    configured=${HERMES_HOME:-$default_home}
+    if [ -n "$service_dir" ]; then
+      service_home=$(dirextalk_normalize_local_path "$service_dir/hermes") || return 1
+      if [ "$(dirextalk_normalize_local_path "$configured")" = "$service_home" ]; then
+        configured=$default_home
+      fi
+    fi
+  fi
   dirextalk_normalize_local_path "$configured"
 }
 

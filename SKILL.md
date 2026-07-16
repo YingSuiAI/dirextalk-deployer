@@ -361,7 +361,10 @@ retains `project` and `conditional`, but no current connect backend uses them.
 S6 never generates a generic fallback artifact. Dedicated manual artifacts are
 limited to registry entries that name one; no unconsumed MCP env artifact is
 generated. MCP does not need a local CLI, daemon, proxy, or listening
-port. S6 installs the
+port. When refreshing an existing service-scoped package, S6 keeps the current
+daemon running during the npm operation and lets the final `daemon install
+--force` perform the short handoff; an npm failure must not stop the working
+daemon. S6 installs the
 service-scoped `dirextalk-connect` daemon and records it as installed only after
 `daemon status` reports Running and recent logs show `dirextalk-connect is
 running`; logs that show agent CLI missing, login/trust failures, ACP startup
@@ -376,7 +379,10 @@ registered through `openclaw config patch --stdin`, then must pass
 token never appears in argv; inherited `OPENCLAW_CONFIG_PATH` and optional
 `DIREXTALK_OPENCLAW_PROFILE=<profile>` select the native scope. Hermes clones
 the current configured native profile into a marked service profile (or uses an
-explicit `DIREXTALK_HERMES_PROFILE`), stores the token through Hermes' native
+explicit `DIREXTALK_HERMES_PROFILE`). An inherited `HERMES_HOME` that points
+back into the current node is replaced by the native Hermes home (`%LOCALAPPDATA%/hermes`
+on Windows, `$HOME/.hermes` elsewhere); use
+`DIREXTALK_HERMES_MCP_HOME` for a deliberate override. S6 stores the token through Hermes' native
 API, and requires a native live-tool probe. Both paths continue automatically
 only after their probe passes; no readiness flag is needed. Destroy removes the
 managed OpenClaw entry/token and any deployer-owned Hermes profile. Other

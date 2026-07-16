@@ -834,7 +834,7 @@ _connect_daemon_install_command() {
     package_dir=${package_dir:+$(_local_connect_path "$package_dir")}
   fi
   if [ -n "$package_dir" ]; then
-    printf 'if [ -x %q ]; then %q daemon stop --service-name %q || true; fi; npm install --prefix %q %q && %q daemon install --config %q --service-name %q --force' "$binary" "$binary" "$service_name" "$package_dir" "$(_connect_npm_package)" "$binary" "$config" "$service_name"
+    printf 'npm install --prefix %q %q && %q daemon install --config %q --service-name %q --force' "$package_dir" "$(_connect_npm_package)" "$binary" "$config" "$service_name"
   else
     printf 'if ! command -v %q >/dev/null 2>&1; then npm install -g %q; fi && %q daemon install --config %q --service-name %q --force' "$binary" "$(_connect_npm_package)" "$binary" "$config" "$service_name"
   fi
@@ -900,9 +900,6 @@ _maybe_auto_install_connect() {
   package_dir=$(_connect_package_dir "$service_dir")
   if [ "${DIREXTALK_CONNECT_INSTALL_FROM:-npm}" != "source" ]; then
     if command -v npm >/dev/null 2>&1; then
-      if _connect_binary_available "$binary"; then
-        "$binary" daemon stop --service-name "$service_name" >/dev/null 2>&1 || true
-      fi
       if ! mkdir -p "$package_dir"; then
         state_set connect_install_status "install_failed" 2>/dev/null || true
         return 1

@@ -246,6 +246,7 @@ case "$install_command" in
     exit 1
     ;;
 esac
+[[ "$install_command" != *"daemon stop"* ]]
 custom_install_command=$(DIREXTALK_CONNECT_NPM_PACKAGE='dirextalk-connect@override-test' _connect_install_command "$connect_service_binary" "$connect_service_dir/dirextalk-connect/config.toml" "service.example.test" "$connect_service_dir")
 [[ "$custom_install_command" == *"dirextalk-connect@override-test"* ]]
 
@@ -253,16 +254,16 @@ custom_install_command=$(DIREXTALK_CONNECT_NPM_PACKAGE='dirextalk-connect@overri
 [ "$(DIREXTALK_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml')" = "C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" ]
 windows_connect_binary="/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd"
 windows_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _connect_install_command "$windows_connect_binary" "/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" "im" "/mnt/c/Users/alice/.dirextalk/nodes/im")
-[[ "$windows_install_command" == *"if [ -x C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd ]"* ]]
 [[ "$windows_install_command" == *"npm install --prefix C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect dirextalk-connect@latest"* ]]
 [[ "$windows_install_command" == *"C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd daemon install --config C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml"* ]]
 [[ "$windows_install_command" == *"--service-name im"* ]]
+[[ "$windows_install_command" != *"daemon stop"* ]]
 [[ "$windows_install_command" != *"/mnt/c/"* ]]
 [[ "$windows_install_command" != *"Test-Path -LiteralPath"* ]]
 
 posix_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=posix _connect_install_command "/home/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect" "/home/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" "im" "/home/alice/.dirextalk/nodes/im")
-[[ "$posix_install_command" == *"if [ -x"* ]]
 [[ "$posix_install_command" == *"npm install --prefix"* ]]
+[[ "$posix_install_command" != *"daemon stop"* ]]
 [[ "$posix_install_command" != *"Test-Path -LiteralPath"* ]]
 
 windows_mcp_doctor_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _mcp_doctor_command "https://service.example.test" "C:/Users/alice/.dirextalk/nodes/im/credentials.json" node-id "C:/Users/alice/.dirextalk/nodes/im")
@@ -411,6 +412,9 @@ grep -Fq "$openclaw_credentials" "$openclaw_service_dir/mcp/openclaw.md"
 hermes_service_dir="$tmp/hermes-mcp-service"
 hermes_credentials="$hermes_service_dir/credentials.json"
 mkdir -p "$hermes_service_dir"
+[ "$(HERMES_HOME="$hermes_service_dir/hermes" _mcp_hermes_home "$hermes_service_dir")" = "$HOME/.hermes" ]
+[ "$(HERMES_HOME="$hermes_service_dir/hermes" DIREXTALK_HERMES_MCP_HOME="$hermes_service_dir/hermes" _mcp_hermes_home "$hermes_service_dir")" = "$hermes_service_dir/hermes" ]
+[ "$(DIREXTALK_LOCAL_PATH_STYLE=windows LOCALAPPDATA='C:/Users/alice/AppData/Local' HERMES_HOME='C:/Users/alice/.dirextalk/nodes/im/hermes' _mcp_hermes_home 'C:/Users/alice/.dirextalk/nodes/im')" = 'C:/Users/alice/AppData/Local/hermes' ]
 _write_credentials_file "$hermes_credentials" hermes.example.test https://hermes.example.test HERMES_TOKEN 12345678 owner-token '!agents-real:hermes.example.test' hermes-node
 _write_mcp_config_artifacts "hermes.example.test" "$hermes_service_dir" "https://hermes.example.test" "HERMES_TOKEN" "$hermes_credentials" "hermes-node" hermes host-managed
 [ -s "$hermes_service_dir/mcp/hermes.md" ]
@@ -763,6 +767,7 @@ EOF
 cat > "$fakebin/dirextalk-connect" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+[ -z "${CONNECT_CALLS:-}" ] || printf '%s\n' "$*" >> "$CONNECT_CALLS"
 if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "install" ]; then
   [ "${5:-}" = "--service-name" ]
   [ "${6:-}" = "service.example.test" ]
@@ -823,13 +828,16 @@ grep -q '^connect_install_status=installed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/state-connect-update-fallback.calls"
 NPM_CALLS="$tmp/npm-connect-update.calls"
+CONNECT_CALLS="$tmp/connect-update-fallback.calls"
 : > "$STATE_CALLS"
 : > "$NPM_CALLS"
-PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="dirextalk-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
+: > "$CONNECT_CALLS"
+PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" CONNECT_CALLS="$CONNECT_CALLS" NPM_FAIL=1 CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="dirextalk-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
 grep -q '^connect_install_status=installed$' "$STATE_CALLS"
 [ -s "$NPM_CALLS" ]
 grep -q -- '--prefix' "$NPM_CALLS"
 grep -q 'dirextalk-connect@latest' "$NPM_CALLS"
+! grep -q '^daemon stop ' "$CONNECT_CALLS"
 
 STATE_CALLS="$tmp/state-no-ready-log.calls"
 : > "$STATE_CALLS"

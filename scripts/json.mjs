@@ -610,7 +610,6 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
   for (const [key, value] of Object.entries(objectValue(st.phases))) {
     phaseStatuses[key] = stringValue(value?.status || "unknown");
   }
-  const userGate = (gate, fallback) => st.user_confirmations?.[gate]?.status || fallback;
   const localRefreshStatus = st.connect_install_status === "refresh_pending" ? "refresh_pending" : "current_or_not_recorded";
   const billable = compact([
     stringValue(st.resources?.lightsail_instance_name) ? `Lightsail instance ${st.resources.lightsail_instance_name}` : "",
@@ -663,14 +662,21 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
     gates: {
       automated: phaseStatuses,
       user_confirmation: {
-        app_initialization: userGate("app_initialization", "pending_user_confirmation"),
-        real_chat: userGate("real_chat", "pending_user_confirmation"),
-        agent_mcp_runtime: userGate("agent_mcp_runtime", "pending_runtime_confirmation")
+        app_initialization: "not_required",
+        real_chat: "not_required",
+        agent_mcp_runtime: "not_required"
       },
       user_confirmation_details: {
-        app_initialization: userGateDetail(st, "app_initialization", "pending_user_confirmation"),
-        real_chat: userGateDetail(st, "real_chat", "pending_user_confirmation"),
-        agent_mcp_runtime: userGateDetail(st, "agent_mcp_runtime", "pending_runtime_confirmation")
+        app_initialization: { status: "not_required", ts: "", evidence: "", evidence_redacted: false },
+        real_chat: { status: "not_required", ts: "", evidence: "", evidence_redacted: false },
+        agent_mcp_runtime: {
+          status: "not_required",
+          ts: "",
+          evidence: "",
+          evidence_redacted: false,
+          runtime_summary_status: st.runtime_checks?.summary?.status || "not_run",
+          runtime_probe_confirmed: false
+        }
       }
     },
     runtime_checks: {
@@ -778,40 +784,6 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
   }
 
   return report;
-}
-
-function userGateDetail(st, gate, fallback) {
-  const gateState = st.user_confirmations?.[gate] || {};
-  const originalEvidence = stringValue(gateState.evidence);
-  const evidence = redactText(originalEvidence, st);
-  const detail = {
-    status: gateState.status || fallback,
-    ts: gateState.ts || "",
-    evidence,
-    evidence_redacted: evidence !== originalEvidence
-  };
-  if (gate === "agent_mcp_runtime") {
-    detail.runtime_summary_status = gateState.runtime_summary_status || "";
-    detail.runtime_probe_confirmed = gateState.runtime_probe_confirmed || false;
-  }
-  return detail;
-}
-
-function redactText(value, st) {
-  let result = stringValue(value);
-  for (const secret of [
-    st.password,
-    st.access_token,
-    st.agent_token,
-    st.matrix_access_token,
-    st.owner_access_token,
-    st.aws_secret_access_key,
-    st.aws_session_token
-  ]) {
-    const text = stringValue(secret);
-    if (text.length > 0) result = result.split(text).join("<redacted>");
-  }
-  return result.replace(/[0-9]{8,}/g, "<redacted>");
 }
 
 function readJsonFile(file) {

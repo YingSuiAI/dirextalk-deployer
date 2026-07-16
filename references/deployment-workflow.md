@@ -198,24 +198,20 @@ service directory is removed:
 ~/.dirextalk/reports/<service_id>/operation-report.json
 ```
 
-Reports include operation type, S0-S7 gate status, user-confirmation gates,
+Reports include operation type, S0-S7 gate status, automated runtime checks,
 credential/config paths, dirextalk-connect/MCP metadata, AWS resource IDs, billing
 reminders, `billing.cost_estimate`, destroy read-back evidence under
 `destroy.evidence` when applicable, AWS credit/Lightsail trial reminder,
 AWS official policy reminder, AWS Billing Console verification reminder, and
 redaction evidence. They must not
 contain the initialization code, AWS secrets, access tokens, agent tokens, or
-Matrix session tokens. User/runtime evidence is also scrubbed for
-eight-or-more digit numeric strings because users may paste initialization
-codes into confirmation notes. After reset/redeploy, the report must show
+Matrix session tokens. After reset/redeploy, the report must show
 `credentials.status=refresh_pending`, `connect.install_status=refresh_pending`,
 and `mcp.status=refresh_pending` until S5/S6/S7 and runtime checks refresh
-local evidence. Image-only update does not clear local credentials,
-confirmations, runtime checks, dirextalk-connect state, or MCP artifacts.
+local evidence. Image-only update does not clear local credentials, runtime
+checks, dirextalk-connect state, or MCP artifacts.
 
-When the user or runtime evidence confirms a manual product gate, write it back
-to state before regenerating the report. Connect daemon status is a
-service-scoped local bridge check, MCP doctor is a non-polluting HTTP MCP
+Connect daemon status is a service-scoped local bridge check, MCP doctor is a non-polluting HTTP MCP
 initialize check, MCP tools is HTTP MCP `tools/list` discovery, and MCP smoke is
 a read-only HTTP MCP `tools/call` against `dirextalk_messages_list`. In the `DIREXTALK_AGENT_INSTALL=recommend` path, `verify runtime` records
 `connect_daemon=manual_pending` instead of failing the aggregate, because
@@ -223,7 +219,7 @@ daemon installation is an explicit operator action. The default
 `DIREXTALK_AGENT_INSTALL=auto` path expects dirextalk-connect to be installed
 automatically during S6, while MCP uses the server HTTP endpoint directly. S6 waits for `dirextalk-connect is running`
 in daemon logs and fails on local Agent startup errors before moving on. These
-checks are not the full runtime product gate:
+checks form the automated runtime boundary for deployment completion:
 
 ```bash
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify runtime
@@ -233,30 +229,14 @@ DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_doctor
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_tools
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_smoke
 
-DIREXTALK_CONFIRM_EVIDENCE="user completed app initialization" \
-DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh confirm app_initialization
-
-DIREXTALK_CONFIRM_EVIDENCE="user sent a message and saw the agent reply" \
-DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh confirm real_chat
-
-DIREXTALK_CONFIRM_RUNTIME_PROBE=1 \
-DIREXTALK_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" \
-DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh confirm agent_mcp_runtime
-
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh report new_deploy
 ```
 
-`confirm agent_mcp_runtime` refuses to write the gate until
-`runtime_checks.summary.status=passed` and `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`
-are both present. Use the flag only after the selected runtime/channel probe has
-actually loaded the service-scoped MCP tools; `verify runtime` alone is an
-internal non-polluting check, not the full product gate.
-All `confirm` commands require `DIREXTALK_CONFIRM_EVIDENCE` with a concrete
-user/runtime evidence note. The agent writes that machine-only note after a
-clear natural-language user confirmation; it must not ask the user to provide
-an exact phrase or environment variable. The evidence note must be at least 12
-characters; avoid generic defaults or placeholders such as `ok`, `yes`, or
-`done`.
+Final delivery runs `verify runtime` itself and reports `deployment_complete`
+only after the automated boundary passes. App initialization and the first real
+chat happen after deployment and require no deployer confirmation command.
+Legacy report consumers still receive `gates.user_confirmation` fields with
+the fixed status `not_required`.
 
 ## Existing Node Update
 

@@ -198,7 +198,7 @@ DOMAIN=<domain> MESSAGE_SERVER_IMAGE=dirextalk/message-server:<debug-tag> bash s
 
 This is an explicit debug/legacy override, not the normal production upgrade
 path. Image refresh restarts the remote service only. It leaves local credentials,
-`dirextalk-connect`, MCP artifacts, user confirmations, and runtime checks intact.
+`dirextalk-connect`, MCP artifacts, and runtime checks intact.
 
 Reset application data while preserving EC2, DNS, fixed IP, and Caddy TLS:
 

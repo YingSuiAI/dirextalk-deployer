@@ -182,7 +182,7 @@ json_build object \
 calls="$tmp/curl.calls"
 run_output=$(DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CURL_CALLS="$calls" CONNECT_WORK_DIR="$runtime_dir" bash "$ROOT/scripts/orchestrate.sh" 2>&1)
 printf '%s\n' "$run_output" | grep -q 'HTTP MCP dirextalk_messages_list (agent token)'
-printf '%s\n' "$run_output" | grep -q 'Automated Deployment Gates Passed'
+printf '%s\n' "$run_output" | grep -q 'Deployment Complete'
 
 json_test_check "$state" "data.phases.S7_VERIFY_E2E.status === 'done' && data.runtime_checks.mcp_smoke.status === 'passed' && data.runtime_checks.summary.status === 'passed'"
 if grep -q '/_p2p/query' "$calls"; then

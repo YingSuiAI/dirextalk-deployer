@@ -38,7 +38,7 @@ report=$(ops_write_report reset_app_data reset_remote_data_cleared_refresh_pendi
 
 echo "Application data reset complete on the existing node."
 echo "Caddy TLS storage was preserved."
-echo "Old user confirmations and runtime checks were cleared."
+echo "Old credentials and runtime checks were cleared."
 echo "$bridge_stop_message"
 echo "Local S4-S7 gates were reset; rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue."
 echo "operation report: $report"

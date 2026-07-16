@@ -126,27 +126,45 @@ json_build object \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
   "resources={\"instance_id\":\"i-final\",\"public_ip\":\"203.0.113.21\",\"key_file\":\"$keyfile\"}" > "$state"
 
+export DOMAIN=final-delivery.example.test
+export DIREXTALK_LOCAL_PATH_STYLE=windows
+export DIREXTALK_WORKDIR="$service_dir"
+export PATH="$fakebin:$PATH"
+export DIREXTALK_ORCHESTRATE_LIB_ONLY=1
+# shellcheck disable=SC1090
+source "$ROOT/scripts/orchestrate.sh"
+unset DIREXTALK_ORCHESTRATE_LIB_ONLY
+
 set +e
-DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" > "$tmp/fail.out" 2>&1
+CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" print_delivery > "$tmp/fail.out" 2>&1
 fail_rc=$?
 set -e
 [ "$fail_rc" -ne 0 ] || {
   echo "final delivery must fail when connect daemon is not running for this service" >&2
   exit 1
 }
-grep -q 'Final delivery blocked because runtime checks did not all pass' "$tmp/fail.out"
+grep -q 'Final delivery blocked because runtime checks did not all pass' "$tmp/fail.out" || {
+  echo "expected runtime-gate failure, got:" >&2
+  cat "$tmp/fail.out" >&2
+  exit 1
+}
 grep -Fq 'DOMAIN=final-delivery.example.test bash' "$tmp/fail.out" || {
   echo "Windows delivery recovery must render a Git Bash verify command" >&2
   exit 1
 }
-if grep -q 'Automated Deployment Gates Passed' "$tmp/fail.out"; then
+if grep -q 'Deployment Complete' "$tmp/fail.out"; then
   echo "final delivery must not print success when runtime checks fail" >&2
   exit 1
 fi
 json_test_check "$state" "data.runtime_checks.summary.status === 'failed' && data.runtime_checks.connect_daemon.status === 'failed'"
 
-pass_output=$(DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_WORKDIR="$service_dir" DIREXTALK_EXISTING_STATE_ACTION=continue PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$runtime_dir" bash "$ROOT/scripts/orchestrate.sh")
-printf '%s\n' "$pass_output" | grep -q 'Automated Deployment Gates Passed'
+pass_output=$(CONNECT_WORK_DIR="$runtime_dir" print_delivery)
+printf '%s\n' "$pass_output" | grep -q 'Deployment Complete'
+printf '%s\n' "$pass_output" | grep -q 'status       : deployment and automated runtime/MCP verification completed'
+if printf '%s\n' "$pass_output" | grep -Eq 'confirm (app_initialization|real_chat|agent_mcp_runtime)|user gates|waits for user/runtime confirmation'; then
+  echo "completed delivery must not require post-deployment confirmation commands" >&2
+  exit 1
+fi
 connect_windows=$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_normalize_local_path "$connect_binary")
 keyfile_windows=$(DIREXTALK_LOCAL_PATH_STYLE=windows dirextalk_normalize_local_path "$keyfile")
 printf '%s\n' "$pass_output" | grep -Eq "  daemon       : .*daemon status --service-name final-delivery\.example\.test" || {
@@ -158,5 +176,12 @@ printf '%s\n' "$pass_output" | grep -Eq "  SSH          : ssh -i .* ubuntu@203\.
   exit 1
 }
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.connect_daemon.status === 'passed' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"
+
+report="$service_dir/operation-report.json"
+json_test_check "$report" "data.status === 'deployment_complete' && data.delivery.product_completion_status === 'deployment_complete' && data.gates.user_confirmation.app_initialization === 'not_required' && data.gates.user_confirmation.real_chat === 'not_required' && data.gates.user_confirmation.agent_mcp_runtime === 'not_required'"
+
+confirm_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" confirm app_initialization)
+printf '%s\n' "$confirm_output" | grep -q 'confirmation not required'
+json_test_check "$state" "!data.user_confirmations"
 
 echo "final delivery runtime gate ok"

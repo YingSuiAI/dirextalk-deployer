@@ -55,16 +55,16 @@ Current best plan is the stricter plan now encoded in this branch:
 2. Keep all node-local deployment state under `~/.dirextalk/nodes/<service_id>/`.
    Do not mutate global host MCP configs or assume one computer has only one
    agent or one backend node.
-3. Treat S7 as automated foundation checks only. `verify runtime is an internal
-   non-polluting check`; it is not enough to declare the product complete.
-4. Require explicit user App initialization and real chat evidence before user
-   gates can be confirmed.
-5. Keep Agent/MCP validation non-polluting by default, then let the user decide
-   whether to send a real message in the Agent chat box.
+3. Complete deployment after S7 and the automated `verify runtime` boundary
+   pass. App initialization and real chat are subsequent product usage, not
+   deployer confirmation gates.
+4. Keep Agent/MCP validation non-polluting by default; the automated boundary
+   proves daemon health, MCP initialization, tool discovery, and a read-only
+   tool call without sending a user-visible chat message.
 6. Keep update/reset/destroy as separate operations with separate receipts;
    update/reset are now first-class scripts, not runbook-only manual actions.
 7. Treat reset/redeploy follow-up as a Local refresh state: reset/redeploy
-   clears old credentials, user confirmations, runtime checks, bridge install
+   clears old credentials, runtime checks, bridge install
    proof, and MCP install proof, so the next action is to rerun S4-S7 and
    runtime checks. Image-only update keeps local state intact.
 8. Keep Lightsail and EC2 resource models separate: Lightsail has its own
@@ -72,45 +72,41 @@ Current best plan is the stricter plan now encoded in this branch:
    preflight and cleanup.
 
 Audit anchors:
-- verify runtime is an internal non-polluting check
-- user App initialization and real chat evidence
+- automated runtime/MCP verification completes deployment
+- App initialization and real chat are subsequent product usage
 - update/reset are now first-class scripts
 - Local refresh
 - Lightsail default path is implemented
 
 ## Requirement Mapping
 
-### DEPLOY-P0-001 - Do Not Declare Completion Early
+### DEPLOY-P0-001 - Declare Completion At The Automated Boundary
 
-Status: Deployer-side implemented, with Runtime evidence still required.
+Status: Implemented.
 
 Current evidence:
-- `SKILL.md` defines Product Completion Gates and says S7 green is not final
-  product completion.
-- `scripts/orchestrate.sh confirm app_initialization|real_chat|agent_mcp_runtime`
-  requires explicit evidence and rejects short generic confirmations.
-- `tests/user_confirmation_gates_test.sh` and `tests/operation_report_test.sh`
-  assert pending gates and redacted evidence.
+- `SKILL.md` defines deployment completion as S0-S7 plus automated runtime/MCP
+  verification.
+- `scripts/orchestrate.sh` reports `deployment_complete` only after the strict
+  runtime summary passes.
+- `tests/final_delivery_runtime_gate_test.sh` and
+  `tests/operation_report_test.sh` assert completion without post-deployment
+  confirmation commands.
 
 Difference from the checklist:
-- The checklist asked for product gates. The current branch implements them as
-  state/report fields instead of a single "done" word.
-
-Remaining evidence:
-- Real user App initialization and real chat evidence.
-- Real selected runtime confirmation that service-scoped MCP tools loaded.
+- User-driven App onboarding is deliberately outside the deployer transaction;
+  it no longer leaves a successful deployment artificially pending.
 
 ### DEPLOY-P0-002 - OpenClaw Runtime Acceptance
 
-Status: Deployer-side implemented, with Runtime evidence still required.
+Status: Implemented.
 
 Current evidence:
 - Runtime snippets are written under `~/.dirextalk/nodes/<service_id>/mcp/`.
 - `verify mcp_doctor`, `verify mcp_tools`, `verify mcp_smoke`, and
   `verify runtime` are available.
 - `mcp_smoke` uses a read-only backend action by default.
-- `agent_mcp_runtime` confirmation requires both a passed runtime summary and
-  `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`.
+- Final delivery requires the aggregate runtime summary to pass.
 
 Difference from the checklist:
 - The deployer does not auto-send a test chat message. That is deliberate:
@@ -118,8 +114,8 @@ Difference from the checklist:
   action.
 
 Remaining evidence:
-- A real OpenClaw/Hermes/Codex runtime must prove it loaded the exact
-  service-scoped MCP snippet and can use it.
+- Runtime-specific end-to-end chat remains a product-usage check, not a
+  deployment blocker.
 
 ### DEPLOY-P0-003 - Cost And Destroy Loop
 
@@ -268,7 +264,8 @@ Current evidence:
 - Reset/redeploy stops only the matching service-scoped dirextalk-connect daemon
   when its `WorkDir` matches the current service, so stale local bridge
   processes do not keep using old credentials.
-- `status` reports Local refresh when reset/redeploy cleared old credentials, user confirmations, runtime checks, bridge install proof, and MCP install proof.
+- `status` reports Local refresh when reset/redeploy cleared old credentials,
+  runtime checks, bridge install proof, and MCP install proof.
 - Runtime checks fail closed when a stale service directory or wrong WorkDir is
   detected.
 
@@ -280,33 +277,30 @@ Remaining evidence:
 - If a real runtime reports 401/403 after reset, first verify it is using the
   current service-scoped credential file before blaming the backend.
 
-### DEPLOY-P2-001 - Automated And Human Acceptance Layers
+### DEPLOY-P2-001 - Automated Deployment Completion Boundary
 
-Status: Deployer-side implemented, with Runtime evidence still required.
+Status: Implemented.
 
 Current evidence:
-- Delivery wording is "Automated Deployment Gates Passed", not final product
-  completion.
-- Reports keep automatic gates separate from user confirmation gates.
-- Runtime confirmation has an explicit stricter path.
+- Delivery wording is "Deployment Complete" only after the automated runtime
+  boundary passes.
+- Reports record automated phases and runtime checks without pending user gates.
+- A failed daemon or MCP check blocks final delivery with a resumable command.
 
 Difference from the checklist:
-- The better plan is a layered state model: automated gates passed, user
-  initialization pending, real chat pending, runtime confirmation pending.
-
-Remaining evidence:
-- Human confirmation is still required for App initialization and real chat.
+- App initialization and real chat are product usage after deployment rather
+  than open deployer state.
 
 ### DEPLOY-P2-002 - User Initialization And Message Loop
 
-Status: Deployer-side implemented for wording and gates, Runtime evidence still
-required for the App loop.
+Status: Deployer-side implemented for delivery wording and handoff.
 
 Current evidence:
 - Docs and delivery call the user-facing value an eight-digit app
   initialization code.
 - Old wording around direct IM login is rejected by structure tests.
-- `confirm app_initialization` and `confirm real_chat` record user evidence.
+- Delivery hands the domain and code to the user without requiring a callback
+  into the deployer.
 
 Difference from the checklist:
 - The deployer can record and guard the App path, but the App itself must prove
@@ -318,14 +312,12 @@ Remaining evidence:
 
 ### DEPLOY-P2-003 - Agent Agents Room Loop
 
-Status: Deployer-side implemented for internal checks, Runtime evidence still
-required for user-visible chat.
+Status: Deployer-side implemented for automated runtime checks.
 
 Current evidence:
 - Non-polluting MCP doctor, tools discovery, read-only smoke, and aggregate
   runtime checks exist.
-- `real_chat` cannot be confirmed from internal non-polluting probes alone.
-- `agent_mcp_runtime` requires explicit runtime probe evidence.
+- Final delivery requires all service-scoped runtime/MCP checks to pass.
 
 Difference from the checklist:
 - The user-facing proof stays simple: the user sends a message and sees the

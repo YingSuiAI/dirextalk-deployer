@@ -139,7 +139,7 @@ json_build object \
 verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
 printf '%s\n' "$verify_output" | grep -q 'verified runtime checks: passed'
 
-json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'passed' && data.runtime_checks.summary.checks.mcp_doctor === 'passed' && data.runtime_checks.summary.checks.mcp_tools === 'passed' && data.runtime_checks.summary.checks.mcp_smoke === 'passed' && !data.user_confirmations?.agent_mcp_runtime"
+json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'passed' && data.runtime_checks.summary.checks.mcp_doctor === 'passed' && data.runtime_checks.summary.checks.mcp_tools === 'passed' && data.runtime_checks.summary.checks.mcp_smoke === 'passed'"
 json_test_check "$state" "data.runtime_checks.mcp_doctor.protocol_version === '2025-06-18' && data.runtime_checks.mcp_doctor.server_name === 'dirextalk-message-server' && data.runtime_checks.mcp_doctor.tools_capable === true && data.runtime_checks.mcp_smoke.action === 'tools/call' && data.runtime_checks.mcp_smoke.room_id === '!agent:runtime-summary.example.test' && data.runtime_checks.mcp_smoke.response_content_type === 'array'"
 
 report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)

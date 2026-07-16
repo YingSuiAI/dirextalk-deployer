@@ -407,17 +407,18 @@ State/report fields include `mcp_capability`, `mcp_config_dir`, `mcp_selected_co
 Codex and Cursor do not receive standalone token-bearing MCP artifacts. Session
 injection is owned by dirextalk-connect; Cursor remains host-managed.
 
-## Product Gates
+## Deployment Completion
 
-S7 green is not the final product-complete state. A new deployment is complete
-only after:
+A new deployment is complete when S0-S7 are green, the App domain and
+eight-digit app initialization code are ready for delivery, dirextalk-connect
+is wired to the real `agent_room_id`, and the automated runtime/MCP checks pass.
+The runtime checks cover the service-scoped connect daemon, HTTP MCP
+initialization, tool discovery, and a read-only tool call. Agent/MCP validation
+is non-polluting and does not auto-send a normal chat message.
 
-1. The user receives the App domain and eight-digit app initialization code.
-2. The user confirms App initialization.
-3. dirextalk-connect is wired to the real `agent_room_id`.
-4. MCP snippets exist and `verify mcp_doctor` succeeds against the server HTTP MCP endpoint.
-5. Agent/MCP validation is non-polluting; prefer read-only checks and do not
-   auto-send a normal chat message.
+App initialization and a user's first real chat are subsequent product usage,
+not deployer gates. Do not ask the user to return and confirm them, and do not
+run a separate `confirm` command after deployment.
 
 Runtime verification commands:
 
@@ -429,19 +430,10 @@ DOMAIN=<DOMAIN> bash scripts/orchestrate.sh verify mcp_tools
 DOMAIN=<DOMAIN> bash scripts/orchestrate.sh verify runtime
 ```
 
-Manual confirmation commands:
-
-```bash
-DIREXTALK_CONFIRM_EVIDENCE="user completed app initialization" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm app_initialization
-DIREXTALK_CONFIRM_RUNTIME_PROBE=1 DIREXTALK_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm agent_mcp_runtime
-```
-
-Every `confirm` command requires `DIREXTALK_CONFIRM_EVIDENCE`; agents derive
-that machine-only note from the user's clear natural-language confirmation and
-must not make the user provide an exact phrase. The evidence must remain
-concrete and at least 12 characters. For `agent_mcp_runtime`, first require
-`runtime_checks.summary.status=passed`, then set `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`
-only after a real runtime/channel probe sees the service-scoped MCP tools.
+Final delivery runs `verify runtime` automatically and requires
+`runtime_checks.summary.status=passed`. If a check fails, repair it and resume
+the same deployment; successful delivery needs no post-deployment action in the
+deployer.
 
 ## Status, Reports, And Delivery
 
@@ -458,17 +450,17 @@ service and reflect the Recovery summary:
 Operation reports are written as redacted `operation-report.json` artifacts.
 `scripts/orchestrate.sh report new_deploy` can regenerate a new deployment
 report. Reports must not include AWS secrets, access tokens, agent tokens,
-Matrix session tokens, or the eight-digit app initialization code. Because user
-evidence can contain secrets, confirmation evidence is redacted, including
-eight-or-more digit numeric strings.
+Matrix session tokens, or the eight-digit app initialization code.
 
-Reports include `user_confirmation_details`, `destroy.evidence`,
+Reports include automated phase and runtime-check evidence, `destroy.evidence`,
 `credentials.status`, `mcp.status`, `possible_remaining_billable_resources`,
 AWS resource IDs, EBS root volume evidence, the default 50 GiB gp3 root EBS
-volume size, billing reminders, and `cost_estimate`.
+volume size, billing reminders, and `cost_estimate`. Legacy
+`gates.user_confirmation` report fields remain schema-compatible but always
+read `not_required`; they never block deployment completion.
 
-Delivery must include App domain, eight-digit app initialization code, product
-gate status, `agent_room_id`, service directory, dirextalk-connect config, MCP config
+Delivery must include App domain, eight-digit app initialization code, deployment
+completion status, `agent_room_id`, service directory, dirextalk-connect config, MCP config
 paths, Matrix bridge user/device, AWS region, cloud provider, cloud instance/public IP, SSH path,
 state path, report path, AWS credit/Lightsail trial reminder, AWS official policy reminder,
 AWS Billing Console verification reminder, stop-billing reminder, and security reminder to delete
@@ -477,14 +469,14 @@ or disable temporary credentials and rotate/remove root access keys if used.
 ## Update, Reset, And Destroy
 
 Use `bash scripts/update.sh` for image-only refresh. It preserves infrastructure,
-TLS storage, local credentials, confirmations, runtime checks, dirextalk-connect daemon
+TLS storage, local credentials, runtime checks, dirextalk-connect daemon
 state, and MCP artifacts unless verification proves credentials were regenerated.
 
 Use `bash scripts/reset-app-data.sh` only after an explicit semantic user
 confirmation that application data will be cleared. Set
 `DIREXTALK_RESET_APP_DATA_CONFIRM=1` internally; never make the user copy it.
 It preserves the cloud instance, fixed public IP/static IP or Elastic IP, DNS, and Caddy TLS storage, clears
-application data, clears old user-confirmation/runtime-check evidence, sets
+application data, clears stale credential/runtime-check evidence, sets
 `connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped dirextalk-connect daemon. The follow-up
 orchestrate run regenerates credentials and MCP snippets.
 

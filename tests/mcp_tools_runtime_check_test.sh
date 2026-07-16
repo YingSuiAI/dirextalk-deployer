@@ -103,10 +103,10 @@ calls="$tmp/curl.calls"
 verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CURL_CALLS="$calls" bash "$ROOT/scripts/orchestrate.sh" verify mcp_tools)
 printf '%s\n' "$verify_output" | grep -q 'verified runtime check: mcp_tools'
 
-json_test_check "$state" "data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.endpoint === 'https://mcp-tools.example.test/mcp' && data.runtime_checks.mcp_tools.tool_count === 3 && data.runtime_checks.mcp_tools.tools.some((tool) => tool.name === 'search_rooms') && data.runtime_checks.mcp_tools.tools.some((tool) => tool.name === 'send_message') && data.runtime_checks.mcp_tools.tools.some((tool) => tool.name === 'list_messages') && !data.user_confirmations?.agent_mcp_runtime"
+json_test_check "$state" "data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.endpoint === 'https://mcp-tools.example.test/mcp' && data.runtime_checks.mcp_tools.tool_count === 3 && data.runtime_checks.mcp_tools.tools.some((tool) => tool.name === 'search_rooms') && data.runtime_checks.mcp_tools.tools.some((tool) => tool.name === 'send_message') && data.runtime_checks.mcp_tools.tools.some((tool) => tool.name === 'list_messages')"
 
 report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)
-json_test_check "$report_path" "data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.tool_count === 3 && data.gates.user_confirmation.agent_mcp_runtime === 'pending_runtime_confirmation'"
+json_test_check "$report_path" "data.status === 'deployment_incomplete' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.tool_count === 3 && data.gates.user_confirmation.agent_mcp_runtime === 'not_required'"
 
 echo "mcp tools runtime check ok"

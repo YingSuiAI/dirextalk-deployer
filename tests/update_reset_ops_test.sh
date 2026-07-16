@@ -144,7 +144,7 @@ for unsafe_image in \
   [ ! -s "$update_calls" ] || { echo "unsafe debug image override reached SSH" >&2; cat "$update_calls" >&2; exit 1; }
 done
 CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" MESSAGE_SERVER_IMAGE="dirextalk/message-server:test" DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
-assert_not_contains "$tmp/update.out" 'Old user confirmations and runtime checks were cleared'
+assert_not_contains "$tmp/update.out" 'Old credentials and runtime checks were cleared'
 assert_not_contains "$tmp/update.out" 'Scoped local bridge daemon was stopped'
 assert_not_contains "$tmp/update.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'
 
@@ -178,7 +178,7 @@ json_test_check "$state" "String(data.password) === '12345678' && data.access_to
 
 update_report="$service_dir/operation-report.json"
 assert_file_exists "$update_report"
-json_test_check "$update_report" "data.operation_type === 'update' && data.status === 'update_remote_restart_complete' && data.security.secrets_included === false && data.gates.user_confirmation.app_initialization === 'confirmed' && data.gates.user_confirmation.real_chat === 'confirmed' && data.gates.user_confirmation.agent_mcp_runtime === 'confirmed' && data.runtime_checks.summary.status === 'passed' && data.connect.install_status === 'installed' && data.credentials.status === 'current_or_not_recorded' && data.mcp.status === 'current_or_not_recorded'"
+json_test_check "$update_report" "data.operation_type === 'update' && data.status === 'update_remote_restart_complete' && data.security.secrets_included === false && data.gates.user_confirmation.app_initialization === 'not_required' && data.runtime_checks.summary.status === 'passed' && data.connect.install_status === 'installed' && data.credentials.status === 'current_or_not_recorded' && data.mcp.status === 'current_or_not_recorded'"
 
 write_state "$state" "$service_dir"
 if CALLS="$tmp/reset-unconfirmed.calls" PATH="$fakebin:$PATH" bash "$ROOT/scripts/reset-app-data.sh" "$state" >/dev/null 2>&1; then
@@ -189,7 +189,7 @@ fi
 reset_calls="$tmp/reset.calls"
 : > "$reset_calls"
 CALLS="$reset_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" DIREXTALK_RESET_APP_DATA_CONFIRM=1 bash "$ROOT/scripts/reset-app-data.sh" "$state" > "$tmp/reset.out"
-assert_contains "$tmp/reset.out" 'Old user confirmations and runtime checks were cleared'
+assert_contains "$tmp/reset.out" 'Old credentials and runtime checks were cleared'
 assert_contains "$tmp/reset.out" 'Scoped local bridge daemon was stopped'
 assert_contains "$tmp/reset.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'
 
@@ -217,6 +217,6 @@ json_test_check "$state" "!(data.password || data.access_token || data.agent_tok
 
 reset_report="$service_dir/operation-report.json"
 assert_file_exists "$reset_report"
-json_test_check "$reset_report" "data.operation_type === 'reset_app_data' && data.status === 'reset_remote_data_cleared_refresh_pending' && data.security.secrets_included === false && data.gates.user_confirmation.app_initialization === 'pending_user_confirmation' && data.gates.user_confirmation.real_chat === 'pending_user_confirmation' && data.gates.user_confirmation.agent_mcp_runtime === 'pending_runtime_confirmation' && data.runtime_checks.summary.status === 'not_run' && data.connect.install_status === 'refresh_pending' && data.credentials.status === 'refresh_pending' && data.mcp.status === 'refresh_pending' && data.mcp.install_status === 'refresh_pending' && !('daemon_install_status' in data.mcp)"
+json_test_check "$reset_report" "data.operation_type === 'reset_app_data' && data.status === 'reset_remote_data_cleared_refresh_pending' && data.security.secrets_included === false && data.gates.user_confirmation.app_initialization === 'not_required' && data.runtime_checks.summary.status === 'not_run' && data.connect.install_status === 'refresh_pending' && data.credentials.status === 'refresh_pending' && data.mcp.status === 'refresh_pending' && data.mcp.install_status === 'refresh_pending' && !('daemon_install_status' in data.mcp)"
 
 echo "update reset ops ok"

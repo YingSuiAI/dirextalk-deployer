@@ -212,7 +212,7 @@ local_refresh_pending() {
 
 status_local_refresh() {
   if local_refresh_pending; then
-    echo "reset/redeploy cleared old credentials, user confirmations, runtime checks, bridge install proof, and MCP install proof"
+    echo "reset/redeploy cleared old credentials, runtime checks, bridge install proof, and MCP install proof"
   fi
 }
 
@@ -343,7 +343,7 @@ print_delivery() {
   local cloud_provider cloud_label
   local agent_node_id agent_service_id agent_service_dir agent_cred cc_config cc_binary cc_agent cc_user cc_pkg
   local mcp_endpoint
-  local report_path runtime_summary app_gate real_chat_gate agent_runtime_gate daemon_command ssh_command report_command
+  local report_path runtime_summary daemon_command ssh_command report_command
   domain=$(state_get domain)
   password=$(state_get password)
   if ! printf '%s' "$password" | grep -Eq '^[0-9]{8}$'; then
@@ -376,15 +376,11 @@ print_delivery() {
   install_status=$(state_get connect_install_status)
   install_command=$(state_get connect_install_command)
   runtime_summary=$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")
-  app_gate=$(json_get "$STATE_JSON" user_confirmations.app_initialization.status "pending_user_confirmation")
-  real_chat_gate=$(json_get "$STATE_JSON" user_confirmations.real_chat.status "pending_user_confirmation")
-  agent_runtime_gate=$(json_get "$STATE_JSON" user_confirmations.agent_mcp_runtime.status "pending_runtime_confirmation")
   echo
-  echo -e "\033[32m========== Automated Deployment Gates Passed ==========\033[0m"
+  echo -e "\033[32m========== Deployment Complete ==========\033[0m"
   echo "  App domain   : $domain"
   echo "  init code    : $password   <- enter in the App initialization flow"
-  echo "  status       : server automation is green; product completion waits for user/runtime confirmation"
-  echo "  user gates   : app_initialization=$app_gate real_chat=$real_chat_gate agent_mcp_runtime=$agent_runtime_gate"
+  echo "  status       : deployment and automated runtime/MCP verification completed"
   echo "  runtime check: ${runtime_summary:-not_run}"
   echo "  agent node   : ${agent_node_id:-default}"
   echo "  service id   : ${agent_service_id:-not recorded}"
@@ -408,8 +404,8 @@ print_delivery() {
   echo "  stop billing : ask the agent to destroy this node when finished"
   echo "  Note         : cloud instances, public IPv4/static IPs, storage, and Route53 resources can keep billing until destroy is run."
   echo "  security     : delete/disable temporary IAM keys after deployment; rotate/remove root keys if used."
-  echo "  Product gate : S7 is green; final product completion still needs App initialization and agent/MCP runtime confirmation."
-  if report_path=$(operation_report_write new_deploy automated_gates_complete_user_confirmation_pending "$STATE_JSON" 2>/dev/null); then
+  echo "  next use     : initialize the App with the domain and code above; no deployer confirmation command is required."
+  if report_path=$(operation_report_write new_deploy deployment_complete "$STATE_JSON" 2>/dev/null); then
     echo "  report       : $report_path"
   else
     report_command=$(dirextalk_render_local_command bash "$0" report new_deploy) || return 1
@@ -693,7 +689,13 @@ cmd_report() {
     return 1
   }
   case "$operation" in
-    new_deploy) status=automated_gates_complete_user_confirmation_pending ;;
+    new_deploy)
+      if [ "$(phase_status S7_VERIFY_E2E)" = "done" ] && delivery_runtime_checks_strictly_passed; then
+        status=deployment_complete
+      else
+        status=deployment_incomplete
+      fi
+      ;;
     repair_or_verify) status=verification_report ;;
     update) status=update_report ;;
     reset_app_data) status=reset_app_data_report ;;
@@ -707,55 +709,16 @@ cmd_report() {
   echo "operation report: $report_path"
 }
 
-cmd_confirm() {
-  local gate=${1:-} evidence=${DIREXTALK_CONFIRM_EVIDENCE:-}
-  local runtime_summary_status runtime_probe_confirmed
-  [ -f "$STATE_JSON" ] || {
-    warn "state.json not found: $STATE_JSON"
-    return 1
-  }
-  case "$gate" in
-    app_initialization|real_chat|agent_mcp_runtime) ;;
+cmd_confirm_compat() {
+  case "${1:-}" in
+    app_initialization|real_chat|agent_mcp_runtime)
+      echo "confirmation not required: $1; deployment completion is determined by automated S0-S7 and runtime/MCP checks."
+      ;;
     *)
       echo "Usage: $0 confirm [app_initialization|real_chat|agent_mcp_runtime]" >&2
       return 1
       ;;
   esac
-  if [ -z "$evidence" ]; then
-    warn "confirm $gate requires DIREXTALK_CONFIRM_EVIDENCE with a concrete user/runtime evidence note."
-    return 1
-  fi
-  if [ "${#evidence}" -lt 12 ]; then
-    warn "DIREXTALK_CONFIRM_EVIDENCE is too short; provide a concrete user/runtime evidence note."
-    return 1
-  fi
-  runtime_summary_status=$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")
-  runtime_probe_confirmed=false
-  if [ "$gate" = "agent_mcp_runtime" ]; then
-    if [ "$runtime_summary_status" != "passed" ]; then
-      warn "agent_mcp_runtime confirmation requires runtime_checks.summary.status=passed. Run: DOMAIN=<DOMAIN> bash $0 verify runtime"
-      return 1
-    fi
-    if [ "${DIREXTALK_CONFIRM_RUNTIME_PROBE:-0}" != "1" ]; then
-      warn "agent_mcp_runtime confirmation requires DIREXTALK_CONFIRM_RUNTIME_PROBE=1 after the selected runtime/channel probe is actually confirmed."
-      return 1
-    fi
-    runtime_probe_confirmed=true
-  fi
-  if [ "$gate" = "agent_mcp_runtime" ]; then
-    state_set_object "user_confirmations.$gate" \
-      status=confirmed \
-      "ts=$(_now)" \
-      "evidence=$evidence" \
-      "runtime_summary_status=$runtime_summary_status" \
-      "runtime_probe_confirmed=$runtime_probe_confirmed"
-  else
-    state_set_object "user_confirmations.$gate" \
-      status=confirmed \
-      "ts=$(_now)" \
-      "evidence=$evidence"
-  fi
-  echo "confirmed gate: $gate"
 }
 
 cmd_verify_mcp_doctor() {
@@ -1139,10 +1102,10 @@ case "${1:-run}" in
   run)    cmd_run ;;
   status) cmd_status ;;
   report) shift; cmd_report "${1:-new_deploy}" ;;
-  confirm) shift; cmd_confirm "${1:-}" ;;
+  confirm) shift; cmd_confirm_compat "${1:-}" ;;
   verify) shift; cmd_verify "${1:-}" ;;
   reset)
     [ -f "$STATE_JSON" ] && { mv "$STATE_JSON" "$STATE_JSON.reset-$(date -u +%Y%m%d%H%M%S)"; warn "Archived old state.json."; }
     warn "Warning: after reset, destroy no longer has state data. Any remaining AWS resources must be removed manually." ;;
-  *) echo "Usage: $0 [run|status|report|confirm|verify|reset]"; exit 1 ;;
+  *) echo "Usage: $0 [run|status|report|verify|reset]"; exit 1 ;;
 esac

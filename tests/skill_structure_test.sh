@@ -66,7 +66,6 @@ required=(
   tests/s7_http_mcp_acceptance_test.sh
   tests/root_volume_size_test.sh
   tests/runtime_summary_check_test.sh
-  tests/user_confirmation_gates_test.sh
   references/agent-targets.md
   references/deployment-optimization-audit.md
   references/runtime-wiring.md
@@ -136,7 +135,6 @@ for test_file in \
   tests/route53_zone_required_test.sh \
   tests/s1_lightsail_availability_fallback_test.sh \
   tests/lightsail_static_ip_quota_test.sh \
-  tests/user_confirmation_gates_test.sh \
   tests/destroy_local_bridge_test.sh \
   tests/destroy_root_identity_test.sh \
   tests/pricing_estimate_test.sh \
@@ -311,10 +309,7 @@ if grep -F 'paste into the IM login form' scripts/orchestrate.sh SKILL.md >/dev/
   exit 1
 fi
 
-if grep -F 'Deployment Complete' scripts/orchestrate.sh SKILL.md references/deployment-workflow.md >/dev/null; then
-  echo "delivery output must not call S7 green the final deployment completion state" >&2
-  exit 1
-fi
+grep -Fq 'Deployment Complete' scripts/orchestrate.sh
 
 if grep -F 'Service URL' scripts/orchestrate.sh SKILL.md references/deployment-workflow.md >/dev/null; then
   echo "new deployment delivery should give the App domain and init code, not a service URL/initialization URL" >&2
@@ -344,7 +339,7 @@ if grep -R 'IM passwords\|login password\|login form\|登录密码\|IM 地址' S
 fi
 
 grep -q 'eight-digit app initialization code' SKILL.md
-grep -q 'S7 green is not the final product-complete state' SKILL.md
+grep -q '## Deployment Completion' SKILL.md
 grep -q 'non-polluting' SKILL.md
 grep -q 'HTTP MCP endpoint' SKILL.md
 grep -q 'dirextalk-connect@latest' SKILL.md
@@ -376,10 +371,7 @@ grep -q 'Destroy allows root AWS access-key identity' references/deployment-work
 grep -q 'Recovery summary' SKILL.md
 grep -q 'operation-report.json' SKILL.md
 grep -q 'destroy.evidence' SKILL.md
-grep -q 'user_confirmation_details' SKILL.md
-grep -q 'confirmation evidence is redacted' SKILL.md
-grep -q 'eight-or-more digit numeric strings' SKILL.md
-grep -q 'eight-or-more digit numeric strings' references/deployment-workflow.md
+grep -q 'automated phase and runtime-check evidence' SKILL.md
 grep -q 'credentials.status' SKILL.md
 grep -q 'mcp.status' SKILL.md
 grep -q 'credentials.status=refresh_pending' references/deployment-workflow.md
@@ -391,7 +383,7 @@ grep -q 'destroy.evidence' references/deployment-workflow.md
 grep -q 'scripts/orchestrate.sh report new_deploy' SKILL.md
 grep -q 'scripts/update.sh' SKILL.md
 grep -q 'scripts/reset-app-data.sh' SKILL.md
-grep -q 'clears old user-confirmation/runtime-check evidence' SKILL.md
+grep -q 'clears stale credential/runtime-check evidence' SKILL.md
 grep -q 'connect_install_status=refresh_pending' SKILL.md
 grep -q 'stops only the matching service-scoped dirextalk-connect daemon' SKILL.md
 grep -q 'Local refresh:' SKILL.md
@@ -432,21 +424,14 @@ grep -q 'timezone' references/deployment-workflow.md
 grep -q 'does not automatically switch to EC2' README.md
 grep -q 'EC2-VPC Elastic IP quota' SKILL.md
 grep -q 'EC2-VPC Elastic IP quota' references/deployment-workflow.md
-grep -q 'orchestrate.sh confirm app_initialization' SKILL.md
-grep -q 'orchestrate.sh confirm agent_mcp_runtime' SKILL.md
-grep -q 'DIREXTALK_CONFIRM_RUNTIME_PROBE=1' SKILL.md
 grep -q 'runtime_checks.summary.status' SKILL.md
-grep -q 'confirm` command requires `DIREXTALK_CONFIRM_EVIDENCE`' SKILL.md
-grep -q 'at least 12 characters' SKILL.md
+grep -q 'no post-deployment action' SKILL.md
 grep -q 'orchestrate.sh verify connect_daemon' SKILL.md
 grep -q 'orchestrate.sh verify mcp_doctor' SKILL.md
 grep -q 'orchestrate.sh verify mcp_smoke' SKILL.md
 grep -q 'orchestrate.sh verify mcp_tools' SKILL.md
 grep -q 'orchestrate.sh verify runtime' SKILL.md
-grep -q 'orchestrate.sh confirm app_initialization' references/deployment-workflow.md
-grep -q 'DIREXTALK_CONFIRM_RUNTIME_PROBE=1' references/deployment-workflow.md
-grep -q 'agent writes that machine-only note' references/deployment-workflow.md
-grep -q 'at least 12' references/deployment-workflow.md
+grep -q 'require no deployer confirmation command' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify connect_daemon' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify mcp_doctor' references/deployment-workflow.md
 grep -q 'orchestrate.sh verify mcp_smoke' references/deployment-workflow.md
@@ -490,11 +475,11 @@ grep -q 'Deployer-side implemented' references/deployment-optimization-audit.md
 grep -q 'Runtime evidence still required' references/deployment-optimization-audit.md
 grep -q 'Current best plan' references/deployment-optimization-audit.md
 grep -q '~/.dirextalk/nodes/<service_id>/' references/deployment-optimization-audit.md
-grep -q 'verify runtime is an internal non-polluting check' references/deployment-optimization-audit.md
-grep -q 'user App initialization and real chat evidence' references/deployment-optimization-audit.md
+grep -q 'automated runtime/MCP verification completes deployment' references/deployment-optimization-audit.md
+grep -q 'App initialization and real chat are subsequent product usage' references/deployment-optimization-audit.md
 grep -q 'update/reset are now first-class scripts' references/deployment-optimization-audit.md
 grep -q 'Local refresh' references/deployment-optimization-audit.md
-grep -q 'clears old credentials, user confirmations, runtime checks, bridge install' references/deployment-optimization-audit.md
+grep -q 'clears old credentials, runtime checks, bridge install' references/deployment-optimization-audit.md
 grep -q 'stops only the matching service-scoped dirextalk-connect daemon' references/deployment-optimization-audit.md
 grep -q 'Lightsail default path is implemented' references/deployment-optimization-audit.md
 

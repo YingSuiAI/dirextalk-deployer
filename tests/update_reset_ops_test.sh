@@ -178,7 +178,7 @@ json_test_check "$state" "String(data.password) === '12345678' && data.access_to
 
 update_report="$service_dir/operation-report.json"
 assert_file_exists "$update_report"
-json_test_check "$update_report" "data.operation_type === 'update' && data.status === 'update_remote_restart_complete' && data.security.secrets_included === false && data.gates.user_confirmation.app_initialization === 'not_required' && data.runtime_checks.summary.status === 'passed' && data.connect.install_status === 'installed' && data.credentials.status === 'current_or_not_recorded' && data.mcp.status === 'current_or_not_recorded'"
+json_test_check "$update_report" "data.operation_type === 'update' && data.status === 'update_remote_restart_complete' && data.security.secrets_included === false && !('user_confirmation' in data.gates) && data.runtime_checks.summary.status === 'passed' && data.connect.install_status === 'installed' && data.credentials.status === 'current_or_not_recorded' && data.mcp.status === 'current_or_not_recorded'"
 
 write_state "$state" "$service_dir"
 if CALLS="$tmp/reset-unconfirmed.calls" PATH="$fakebin:$PATH" bash "$ROOT/scripts/reset-app-data.sh" "$state" >/dev/null 2>&1; then
@@ -217,6 +217,6 @@ json_test_check "$state" "!(data.password || data.access_token || data.agent_tok
 
 reset_report="$service_dir/operation-report.json"
 assert_file_exists "$reset_report"
-json_test_check "$reset_report" "data.operation_type === 'reset_app_data' && data.status === 'reset_remote_data_cleared_refresh_pending' && data.security.secrets_included === false && data.gates.user_confirmation.app_initialization === 'not_required' && data.runtime_checks.summary.status === 'not_run' && data.connect.install_status === 'refresh_pending' && data.credentials.status === 'refresh_pending' && data.mcp.status === 'refresh_pending' && data.mcp.install_status === 'refresh_pending' && !('daemon_install_status' in data.mcp)"
+json_test_check "$reset_report" "data.operation_type === 'reset_app_data' && data.status === 'reset_remote_data_cleared_refresh_pending' && data.security.secrets_included === false && !('user_confirmation' in data.gates) && data.runtime_checks.summary.status === 'not_run' && data.connect.install_status === 'refresh_pending' && data.credentials.status === 'refresh_pending' && data.mcp.status === 'refresh_pending' && data.mcp.install_status === 'refresh_pending' && !('daemon_install_status' in data.mcp)"
 
 echo "update reset ops ok"

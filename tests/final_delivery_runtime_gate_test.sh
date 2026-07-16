@@ -178,10 +178,16 @@ printf '%s\n' "$pass_output" | grep -Eq "  SSH          : ssh -i .* ubuntu@203\.
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.connect_daemon.status === 'passed' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"
 
 report="$service_dir/operation-report.json"
-json_test_check "$report" "data.status === 'deployment_complete' && data.delivery.product_completion_status === 'deployment_complete' && data.gates.user_confirmation.app_initialization === 'not_required' && data.gates.user_confirmation.real_chat === 'not_required' && data.gates.user_confirmation.agent_mcp_runtime === 'not_required'"
+json_test_check "$report" "data.status === 'deployment_complete' && data.delivery.product_completion_status === 'deployment_complete' && !('user_confirmation' in data.gates) && !('user_confirmation_details' in data.gates)"
 
-confirm_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" confirm app_initialization)
-printf '%s\n' "$confirm_output" | grep -q 'confirmation not required'
-json_test_check "$state" "!data.user_confirmations"
+set +e
+DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" confirm app_initialization > "$tmp/confirm.out" 2>&1
+confirm_rc=$?
+set -e
+[ "$confirm_rc" -ne 0 ] || {
+  echo "obsolete post-deployment confirm command must not remain available" >&2
+  exit 1
+}
+grep -q 'Usage: .*\[run|status|report|verify|reset\]' "$tmp/confirm.out"
 
 echo "final delivery runtime gate ok"

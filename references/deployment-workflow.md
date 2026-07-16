@@ -235,8 +235,6 @@ DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh report new_deploy
 Final delivery runs `verify runtime` itself and reports `deployment_complete`
 only after the automated boundary passes. App initialization and the first real
 chat happen after deployment and require no deployer confirmation command.
-Legacy report consumers still receive `gates.user_confirmation` fields with
-the fixed status `not_required`.
 
 ## Existing Node Update
 

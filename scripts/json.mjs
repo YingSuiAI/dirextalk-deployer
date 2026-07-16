@@ -660,24 +660,7 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       credentials_file: st.agent_credentials_file || ""
     },
     gates: {
-      automated: phaseStatuses,
-      user_confirmation: {
-        app_initialization: "not_required",
-        real_chat: "not_required",
-        agent_mcp_runtime: "not_required"
-      },
-      user_confirmation_details: {
-        app_initialization: { status: "not_required", ts: "", evidence: "", evidence_redacted: false },
-        real_chat: { status: "not_required", ts: "", evidence: "", evidence_redacted: false },
-        agent_mcp_runtime: {
-          status: "not_required",
-          ts: "",
-          evidence: "",
-          evidence_redacted: false,
-          runtime_summary_status: st.runtime_checks?.summary?.status || "not_run",
-          runtime_probe_confirmed: false
-        }
-      }
+      automated: phaseStatuses
     },
     runtime_checks: {
       summary: st.runtime_checks?.summary || { status: "not_run" },

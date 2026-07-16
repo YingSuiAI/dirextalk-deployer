@@ -107,6 +107,6 @@ json_test_check "$state" "data.runtime_checks.mcp_tools.status === 'passed' && d
 
 report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)
-json_test_check "$report_path" "data.status === 'deployment_incomplete' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.tool_count === 3 && data.gates.user_confirmation.agent_mcp_runtime === 'not_required'"
+json_test_check "$report_path" "data.status === 'deployment_incomplete' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_tools.tool_count === 3 && !('user_confirmation' in data.gates)"
 
 echo "mcp tools runtime check ok"

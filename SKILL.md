@@ -455,9 +455,7 @@ Matrix session tokens, or the eight-digit app initialization code.
 Reports include automated phase and runtime-check evidence, `destroy.evidence`,
 `credentials.status`, `mcp.status`, `possible_remaining_billable_resources`,
 AWS resource IDs, EBS root volume evidence, the default 50 GiB gp3 root EBS
-volume size, billing reminders, and `cost_estimate`. Legacy
-`gates.user_confirmation` report fields remain schema-compatible but always
-read `not_required`; they never block deployment completion.
+volume size, billing reminders, and `cost_estimate`.
 
 Delivery must include App domain, eight-digit app initialization code, deployment
 completion status, `agent_room_id`, service directory, dirextalk-connect config, MCP config

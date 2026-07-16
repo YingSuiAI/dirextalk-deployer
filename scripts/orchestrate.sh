@@ -709,18 +709,6 @@ cmd_report() {
   echo "operation report: $report_path"
 }
 
-cmd_confirm_compat() {
-  case "${1:-}" in
-    app_initialization|real_chat|agent_mcp_runtime)
-      echo "confirmation not required: $1; deployment completion is determined by automated S0-S7 and runtime/MCP checks."
-      ;;
-    *)
-      echo "Usage: $0 confirm [app_initialization|real_chat|agent_mcp_runtime]" >&2
-      return 1
-      ;;
-  esac
-}
-
 cmd_verify_mcp_doctor() {
   [ -f "$STATE_JSON" ] || {
     warn "state.json not found: $STATE_JSON"
@@ -1102,7 +1090,6 @@ case "${1:-run}" in
   run)    cmd_run ;;
   status) cmd_status ;;
   report) shift; cmd_report "${1:-new_deploy}" ;;
-  confirm) shift; cmd_confirm_compat "${1:-}" ;;
   verify) shift; cmd_verify "${1:-}" ;;
   reset)
     [ -f "$STATE_JSON" ] && { mv "$STATE_JSON" "$STATE_JSON.reset-$(date -u +%Y%m%d%H%M%S)"; warn "Archived old state.json."; }

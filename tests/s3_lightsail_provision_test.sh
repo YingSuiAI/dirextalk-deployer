@@ -68,7 +68,7 @@ printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 cat >/dev/null
-printf 'v1.0.7\te92febe04568d2f29f889aadd66b042d7a7f5e65\tfd728a1ad7bb8994c65eb1aa2224ffbb62fb83e0ff34268bbf5707cc36034b09\n'
+printf 'v1.0.8\t1efa90fd776d355d4cd898bcdb4922267b03d180\t04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b\n'
 EOF
 chmod 700 "$fakebin/ssh"
 export PATH="$fakebin:$PATH"
@@ -99,7 +99,7 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'default_latest' && data.server_release.version === 'latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.updater_release.version === 'v1.0.7' && data.updater_release.sha256 === 'fd728a1ad7bb8994c65eb1aa2224ffbb62fb83e0ff34268bbf5707cc36034b09'"
+json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'default_latest' && data.server_release.version === 'latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.updater_release.version === 'v1.0.8' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b'"
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
 grep -q '^#!/usr/bin/env bash' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2

@@ -2,12 +2,17 @@
 
 `dirextalk-deployer` deploys a production Dirextalk message server and wires the local agent room through Dirextalk's Matrix bridge. The supported local bridge is `dirextalk-connect`, installed per service from the npm package `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`. MCP capability is declared separately from bridge-agent support; S6 writes the canonical remote HTTP MCP description and never assumes that every bridge agent can consume it.
 
+## Platform Architecture
+
+![Dirextalk platform architecture](https://raw.githubusercontent.com/YingSuiAI/dirextalk-deployer/main/assets/dirextalk-platform.png)
+
 ## Contents
 
 - `SKILL.md`: Agent entrypoint, confirmation rules, deployment/destroy flow, and delivery format.
 - `scripts/`: State machine, AWS Lightsail/EC2/DNS/user-data/verification/destroy scripts.
 - `references/`: Tooling, deployment resume flow, dirextalk-connect wiring, state machine, architecture, troubleshooting, and recovery notes.
 - `agents/`: Runtime metadata and recognition notes for agent hosts.
+- `assets/`: README diagrams and other published documentation assets.
 
 ## Web Deployment Console
 

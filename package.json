@@ -1,6 +1,6 @@
 {
   "name": "dirextalk-deployer",
-  "version": "0.1.43",
+  "version": "0.1.44",
   "description": "Versioned Dirextalk deployer agent skill and portable deployment orchestration tools.",
   "type": "module",
   "bin": {
@@ -12,6 +12,7 @@
     "README.md",
     "SKILL.md",
     "agents/",
+    "assets/",
     "bin/",
     "references/",
     "scripts/"

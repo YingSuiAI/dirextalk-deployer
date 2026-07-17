@@ -51,7 +51,7 @@ printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 cat >/dev/null
-printf 'v1.0.7\te92febe04568d2f29f889aadd66b042d7a7f5e65\tfd728a1ad7bb8994c65eb1aa2224ffbb62fb83e0ff34268bbf5707cc36034b09\n'
+printf 'v1.0.8\t1efa90fd776d355d4cd898bcdb4922267b03d180\t04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b\n'
 EOF
 chmod 0700 "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH"
@@ -76,7 +76,7 @@ domain_resolves_to_ip() {
 }
 
 run_phase > "$tmp/s3.out" 2>&1 || { cat "$tmp/s3.out" >&2; exit 1; }
-json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.server_release.source === 'default_latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.updater_release.version === 'v1.0.7' && data.updater_release.commit === 'e92febe04568d2f29f889aadd66b042d7a7f5e65' && data.updater_release.sha256 === 'fd728a1ad7bb8994c65eb1aa2224ffbb62fb83e0ff34268bbf5707cc36034b09'"
+json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.server_release.source === 'default_latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.updater_release.version === 'v1.0.8' && data.updater_release.commit === '1efa90fd776d355d4cd898bcdb4922267b03d180' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b'"
 if grep -q '^scp-called$\|^scp ' "$CALLS"; then
   echo "S3 must not SCP updater artifacts" >&2
   cat "$CALLS" >&2

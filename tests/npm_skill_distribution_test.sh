@@ -89,7 +89,7 @@ npm pack --dry-run --json > "$tmp/pack.json"
 const fs = require("node:fs");
 const pack = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))[0];
 const files = pack.files.map((entry) => entry.path);
-for (const required of ["SKILL.md", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh", "scripts/run-tests.mjs", "scripts/lib/test-runner.mjs", "scripts/lib/git-bash.sh", "scripts/lib/server-release.sh", "scripts/updater/release.env"]) {
+for (const required of ["SKILL.md", "assets/dirextalk-platform.png", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh", "scripts/run-tests.mjs", "scripts/lib/test-runner.mjs", "scripts/lib/git-bash.sh", "scripts/lib/server-release.sh", "scripts/updater/release.env"]) {
   if (!files.includes(required)) throw new Error(`missing package file: ${required}`);
 }
 if (files.includes("README_zh.md")) {

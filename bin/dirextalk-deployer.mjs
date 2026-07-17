@@ -14,6 +14,7 @@ const skillFiles = [
   "LICENSE",
   "README.md",
   "SKILL.md",
+  "assets",
   "agents",
   "bin",
   "package.json",

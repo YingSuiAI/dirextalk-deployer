@@ -27,10 +27,12 @@ fi
 
 integration_dir="$base/updater"
 install -d -m 0755 "$integration_dir"
+rm -f "$integration_dir/dirextalk-updater-discovery.service" \
+  "$integration_dir/dirextalk-updater-discovery.timer"
 for file in bootstrap-host.sh install.sh reconcile-host.sh adopt-legacy-host.sh set-desired-state.sh; do
   install -m 0755 "$source_dir/$file" "$integration_dir/$file"
 done
-for file in release.env config.json dirextalk-updater.service dirextalk-updater-discovery.service dirextalk-updater-discovery.timer; do
+for file in release.env config.json dirextalk-updater.service; do
   install -m 0644 "$source_dir/$file" "$integration_dir/$file"
 done
 if [ -z "$legacy_source" ]; then

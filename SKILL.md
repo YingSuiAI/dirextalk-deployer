@@ -288,6 +288,10 @@ The local deployer host does not need Go and does not SCP updater artifacts.
 The updater pin and checksum contract remains independent from the default
 message-server image selection.
 
+The updater does not install or run a daily GitHub release-discovery timer.
+After the direct-version migration, an authorized client/server release action
+creates the target-version job instead.
+
 The only legacy host adoption path is `scripts/adopt-legacy-node.sh`. It first
 requires a dry-run proof of the fixed d1 v0.15.2 Compose project, approved image
 digest, live health, binary version, and systemd Caddy identity. Mutation then

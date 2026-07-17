@@ -27,9 +27,7 @@ for path in \
   updater/release.env \
   updater/config.json \
   updater/config.legacy-compose-caddy.json \
-  updater/dirextalk-updater.service \
-  updater/dirextalk-updater-discovery.service \
-  updater/dirextalk-updater-discovery.timer; do
+  updater/dirextalk-updater.service; do
   [ -f "$tmp/bundle/$path" ] || { echo "missing updater bundle file: $path" >&2; exit 1; }
 done
 grep -q 'systemctl cat dirextalk-updater.service' "$tmp/bundle/updater/set-desired-state.sh"
@@ -47,8 +45,6 @@ fi
 compose="$tmp/bundle/docker-compose.yml"
 caddy="$tmp/bundle/Caddyfile"
 main_unit="$tmp/bundle/updater/dirextalk-updater.service"
-discovery_unit="$tmp/bundle/updater/dirextalk-updater-discovery.service"
-timer="$tmp/bundle/updater/dirextalk-updater-discovery.timer"
 grep -F -q '"compose_project": "dirextalk-message-server"' "$tmp/bundle/updater/config.json"
 
 awk '
@@ -110,15 +106,9 @@ grep -q '^ConfigurationDirectory=dirextalk-updater$' "$main_unit"
 grep -q '^ConfigurationDirectoryMode=0700$' "$main_unit"
 grep -q '^ReadWritePaths=/var/lib/dirextalk-updater /run/dirextalk-updater /var/dirextalk-message-server$' "$main_unit"
 
-grep -q '^OnCalendar=\*-\*-\* 03:00:00$' "$timer"
-grep -q '^RandomizedDelaySec=45m$' "$timer"
-grep -q '^Persistent=true$' "$timer"
-grep -q '^Unit=dirextalk-updater-discovery.service$' "$timer"
-grep -q 'trigger-discovery' "$discovery_unit"
-grep -q -- '--config /etc/dirextalk-updater/config.json' "$discovery_unit"
-if grep -q 'runtime.json\|curl\|\$(cat\|--header' "$discovery_unit" \
-  || grep -Eq '^ExecStart=.*[[:space:]]serve([[:space:]]|$)' "$discovery_unit"; then
-  echo "daily timer must call the resident Unix-socket control client without token argv or direct state access" >&2
+if [ -e "$tmp/bundle/updater/dirextalk-updater-discovery.service" ] \
+  || [ -e "$tmp/bundle/updater/dirextalk-updater-discovery.timer" ]; then
+  echo "bundle must not ship the retired discovery units" >&2
   exit 1
 fi
 
@@ -152,7 +142,7 @@ assert_linux_mode 700 "$tmp/root/var/lib/dirextalk-updater"
 assert_linux_mode 755 "$tmp/root/usr/local/bin/dirextalk-updater"
 [ "$(wc -c < "$tmp/root/etc/dirextalk-updater/control-token")" -ge 32 ]
 grep -q 'chown root:root' "$tmp/bundle/updater/install.sh"
-grep -q 'systemctl start dirextalk-updater-discovery.service' "$tmp/bundle/updater/install.sh"
+grep -q 'systemctl disable --now dirextalk-updater-discovery.timer' "$tmp/bundle/updater/install.sh"
 grep -q 'flock' "$tmp/bundle/updater/bootstrap-host.sh"
 grep -q 'docker compose --env-file .env up -d' "$tmp/bundle/updater/bootstrap-host.sh"
 grep -F -q 'github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.6/dirextalk-updater-linux-amd64' "$tmp/bundle/updater/release.env"

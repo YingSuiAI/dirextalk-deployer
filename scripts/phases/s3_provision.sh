@@ -441,8 +441,6 @@ _resume_host_bootstrap() {
       updater/config.legacy-compose-caddy.json \
       updater/config.legacy-systemd-caddy.json \
       updater/dirextalk-updater.service \
-      updater/dirextalk-updater-discovery.service \
-      updater/dirextalk-updater-discovery.timer \
       | gzip -n > "$integration_bundle"; then
     rm -f "$integration_bundle"
     warn "Failed to build the updater integration bundle."

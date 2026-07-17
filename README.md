@@ -128,8 +128,9 @@ published under `latest`. The host updater is a separate
 the supported Ubuntu 22.04 or 24.04 x86_64 host downloads the deployer-pinned updater asset and
 verifies the deployer-pinned SHA-256 before atomic installation. The local
 machine does not need Go, and S3 never copies an updater binary over SSH.
-The updater remains independently pinned and checksum-verified; this change
-does not alter its remote download or upgrade-discovery contract.
+The updater remains independently pinned and checksum-verified. New direct
+version upgrades do not install a daily GitHub discovery timer; an update is
+created only when an authorized client requests the current central target.
 
 One pre-updater node can be adopted only through the explicit, fixed d1
 contract. Run `scripts/adopt-legacy-node.sh --dry-run <state.json>` with

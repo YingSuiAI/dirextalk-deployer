@@ -147,6 +147,7 @@ chmod 0700 "$base"
 cd "$base"
 docker compose --env-file .env pull
 docker compose --env-file .env up -d
+"$updater_binary" pin-initial-latest
 domain=$(awk -F= '$1 == "DOMAIN" { print substr($0, index($0, "=") + 1); exit }' .env)
 DOMAIN="$domain" bash init-tokens.sh
 touch .deploy-done

@@ -41,13 +41,16 @@ while [ $# -gt 0 ]; do
   case "$1" in --output) output=$2; shift 2 ;; *) shift ;; esac
 done
 [ -n "$output" ] || exit 91
-printf '%s' "$DOWNLOAD_MODE" > "$output"
+if [ "$DOWNLOAD_MODE" = good ]; then
+  printf '#!/bin/sh\nprintf "updater %%s\\n" "$1" >> "$BOOTSTRAP_CALLS"\n' > "$output"
+else
+  printf '%s' "$DOWNLOAD_MODE" > "$output"
+fi
 EOF
 cat > "$tmp/bin/sha256sum" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-value=$(cat "$1")
-if [ "$value" = good ]; then digest=$PIN_SHA; else digest=$(printf '0%.0s' {1..64}); fi
+if grep -F -q 'updater %s' "$1"; then digest=$PIN_SHA; else digest=$(printf '0%.0s' {1..64}); fi
 printf '%s  %s\n' "$digest" "$1"
 EOF
 cat > "$tmp/bin/sync" <<'EOF'
@@ -94,7 +97,7 @@ export BOOTSTRAP_CALLS="$calls" PIN_SHA="$UPDATER_PIN_SHA256" DOWNLOAD_MODE=good
 export PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRAP_TIMEOUT=2
 bash "$script" 203.0.113.20
 
-[ "$(cat "$base/dirextalk-updater")" = good ]
+grep -F -q 'updater %s' "$base/dirextalk-updater"
 assert_linux_mode() {
   local expected=$1 path=$2
   case "$(uname -s)" in
@@ -105,13 +108,14 @@ assert_linux_mode() {
 
 assert_linux_mode 755 "$base/dirextalk-updater"
 grep -F -q "$UPDATER_PIN_URL" "$calls"
-if grep -qi latest "$calls"; then
+if grep '^curl ' "$calls" | grep -qi latest; then
   echo "bootstrap downloaded a mutable updater URL" >&2
   exit 1
 fi
 grep -q 'sync -f .*\.dirextalk-updater\.download\.' "$calls"
 grep -q '^install ' "$calls"
 grep -q 'docker compose --env-file .env up -d' "$calls"
+grep -q '^updater pin-initial-latest$' "$calls"
 
 before=$(grep -c '^curl' "$calls")
 chmod 0644 "$base/dirextalk-updater"

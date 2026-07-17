@@ -74,7 +74,8 @@ json_node() {
 
 json_worker_connect() {
   [ -n "${DIREXTALK_JSON_WORKER_SOCKET:-}" ] && return 0
-  if ! exec {DIREXTALK_JSON_WORKER_SOCKET}<>"/dev/tcp/127.0.0.1/${DIREXTALK_JSON_WORKER_PORT}"; then
+  DIREXTALK_JSON_WORKER_SOCKET=9
+  if ! exec 9<>"/dev/tcp/127.0.0.1/${DIREXTALK_JSON_WORKER_PORT}"; then
     unset DIREXTALK_JSON_WORKER_SOCKET
     return 1
   fi
@@ -118,7 +119,9 @@ json_cli() {
     case "${1:-}" in
       stdin-*) json_worker_cli "$@" ;;
       *)
-        mapfile -d '' -t worker_args < <(json_normalize_file_arguments "$@")
+        while IFS= read -r -d '' worker_arg; do
+          worker_args+=("$worker_arg")
+        done < <(json_normalize_file_arguments "$@")
         json_worker_cli "${worker_args[@]}"
         ;;
     esac

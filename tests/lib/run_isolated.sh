@@ -6,7 +6,10 @@ isolation_root=$(mktemp -d)
 json_worker_pid=
 cleanup() {
   if [ -n "${DIREXTALK_JSON_WORKER_SOCKET:-}" ]; then
-    exec {DIREXTALK_JSON_WORKER_SOCKET}>&- || true
+    case "$DIREXTALK_JSON_WORKER_SOCKET" in
+      *[!0-9]*|'') ;;
+      *) eval "exec ${DIREXTALK_JSON_WORKER_SOCKET}>&-" || true ;;
+    esac
     unset DIREXTALK_JSON_WORKER_SOCKET
   fi
   if [ -n "$json_worker_pid" ]; then

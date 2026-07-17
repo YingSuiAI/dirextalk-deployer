@@ -194,6 +194,7 @@ assert_contains "$tmp/reset.out" 'Scoped local bridge daemon was stopped'
 assert_contains "$tmp/reset.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'
 
 assert_contains "$reset_calls" 'docker compose --env-file \.env down'
+assert_contains "$reset_calls" 'sudo sh -lc'
 assert_contains "$reset_calls" 'set-desired-state\.sh maintenance'
 assert_contains "$reset_calls" 'set-desired-state\.sh running'
 assert_contains "$reset_calls" 'base64 --decode'

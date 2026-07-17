@@ -184,8 +184,8 @@ EOF
 }
 
 ops_reset_remote_command() {
-  ops_desired_state_helper_prelude
-  cat <<'EOF'
+  local remote_script
+  remote_script="$(ops_desired_state_helper_prelude)"$'\n'$(cat <<'EOF'
 cd /var/dirextalk-message-server
 sudo /var/dirextalk-message-server/updater/set-desired-state.sh maintenance
 sudo docker compose --env-file .env down
@@ -206,6 +206,8 @@ DOMAIN=$(grep '^DOMAIN=' .env | cut -d= -f2)
 sudo DOMAIN="$DOMAIN" bash /var/dirextalk-message-server/init-tokens.sh
 sudo /var/dirextalk-message-server/updater/set-desired-state.sh running
 EOF
+)
+  printf 'sudo sh -lc %s\n' "$(ops_sh_quote "$remote_script")"
 }
 
 ops_mark_refresh_pending() {

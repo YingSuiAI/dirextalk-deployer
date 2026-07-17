@@ -22,5 +22,5 @@ Required capabilities:
 
 - Read local files.
 - Run Bash commands on Linux/macOS/WSL, or Git Bash on native Windows. Before a native Windows lifecycle or skill-install action, use the matching-install-root `MINGW*`/`cygpath`/`.windows.` Git preflight in `references/agent-targets.md`; if it fails, tell the user to install Git for Windows and stop.
-- Use `aws`, `ssh`, `curl`, and Node.js for `scripts/json.mjs` after the user approves any missing installs. Go and SCP are not deployment prerequisites; the Ubuntu host downloads the pinned independent updater Release itself.
+- Use `aws`, `ssh`, `curl`, and Node.js for `scripts/json.mjs` after the user approves any missing installs. Go and SCP are not deployment prerequisites; the Ubuntu host downloads the pinned independent updater Release itself; it does not install a daily release-discovery timer.
 - Preserve secrets outside the repository.

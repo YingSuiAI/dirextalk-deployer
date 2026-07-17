@@ -79,7 +79,12 @@ grep -F -q 'systemctl daemon-reload' "$install_script"
 grep -F -q 'systemctl is-active --quiet dirextalk-updater.service' "$install_script"
 grep -F -q 'systemctl restart dirextalk-updater.service' "$install_script"
 grep -F -q 'systemctl enable --now dirextalk-updater.service' "$install_script"
-grep -F -q 'if ! systemctl start dirextalk-updater-discovery.service; then' "$install_script"
-grep -F -q 'the timer will retry' "$install_script"
+grep -F -q 'systemctl disable --now dirextalk-updater-discovery.timer' "$install_script"
+grep -F -q 'rm -f /etc/systemd/system/dirextalk-updater-discovery.timer' "$install_script"
+if grep -F -q 'systemctl start dirextalk-updater-discovery.service' "$install_script" \
+  || grep -F -q 'systemctl enable --now dirextalk-updater-discovery.timer' "$install_script"; then
+  echo "installer must not start the retired discovery units" >&2
+  exit 1
+fi
 
 echo "updater atomic final install ok"

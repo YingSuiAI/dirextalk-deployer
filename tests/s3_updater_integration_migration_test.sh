@@ -50,11 +50,13 @@ for path in \
   updater/set-desired-state.sh \
   updater/release.env \
   updater/config.json \
-  updater/dirextalk-updater.service \
-  updater/dirextalk-updater-discovery.service \
-  updater/dirextalk-updater-discovery.timer; do
+  updater/dirextalk-updater.service; do
   grep -Fx -q "$path" "$tmp/bundle.list" || { echo "missing updater integration file: $path" >&2; exit 1; }
 done
+if grep -Eq 'dirextalk-updater-discovery\.(service|timer)' "$tmp/bundle.list"; then
+  echo "integration bundle must not include retired discovery units" >&2
+  exit 1
+fi
 if grep -Eq '(^|/)dirextalk-updater$' "$tmp/bundle.list"; then
   echo "integration bundle must not transport the updater binary" >&2
   exit 1

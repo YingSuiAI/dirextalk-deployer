@@ -14,8 +14,6 @@ install -d -m 0755 "$root/usr/local/bin" "$root/etc/systemd/system"
 install -d -m 0700 "$root/etc/dirextalk-updater" "$root/var/lib/dirextalk-updater"
 install -m 0600 "$here/config.json" "$root/etc/dirextalk-updater/config.json"
 install -m 0644 "$here/dirextalk-updater.service" "$root/etc/systemd/system/dirextalk-updater.service"
-install -m 0644 "$here/dirextalk-updater-discovery.service" "$root/etc/systemd/system/dirextalk-updater-discovery.service"
-install -m 0644 "$here/dirextalk-updater-discovery.timer" "$root/etc/systemd/system/dirextalk-updater-discovery.timer"
 
 token="$root/etc/dirextalk-updater/control-token"
 if [ ! -s "$token" ]; then
@@ -29,6 +27,22 @@ if [ ! -s "$token" ]; then
 fi
 chmod 0700 "$root/etc/dirextalk-updater" "$root/var/lib/dirextalk-updater"
 chmod 0600 "$root/etc/dirextalk-updater/config.json" "$token"
+
+if [ "${DIREXTALK_UPDATER_SKIP_SYSTEMD:-0}" != "1" ] && [ -z "$root" ]; then
+  # Direct-version upgrades are user initiated. Retire the old daily GitHub
+  # discovery units before swapping the updater binary so they cannot race a
+  # new installation or report a misleading background failure.
+  if systemctl cat dirextalk-updater-discovery.timer >/dev/null 2>&1 \
+    || systemctl cat dirextalk-updater-discovery.service >/dev/null 2>&1 \
+    || [ -e /etc/systemd/system/dirextalk-updater-discovery.timer ] \
+    || [ -e /etc/systemd/system/dirextalk-updater-discovery.service ]; then
+    systemctl disable --now dirextalk-updater-discovery.timer >/dev/null 2>&1 || true
+    systemctl stop dirextalk-updater-discovery.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/dirextalk-updater-discovery.timer \
+      /etc/systemd/system/dirextalk-updater-discovery.service
+    systemctl daemon-reload
+  fi
+fi
 
 # Commit the service binary only after all integration/config staging succeeds.
 binary_target="$root/usr/local/bin/dirextalk-updater"
@@ -49,9 +63,7 @@ if [ "$(id -u)" -eq 0 ]; then
     "$root/etc/dirextalk-updater/config.json" \
     "$token" \
     "$root/var/lib/dirextalk-updater" \
-    "$root/etc/systemd/system/dirextalk-updater.service" \
-    "$root/etc/systemd/system/dirextalk-updater-discovery.service" \
-    "$root/etc/systemd/system/dirextalk-updater-discovery.timer"
+    "$root/etc/systemd/system/dirextalk-updater.service"
 fi
 
 if [ "${DIREXTALK_UPDATER_SKIP_SYSTEMD:-0}" != "1" ] && [ -z "$root" ]; then
@@ -61,8 +73,4 @@ if [ "${DIREXTALK_UPDATER_SKIP_SYSTEMD:-0}" != "1" ] && [ -z "$root" ]; then
   else
     systemctl enable --now dirextalk-updater.service
   fi
-  if ! systemctl start dirextalk-updater-discovery.service; then
-    echo "dirextalk updater initial release discovery failed; the timer will retry." >&2
-  fi
-  systemctl enable --now dirextalk-updater-discovery.timer
 fi

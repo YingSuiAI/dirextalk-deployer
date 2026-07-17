@@ -6,6 +6,7 @@
 
 - Deploy, resume, verify, destroy, and locally wire a production Dirextalk message server.
 - Install the independently released `YingSuiAI/dirextalk-updater` host binary from the deployer-owned immutable version/commit/SHA pin. The deployer does not embed or build updater Go source.
+- Direct-version upgrades are client initiated; do not reintroduce the retired daily updater GitHub discovery timer or service.
 - Treat `SKILL.md` as the compact agent-facing entrypoint. Detailed runbooks belong in `references/`; `scripts/` are the stable implementation entrypoints.
 - `SKILL.md` is a user-facing runbook that must remain usable by less capable models. Its Freshness Gate, step-by-step onboarding, semantic confirmation policy, AWS promotional/billing reminders, and repeated safety guidance are intentional product behavior; preserve them unless the product owner explicitly changes that onboarding contract.
 - The supported local conversation bridge is `dirextalk-connect`, installed from `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`.

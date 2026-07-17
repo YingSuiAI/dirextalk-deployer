@@ -20,7 +20,7 @@
 - `message-init`: 生成 Dirextalk message-server 配置和 TURN 配置。
 - `message-server`: 运行 Matrix + Dirextalk 统一后端，公开容器内 8008。
 - `caddy`: 对外 80/443，反代 `/_matrix/*`、`/_p2p/*`，并通过只读挂载的 Unix socket 目录转发 updater public API；不挂 control token，也不依赖 message-server healthy 才启动。
-- `dirextalk-updater`: root-owned systemd host service，状态和 token 分别位于 `/var/lib/dirextalk-updater` 与 `/etc/dirextalk-updater`；每日 03:00 timer 通过 Unix socket 调常驻进程做 Release discovery，不直接读写 updater state。
+- `dirextalk-updater`: root-owned systemd host service，状态和 token 分别位于 `/var/lib/dirextalk-updater` 与 `/etc/dirextalk-updater`；不再运行每日 Release discovery timer，服务端版本更新由客户端发起的目标版本任务驱动。
 - `coturn`: TURN relay。
 
 ## 完成判据

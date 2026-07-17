@@ -42,7 +42,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$output" ] || exit 91
 if [ "$DOWNLOAD_MODE" = good ]; then
-  printf '#!/bin/sh\nprintf "updater %%s\\n" "$1" >> "$BOOTSTRAP_CALLS"\n' > "$output"
+  printf '#!/bin/sh\nprintf "updater %%s\\n" "$*" >> "$BOOTSTRAP_CALLS"\n' > "$output"
 else
   printf '%s' "$DOWNLOAD_MODE" > "$output"
 fi
@@ -115,7 +115,7 @@ fi
 grep -q 'sync -f .*\.dirextalk-updater\.download\.' "$calls"
 grep -q '^install ' "$calls"
 grep -q 'docker compose --env-file .env up -d' "$calls"
-grep -q '^updater pin-initial-latest$' "$calls"
+grep -F -q "updater --config $root/etc/dirextalk-updater/config.json pin-initial-latest" "$calls"
 
 before=$(grep -c '^curl' "$calls")
 chmod 0644 "$base/dirextalk-updater"

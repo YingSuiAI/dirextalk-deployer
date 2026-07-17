@@ -28,6 +28,12 @@ printf '#!/bin/sh\nprintf "init\\n" >> "$BOOTSTRAP_CALLS"\n' > "$base/init-token
 printf '#!/bin/sh\nprintf "install %%s\\n" "$1" >> "$BOOTSTRAP_CALLS"\n' > "$base/updater/install.sh"
 chmod 0755 "$base/init-tokens.sh" "$base/updater/install.sh"
 
+replace_os_release_version() {
+  local from=$1 to=$2 file="$root/etc/os-release"
+  sed "s/$from/$to/" "$file" > "$tmp/os-release.next"
+  mv "$tmp/os-release.next" "$file"
+}
+
 cat > "$tmp/bin/uname" <<'EOF'
 #!/usr/bin/env bash
 cat "$UNAME_VALUE"
@@ -62,13 +68,11 @@ cat > "$tmp/bin/docker" <<'EOF'
 printf 'docker' >> "$BOOTSTRAP_CALLS"; printf ' %s' "$@" >> "$BOOTSTRAP_CALLS"; printf '\n' >> "$BOOTSTRAP_CALLS"
 EOF
 chmod 0755 "$tmp/bin/"*
-case "$(uname -s 2>/dev/null || true)" in
-  *MINGW*|*MSYS*|*CYGWIN*)
-    cp "$ROOT/tests/lib/linux-flock.sh" "$tmp/bin/flock"
-    chmod 0755 "$tmp/bin/flock"
-    export DIREXTALK_TEST_FLOCK_DIR="$tmp/flock.lock"
-    ;;
-esac
+if ! command -v flock >/dev/null 2>&1; then
+  cp "$ROOT/tests/lib/linux-flock.sh" "$tmp/bin/flock"
+  chmod 0755 "$tmp/bin/flock"
+  export DIREXTALK_TEST_FLOCK_DIR="$tmp/flock.lock"
+fi
 
 # Git Bash's NTFS fixture cannot mark an extensionless downloaded file as
 # executable. Preserve the production Linux assertion by representing only the
@@ -103,7 +107,11 @@ assert_linux_mode() {
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) return 0 ;;
   esac
-  [ "$(stat -c '%a' "$path")" = "$expected" ]
+  if stat -c '%a' "$path" >/dev/null 2>&1; then
+    [ "$(stat -c '%a' "$path")" = "$expected" ]
+  else
+    [ "$(stat -f '%Lp' "$path")" = "$expected" ]
+  fi
 }
 
 assert_linux_mode 755 "$base/dirextalk-updater"
@@ -131,12 +139,12 @@ DOWNLOAD_MODE=bad bash "$script" 203.0.113.20 >"$tmp/bad.out" 2>&1 && {
 }
 [ "$(cat "$base/dirextalk-updater")" = corrupt ] || { echo "failed download replaced existing binary" >&2; exit 1; }
 
-sed -i 's/24\.04/22.04/' "$root/etc/os-release"
+replace_os_release_version '24\.04' '22.04'
 : > "$calls"
 DOWNLOAD_MODE=good bash "$script" 203.0.113.20
 grep -q 'docker compose --env-file .env up -d' "$calls"
 
-sed -i 's/22\.04/20.04/' "$root/etc/os-release"
+replace_os_release_version '22\.04' '20.04'
 : > "$calls"
 if DOWNLOAD_MODE=good bash "$script" 203.0.113.20 >"$tmp/ubuntu20.out" 2>&1; then
   echo "Ubuntu 20.04 host was accepted" >&2
@@ -144,7 +152,7 @@ if DOWNLOAD_MODE=good bash "$script" 203.0.113.20 >"$tmp/ubuntu20.out" 2>&1; the
 fi
 [ ! -s "$calls" ] || { echo "unsupported Ubuntu reached download/Compose" >&2; cat "$calls" >&2; exit 1; }
 
-sed -i 's/20.04/24.04/' "$root/etc/os-release"
+replace_os_release_version '20.04' '24.04'
 printf 'aarch64\n' > "$tmp/uname.value"
 : > "$calls"
 if DOWNLOAD_MODE=good bash "$script" 203.0.113.20 >"$tmp/arm64.out" 2>&1; then

@@ -132,7 +132,11 @@ assert_linux_mode() {
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) return 0 ;;
   esac
-  [ "$(stat -c '%a' "$path")" = "$expected" ]
+  if stat -c '%a' "$path" >/dev/null 2>&1; then
+    [ "$(stat -c '%a' "$path")" = "$expected" ]
+  else
+    [ "$(stat -f '%Lp' "$path")" = "$expected" ]
+  fi
 }
 
 assert_linux_mode 700 "$tmp/root/etc/dirextalk-updater"

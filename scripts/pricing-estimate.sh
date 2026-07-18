@@ -189,36 +189,18 @@ build_lightsail_estimate() {
 }
 
 lookup_lightsail_bundle() {
-  local wanted_id=$1 bundles
-  bundles=$(aws lightsail get-bundles --include-inactive --output json 2>/dev/null) || return 1
-  printf '%s\n' "$bundles" | "$(json_node)" -e '
-let input = "";
-process.stdin.on("data", (chunk) => input += chunk);
-process.stdin.on("end", () => {
-  const wantedId = process.argv[1] || "";
-  const wantedRam = Number(process.argv[2] || "2");
-  const wantedDisk = Number(process.argv[3] || "60");
-  const data = JSON.parse(input || "{}");
-  const bundles = Array.isArray(data.bundles) ? data.bundles : [];
-  const linux = bundles.filter((bundle) =>
-    Array.isArray(bundle.supportedPlatforms) && bundle.supportedPlatforms.includes("LINUX_UNIX")
-  );
-  const selected = linux.find((bundle) => wantedId && bundle.bundleId === wantedId) ||
-    linux.find((bundle) => Number(bundle.ramSizeInGb) === wantedRam && Number(bundle.diskSizeInGb) === wantedDisk) ||
-    linux.find((bundle) => Number(bundle.price) === 12) ||
-    linux[0];
-  if (!selected) process.exit(1);
-  const fields = [
-    selected.bundleId,
-    selected.price,
-    selected.ramSizeInGb,
-    selected.diskSizeInGb,
-    selected.transferPerMonthInGb || 0,
-    selected.cpuCount || 0
-  ];
-  process.stdout.write(`${fields.join("\t")}\n`);
-});
-' "$wanted_id" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB"
+  local wanted_id=$1 bundle_file selection
+  bundle_file=$(mktemp) || return 1
+  aws lightsail get-bundles --include-inactive --output json > "$bundle_file" 2>/dev/null || {
+    rm -f "$bundle_file"
+    return 1
+  }
+  selection=$(json_lightsail_bundle_select "$bundle_file" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB" "$wanted_id") || {
+    rm -f "$bundle_file"
+    return 1
+  }
+  rm -f "$bundle_file"
+  printf '%s\n' "$selection"
 }
 
 state=""

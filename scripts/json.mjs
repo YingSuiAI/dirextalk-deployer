@@ -165,6 +165,7 @@ function cmdLightsailBundleSelect(args) {
   const targetPrice = numberValue(required(args, 1, "target price"));
   const targetRam = numberValue(required(args, 2, "target RAM"));
   const targetDisk = numberValue(required(args, 3, "target disk"));
+  const preferredID = String(args[4] || "");
   const data = readJsonFile(file);
   const platformOk = (bundle) => {
     const platform = String(bundle.supportedPlatforms || bundle.supportedPlatform || bundle.platform || "").toLowerCase();
@@ -178,12 +179,14 @@ function cmdLightsailBundleSelect(args) {
       ram: numberValue(bundle.ramSizeInGb),
       disk: numberValue(bundle.diskSizeInGb),
       transfer: numberValue(bundle.transferPerMonthInGb),
-      cpu: numberValue(bundle.cpuCount)
+      cpu: numberValue(bundle.cpuCount),
+      active: bundle.isActive !== false
     }))
-    .filter((bundle) => bundle.id && bundle.price > 0);
+    .filter((bundle) => bundle.id && bundle.price > 0 && bundle.active);
   const exact = candidates.filter((bundle) => Math.abs(bundle.price - targetPrice) < 0.01 && bundle.ram >= targetRam && bundle.disk >= targetDisk);
   const fallback = candidates.filter((bundle) => bundle.price >= targetPrice && bundle.ram >= targetRam);
-  const selected = (exact.length ? exact : fallback)
+  const preferred = preferredID ? candidates.find((bundle) => bundle.id === preferredID) : null;
+  const selected = preferred || (exact.length ? exact : fallback)
     .sort((left, right) => left.price - right.price || left.ram - right.ram || left.disk - right.disk)[0];
   if (!selected) {
     setExitCode(1);

@@ -83,6 +83,46 @@ $JSON mutate "$tmp/state.json" set-string resources.public_ip 203.0.113.10
 $JSON mutate "$tmp/state.json" set-json runtime_checks.summary '{"status":"failed","checks":{"mcp":"failed"}}'
 [ "$($JSON get "$tmp/state.json" runtime_checks.summary.status)" = "failed" ]
 
+cat > "$tmp/lightsail-bundles.json" <<'JSON'
+{
+  "bundles": [
+    {
+      "bundleId": "nano_3_1",
+      "price": 5,
+      "ramSizeInGb": 0.5,
+      "diskSizeInGb": 20,
+      "transferPerMonthInGb": 1024,
+      "cpuCount": 2,
+      "supportedPlatforms": ["LINUX_UNIX"],
+      "isActive": true
+    },
+    {
+      "bundleId": "small_2_0",
+      "price": 12,
+      "ramSizeInGb": 2,
+      "diskSizeInGb": 60,
+      "transferPerMonthInGb": 3072,
+      "cpuCount": 1,
+      "supportedPlatforms": ["LINUX_UNIX"],
+      "isActive": false
+    },
+    {
+      "bundleId": "small_3_0",
+      "price": 12,
+      "ramSizeInGb": 2,
+      "diskSizeInGb": 60,
+      "transferPerMonthInGb": 3072,
+      "cpuCount": 2,
+      "supportedPlatforms": ["LINUX_UNIX"],
+      "isActive": true
+    }
+  ]
+}
+JSON
+[ "$($JSON lightsail-bundle-select "$tmp/lightsail-bundles.json" 12 2 60)" = $'small_3_0\t12\t2\t60\t3072\t2' ]
+[ "$($JSON lightsail-bundle-select "$tmp/lightsail-bundles.json" 12 2 60 nano_3_1)" = $'nano_3_1\t5\t0.5\t20\t1024\t2' ]
+[ "$($JSON lightsail-bundle-select "$tmp/lightsail-bundles.json" 12 2 60 small_2_0)" = $'small_3_0\t12\t2\t60\t3072\t2' ]
+
 if $JSON build mcp-messages-list '!room:im.test' > "$tmp/legacy-mcp-action.json" 2>/dev/null; then
   echo "retired mcp-messages-list body action must not be generated" >&2
   exit 1

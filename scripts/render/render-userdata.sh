@@ -4,7 +4,7 @@
 # Bundle cloud-init deployment files (docker-compose.yml / Caddyfile /
 # init-tokens.sh / p2p-http-request.sh) into a tar.gz, inline it as one write_files entry, and unpack
 # it to /var/dirextalk-message-server in runcmd. Comment-only lines are stripped at the end to keep
-# AWS user-data below the 16384-byte limit. Replaces __DOMAIN__ /
+# EC2 cloud-init compact. Replaces __DOMAIN__ /
 # __ACME_EMAIL__ / __MESSAGE_SERVER_IMAGE__; the EC2 instance does not need to
 # clone repos. An optional Agent bundle is rendered only when all three
 # reviewed, non-secret Agent inputs are present.
@@ -37,6 +37,9 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$MESSAGE_SERVER_IMAGE" ] || { echo "--message-server-image required" >&2; exit 1; }
 [ -n "$DOMAIN" ] || { echo "--domain required; production deployments require a real domain" >&2; exit 1; }
+case "$ACME$MESSAGE_SERVER_IMAGE" in
+  *$'\n'*|*$'\r'*) echo "--acme and --message-server-image must be single-line values" >&2; exit 1 ;;
+esac
 DOMAIN=$(domain_normalize "$DOMAIN")
 [ "$DOMAIN" != "PLACEHOLDER" ] || { echo "PLACEHOLDER/sslip.io domains are not accepted in the production renderer" >&2; exit 1; }
 domain_is_formal_name "$DOMAIN" || { echo "invalid production domain: $DOMAIN" >&2; exit 1; }
@@ -74,8 +77,7 @@ render_optional_agent_sections() {
 
 strip_bundle_comments() {
   # These two files have no block-scalar comments. Strip documentation-only
-  # lines from the deployed copy so the Lightsail launch payload keeps room
-  # for AWS CLI's JSON request envelope.
+  # lines from the deployed copy to keep the generated bootstrap compact.
   awk 'NF && $0 !~ /^[[:space:]]*#/ { print }'
 }
 
@@ -109,29 +111,36 @@ bundle_files=(docker-compose.yml Caddyfile init-tokens.sh p2p-http-request.sh up
 if [ "$agent_enabled" = 1 ]; then
   bundle_files+=(agent-db-init.sh agent-runtime-init.sh agent-model-profiles.json)
 fi
-# Lightsail rejects the serialized CreateInstances request above 16,000 bytes.
-# Keep the raw shell script below 15,700 bytes to reserve JSON-envelope space.
+# The shell renderer is a self-contained bootstrap payload. Lightsail streams
+# it over SSH; EC2 embeds the same bundle in cloud-init below.
 BUNDLE_B64=$(COPYFILE_DISABLE=1 tar -C "$WORK" -cf - "${bundle_files[@]}" | gzip -9n | b64)
 
 if [ "$FORMAT" = "shell" ]; then
   cat <<EOF
 #!/bin/bash
 set -eu
+mkdir -p /run/lock
+exec 8>/run/lock/dirextalk-rendered-bootstrap.lock
+flock 8
 d=/var/dirextalk-message-server;mkdir -p "\$d";cd "\$d"
-cat > .env <<'E'
+if [ ! -f .env ]; then
+(umask 077
+cat > .env.tmp <<'E'
 DOMAIN=$DOMAIN
 ACME_EMAIL=$ACME
 MESSAGE_SERVER_IMAGE=$MESSAGE_SERVER_IMAGE
 AGENT_IMAGE=$AGENT_IMAGE
 AGENT_INSTANCE_ID=$AGENT_INSTANCE_ID
 E
+mv -f .env.tmp .env)
+fi
 base64 -d>bundle.tar.gz<<B
 $BUNDLE_B64
 B
 tar xzf bundle.tar.gz
 type docker>&/dev/null||curl -fsSL https://get.docker.com|sh
 systemctl enable --now docker
-updater/bootstrap-host.sh
+updater/bootstrap-host.sh "\${1:-}"
 EOF
   exit 0
 fi

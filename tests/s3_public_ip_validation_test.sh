@@ -52,6 +52,9 @@ invalid_ips=(
   '203.0.113.44;touch/tmp/injected'
   '$(touch /tmp/injected)'
 )
+lightsail_bootstrap="$tmp/lightsail-bootstrap.sh"
+printf '#!/bin/bash\nset -eu\nexit 0\n' > "$lightsail_bootstrap"
+lightsail_nonce=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 for ip in "${invalid_ips[@]}"; do
   : > "$CALLS"
   if _resume_host_bootstrap "$ip" "$tmp/key.pem" >/dev/null 2>&1; then
@@ -59,6 +62,13 @@ for ip in "${invalid_ips[@]}"; do
     exit 1
   fi
   [ ! -s "$CALLS" ] || { echo "invalid public IP invoked scp/ssh: [$ip]" >&2; exit 1; }
+
+  : > "$CALLS"
+  if _bootstrap_lightsail_host "$ip" "$tmp/key.pem" "$lightsail_bootstrap" "$lightsail_nonce" >/dev/null 2>&1; then
+    echo "invalid public IP reached Lightsail root bootstrap: [$ip]" >&2
+    exit 1
+  fi
+  [ ! -s "$CALLS" ] || { echo "invalid public IP invoked Lightsail root bootstrap SSH: [$ip]" >&2; exit 1; }
 done
 
 for ip in '203.0.113.044' '999.0.0.1' $'203.0.113.44\nssh'; do

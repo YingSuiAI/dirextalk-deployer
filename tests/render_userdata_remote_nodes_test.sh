@@ -29,12 +29,23 @@ grep -q 'if ! command -v docker >/dev/null 2>&1' "$tmp/user-data.yaml"
 grep -q 'type docker>&/dev/null||curl -fsSL https://get.docker.com|sh' "$tmp/user-data.sh"
 grep -q 'bash /var/dirextalk-message-server/updater/bootstrap-host.sh' "$tmp/user-data.yaml"
 grep -q 'd=/var/dirextalk-message-server;mkdir -p "$d";cd "$d"' "$tmp/user-data.sh"
-grep -q 'updater/bootstrap-host.sh' "$tmp/user-data.sh"
+grep -F -q 'flock 8' "$tmp/user-data.sh"
+grep -F -q 'if [ ! -f .env ]; then' "$tmp/user-data.sh"
+grep -F -q 'updater/bootstrap-host.sh "${1:-}"' "$tmp/user-data.sh"
 if grep -q '^#cloud-config' "$tmp/user-data.sh"; then
   echo "Lightsail shell user-data must not be rendered as cloud-config" >&2
   exit 1
 fi
 grep -q 'base64 -d>bundle.tar.gz<<B' "$tmp/user-data.sh"
+
+if bash "$ROOT/scripts/render/render-userdata.sh" --format shell --domain service.example.test --acme $'ops@example.test\nINJECTED=true' --message-server-image dirextalk/message-server:test > /dev/null 2>&1; then
+  echo "renderer accepted a multiline ACME email" >&2
+  exit 1
+fi
+if bash "$ROOT/scripts/render/render-userdata.sh" --format shell --domain service.example.test --acme ops@example.test --message-server-image $'dirextalk/message-server:test\nINJECTED=true' > /dev/null 2>&1; then
+  echo "renderer accepted a multiline Message Server image" >&2
+  exit 1
+fi
 
 awk '/encoding: b64/ { getline; sub(/^    content: /, ""); print; exit }' "$tmp/user-data.yaml" \
   | base64 -d > "$tmp/bundle.tar.gz"

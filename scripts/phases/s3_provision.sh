@@ -17,9 +17,9 @@ DEFAULT_LIGHTSAIL_BLUEPRINT_ID=${DEFAULT_LIGHTSAIL_BLUEPRINT_ID:-ubuntu_24_04}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
 DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
-# The service rejects the serialized CreateInstances request at 16,000 bytes;
-# reserve room beyond the raw user-data script for AWS CLI JSON escaping.
-LIGHTSAIL_USER_DATA_MAX_BYTES=15700
+# Lightsail receives only a deliberately small launcher. The rendered bootstrap
+# is streamed through authenticated SSH after the stable IP is attached.
+LIGHTSAIL_LAUNCH_USER_DATA_MAX_BYTES=16000
 
 run_phase() {
   if ! updater_release_validate_pin; then
@@ -237,7 +237,9 @@ _run_phase_ec2() {
 _run_phase_lightsail() {
   phase_set S3_PROVISION in_progress "provisioning Lightsail"
 
-  local name region bundle blueprint zone keyfile domain_mode domain message_server_image agent_image agent_instance_id scripts_dir userdata userdata_bytes userdata_aws
+  local name region bundle blueprint zone keyfile domain_mode domain message_server_image agent_image agent_instance_id scripts_dir
+  local bootstrap_script bootstrap_sha256 bootstrap_nonce_file bootstrap_nonce launch_userdata launch_userdata_bytes launch_userdata_aws bootstrap_tmp
+  local known_hosts instance_exists instance_lookup instance_lookup_rc
   local -a agent_render_args=()
   local instance_name static_ip_name pubip
   name=$(state_get run_id)
@@ -291,25 +293,107 @@ _run_phase_lightsail() {
   fi
   scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
 
-  # Validate and render before creating any remote state, so an oversized or
-  # otherwise invalid launch script cannot leave an orphaned Lightsail key.
-  userdata="$DIREXTALK_WORKDIR/user-data.sh"
-  log "Rendering Lightsail launch script (domain_mode=$domain_mode, provider=lightsail)..."
-  bash "$scripts_dir/render/render-userdata.sh" \
-    --format shell \
-    --domain "$domain" \
-    --acme "${ACME_EMAIL:-}" \
-    --message-server-image "$message_server_image" \
-    "${agent_render_args[@]}" \
-    > "$userdata"
-  userdata_bytes=$(wc -c < "$userdata" | tr -d '[:space:]')
-  if [ "$userdata_bytes" -gt "$LIGHTSAIL_USER_DATA_MAX_BYTES" ]; then
-    phase_set S3_PROVISION failed "Lightsail user-data exceeds ${LIGHTSAIL_USER_DATA_MAX_BYTES}-byte provider ceiling"
-    warn "Rendered Lightsail launch script is ${userdata_bytes} bytes; the provider ceiling is ${LIGHTSAIL_USER_DATA_MAX_BYTES}. Skipping remote key-pair creation."
-    return 1
+  # Persist the exact full bootstrap before creating remote state. A resumed
+  # deployment with an existing instance must reuse this artifact verbatim so a
+  # lost SSH response cannot replace already-generated service secrets.
+  instance_exists=0
+  instance_lookup=$(mktemp "$DIREXTALK_WORKDIR/.lightsail-instance-lookup.XXXXXX") || return 1
+  if aws lightsail get-instance --instance-name "$instance_name" >"$instance_lookup" 2>&1; then
+    instance_exists=1
+    res_set instance_id "$instance_name"
+  else
+    instance_lookup_rc=$?
+    if grep -Eq '\((NotFoundException|ResourceNotFoundException)\)' "$instance_lookup"; then
+      instance_exists=0
+    else
+      rm -f "$instance_lookup"
+      phase_set S3_PROVISION failed "could not determine whether Lightsail instance exists"
+      warn "Could not determine whether Lightsail instance $instance_name exists (AWS CLI rc=$instance_lookup_rc). Refusing to alter bootstrap artifacts or create a duplicate instance; check AWS reachability and permissions, then rerun."
+      return 1
+    fi
   fi
-  userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
-  res_set user_data "$userdata"
+  rm -f "$instance_lookup"
+  known_hosts="$DIREXTALK_WORKDIR/known_hosts"
+  if [ "$instance_exists" = 1 ]; then
+    bootstrap_script=$(res_get lightsail_bootstrap_script)
+    bootstrap_sha256=$(res_get lightsail_bootstrap_sha256)
+    bootstrap_nonce_file=$(res_get lightsail_bootstrap_nonce_file)
+    launch_userdata=$(res_get user_data)
+    known_hosts=$(res_get lightsail_ssh_known_hosts)
+    known_hosts=${known_hosts:-"$DIREXTALK_WORKDIR/known_hosts"}
+    [ -n "$bootstrap_script$bootstrap_sha256$bootstrap_nonce_file$launch_userdata" ] \
+      && [ -f "$bootstrap_script" ] && [ -f "$bootstrap_nonce_file" ] && [ -f "$launch_userdata" ] || {
+      phase_set S3_PROVISION failed "Lightsail bootstrap artifact is unavailable"
+      warn "The existing Lightsail instance has no complete local bootstrap artifact. Refusing to stream a replacement payload."
+      return 1
+    }
+    [ "$(_s3_file_sha256 "$bootstrap_script")" = "$bootstrap_sha256" ] || {
+      phase_set S3_PROVISION failed "Lightsail bootstrap artifact changed"
+      warn "The stored Lightsail bootstrap checksum no longer matches. Refusing to stream changed root code."
+      return 1
+    }
+    bootstrap_nonce=$(_lightsail_bootstrap_nonce_read "$bootstrap_nonce_file") || {
+      phase_set S3_PROVISION failed "Lightsail bootstrap identity nonce is invalid"
+      warn "The stored Lightsail bootstrap identity nonce is unavailable."
+      return 1
+    }
+    launch_userdata_bytes=$(wc -c < "$launch_userdata" | tr -d '[:space:]')
+    [ "$launch_userdata_bytes" -le "$LIGHTSAIL_LAUNCH_USER_DATA_MAX_BYTES" ] && bash -n "$launch_userdata" || {
+      phase_set S3_PROVISION failed "Lightsail launch user-data artifact is invalid"
+      warn "The stored Lightsail launch user-data artifact is invalid."
+      return 1
+    }
+  else
+    bootstrap_script="$DIREXTALK_WORKDIR/lightsail-bootstrap.sh"
+    launch_userdata="$DIREXTALK_WORKDIR/lightsail-launch.sh"
+    bootstrap_nonce_file="$DIREXTALK_WORKDIR/lightsail-bootstrap.nonce"
+    rm -f "$known_hosts"
+    bootstrap_tmp=$(mktemp "$DIREXTALK_WORKDIR/.lightsail-bootstrap.XXXXXX") || return 1
+    log "Rendering Lightsail bootstrap script (domain_mode=$domain_mode, provider=lightsail)..."
+    if ! bash "$scripts_dir/render/render-userdata.sh" \
+      --format shell \
+      --domain "$domain" \
+      --acme "${ACME_EMAIL:-}" \
+      --message-server-image "$message_server_image" \
+      "${agent_render_args[@]}" \
+      > "$bootstrap_tmp"; then
+      rm -f "$bootstrap_tmp"
+      phase_set S3_PROVISION failed "Lightsail bootstrap script could not be rendered"
+      return 1
+    fi
+    if [ ! -s "$bootstrap_tmp" ] || ! bash -n "$bootstrap_tmp"; then
+      rm -f "$bootstrap_tmp"
+      phase_set S3_PROVISION failed "Lightsail bootstrap script is invalid"
+      warn "Rendered Lightsail bootstrap script is empty or invalid. Skipping remote key-pair creation."
+      return 1
+    fi
+    mv -f "$bootstrap_tmp" "$bootstrap_script"
+    restrict_private_file "$bootstrap_script"
+    bootstrap_sha256=$(_s3_file_sha256 "$bootstrap_script") || {
+      phase_set S3_PROVISION failed "Lightsail bootstrap checksum could not be computed"
+      return 1
+    }
+    bootstrap_nonce=$(_lightsail_bootstrap_nonce_ensure "$bootstrap_nonce_file") || {
+      phase_set S3_PROVISION failed "Lightsail bootstrap identity nonce could not be prepared"
+      return 1
+    }
+    if ! _render_lightsail_launch_userdata "$launch_userdata" "$bootstrap_nonce"; then
+      phase_set S3_PROVISION failed "Lightsail launch user-data could not be prepared"
+      return 1
+    fi
+    launch_userdata_bytes=$(wc -c < "$launch_userdata" | tr -d '[:space:]')
+    if [ "$launch_userdata_bytes" -gt "$LIGHTSAIL_LAUNCH_USER_DATA_MAX_BYTES" ]; then
+      phase_set S3_PROVISION failed "Lightsail launch user-data exceeds ${LIGHTSAIL_LAUNCH_USER_DATA_MAX_BYTES}-byte provider ceiling"
+      warn "Generated Lightsail launch user-data is unexpectedly oversized. Skipping remote key-pair creation."
+      return 1
+    fi
+    res_set user_data "$launch_userdata"
+    res_set lightsail_bootstrap_script "$bootstrap_script"
+    res_set lightsail_bootstrap_sha256 "$bootstrap_sha256"
+    res_set lightsail_bootstrap_nonce_file "$bootstrap_nonce_file"
+    res_set lightsail_ssh_known_hosts "$known_hosts"
+  fi
+  launch_userdata_aws=$(dirextalk_native_tool_path "$launch_userdata") || return 1
 
   keyfile="$DIREXTALK_WORKDIR/${name}.pem"
   if [ -z "$(res_get key_name)" ]; then
@@ -327,7 +411,7 @@ _run_phase_lightsail() {
     log "Lightsail key pair already exists; skipping."; keyfile=$(res_get key_file)
   fi
 
-  if [ -n "$(res_get instance_id)" ] && aws lightsail get-instance --instance-name "$instance_name" >/dev/null 2>&1; then
+  if [ "$instance_exists" = 1 ]; then
     log "Lightsail instance $instance_name already exists; skipping creation."
   else
     log "Launching Lightsail instance ($bundle, $blueprint, $zone)..."
@@ -337,7 +421,7 @@ _run_phase_lightsail() {
       --blueprint-id "$blueprint" \
       --bundle-id "$bundle" \
       --key-pair-name "$name" \
-      --user-data "file://$userdata_aws" \
+      --user-data "file://$launch_userdata_aws" \
       --tags "key=Name,value=$name" >/dev/null || {
         phase_set S3_PROVISION failed "Lightsail create-instances failed"
         warn "Lightsail instance creation failed. Check Lightsail availability, bundle support, and AWS permissions."
@@ -372,6 +456,10 @@ _run_phase_lightsail() {
   }
   res_set public_ip "$pubip"
   res_set static_ip_name "$static_ip_name"
+  if ! _bootstrap_lightsail_host "$pubip" "$keyfile" "$bootstrap_script" "$bootstrap_nonce"; then
+    phase_set S3_PROVISION failed "failed to bootstrap Lightsail host over SSH"
+    return 1
+  fi
   if ! _resume_host_bootstrap "$pubip" "$keyfile"; then
     phase_set S3_PROVISION failed "failed to resume host bootstrap on Lightsail"
     return 1
@@ -454,12 +542,196 @@ _is_canonical_ipv4() {
   done
 }
 
-_resume_host_bootstrap() {
-  local public_ip=$1 keyfile=$2 legacy_source=${3:-}
-  local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt result identity integration_bundle remote_command
+_s3_file_sha256() {
+  local path=${1:-} output digest
+  [ -f "$path" ] || return 1
+  if command -v sha256sum >/dev/null 2>&1; then
+    output=$(sha256sum -- "$path") || return 1
+  else
+    output=$(shasum -a 256 "$path") || return 1
+  fi
+  # GNU coreutils prefixes output with `\` when it escapes a Windows path.
+  case "$output" in
+    \\*) output=${output#?} ;;
+  esac
+  digest=${output%%[[:space:]]*}
+  printf '%s\n' "$digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s\n' "$digest"
+}
+
+_lightsail_bootstrap_nonce_read() {
+  local path=${1:-} nonce
+  [ -f "$path" ] || return 1
+  nonce=$(tr -d '\r\n' < "$path") || return 1
+  printf '%s' "$nonce" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s\n' "$nonce"
+}
+
+_lightsail_bootstrap_nonce_ensure() {
+  local path=${1:-} nonce tmp
+  if nonce=$(_lightsail_bootstrap_nonce_read "$path"); then
+    printf '%s\n' "$nonce"
+    return 0
+  fi
+  nonce=$(od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]') || return 1
+  printf '%s' "$nonce" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  tmp=$(mktemp "$DIREXTALK_WORKDIR/.lightsail-bootstrap-nonce.XXXXXX") || return 1
+  if ! (umask 077 && printf '%s\n' "$nonce" > "$tmp"); then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv -f "$tmp" "$path"
+  restrict_private_file "$path"
+  printf '%s\n' "$nonce"
+}
+
+_render_lightsail_launch_userdata() {
+  local path=${1:-} nonce=${2:-} tmp
+  printf '%s' "$nonce" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  tmp=$(mktemp "$DIREXTALK_WORKDIR/.lightsail-launch.XXXXXX") || return 1
+  cat > "$tmp" <<EOF
+#!/bin/bash
+set -eu
+install -d -m 0700 /var/lib/dirextalk-bootstrap
+nonce_tmp=\$(mktemp /var/lib/dirextalk-bootstrap/.nonce.XXXXXX)
+printf '%s\\n' '$nonce' > "\$nonce_tmp"
+chmod 0600 "\$nonce_tmp"
+mv -f "\$nonce_tmp" /var/lib/dirextalk-bootstrap/nonce
+EOF
+  if ! bash -n "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv -f "$tmp" "$path"
+  restrict_private_file "$path"
+}
+
+_bootstrap_lightsail_host() {
+  local public_ip=$1 keyfile=$2 bootstrap_script=$3 expected_nonce=$4
+  local known_hosts candidate_known_hosts diagnostic_log remote_nonce attempt
   local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
   local attempts=${DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS:-60}
   local delay=${DIREXTALK_BOOTSTRAP_SSH_DELAY:-5}
+  _is_canonical_ipv4 "$public_ip" || {
+    warn "Lightsail bootstrap rejected a non-canonical public IPv4 address."
+    return 1
+  }
+  [ -f "$keyfile" ] && [ -s "$bootstrap_script" ] || {
+    warn "Lightsail bootstrap requires the recorded SSH key and rendered bootstrap script."
+    return 1
+  }
+  bash -n "$bootstrap_script" || {
+    warn "Lightsail bootstrap script is invalid."
+    return 1
+  }
+  printf '%s' "$expected_nonce" | grep -Eq '^[0-9a-f]{64}$' || {
+    warn "Lightsail bootstrap identity nonce is invalid."
+    return 1
+  }
+  [ "$ssh_user" = ubuntu ] || {
+    warn "Lightsail bootstrap requires the ubuntu SSH user."
+    return 1
+  }
+  known_hosts=$(res_get lightsail_ssh_known_hosts)
+  known_hosts=${known_hosts:-"$DIREXTALK_WORKDIR/known_hosts"}
+  diagnostic_log="$DIREXTALK_WORKDIR/lightsail-bootstrap-ssh.log"
+  : > "$diagnostic_log"
+  restrict_private_file "$diagnostic_log"
+  candidate_known_hosts=
+  if [ -s "$known_hosts" ]; then
+    remote_nonce=$(ssh -T -i "$keyfile" \
+      -o BatchMode=yes \
+      -o IdentitiesOnly=yes \
+      -o PreferredAuthentications=publickey \
+      -o PasswordAuthentication=no \
+      -o KbdInteractiveAuthentication=no \
+      -o ConnectTimeout=10 \
+      -o StrictHostKeyChecking=yes \
+      -o "UserKnownHostsFile=$known_hosts" \
+      "$ssh_user@$public_ip" \
+      'sudo -n -- /bin/cat /var/lib/dirextalk-bootstrap/nonce' 2>>"$diagnostic_log") || {
+      warn "Could not authenticate the pinned Lightsail SSH host."
+      return 1
+    }
+  else
+    attempt=1
+    while [ "$attempt" -le "$attempts" ]; do
+      candidate_known_hosts=$(mktemp "$DIREXTALK_WORKDIR/.lightsail-known-hosts.XXXXXX") || return 1
+      if remote_nonce=$(ssh -T -i "$keyfile" \
+          -o BatchMode=yes \
+          -o IdentitiesOnly=yes \
+          -o PreferredAuthentications=publickey \
+          -o PasswordAuthentication=no \
+          -o KbdInteractiveAuthentication=no \
+          -o ConnectTimeout=10 \
+          -o StrictHostKeyChecking=accept-new \
+          -o "UserKnownHostsFile=$candidate_known_hosts" \
+          "$ssh_user@$public_ip" \
+          'sudo -n -- /bin/cat /var/lib/dirextalk-bootstrap/nonce' 2>>"$diagnostic_log"); then
+        if [ -n "$remote_nonce" ]; then
+          break
+        fi
+      fi
+      rm -f "$candidate_known_hosts"
+      candidate_known_hosts=
+      warn "Lightsail SSH identity nonce is not ready (attempt $attempt/$attempts); retrying in ${delay}s."
+      attempt=$((attempt + 1))
+      [ "$attempt" -le "$attempts" ] && sleep "$delay"
+    done
+    [ "$attempt" -le "$attempts" ] || {
+      warn "Timed out waiting for the Lightsail SSH identity nonce. Rerun S3 to retry the frozen bootstrap."
+      return 1
+    }
+  fi
+  if [ "$remote_nonce" != "$expected_nonce" ]; then
+    [ -n "$candidate_known_hosts" ] && rm -f "$candidate_known_hosts"
+    warn "Lightsail SSH identity nonce did not match. Refusing to stream root bootstrap code."
+    return 1
+  fi
+  if [ -n "$candidate_known_hosts" ]; then
+    [ -s "$candidate_known_hosts" ] || {
+      rm -f "$candidate_known_hosts"
+      warn "Lightsail SSH host key was not recorded during identity enrollment."
+      return 1
+    }
+    mv -f "$candidate_known_hosts" "$known_hosts"
+    restrict_private_file "$known_hosts"
+    res_set lightsail_ssh_known_hosts "$known_hosts"
+  fi
+  log "Streaming frozen Lightsail bootstrap through the verified stable public IP before DNS gating..."
+  attempt=1
+  while [ "$attempt" -le "$attempts" ]; do
+    if ssh -T -i "$keyfile" \
+        -o BatchMode=yes \
+        -o IdentitiesOnly=yes \
+        -o PreferredAuthentications=publickey \
+        -o PasswordAuthentication=no \
+        -o KbdInteractiveAuthentication=no \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=yes \
+        -o "UserKnownHostsFile=$known_hosts" \
+        "$ssh_user@$public_ip" \
+        "sudo -n -- /bin/bash -s -- '$public_ip'" < "$bootstrap_script" >>"$diagnostic_log" 2>&1; then
+      return 0
+    fi
+    warn "Lightsail SSH bootstrap is not ready (attempt $attempt/$attempts); retrying in ${delay}s."
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$attempts" ] && sleep "$delay"
+  done
+  warn "Timed out bootstrapping Lightsail through $public_ip. Rerun S3 to retry the frozen bootstrap."
+  return 1
+}
+
+_resume_host_bootstrap() {
+  local public_ip=$1 keyfile=$2 legacy_source=${3:-}
+  local known_hosts attempt result identity integration_bundle remote_command strict_host_key_checking
+  local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
+  local attempts=${DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS:-60}
+  local delay=${DIREXTALK_BOOTSTRAP_SSH_DELAY:-5}
+  known_hosts=$(res_get lightsail_ssh_known_hosts)
+  known_hosts=${known_hosts:-"$DIREXTALK_WORKDIR/known_hosts"}
+  strict_host_key_checking=accept-new
+  [ -s "$known_hosts" ] && strict_host_key_checking=yes
   _is_canonical_ipv4 "$public_ip" || {
     warn "Host bootstrap resume rejected a non-canonical public IPv4 address."
     return 1
@@ -489,7 +761,7 @@ _resume_host_bootstrap() {
     return 1
   fi
   case "$ssh_user:$legacy_source" in
-    ubuntu:) remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'" ;;
+    ubuntu:) remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo -n -- /bin/bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'" ;;
     root:/root/dirextalk/dirextalk-message-server) remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip' '$legacy_source'" ;;
     *) rm -f "$integration_bundle"; warn "Host bootstrap rejected an unsupported SSH user or legacy source."; return 1 ;;
   esac
@@ -499,8 +771,12 @@ _resume_host_bootstrap() {
   while [ "$attempt" -le "$attempts" ]; do
     if result=$(ssh -T -i "$keyfile" \
         -o BatchMode=yes \
+        -o IdentitiesOnly=yes \
+        -o PreferredAuthentications=publickey \
+        -o PasswordAuthentication=no \
+        -o KbdInteractiveAuthentication=no \
         -o ConnectTimeout=10 \
-        -o StrictHostKeyChecking=accept-new \
+        -o "StrictHostKeyChecking=$strict_host_key_checking" \
         -o "UserKnownHostsFile=$known_hosts" \
         "$ssh_user@$public_ip" \
         "$remote_command" < "$integration_bundle"); then

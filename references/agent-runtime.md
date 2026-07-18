@@ -72,7 +72,7 @@ minimum release closure before a real z3 Lightsail acceptance is:
 1. Publish the reviewed linux/amd64 Agent artifact to a registry and record the
    immutable `repository:prerelease-tag@sha256:digest` reference.
 2. Make that exact digest pullable by a freshly created Lightsail host **before
-   cloud-init starts Compose**.
+   the authenticated SSH bootstrap starts Compose**.
 3. Supply only the digest-pinned reference to `AGENT_IMAGE`; do not substitute a
    tag or publish a gRPC host port.
 
@@ -82,7 +82,7 @@ target source revision and verify that revision before treating
 tag is not evidence by itself. This is a local test-image prerequisite; it does
 not change the deployment image policy.
 
-The current cloud-init path deliberately does not write `docker login` data,
+The current EC2 cloud-init and Lightsail SSH-bootstrap paths deliberately do not write `docker login` data,
 ECR passwords, AWS credentials, or registry tokens to user-data, `.env`, or
 state. Therefore the supported fresh-z3 path is an anonymously pullable
 registry digest. A private ECR reference is not sufficient by itself: without a

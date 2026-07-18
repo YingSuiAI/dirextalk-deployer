@@ -151,10 +151,20 @@ GitHub Releases and persists `server_release.source=default_latest`,
 `version=latest`, and the image reference before provisioning. Each new
 deployment pulls the image currently published under `latest`. S3 also records
 the deployer-owned independent updater version, commit, and
-SHA-256 pin. User-data on the verified Ubuntu 22.04 or 24.04 x86_64 host downloads that
-fixed Release asset, verifies the local pin, and atomically installs it; no
-local Go toolchain or updater SCP step is required.
+SHA-256 pin. EC2 user-data on the verified Ubuntu 22.04 or 24.04 x86_64 host
+downloads that fixed Release asset, verifies the local pin, and atomically
+installs it. Lightsail instead receives only a one-time identity nonce in its
+small launch script; after a static IP is attached, the deployer verifies that
+nonce over first-contact SSH, pins the host key, and streams the frozen local
+bootstrap through that verified connection. In both paths, no local Go
+toolchain or updater SCP step is required.
 The updater's fixed Release download and checksum contract is unchanged.
+
+An existing Lightsail instance from a deployment state created before this
+nonce-and-frozen-artifact flow is deliberately not migrated in place: it lacks
+the identity evidence required to stream replacement root code safely. Preserve
+that state for cleanup and destroy/rebuild the temporary node rather than
+resetting it or bypassing the refusal.
 
 ### Fixed legacy d1 adoption
 

@@ -19,6 +19,39 @@ MSYS_NO_PATHCONV=1 json_build object path_boundary=explicit > "$tmp/no-path-conv
 [ "$(MSYS_NO_PATHCONV=1 NODE=/missing/node json_get "$tmp/no-path-conversion.json" path_boundary)" = "explicit" ]
 [ -n "${DIREXTALK_JSON_WORKER_PORT:-}" ]
 (
+  json_worker_disconnect
+  exec 10>"$tmp/reserved-worker-fd-10"
+  exec 11>"$tmp/reserved-worker-fd-11"
+  json_worker_connect
+  [ "$DIREXTALK_JSON_WORKER_SOCKET" -gt 11 ]
+  [ "$(NODE=/missing/node json_get "$tmp/no-path-conversion.json" path_boundary)" = "explicit" ]
+  json_worker_disconnect
+  : >&10
+  : >&11
+)
+parallel_dir="$tmp/parallel-worker"
+mkdir -p "$parallel_dir"
+parallel_pids=
+parallel_index=1
+while [ "$parallel_index" -le 20 ]; do
+  printf '{"value":"%s"}\n' "$parallel_index" > "$parallel_dir/$parallel_index.json"
+  (
+    json_get "$parallel_dir/$parallel_index.json" value > "$parallel_dir/$parallel_index.out"
+  ) &
+  parallel_pids="$parallel_pids $!"
+  parallel_index=$((parallel_index + 1))
+done
+parallel_status=0
+for parallel_pid in $parallel_pids; do
+  wait "$parallel_pid" || parallel_status=1
+done
+[ "$parallel_status" -eq 0 ]
+parallel_index=1
+while [ "$parallel_index" -le 20 ]; do
+  [ "$(cat "$parallel_dir/$parallel_index.out")" = "$parallel_index" ]
+  parallel_index=$((parallel_index + 1))
+done
+(
   cd "$tmp"
   [ "$(NODE=/missing/node json_get no-path-conversion.json path_boundary)" = "explicit" ]
 )

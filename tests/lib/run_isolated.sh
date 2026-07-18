@@ -6,8 +6,7 @@ isolation_root=$(mktemp -d)
 json_worker_pid=
 cleanup() {
   if [ -n "${DIREXTALK_JSON_WORKER_SOCKET:-}" ]; then
-    exec {DIREXTALK_JSON_WORKER_SOCKET}>&- || true
-    unset DIREXTALK_JSON_WORKER_SOCKET
+    json_worker_disconnect || true
   fi
   if [ -n "$json_worker_pid" ]; then
     kill "$json_worker_pid" 2>/dev/null || true

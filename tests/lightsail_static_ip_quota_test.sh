@@ -35,12 +35,20 @@ case "${1:-} ${2:-}" in
     printf '%s\n' '-----END OPENSSH PRIVATE KEY-----'
     ;;
   "lightsail get-instance")
-    printf 'running\n'
+    if [ -f "$DIREXTALK_WORKDIR/fake-instance-created" ]; then
+      printf 'running\n'
+    else
+      printf '%s\n' 'An error occurred (NotFoundException) when calling the GetInstance operation: test instance absent' >&2
+      exit 255
+    fi
     ;;
   "lightsail get-static-ip")
     exit 255
     ;;
-  "lightsail create-instances"|"lightsail open-instance-public-ports"|"lightsail attach-static-ip")
+  "lightsail create-instances")
+    touch "$DIREXTALK_WORKDIR/fake-instance-created"
+    ;;
+  "lightsail open-instance-public-ports"|"lightsail attach-static-ip")
     ;;
   "lightsail allocate-static-ip")
     echo "An error occurred (ServiceException) when calling the AllocateStaticIp operation: Sorry, you have reached the maximum number of static IP addresses." >&2

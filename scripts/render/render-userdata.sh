@@ -72,11 +72,18 @@ render_optional_agent_sections() {
   ' "$CI/docker-compose.yml"
 }
 
+strip_bundle_comments() {
+  # These two files have no block-scalar comments. Strip documentation-only
+  # lines from the deployed copy so the Lightsail launch payload keeps room
+  # for AWS CLI's JSON request envelope.
+  awk 'NF && $0 !~ /^[[:space:]]*#/ { print }'
+}
+
 # Build a deterministic tar.gz bundle with fixed permissions and no extra attrs.
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-render_optional_agent_sections "$agent_enabled" > "$WORK/docker-compose.yml"
-cp "$CI/Caddyfile"          "$WORK/Caddyfile"
+render_optional_agent_sections "$agent_enabled" | strip_bundle_comments > "$WORK/docker-compose.yml"
+strip_bundle_comments < "$CI/Caddyfile" > "$WORK/Caddyfile"
 tr -d '\r' < "$CI/init-tokens.sh" > "$WORK/init-tokens.sh"
 tr -d '\r' < "$CI/p2p-http-request.sh" > "$WORK/p2p-http-request.sh"
 if [ "$agent_enabled" = 1 ]; then
@@ -102,9 +109,8 @@ bundle_files=(docker-compose.yml Caddyfile init-tokens.sh p2p-http-request.sh up
 if [ "$agent_enabled" = 1 ]; then
   bundle_files+=(agent-db-init.sh agent-runtime-init.sh agent-model-profiles.json)
 fi
-# Use deterministic maximum compression to stay below the 16,000-byte
-# Lightsail provider ceiling; the optional Agent bundle leaves little headroom
-# with long pinned image references.
+# Lightsail rejects the serialized CreateInstances request above 16,000 bytes.
+# Keep the raw shell script below 15,700 bytes to reserve JSON-envelope space.
 BUNDLE_B64=$(COPYFILE_DISABLE=1 tar -C "$WORK" -cf - "${bundle_files[@]}" | gzip -9n | b64)
 
 if [ "$FORMAT" = "shell" ]; then

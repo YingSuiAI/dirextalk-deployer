@@ -109,7 +109,7 @@ oversized_scripts="$tmp/oversized-scripts"
 mkdir -p "$oversized_scripts/render"
 cat > "$oversized_scripts/render/render-userdata.sh" <<'EOF'
 #!/usr/bin/env bash
-printf '%016001d' 0
+printf '%015701d' 0
 EOF
 set +e
 DIREXTALK_INSTALL_SCRIPTS_DIR="$oversized_scripts" run_phase > "$tmp/s3-oversized.out" 2>&1
@@ -120,7 +120,7 @@ set -e
   echo "expected oversized Lightsail user-data to fail before provisioning" >&2
   exit 1
 }
-grep -q 'provider ceiling is 16000' "$tmp/s3-oversized.out"
+grep -q 'provider ceiling is 15700' "$tmp/s3-oversized.out"
 if grep -q 'lightsail create-key-pair' "$CALLS" 2>/dev/null; then
   echo "oversized Lightsail user-data must fail before creating a key pair" >&2
   cat "$CALLS" >&2

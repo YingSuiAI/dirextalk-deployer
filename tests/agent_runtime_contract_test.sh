@@ -142,8 +142,9 @@ tar -tzf "$tmp/agent-bundle.tar.gz" | grep -qx p2p-http-request.sh
 grep -F -q "AGENT_IMAGE=$image" "$agent_bundle"
 grep -F -q "AGENT_INSTANCE_ID=$instance_id" "$agent_bundle"
 
-# Lightsail rejected a 16,133-byte shell launch script in eu-west-2. Keep a
-# 16,000-byte ceiling for the long digest-pinned images of an enabled Agent.
+# Lightsail rejected a 15,912-byte raw script because the CreateInstances
+# request itself crossed its 16,000-byte ceiling. Reserve payload headroom for
+# AWS CLI JSON escaping and the request envelope.
 lightsail_user_data="$tmp/agent-user-data.sh"
 bash "$ROOT/scripts/render/render-userdata.sh" \
   --format shell \
@@ -155,8 +156,8 @@ bash "$ROOT/scripts/render/render-userdata.sh" \
   --agent-model-profiles-file "$profiles" \
   > "$lightsail_user_data"
 lightsail_user_data_bytes=$(wc -c < "$lightsail_user_data")
-[ "$lightsail_user_data_bytes" -le 16000 ] || {
-  echo "enabled Agent Lightsail shell user-data exceeds the 16000-byte provider ceiling ($lightsail_user_data_bytes bytes)" >&2
+[ "$lightsail_user_data_bytes" -le 15700 ] || {
+  echo "enabled Agent Lightsail shell user-data exceeds the 15700-byte safe ceiling ($lightsail_user_data_bytes bytes)" >&2
   exit 1
 }
 

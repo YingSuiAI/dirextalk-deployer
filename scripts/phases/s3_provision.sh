@@ -17,7 +17,9 @@ DEFAULT_LIGHTSAIL_BLUEPRINT_ID=${DEFAULT_LIGHTSAIL_BLUEPRINT_ID:-ubuntu_24_04}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
 DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
-LIGHTSAIL_USER_DATA_MAX_BYTES=16000
+# The service rejects the serialized CreateInstances request at 16,000 bytes;
+# reserve room beyond the raw user-data script for AWS CLI JSON escaping.
+LIGHTSAIL_USER_DATA_MAX_BYTES=15700
 
 run_phase() {
   if ! updater_release_validate_pin; then

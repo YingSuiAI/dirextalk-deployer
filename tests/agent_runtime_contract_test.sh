@@ -71,6 +71,21 @@ agent_instance_id_is_canonical "$instance_id"
 ! agent_instance_id_is_canonical '00000000-0000-0000-0000-000000000000'
 ! agent_model_profiles_file_is_safe "$unsafe_profiles"
 
+# Git Bash/coreutils uses this leading marker when escaping a Windows path.
+# Persisting that marker would make the later infrastructure-bound comparison
+# fail, even with exactly the same catalog file.
+escaped_sha256_digest=$(printf '%064d' 0 | tr 0 a)
+sha256sum() {
+  printf '\\%s *C:\\model-profiles.json\n' "$escaped_sha256_digest"
+}
+[ "$(agent_model_profiles_sha256 "$profiles")" = "$escaped_sha256_digest" ]
+AGENT_IMAGE="$image" AGENT_INSTANCE_ID="$instance_id" AGENT_MODEL_PROFILES_FILE="$profiles" agent_release_prepare_state
+[ "$test_profiles_sha256" = "$escaped_sha256_digest" ]
+test_infrastructure_id=i-agent-existing
+AGENT_IMAGE="$image" AGENT_INSTANCE_ID="$instance_id" AGENT_MODEL_PROFILES_FILE="$profiles" agent_release_prepare_state
+unset -f sha256sum
+test_source= test_enabled= test_image_ref= test_instance_id= test_profiles_sha256= test_infrastructure_id=
+
 AGENT_IMAGE="$image" AGENT_INSTANCE_ID="$instance_id" AGENT_MODEL_PROFILES_FILE="$profiles" agent_release_prepare_state
 [ "$test_source" = operator_image ]
 [ "$test_enabled" = true ]

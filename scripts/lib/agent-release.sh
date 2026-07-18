@@ -32,12 +32,20 @@ agent_model_profiles_file_is_safe() {
 }
 
 agent_model_profiles_sha256() {
-  local path=${1:-}
+  local path=${1:-} output digest
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$path" | awk '{print $1}'
+    output=$(sha256sum -- "$path") || return 1
   else
-    shasum -a 256 "$path" | awk '{print $1}'
+    output=$(shasum -a 256 "$path") || return 1
   fi
+  # GNU coreutils prefixes the complete output with `\\` when it escapes a
+  # Windows-style filename. That marker is not part of the checksum.
+  case "$output" in
+    \\*) output=${output#?} ;;
+  esac
+  digest=${output%%[[:space:]]*}
+  printf '%s\n' "$digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s\n' "$digest"
 }
 
 agent_release_state_is_blank() {

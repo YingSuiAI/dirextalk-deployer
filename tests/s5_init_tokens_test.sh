@@ -103,6 +103,37 @@ fi
 grep -q '^19$' "$TIMEOUT_LOG"
 json_test_check "$tmp/bootstrap-timeout.json" "data.password === '12345678' && data.agent_token === 'agent' && data.access_token === 'access'"
 
+cat > "$tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+payload=$(/usr/bin/mktemp)
+trap 'rm -f "$payload"' EXIT
+cat > "$payload"
+{
+  printf '%s\n' \
+    'test() { :; }' \
+    'cd() { :; }' \
+    'sudo() {' \
+    '  inner=' \
+    '  for argument in "$@"; do inner=$argument; done' \
+    '  printf "%s" "$inner" > "$S5_INNER"' \
+    '  sh -n -c "$inner"' \
+    '}'
+  cat "$payload"
+} | sh
+grep -Fxq '  body='"'"'{"action":"cloud.deployments.list","params":{}}'"'"'' "$S5_INNER"
+grep -Fq 'Content-Length: %s\r\n\r\n' "$S5_INNER"
+grep -Eq 'printf .*%s.*"\$body"' "$S5_INNER"
+EOF
+chmod 700 "$tmp/bin/ssh"
+export S5_INNER="$tmp/agent-grpc-inner.sh"
+hash -r
+
+if ! _verify_remote_agent_grpc "$tmp/key.pem" "203.0.113.10"; then
+  echo "S5 Agent gRPC probe must preserve a valid Agent gRPC request" >&2
+  exit 1
+fi
+
 printf '{"password":"01234567","agent_token":"agent","access_token":"access"}\n' > "$tmp/bootstrap-leading-zero.json"
 IFS=$'\t' read -r password token access_token < <(_extract_output_tokens "$tmp/bootstrap-leading-zero.json")
 [ "$password" = "01234567" ]

@@ -132,20 +132,20 @@ bootstrap=/var/dirextalk-message-server/p2p/bootstrap.json
 test -s "$bootstrap"
 cd "$deploy_dir"
 sudo docker compose --env-file .env exec -T message-server sh -ceu '
-  token=$(grep -oE '"'"'access_token'"'"'[[:space:]]*:[[:space:]]*"[^"]+"'"'"' /var/dirextalk-message-server/p2p/bootstrap.json | head -1 | sed -E '"'"'s/.*:[[:space:]]*"([^"]+)".*/\1/'"'"')
+  token=$(grep -oE '"'"'"access_token"[[:space:]]*:[[:space:]]*"[^"]+"'"'"' /var/dirextalk-message-server/p2p/bootstrap.json | head -1 | sed -E '"'"'s/.*:[[:space:]]*"([^"]+)".*/\1/'"'"')
   [ -n "$token" ]
   response=$(mktemp)
   trap '"'"'rm -f "$response"'"'"' EXIT HUP INT TERM
-  body='{"action":"cloud.deployments.list","params":{}}'
-  content_length=$(printf '%s' "$body" | wc -c | tr -d '[:space:]')
+  body='"'"'{"action":"cloud.deployments.list","params":{}}'"'"'
+  content_length=$(printf '"'"'%s'"'"' "$body" | wc -c | tr -d '"'"'[:space:]'"'"')
   {
     printf '"'"'POST /_p2p/query HTTP/1.1\r\n'"'"'
     printf '"'"'Host: 127.0.0.1:8008\r\n'"'"'
     printf '"'"'Content-Type: application/json\r\n'"'"'
     printf '"'"'Authorization: Bearer %s\r\n'"'"' "$token"
     printf '"'"'Connection: close\r\n'"'"'
-    printf 'Content-Length: %s\r\n\r\n' "$content_length"
-    printf '%s' "$body"
+    printf '"'"'Content-Length: %s\r\n\r\n'"'"' "$content_length"
+    printf '"'"'%s'"'"' "$body"
   } | sh /bootstrap/p2p-http-request.sh > "$response"
   grep -Eq '"'"'"deployments"[[:space:]]*:[[:space:]]*\['"'"' "$response"
 '
@@ -158,20 +158,20 @@ bootstrap=/var/dirextalk-message-server/p2p/bootstrap.json
 test -s "$bootstrap"
 cd "$deploy_dir"
 sudo docker compose --env-file .env exec -T message-server sh -ceu '
-  token=$(grep -oE '"'"'access_token'"'"'[[:space:]]*:[[:space:]]*"[^"]+"'"'"' /var/dirextalk-message-server/p2p/bootstrap.json | head -1 | sed -E '"'"'s/.*:[[:space:]]*"([^"]+)".*/\1/'"'"')
+  token=$(grep -oE '"'"'"access_token"[[:space:]]*:[[:space:]]*"[^"]+"'"'"' /var/dirextalk-message-server/p2p/bootstrap.json | head -1 | sed -E '"'"'s/.*:[[:space:]]*"([^"]+)".*/\1/'"'"')
   [ -n "$token" ]
   response=$(mktemp)
   trap '"'"'rm -f "$response"'"'"' EXIT HUP INT TERM
-  body='{"action":"cloud.deployments.list","params":{}}'
-  content_length=$(printf '%s' "$body" | wc -c | tr -d '[:space:]')
+  body='"'"'{"action":"cloud.deployments.list","params":{}}'"'"'
+  content_length=$(printf '"'"'%s'"'"' "$body" | wc -c | tr -d '"'"'[:space:]'"'"')
   {
     printf '"'"'POST /_p2p/query HTTP/1.1\r\n'"'"'
     printf '"'"'Host: 127.0.0.1:8008\r\n'"'"'
     printf '"'"'Content-Type: application/json\r\n'"'"'
     printf '"'"'Authorization: Bearer %s\r\n'"'"' "$token"
     printf '"'"'Connection: close\r\n'
-    printf 'Content-Length: %s\r\n\r\n' "$content_length"
-    printf '%s' "$body"
+    printf '"'"'Content-Length: %s\r\n\r\n'"'"' "$content_length"
+    printf '"'"'%s'"'"' "$body"
   } | sh /bootstrap/p2p-http-request.sh > "$response"
   grep -Eq '"'"'"deployments"[[:space:]]*:[[:space:]]*\['"'"' "$response"
 '

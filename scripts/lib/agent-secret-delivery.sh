@@ -56,14 +56,15 @@ _agent_mounted_secret_is_managed_local_path() {
 }
 
 _agent_mounted_secret_catalog_references_name() {
-  local catalog=$1 name=$2
+  local catalog=$1 name=$2 native_catalog
+  native_catalog=$(dirextalk_native_tool_path "$catalog") || return 1
   "$(json_node)" -e '
 const fs = require("fs");
 const [catalog, name] = process.argv.slice(1);
 const parsed = JSON.parse(fs.readFileSync(catalog, "utf8"));
 const profiles = Array.isArray(parsed.profiles) ? parsed.profiles : [];
 process.exit(profiles.some((profile) => profile && profile.secret_ref === `mounted:${name}`) ? 0 : 1);
-' "$catalog" "$name" >/dev/null 2>&1
+' "$native_catalog" "$name" >/dev/null 2>&1
 }
 
 agent_mounted_secret_delivery_inputs_validate() {

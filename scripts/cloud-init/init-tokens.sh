@@ -30,31 +30,34 @@ matrix_room_path() {
 }
 
 container_post_json() {
-  local path=$1 json=$2 token=${3:-} url
-  url="http://127.0.0.1:8008${path}"
-  {
-    printf 'header=Content-Type: application/json\n'
-    [ -z "$token" ] || printf 'header=Authorization: Bearer %s\n' "$token"
-    printf 'post_data=%s\n' "$json"
-  } | $COMPOSE exec -T message-server sh -c '
-    set -eu
-    umask 077
-    config=$(mktemp)
-    trap '\''rm -f "$config"'\'' EXIT HUP INT TERM
-    cat > "$config"
-    chmod 600 "$config"
-    wget -q -O - --config="$config" "$1"
-  ' sh "$url"
+  local path=$1 json=$2 token=${3:-} content_length response
+  content_length=$(printf '%s' "$json" | wc -c | tr -d '[:space:]')
+  response=$(mktemp)
+  if {
+    printf 'POST %s HTTP/1.1\r\n' "$path"
+    printf 'Host: 127.0.0.1:8008\r\n'
+    printf 'Content-Type: application/json\r\n'
+    [ -z "$token" ] || printf 'Authorization: Bearer %s\r\n' "$token"
+    printf 'Connection: close\r\n'
+    printf 'Content-Length: %s\r\n\r\n' "$content_length"
+    printf '%s' "$json"
+  } | $COMPOSE exec -T message-server sh /bootstrap/p2p-http-request.sh > "$response"; then
+    cat "$response"
+    rm -f "$response"
+    return 0
+  fi
+  rm -f "$response"
+  return 1
 }
 
 wait_for_message_server() {
   log "waiting for message-server /_p2p/health ..."
-  for i in $(seq 1 90); do
+  for i in $(seq 1 "${P2P_HEALTH_POLL_MAX:-90}"); do
     if $COMPOSE exec -T message-server wget -q -O - http://127.0.0.1:8008/_p2p/health >/dev/null 2>&1; then
       log "message-server is healthy."
       return 0
     fi
-    sleep 5
+    sleep "${P2P_HEALTH_POLL_INTERVAL:-5}"
   done
   log "message-server did not become healthy in time"
   return 1
@@ -117,7 +120,7 @@ bootstrap_portal() {
 wait_for_core_bootstrap_file() {
   local password agent_token access_token
   log "waiting for ${BOOTSTRAP_FILE} ..."
-  for i in $(seq 1 90); do
+  for i in $(seq 1 "${P2P_CORE_BOOTSTRAP_POLL_MAX:-90}"); do
     if bootstrap_file_ready; then
       if bootstrap_has_core_credentials "$BOOTSTRAP_FILE"; then
         log "credentials file is ready."
@@ -125,7 +128,7 @@ wait_for_core_bootstrap_file() {
       fi
       log "credentials file exists but is missing password/access/agent token"
     fi
-    sleep 5
+    sleep "${P2P_CORE_BOOTSTRAP_POLL_INTERVAL:-5}"
   done
   log "FATAL: ${BOOTSTRAP_FILE} was not written with complete credentials in time."
   return 1
@@ -209,12 +212,12 @@ ensure_agent_room() {
 
 wait_for_complete_bootstrap_file() {
   log "waiting for complete bootstrap credentials with agent_room_id ..."
-  for i in $(seq 1 30); do
+  for i in $(seq 1 "${P2P_COMPLETE_BOOTSTRAP_POLL_MAX:-30}"); do
     if bootstrap_file_ready && bootstrap_has_core_credentials "$BOOTSTRAP_FILE" && bootstrap_has_real_agent_room "$BOOTSTRAP_FILE"; then
       log "complete credentials file is ready."
       return 0
     fi
-    sleep 2
+    sleep "${P2P_COMPLETE_BOOTSTRAP_POLL_INTERVAL:-2}"
   done
   log "FATAL: bootstrap credentials never contained a real agent_room_id."
   return 1

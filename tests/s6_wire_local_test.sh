@@ -618,6 +618,7 @@ grep -q 'app_server_url = "stdio"' "$config_path"
 grep -q 'mode = "yolo"' "$config_path"
 grep -q 'room_id = "!agents-real:service.example.test"' "$config_path"
 grep -q 'user_id = "@agent:service.example.test"' "$config_path"
+awk '/^\[projects\.platforms\.options\]$/{in_options=1; next} /^\[/{in_options=0} in_options && /^approval_owner_id = "@owner:service\.example\.test"$/{found=1} END{exit found ? 0 : 1}' "$config_path"
 grep -q 'share_session_in_channel = true' "$config_path"
 grep -q 'group_reply_all = true' "$config_path"
 grep -q 'auto_join = false' "$config_path"
@@ -627,6 +628,14 @@ grep -q '^\[display\]$' "$config_path"
 grep -q 'mode = "compact"' "$config_path"
 grep -q 'tool_messages = false' "$config_path"
 grep -q 'thinking_messages = false' "$config_path"
+
+approval_config_path="$tmp/dirextalk-connect/config-with-approval-mode.toml"
+approval_options=$(DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"' _connect_agent_options_toml codex codex "$tmp/workspace" dirextalk-service-example)
+[ "$approval_options" = 'mode = "default"' ]
+_write_connect_config "$approval_config_path" "$tmp/dirextalk-connect/data-approval-mode" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" "$approval_options"
+grep -q '^mode = "default"$' "$approval_config_path"
+! grep -q '^mode = "yolo"$' "$approval_config_path"
+awk '/^\[projects\.platforms\.options\]$/{in_options=1; next} /^\[/{in_options=0} in_options && /^approval_owner_id = "@owner:service\.example\.test"$/{found=1} END{exit found ? 0 : 1}' "$approval_config_path"
 
 codex_mcp_connect_config_path="$tmp/dirextalk-connect/config-with-codex-mcp.toml"
 _write_connect_config "$codex_mcp_connect_config_path" "$tmp/dirextalk-connect/data-codex-mcp" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" "" "https://service.example.test/mcp" "dirextalk-service_example_test" "agent-token" "codex-node" session

@@ -812,6 +812,7 @@ homeserver = "$q_homeserver"
 access_token = "$q_token"
 user_id = "$q_user"
 room_id = "$q_room"
+approval_owner_id = "$q_admin_from"
 share_session_in_channel = true
 group_reply_all = true
 auto_join = false

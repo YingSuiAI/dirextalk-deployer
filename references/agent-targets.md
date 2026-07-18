@@ -115,6 +115,7 @@ type = "matrix"
 homeserver = "https://<domain>"
 user_id = "@agent:<server>"
 room_id = "!<real-agent-room>:<server>"
+approval_owner_id = "@owner:<server>"
 share_session_in_channel = true
 group_reply_all = true
 auto_join = false
@@ -123,7 +124,7 @@ auto_verify = false
 
 The `[speech]` block is present only when S6 finds a speech-to-text API key from `DIREXTALK_SPEECH_*` or supported provider environment variables. Voice input is not available without STT credentials.
 
-`admin_from` must stay at the `[[projects]]` level. `dirextalk-connect` uses the full Matrix sender ID, so S6 writes `@owner:<server>`; privileged commands such as `/dir`, `/shell`, `/show`, `/restart`, and `/upgrade` are blocked for other room members. `/dir reset` returns to the generated `work_dir` and clears the runtime override stored under `dirextalk-connect/data/projects/<project>.state.json`.
+`admin_from` must stay at the `[[projects]]` level. `dirextalk-connect` uses the full Matrix sender ID, so S6 writes `@owner:<server>`; privileged commands such as `/dir`, `/shell`, `/show`, `/restart`, and `/upgrade` are blocked for other room members. `approval_owner_id` must stay under `[projects.platforms.options]` and is generated from that same exact owner; it fail-closes non-YOLO approval-card responses from every other Matrix sender. `/dir reset` returns to the generated `work_dir` and clears the runtime override stored under `dirextalk-connect/data/projects/<project>.state.json`.
 
 ## MCP Targets
 
@@ -169,6 +170,6 @@ With `recommend` or `skip`, output generation completes with
 - `DIREXTALK_AGENT_INSTALL=auto` (default): refresh `dirextalk-connect@latest` under `~/.dirextalk/nodes/<service_id>/dirextalk-connect`, unless explicit binary/command overrides are set. When a daemon already exists, S6 leaves it running while npm refreshes the package; only the final `daemon install --force` performs the handoff, so an npm failure cannot strand the working daemon in a stopped state. S6 writes short wrappers at `dirextalk-connect/dirextalk-connect(.cmd)`, installs or refreshes the service-scoped `dirextalk-connect daemon install --config ~/.dirextalk/nodes/<service_id>/dirextalk-connect/config.toml --service-name <service_id> --force`, and records dirextalk-connect as installed only after `dirextalk-connect daemon status --service-name <service_id>` reports `Status: Running` and recent daemon logs show `dirextalk-connect is running`. Logs that show agent CLI missing, login/auth/trust failures, ACP startup failures, or agent offline state make S6 fail with `connect_install_status=install_failed`; deploy does not continue to completion until the daemon startup is verified. MCP records `mcp_install_status=not_required` for the HTTP endpoint path.
 
 Prefer `DIREXTALK_CONNECT_AGENT=<agent>` to choose the local agent that `dirextalk-connect` should run. Keep `DIREXTALK_AGENT_PLATFORM=<runtime>` for auto-detection overrides and legacy host-runtime naming. Use `DIREXTALK_AGENT_INSTALL_MODE=dirextalk-connect` only when overriding the default `recommended` mapping explicitly.
-Use `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXTALK_CONNECT_AGENT_CMD` is not enough.
+Use `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` for agent-specific options that cannot be represented by `work_dir` or `cmd`; for example `reasonix` requires `serve_url`, `tmux` requires `session`, and generic `acp` requires a command when `DIREXTALK_CONNECT_AGENT_CMD` is not enough. S6 keeps `mode = "yolo"` as its backward-compatible default. A real approval-card acceptance path must explicitly override it, for example `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"'`; otherwise approval cards are bypassed by the runtime mode.
 For OpenCode, use `DIREXTALK_OPENCODE_COMMAND` when PATH lookup does not find the right CLI. On Windows, Git Bash also checks the global `opencode-ai` npm package under the npm global prefix.
 For OpenClaw Gateway ACP, S6 defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-discover the Gateway from `~/.openclaw/openclaw.json`. To force an explicit Gateway, complete OpenClaw pairing first, then set all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime. S6 writes `["acp", "--url", <url>, "--token-file", <local path>, "--session", <session>]` and converts the token-file with `DIREXTALK_LOCAL_PATH_STYLE`. Fully replaceable OpenClaw args are rejected so the host ACP shape cannot be bypassed. `DIREXTALK_HERMES_ACP_ARGS_TOML` supplies child Hermes args and keeps the Dirextalk adapter/profile prefix.

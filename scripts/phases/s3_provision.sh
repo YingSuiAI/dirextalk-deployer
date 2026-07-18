@@ -7,6 +7,7 @@
 S3_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 source "$S3_PHASE_DIR/lib/domain.sh"
 source "$S3_PHASE_DIR/lib/server-release.sh"
+source "$S3_PHASE_DIR/lib/agent-release.sh"
 source "$S3_PHASE_DIR/lib/updater-release.sh"
 
 DIREXTALK_ROOT_VOLUME_GB=${DIREXTALK_ROOT_VOLUME_GB:-50}
@@ -24,6 +25,14 @@ run_phase() {
   fi
   if ! server_release_prepare_state; then
     phase_set S3_PROVISION failed "message-server image selection failed"
+    return 1
+  fi
+  if ! agent_release_prepare_state; then
+    phase_set S3_PROVISION failed "Agent image selection failed"
+    return 1
+  fi
+  if ! agent_release_require_render_inputs; then
+    phase_set S3_PROVISION failed "Agent model-profile catalog is unavailable"
     return 1
   fi
   aws_env_prep
@@ -81,8 +90,18 @@ _run_phase_ec2() {
   fi
   ami=$(res_get ami_id)
   vpc=$(res_get vpc_id)
-  local message_server_image
+  local message_server_image agent_image agent_instance_id
+  local -a agent_render_args=()
   message_server_image=$(state_get server_release.image_ref)
+  agent_image=$(state_get agent_release.image_ref)
+  agent_instance_id=$(state_get agent_release.instance_id)
+  if [ -n "$agent_image" ]; then
+    agent_render_args=(
+      --agent-image "$agent_image"
+      --agent-instance-id "$agent_instance_id"
+      --agent-model-profiles-file "$AGENT_MODEL_PROFILES_FILE"
+    )
+  fi
   local scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
 
   # 1) Key pair (idempotent).
@@ -134,6 +153,7 @@ _run_phase_ec2() {
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
+    "${agent_render_args[@]}" \
     > "$userdata"
   local userdata_aws
   userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
@@ -214,7 +234,8 @@ _run_phase_ec2() {
 _run_phase_lightsail() {
   phase_set S3_PROVISION in_progress "provisioning Lightsail"
 
-  local name region bundle blueprint zone keyfile domain_mode domain message_server_image scripts_dir userdata userdata_aws
+  local name region bundle blueprint zone keyfile domain_mode domain message_server_image agent_image agent_instance_id scripts_dir userdata userdata_aws
+  local -a agent_render_args=()
   local instance_name static_ip_name pubip
   name=$(state_get run_id)
   region=$(state_get region)
@@ -256,6 +277,15 @@ _run_phase_lightsail() {
     return 2
   fi
   message_server_image=$(state_get server_release.image_ref)
+  agent_image=$(state_get agent_release.image_ref)
+  agent_instance_id=$(state_get agent_release.instance_id)
+  if [ -n "$agent_image" ]; then
+    agent_render_args=(
+      --agent-image "$agent_image"
+      --agent-instance-id "$agent_instance_id"
+      --agent-model-profiles-file "$AGENT_MODEL_PROFILES_FILE"
+    )
+  fi
   scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
 
   keyfile="$DIREXTALK_WORKDIR/${name}.pem"
@@ -281,6 +311,7 @@ _run_phase_lightsail() {
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
+    "${agent_render_args[@]}" \
     > "$userdata"
   userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
   res_set user_data "$userdata"

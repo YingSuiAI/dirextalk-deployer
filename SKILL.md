@@ -395,7 +395,14 @@ host-managed backends without a safe native adapter record
 `DIREXTALK_MCP_HOST_READY=1` confirmation. `recommend` and `skip` only write
 artifacts/guidance and retain `host_action_required` without running a host
 probe. Generated agent options
-write `mode = "yolo"` by default unless an explicit `mode` is supplied.
+write `mode = "yolo"` by default unless an explicit `mode` is supplied. When
+the optional private Agent runtime is enabled, read
+`references/agent-runtime.md` before S3: it requires an immutable prerelease
+digest, a separate Agent database/role, no public gRPC port, and an actual
+Message Server remote gRPC acceptance in S5. The generated Matrix platform
+options bind `approval_owner_id` to the same `@owner:<domain>` as `admin_from`.
+Real approval-card validation must explicitly select a reviewed non-YOLO mode,
+for example `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"'`.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
 once; rerunning the deployer refreshes config and restarts the service-scoped

@@ -13,6 +13,9 @@ volumes:
   message-data:
   caddy-data:
   caddy-config:
+  # DIREXTALK_AGENT_OPTIONAL_BEGIN
+  agent-runtime:
+  # DIREXTALK_AGENT_OPTIONAL_END
 
 services:
   postgres:
@@ -64,9 +67,24 @@ services:
         condition: service_healthy
       message-init:
         condition: service_completed_successfully
+      # DIREXTALK_AGENT_OPTIONAL_BEGIN
+      agent:
+        condition: service_healthy
+      # DIREXTALK_AGENT_OPTIONAL_END
     environment:
       P2P_PORTAL_CREDENTIALS_FILE: /var/dirextalk-message-server/p2p/bootstrap.json
       P2P_PORTAL_PASSWORD: ${P2P_PORTAL_PASSWORD}
+      # DIREXTALK_AGENT_OPTIONAL_BEGIN
+      # Keep this complete transport tuple together. With ENABLED=true the
+      # Message Server rejects missing/invalid values rather than using its
+      # in-process fallback.
+      P2P_AGENT_GRPC_ENABLED: "true"
+      P2P_AGENT_GRPC_TARGET: dns:///agent:9443
+      P2P_AGENT_GRPC_CA_FILE: /run/dirextalk-agent/agent-ca.crt
+      P2P_AGENT_GRPC_SERVER_NAME: agent
+      P2P_AGENT_GRPC_SERVICE_KEY_FILE: /run/dirextalk-agent/message-server.service-key
+      P2P_AGENT_GRPC_INSTANCE_ID: ${AGENT_INSTANCE_ID}
+      # DIREXTALK_AGENT_OPTIONAL_END
     command:
       - --config
       - /etc/dirextalk-message-server/message-server.yaml
@@ -78,6 +96,10 @@ services:
       - /var/dirextalk-message-server/p2p:/var/dirextalk-message-server/p2p
       - /run/dirextalk-updater:/run/dirextalk-updater:ro
       - /etc/dirextalk-updater/control-token:/etc/dirextalk-updater/control-token:ro
+      - ./p2p-http-request.sh:/bootstrap/p2p-http-request.sh:ro
+      # DIREXTALK_AGENT_OPTIONAL_BEGIN
+      - agent-runtime:/run/dirextalk-agent:ro
+      # DIREXTALK_AGENT_OPTIONAL_END
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8008/_p2p/health >/dev/null"]
       interval: 10s
@@ -85,6 +107,116 @@ services:
       retries: 30
       start_period: 15s
     restart: unless-stopped
+
+  # DIREXTALK_AGENT_OPTIONAL_BEGIN
+  # The two root init containers are limited to private named volumes. The
+  # serving/boundary containers below run with the Agent image's fixed non-root
+  # UID/GID and never publish a host gRPC port.
+  agent-runtime-init:
+    image: ${MESSAGE_SERVER_IMAGE}
+    networks: [dirextalk-net]
+    entrypoint: ["/bin/sh", "/bootstrap/agent-runtime-init.sh"]
+    environment:
+      AGENT_RUNTIME_DIR: /run/dirextalk-agent
+      AGENT_MODEL_PROFILES_SOURCE: /bootstrap/agent-model-profiles.json
+    volumes:
+      - agent-runtime:/run/dirextalk-agent
+      - ./agent-runtime-init.sh:/bootstrap/agent-runtime-init.sh:ro
+      - ./agent-model-profiles.json:/bootstrap/agent-model-profiles.json:ro
+    restart: "no"
+
+  agent-db-init:
+    image: postgres:18-alpine
+    networks: [dirextalk-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/bootstrap/agent-db-init.sh"]
+    environment:
+      POSTGRES_USER: dirextalk_message_server
+      POSTGRES_PASSWORD: dirextalk_message_server
+      POSTGRES_DB: dirextalk_message_server
+      AGENT_RUNTIME_DIR: /run/dirextalk-agent
+    volumes:
+      - agent-runtime:/run/dirextalk-agent
+      - ./agent-db-init.sh:/bootstrap/agent-db-init.sh:ro
+    restart: "no"
+
+  agent-migrate:
+    image: ${AGENT_IMAGE}
+    networks: [dirextalk-net]
+    user: "65532:65532"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      agent-runtime-init:
+        condition: service_completed_successfully
+      agent-db-init:
+        condition: service_completed_successfully
+    environment:
+      AGENT_INSTANCE_ID: ${AGENT_INSTANCE_ID}
+      AGENT_DATABASE_URL_FILE: /run/dirextalk-agent/agent-database-url
+    command: ["migrate"]
+    volumes:
+      - agent-runtime:/run/dirextalk-agent:ro
+    restart: "no"
+
+  agent-bootstrap:
+    image: ${AGENT_IMAGE}
+    networks: [dirextalk-net]
+    user: "65532:65532"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      agent-migrate:
+        condition: service_completed_successfully
+    environment:
+      AGENT_INSTANCE_ID: ${AGENT_INSTANCE_ID}
+      AGENT_DATABASE_URL_FILE: /run/dirextalk-agent/agent-database-url
+      AGENT_SERVICE_KEY_PEPPER_FILE: /run/dirextalk-agent/agent-service-key-pepper
+      AGENT_BOOTSTRAP_SERVICE_KEY_FILE: /run/dirextalk-agent/message-server.service-key
+      AGENT_BOOTSTRAP_CLIENT_ID: "dirextalk-project:${DOMAIN}"
+      AGENT_BOOTSTRAP_SCOPES: runtime.chat,cloud.read,cloud.plan.write,cloud.connection.preview,cloud.approve,cloud.connection.write,cloud.destroy,secret.bootstrap,event.read
+    command: ["bootstrap-service-key"]
+    volumes:
+      - agent-runtime:/run/dirextalk-agent:ro
+    restart: "no"
+
+  agent:
+    image: ${AGENT_IMAGE}
+    networks: [dirextalk-net]
+    user: "65532:65532"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:mode=1777,noexec,nosuid
+    depends_on:
+      agent-runtime-init:
+        condition: service_completed_successfully
+      agent-db-init:
+        condition: service_completed_successfully
+      agent-migrate:
+        condition: service_completed_successfully
+      agent-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      AGENT_INSTANCE_ID: ${AGENT_INSTANCE_ID}
+      AGENT_DATABASE_URL_FILE: /run/dirextalk-agent/agent-database-url
+      AGENT_TLS_CERT_FILE: /run/dirextalk-agent/agent-tls.crt
+      AGENT_TLS_KEY_FILE: /run/dirextalk-agent/agent-tls.key
+      AGENT_SERVICE_KEY_PEPPER_FILE: /run/dirextalk-agent/agent-service-key-pepper
+      AGENT_MASTER_KEY_FILE: /run/dirextalk-agent/agent-master-key
+      AGENT_MOUNTED_SECRETS_DIR: /run/dirextalk-agent/mounted-secrets
+      AGENT_MODEL_PROFILES_FILE: /run/dirextalk-agent/agent-model-profiles.json
+      AGENT_GRPC_HEALTHCHECK_SERVER_NAME: agent
+      AGENT_ENABLE_AWS_CONTROL: "false"
+    volumes:
+      - agent-runtime:/run/dirextalk-agent:ro
+    restart: unless-stopped
+  # DIREXTALK_AGENT_OPTIONAL_END
 
   caddy:
     image: caddy:2

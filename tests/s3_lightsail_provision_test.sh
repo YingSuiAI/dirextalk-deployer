@@ -78,6 +78,17 @@ export AWS_DEFAULT_REGION=us-east-1
 export DIREXTALK_CLOUD_PROVIDER=lightsail
 export MSYS_NO_PATHCONV=1
 
+# Exercise the optional Agent through the real S3 render invocation while the
+# AWS CLI remains fully mocked below.  The renderer/Agent contract covers the
+# bundle internals; this test owns the hand-off from provision state.
+agent_image='registry.example/dirextalk-agent:v0.1.0-alpha.20260718.1-abcdef123456@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+agent_instance_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+agent_profiles="$tmp/agent-model-profiles.json"
+printf '%s\n' '{"schema_version":1,"profiles":[{"profile_id":"test-profile","provider":"openai_compatible","model":"test-model","base_url":"https://api.example.test/v1","secret_ref":"mounted:test-token","context_window":4096,"max_output_tokens":1024}]}' > "$agent_profiles"
+export AGENT_IMAGE="$agent_image"
+export AGENT_INSTANCE_ID="$agent_instance_id"
+export AGENT_MODEL_PROFILES_FILE="$agent_profiles"
+
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null 2>&1
@@ -99,13 +110,15 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'default_latest' && data.server_release.version === 'latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.updater_release.version === 'v1.0.8' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b'"
+json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'default_latest' && data.server_release.version === 'latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.agent_release.source === 'operator_image' && data.agent_release.enabled === true && data.agent_release.image_ref === '$agent_image' && data.agent_release.instance_id === '$agent_instance_id' && data.agent_release.model_profiles_sha256.length === 64 && data.updater_release.version === 'v1.0.8' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b'"
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
 grep -q '^#!/usr/bin/env bash' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
   sed -n '1,12p' "$userdata_file" >&2
   exit 1
 }
+grep -F -q "AGENT_IMAGE=$agent_image" "$userdata_file"
+grep -F -q "AGENT_INSTANCE_ID=$agent_instance_id" "$userdata_file"
 key_file=$(json_get "$STATE_JSON" resources.key_file)
 grep -q -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$key_file" || {
   echo "Lightsail private key should be written as PEM text when AWS returns PEM text" >&2

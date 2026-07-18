@@ -2,6 +2,17 @@
 
 `dirextalk-deployer` deploys a production Dirextalk message server and wires the local agent room through Dirextalk's Matrix bridge. The supported local bridge is `dirextalk-connect`, installed per service from the npm package `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`. MCP capability is declared separately from bridge-agent support; S6 writes the canonical remote HTTP MCP description and never assumes that every bridge agent can consume it.
 
+## Optional Single-Tenant Agent
+
+The deployer can render the reusable Agent as an optional private Compose
+component only from an immutable prerelease `AGENT_IMAGE` digest, canonical
+`AGENT_INSTANCE_ID`, and secret-free `AGENT_MODEL_PROFILES_FILE`. It creates a
+separate database/role, keeps gRPC off public ports, and binds the Message Server
+to TLS 1.3 plus a mounted service key. See
+[the Agent runtime contract](references/agent-runtime.md) before enabling it,
+especially the real z3 Lightsail registry prerequisite and the explicit
+non-YOLO approval-card setting for S6.
+
 ## Platform Architecture
 
 ![Dirextalk platform architecture](https://raw.githubusercontent.com/YingSuiAI/dirextalk-deployer/main/assets/dirextalk-platform.png)

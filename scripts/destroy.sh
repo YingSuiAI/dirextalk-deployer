@@ -23,6 +23,8 @@ source "$HERE/lib/operation_report.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/local-paths.sh"
 # shellcheck disable=SC1090
+source "$HERE/lib/agent-secret-delivery.sh"
+# shellcheck disable=SC1090
 source "$HERE/lib/connect-agent-adapters.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/mcp-client-adapters.sh"
@@ -239,6 +241,8 @@ EIP_ID=$(json_get "$SRC" resources.eip_id)
 SG_ID=$(json_get "$SRC" resources.sg_id)
 KEY_NAME=$(json_get "$SRC" resources.key_name)
 KEY_FILE=$(json_get "$SRC" resources.key_file)
+LIGHTSAIL_SSH_KNOWN_HOSTS=$(json_get "$SRC" resources.lightsail_ssh_known_hosts)
+AGENT_RUNTIME_ENABLED=$(json_get "$SRC" agent_release.enabled)
 DOMAIN_MODE=$(json_get "$SRC" domain_mode)
 DOMAIN=$(json_get "$SRC" domain)
 AS_URL=$(json_get "$SRC" as_url)
@@ -521,6 +525,30 @@ EOF
   fi
 }
 
+cleanup_remote_agent_mounted_secrets() {
+  local cleanup_rc
+  if [ "$CLOUD_PROVIDER" != lightsail ] || [ "$AGENT_RUNTIME_ENABLED" != true ]; then
+    destroy_evidence_set agent_mounted_secrets skipped "optional Agent runtime is not enabled on a Lightsail host"
+    return 0
+  fi
+  agent_mounted_secret_cleanup_lightsail "$PUBLIC_IP" "$KEY_FILE" "$LIGHTSAIL_SSH_KNOWN_HOSTS"
+  cleanup_rc=$?
+  case "$cleanup_rc" in
+    0)
+      log "cleared private mounted Agent secrets through the pinned SSH host"
+      destroy_evidence_set agent_mounted_secrets cleared "private mounted Agent secrets cleared before cloud deletion"
+      ;;
+    2)
+      log "pinned SSH host data is unavailable; skipping remote mounted-secret cleanup before cloud deletion"
+      destroy_evidence_set agent_mounted_secrets skipped "pinned SSH host data unavailable; instance deletion remains the final wipe"
+      ;;
+    *)
+      log "private mounted Agent secret cleanup failed; cloud deletion will still wipe the volume"
+      destroy_evidence_set agent_mounted_secrets cleanup_failed "remote cleanup failed; instance deletion remains the final wipe"
+      ;;
+  esac
+}
+
 cleanup_local_service_dir() {
   local service_dir=$1 root=$2 nodes_root src_real nodes_real src_norm nodes_norm name
 
@@ -601,6 +629,7 @@ cleanup_host_mcp_registry() {
 # 0. Remove DNS record if ops created it through Route53 mode.
 CURRENT_SERVICE_DIR=$(current_service_dir "$AGENT_SERVICE_DIR" "$AS_URL" "$DOMAIN" "$CONNECT_CONFIG")
 CURRENT_SERVICE_NAME=$(connect_service_name "$AGENT_SERVICE_ID" "$CURRENT_SERVICE_DIR" "$AS_URL" "$DOMAIN")
+cleanup_remote_agent_mounted_secrets
 mark_remote_deprovisioned "$KEY_FILE" "$PUBLIC_IP"
 stop_current_connect_daemon "$CONNECT_CONFIG" "$CONNECT_BINARY" "$CONNECT_RUNTIME_DIR" "$CURRENT_SERVICE_DIR" "$CURRENT_SERVICE_NAME"
 

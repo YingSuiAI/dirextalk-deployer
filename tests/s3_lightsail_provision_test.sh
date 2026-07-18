@@ -118,6 +118,12 @@ if [[ "$*" == *"/bin/cat /var/lib/dirextalk-bootstrap/nonce"* ]]; then
 elif [[ "$*" == *"sudo -n -- /bin/bash -s"* ]]; then
   printf 'ssh-bootstrap\n' >> "$CALLS"
   cat > "$TMPDIR/lightsail-bootstrap.stdin"
+elif [[ "$*" == *"agent-runtime-init"* && "$*" == *"mounted-secrets"* ]]; then
+  printf 'ssh-secret-delivery\n' >> "$CALLS"
+  if [ -n "${DIREXTALK_FAKE_SECRET_DELIVERY_FAILURE:-}" ]; then
+    exit 255
+  fi
+  cat > "$TMPDIR/lightsail-secret.stdin"
 else
   cat >/dev/null
   printf 'v1.0.8\t1efa90fd776d355d4cd898bcdb4922267b03d180\t04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b\n'
@@ -140,6 +146,9 @@ agent_image='registry.example/dirextalk-agent:v0.1.0-alpha.20260718.1-abcdef1234
 agent_instance_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 agent_profiles="$tmp/agent-model-profiles.json"
 printf '%s\n' '{"schema_version":1,"profiles":[{"profile_id":"test-profile","provider":"openai_compatible","model":"test-model","base_url":"https://api.example.test/v1","secret_ref":"mounted:test-token","context_window":4096,"max_output_tokens":1024}]}' > "$agent_profiles"
+secret_source="$tmp/operator-mounted-secret"
+secret_value='test-only-mounted-secret'
+printf '%s\n' "$secret_value" > "$secret_source"
 export AGENT_IMAGE="$agent_image"
 export AGENT_INSTANCE_ID="$agent_instance_id"
 export AGENT_MODEL_PROFILES_FILE="$agent_profiles"
@@ -159,6 +168,23 @@ domain_resolves_to_ip() {
   printf 'dns-check %s %s\n' "$1" "$2" >> "$CALLS"
   return 0
 }
+
+unsafe_secret_source="$DIREXTALK_WORKDIR/unsafe-mounted-secret"
+printf '%s\n' "$secret_value" > "$unsafe_secret_source"
+set +e
+AGENT_MOUNTED_SECRET_FILE="$unsafe_secret_source" AGENT_MOUNTED_SECRET_NAME=test-token run_phase > "$tmp/s3-unsafe-secret.out" 2>&1
+unsafe_secret_rc=$?
+set -e
+[ "$unsafe_secret_rc" -eq 1 ] || {
+  cat "$tmp/s3-unsafe-secret.out" >&2
+  echo "managed-workdir mounted secret source must fail before provisioning" >&2
+  exit 1
+}
+if grep -q 'lightsail create-key-pair' "$CALLS" 2>/dev/null; then
+  echo "invalid mounted secret source must fail before creating a key pair" >&2
+  cat "$CALLS" >&2
+  exit 1
+fi
 
 invalid_scripts="$tmp/invalid-scripts"
 mkdir -p "$invalid_scripts/render"
@@ -215,6 +241,11 @@ if grep -q 'bundle.tar.gz\|AGENT_IMAGE' "$tmp/lightsail-launch-user-data"; then
   echo "Lightsail launch user-data must not contain the full bootstrap payload" >&2
   exit 1
 fi
+if grep -q '^ssh-secret-delivery$' "$CALLS"; then
+  echo "unset mounted Agent secret inputs must not trigger delivery" >&2
+  cat "$CALLS" >&2
+  exit 1
+fi
 
 # Reset the isolated state and mock call log before the independent Agent happy path.
 state_init >/dev/null 2>&1
@@ -224,7 +255,7 @@ state_set domain_mode user
 : > "$CALLS"
 rm -f "$tmp/instance.created" "$tmp/static-ip.allocated" "$tmp/static-ip.attached" "$tmp/lightsail-launch-user-data" "$tmp/lightsail-bootstrap.stdin" "$tmp/lightsail-bootstrap.nonce"
 
-if ! run_phase > "$tmp/s3.out" 2>&1; then
+if ! AGENT_MOUNTED_SECRET_FILE="$secret_source" AGENT_MOUNTED_SECRET_NAME=test-token run_phase > "$tmp/s3.out" 2>&1; then
   cat "$tmp/s3.out" >&2
   exit 1
 fi
@@ -259,6 +290,11 @@ bash -n "$bootstrap_file"
 [ -s "$known_hosts_file" ]
 cmp "$userdata_file" "$TMPDIR/lightsail-launch-user-data"
 cmp "$bootstrap_file" "$TMPDIR/lightsail-bootstrap.stdin"
+cmp "$secret_source" "$TMPDIR/lightsail-secret.stdin"
+if grep -F -q "$secret_value" "$CALLS" "$STATE_JSON" "$userdata_file" "$bootstrap_file"; then
+  echo "mounted Agent secret must stay out of state, launch data, bootstrap, and SSH arguments" >&2
+  exit 1
+fi
 key_file=$(json_get "$STATE_JSON" resources.key_file)
 grep -q -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$key_file" || {
   echo "Lightsail private key should be written as PEM text when AWS returns PEM text" >&2
@@ -289,14 +325,20 @@ static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddr
 enroll_line=$(grep -n '^ssh-enroll$' "$CALLS" | cut -d: -f1 | head -n1)
 bootstrap_line=$(grep -n '^ssh-bootstrap$' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^ssh .*reconcile-host\.sh' "$CALLS" | cut -d: -f1 | head -n1)
+secret_line=$(grep -n '^ssh-secret-delivery$' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)
 [ "$bootstrap_line" -gt 1 ] && sed -n "$((bootstrap_line - 1))p" "$CALLS" | grep -q 'StrictHostKeyChecking=yes' || {
   echo "Lightsail root bootstrap must use the nonce-verified pinned host key" >&2
   cat "$CALLS" >&2
   exit 1
 }
-[ "$static_ip_line" -lt "$enroll_line" ] && [ "$enroll_line" -lt "$bootstrap_line" ] && [ "$bootstrap_line" -lt "$upload_line" ] && [ "$upload_line" -lt "$dns_line" ] || {
-  echo "Lightsail bootstrap and updater upload must use the static IP and complete before DNS gating" >&2
+[ "$secret_line" -gt 1 ] && sed -n "$((secret_line - 1))p" "$CALLS" | grep -q 'StrictHostKeyChecking=yes' || {
+  echo "mounted Agent secret delivery must use the pinned SSH host key" >&2
+  cat "$CALLS" >&2
+  exit 1
+}
+[ "$static_ip_line" -lt "$enroll_line" ] && [ "$enroll_line" -lt "$bootstrap_line" ] && [ "$bootstrap_line" -lt "$upload_line" ] && [ "$upload_line" -lt "$secret_line" ] && [ "$secret_line" -lt "$dns_line" ] || {
+  echo "Lightsail bootstrap, updater upload, and secret delivery must complete before DNS gating" >&2
   cat "$CALLS" >&2
   exit 1
 }
@@ -313,6 +355,21 @@ after_mismatch=$(grep -c '^ssh-bootstrap$' "$CALLS")
 [ "$after_mismatch" -eq "$before_mismatch" ] || { echo "mismatched Lightsail SSH identity must not stream root bootstrap code" >&2; exit 1; }
 cp "$CALLS" "$tmp/initial-aws.calls"
 frozen_sha=$(_s3_file_sha256 "$bootstrap_file")
+: > "$CALLS"
+set +e
+AGENT_MOUNTED_SECRET_FILE="$secret_source" AGENT_MOUNTED_SECRET_NAME=test-token DIREXTALK_FAKE_SECRET_DELIVERY_FAILURE=1 run_phase > "$tmp/s3-secret-delivery-failure.out" 2>&1
+secret_delivery_rc=$?
+set -e
+[ "$secret_delivery_rc" -eq 1 ] || {
+  cat "$tmp/s3-secret-delivery-failure.out" >&2
+  echo "failed mounted Agent secret delivery must stop S3" >&2
+  exit 1
+}
+if grep -q '^dns-check ' "$CALLS"; then
+  echo "failed mounted Agent secret delivery must stop before DNS gating" >&2
+  cat "$CALLS" >&2
+  exit 1
+fi
 : > "$CALLS"
 if DIREXTALK_FAKE_INSTANCE_LOOKUP_FAILURE=1 run_phase > "$tmp/s3-ambiguous-instance.out" 2>&1; then
   echo "ambiguous Lightsail instance lookup must fail closed" >&2

@@ -23,6 +23,35 @@ and private-key PEM content are rejected before the catalog enters cloud-init.
 Do not put provider tokens, database passwords, TLS private keys, or registry
 credentials in that catalog, `.env`, user-data, command arguments, or state.
 
+### One-time mounted provider secret (verified Lightsail only)
+
+An actual provider-model acceptance can opt in to one external local source
+file without weakening that boundary:
+
+```bash
+AGENT_MOUNTED_SECRET_NAME='deepseek-token' \
+AGENT_MOUNTED_SECRET_FILE='/secure/local/path/deepseek-token' \
+bash scripts/orchestrate.sh
+```
+
+Both variables are required together. The name must already appear as exactly
+`"secret_ref":"mounted:deepseek-token"` in the reviewed catalog. The source
+must be a regular non-symlink file outside the deployer repository and service
+work directory, containing one non-empty single-line token of at most 16 KiB.
+Its path and contents are never written to state, user-data, command arguments,
+or reports. After the Lightsail host's nonce-verified key is pinned and the
+normal updater reconciliation succeeds, the deployer streams the file only on
+SSH stdin into `agent-runtime`'s private `mounted-secrets` directory with
+atomic `65532:65532`/`0400` ownership. The Agent reads it on each provider
+request; no public port, container environment variable, or restart is needed.
+
+This narrow transport deliberately rejects EC2 and unpinned hosts. On destroy,
+the deployer best-effort clears the private regular files through the same
+pinned host key before deleting the instance; instance deletion remains the
+final volume wipe. Keep the local source file under operator control and remove
+it after testing. Never reuse a provider key that was pasted into chat; rotate
+it first and mount the replacement through this file.
+
 ## Cloud Runtime Boundary
 
 S3 renders these services only when the inputs above pass preflight:

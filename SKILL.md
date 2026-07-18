@@ -403,6 +403,13 @@ Message Server remote gRPC acceptance in S5. The generated Matrix platform
 options bind `approval_owner_id` to the same `@owner:<domain>` as `admin_from`.
 Real approval-card validation must explicitly select a reviewed non-YOLO mode,
 for example `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"'`.
+For real provider-model acceptance on Lightsail, an operator may supply one
+newly rotated local token file through `AGENT_MOUNTED_SECRET_NAME` and
+`AGENT_MOUNTED_SECRET_FILE` when the reviewed catalog has the matching
+`mounted:<name>` reference. The source must remain outside the repository and
+service work directory; it is streamed only on the nonce-verified, pinned SSH
+connection into the private Agent volume and never enters state, user-data,
+arguments, or logs. Do not use a provider key exposed in chat.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
 once; rerunning the deployer refreshes config and restarts the service-scoped

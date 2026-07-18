@@ -8,6 +8,7 @@ S3_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 source "$S3_PHASE_DIR/lib/domain.sh"
 source "$S3_PHASE_DIR/lib/server-release.sh"
 source "$S3_PHASE_DIR/lib/agent-release.sh"
+source "$S3_PHASE_DIR/lib/agent-secret-delivery.sh"
 source "$S3_PHASE_DIR/lib/updater-release.sh"
 
 DIREXTALK_ROOT_VOLUME_GB=${DIREXTALK_ROOT_VOLUME_GB:-50}
@@ -38,9 +39,18 @@ run_phase() {
     phase_set S3_PROVISION failed "Agent model-profile catalog is unavailable"
     return 1
   fi
-  aws_env_prep
+  if ! agent_mounted_secret_delivery_inputs_validate; then
+    phase_set S3_PROVISION failed "Agent mounted-secret delivery input is invalid"
+    return 1
+  fi
   local cloud_provider
   cloud_provider=$(_resolve_cloud_provider)
+  if agent_mounted_secret_delivery_is_configured && [ "$cloud_provider" != lightsail ]; then
+    phase_set S3_PROVISION failed "Agent mounted-secret delivery requires verified Lightsail SSH"
+    warn "Mounted Agent secret delivery is currently supported only for the verified Lightsail SSH path."
+    return 1
+  fi
+  aws_env_prep
   state_set cloud_provider "$cloud_provider"
   case "$cloud_provider" in
     lightsail) _run_phase_lightsail ;;
@@ -463,6 +473,12 @@ _run_phase_lightsail() {
   if ! _resume_host_bootstrap "$pubip" "$keyfile"; then
     phase_set S3_PROVISION failed "failed to resume host bootstrap on Lightsail"
     return 1
+  fi
+  if agent_mounted_secret_delivery_is_configured; then
+    if ! agent_mounted_secret_deliver_lightsail "$pubip" "$keyfile" "$known_hosts"; then
+      phase_set S3_PROVISION failed "failed to deliver mounted Agent secret over verified SSH"
+      return 1
+    fi
   fi
   log "Public IP = $pubip; domain = $(state_get domain)"
 

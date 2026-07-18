@@ -105,6 +105,37 @@ domain_resolves_to_ip() {
   return 0
 }
 
+oversized_scripts="$tmp/oversized-scripts"
+mkdir -p "$oversized_scripts/render"
+cat > "$oversized_scripts/render/render-userdata.sh" <<'EOF'
+#!/usr/bin/env bash
+printf '%016001d' 0
+EOF
+set +e
+DIREXTALK_INSTALL_SCRIPTS_DIR="$oversized_scripts" run_phase > "$tmp/s3-oversized.out" 2>&1
+oversized_rc=$?
+set -e
+[ "$oversized_rc" -eq 1 ] || {
+  cat "$tmp/s3-oversized.out" >&2
+  echo "expected oversized Lightsail user-data to fail before provisioning" >&2
+  exit 1
+}
+grep -q 'provider ceiling is 16000' "$tmp/s3-oversized.out"
+if grep -q 'lightsail create-key-pair' "$CALLS" 2>/dev/null; then
+  echo "oversized Lightsail user-data must fail before creating a key pair" >&2
+  cat "$CALLS" >&2
+  exit 1
+fi
+json_test_check "$STATE_JSON" "data.phases.S3_PROVISION.status === 'failed' && !data.resources.key_name"
+unset DIREXTALK_INSTALL_SCRIPTS_DIR
+
+# Reset the isolated state and mock call log before the independent happy path.
+state_init >/dev/null 2>&1
+state_set region us-east-1
+state_set domain lightsail.example.test
+state_set domain_mode user
+: > "$CALLS"
+
 if ! run_phase > "$tmp/s3.out" 2>&1; then
   cat "$tmp/s3.out" >&2
   exit 1
@@ -112,7 +143,7 @@ fi
 
 json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'default_latest' && data.server_release.version === 'latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.agent_release.source === 'operator_image' && data.agent_release.enabled === true && data.agent_release.image_ref === '$agent_image' && data.agent_release.instance_id === '$agent_instance_id' && data.agent_release.model_profiles_sha256.length === 64 && data.updater_release.version === 'v1.0.8' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b'"
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
-grep -q '^#!/usr/bin/env bash' "$userdata_file" || {
+grep -q '^#!/bin/bash' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
   sed -n '1,12p' "$userdata_file" >&2
   exit 1

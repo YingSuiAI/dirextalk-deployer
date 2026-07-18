@@ -17,6 +17,7 @@ DEFAULT_LIGHTSAIL_BLUEPRINT_ID=${DEFAULT_LIGHTSAIL_BLUEPRINT_ID:-ubuntu_24_04}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
 DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
+LIGHTSAIL_USER_DATA_MAX_BYTES=16000
 
 run_phase() {
   if ! updater_release_validate_pin; then
@@ -234,7 +235,7 @@ _run_phase_ec2() {
 _run_phase_lightsail() {
   phase_set S3_PROVISION in_progress "provisioning Lightsail"
 
-  local name region bundle blueprint zone keyfile domain_mode domain message_server_image agent_image agent_instance_id scripts_dir userdata userdata_aws
+  local name region bundle blueprint zone keyfile domain_mode domain message_server_image agent_image agent_instance_id scripts_dir userdata userdata_bytes userdata_aws
   local -a agent_render_args=()
   local instance_name static_ip_name pubip
   name=$(state_get run_id)
@@ -299,6 +300,12 @@ _run_phase_lightsail() {
     --message-server-image "$message_server_image" \
     "${agent_render_args[@]}" \
     > "$userdata"
+  userdata_bytes=$(wc -c < "$userdata" | tr -d '[:space:]')
+  if [ "$userdata_bytes" -gt "$LIGHTSAIL_USER_DATA_MAX_BYTES" ]; then
+    phase_set S3_PROVISION failed "Lightsail user-data exceeds ${LIGHTSAIL_USER_DATA_MAX_BYTES}-byte provider ceiling"
+    warn "Rendered Lightsail launch script is ${userdata_bytes} bytes; the provider ceiling is ${LIGHTSAIL_USER_DATA_MAX_BYTES}. Skipping remote key-pair creation."
+    return 1
+  fi
   userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
   res_set user_data "$userdata"
 

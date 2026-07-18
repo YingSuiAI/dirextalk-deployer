@@ -16,29 +16,36 @@ bash "$ROOT/scripts/render/render-userdata.sh" \
   --acme ops@example.test \
   --message-server-image dirextalk/message-server:test \
   > "$tmp/user-data.sh"
+bash -n "$tmp/user-data.sh"
 
 grep -q '^#cloud-config' "$tmp/user-data.yaml"
-grep -q '^#!/usr/bin/env bash' "$tmp/user-data.sh"
+grep -q '^#!/bin/bash' "$tmp/user-data.sh"
 grep -q '^package_update: false' "$tmp/user-data.yaml"
 if grep -q '^package_update: true' "$tmp/user-data.yaml"; then
   echo "cloud-init user-data must not run a redundant package update before Docker's installer" >&2
   exit 1
 fi
 grep -q 'if ! command -v docker >/dev/null 2>&1' "$tmp/user-data.yaml"
-grep -q 'if ! command -v docker >/dev/null 2>&1' "$tmp/user-data.sh"
+grep -q 'type docker>&/dev/null||curl -fsSL https://get.docker.com|sh' "$tmp/user-data.sh"
 grep -q 'bash /var/dirextalk-message-server/updater/bootstrap-host.sh' "$tmp/user-data.yaml"
-grep -q 'cd /var/dirextalk-message-server' "$tmp/user-data.sh"
-grep -q 'bash updater/bootstrap-host.sh' "$tmp/user-data.sh"
+grep -q 'd=/var/dirextalk-message-server;mkdir -p "$d";cd "$d"' "$tmp/user-data.sh"
+grep -q 'updater/bootstrap-host.sh' "$tmp/user-data.sh"
 if grep -q '^#cloud-config' "$tmp/user-data.sh"; then
   echo "Lightsail shell user-data must not be rendered as cloud-config" >&2
   exit 1
 fi
-grep -q 'base64 --decode > bundle.tar.gz' "$tmp/user-data.sh"
+grep -q 'base64 -d>bundle.tar.gz<<B' "$tmp/user-data.sh"
 
 awk '/encoding: b64/ { getline; sub(/^    content: /, ""); print; exit }' "$tmp/user-data.yaml" \
   | base64 -d > "$tmp/bundle.tar.gz"
 mkdir "$tmp/bundle"
 tar -xzf "$tmp/bundle.tar.gz" -C "$tmp/bundle"
+for executable in init-tokens.sh p2p-http-request.sh updater/install.sh updater/bootstrap-host.sh; do
+  [ -x "$tmp/bundle/$executable" ] || {
+    echo "bundle must preserve executable mode for $executable" >&2
+    exit 1
+  }
+done
 
 if grep -q 'P2P_REMOTE_NODE_' "$tmp/user-data.yaml"; then
   echo "rendered user-data must not configure fixed remote P2P nodes" >&2

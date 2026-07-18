@@ -16,7 +16,11 @@ Confirm these items before calling `scripts/orchestrate.sh`:
 4. Node.js, AWS CLI v2, `ssh`, and `curl` are available. Go is not required.
 5. AWS credentials are configured through `AWS_PROFILE` or environment variables.
 6. `AWS_DEFAULT_REGION` is explicit.
-7. Docker Hub can pull `dirextalk/message-server:latest`; new deployments do not require message-server GitHub Release access.
+7. Legacy/no-Agent deployment can pull `dirextalk/message-server:latest`. An
+   Agent-enabled production deployment has the exact public stable
+   `DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE` digest, and EC2 has the immutable
+   same-account/same-region private ECR `dirextalk-agent` digest plus an
+   eligible root/IAM-user caller or explicit same-account pull role.
 8. Existing state handling is explicit: continue, destroy, or new workdir.
 
 On native Windows, first open Git Bash and verify Git before a lifecycle

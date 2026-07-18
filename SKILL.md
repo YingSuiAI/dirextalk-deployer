@@ -276,12 +276,16 @@ CONFIRM_DOMAIN_BINDING=1
 DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
-Normal server selection uses `dirextalk/message-server:latest` directly and
-does not query message-server GitHub Releases before provisioning. Each new
-deployment therefore pulls the image currently published under `latest`.
+Legacy/no-Agent server selection uses `dirextalk/message-server:latest`
+directly and does not query message-server GitHub Releases before
+provisioning. An Agent-enabled production deployment instead requires
+`DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE` to be an exact public stable
+`dirextalk/message-server:vX.Y.Z@sha256:<64-lowercase-hex>` reference; `latest`
+and prerelease/debug references fail closed.
 `MESSAGE_SERVER_IMAGE` is disabled unless
 `DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1` explicitly marks a
-debug/legacy deployment. The independent `YingSuiAI/dirextalk-updater`
+debug/legacy deployment and remains separate from the production release
+selector. The independent `YingSuiAI/dirextalk-updater`
 host binary is downloaded only on a verified Ubuntu 22.04 or 24.04 x86_64 server from
 the deployer-pinned Release URL and must match the deployer-pinned SHA-256.
 The local deployer host does not need Go and does not SCP updater artifacts.
@@ -313,6 +317,21 @@ replacement target. Then set `DIREXTALK_CONFIRM_DNS_OVERWRITE=1` internally.
 If Route53 delegation is needed, wait for authoritative DNS before continuing.
 
 Default cloud provider is Lightsail. If no AWS region is configured in state, `AWS_DEFAULT_REGION`/`AWS_REGION`, or the AWS profile, the deployer recommends a default region from the local timezone and uses it in non-interactive runs; `DIREXTALK_DEFAULT_REGION` is the explicit deployer override. S1 queries Lightsail bundle availability and Lightsail availability zones before provisioning, but it does not query AWS Free Tier or credit usage. For manual Lightsail zone checks, use `aws lightsail get-regions --include-availability-zones --output json`; plain `aws lightsail get-regions` can omit availability-zone details. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone in the same region. If Lightsail has no usable bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; ask the operator to choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2` after reviewing the estimate. EC2 remains supported explicitly with `DIREXTALK_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
+
+EC2 user-data contains only a one-time 64-hex host-identity nonce. S3 freezes
+the complete bootstrap and stable EC2 client token locally before creating AWS
+resources, attaches the Elastic IP, verifies the remote nonce, pins the SSH
+host key, and performs all root actions over strict pinned SSH. For Agent on
+EC2, `AGENT_IMAGE` must be an
+immutable prerelease `tag@sha256` in the same-account, same-region private ECR
+repository named exactly `dirextalk-agent`. The caller must be root/IAM-user
+credentials eligible for a one-hour least-privilege federation session, or an
+assumed-role caller must explicitly set a same-account
+`DIREXTALK_ECR_PULL_ROLE_ARN`. Only the ECR Docker password crosses SSH stdin;
+the remote login uses `/run/dirextalk-ecr-auth`, then logs out, removes it, and
+proves it absent on success, failure, resume, and destroy. AWS/STS credentials
+and registry passwords must never enter user-data, `.env`, Compose, state,
+arguments, logs, reports, or the repository.
 
 ## Local Runtime Wiring
 
@@ -401,15 +420,27 @@ the optional private Agent runtime is enabled, read
 digest, a separate Agent database/role, no public gRPC port, and an actual
 Message Server remote gRPC acceptance in S5. The generated Matrix platform
 options bind `approval_owner_id` to the same `@owner:<domain>` as `admin_from`.
+Agent AWS control is a separate explicit opt-in requiring
+`AGENT_ENABLE_AWS_CONTROL=true`, a digest-pinned reaper image, a credential-free
+`grpcs://` DNS endpoint on port 443, an exact managed-preparation boolean, and
+one strict Agent Worker-AMI publication file. The deployer freezes exactly one
+regular non-symlink snapshot and records only its local path, SHA-256, and the
+public configuration; unknown publication fields (including standard AWS
+credential fields), malformed/arbitrary content, symlinks, missing input, and
+resume drift fail before AWS access. The publication is mounted read-only and
+the Agent remains its final cryptographic `image_digest` verifier. EC2 is the
+production AWS-control expectation; see `references/agent-runtime.md` for the
+exact schema, input, private-ECR, and resume contract.
 Real approval-card validation must explicitly select a reviewed non-YOLO mode,
 for example `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"'`.
-For real provider-model acceptance on Lightsail, an operator may supply one
-newly rotated local token file through `AGENT_MOUNTED_SECRET_NAME` and
-`AGENT_MOUNTED_SECRET_FILE` when the reviewed catalog has the matching
-`mounted:<name>` reference. The source must remain outside the repository and
-service work directory; it is streamed only on the nonce-verified, pinned SSH
-connection into the private Agent volume and never enters state, user-data,
-arguments, or logs. Do not use a provider key exposed in chat.
+For real provider-model acceptance on a nonce-verified Lightsail or EC2 host,
+an operator may supply one newly rotated local token file through
+`AGENT_MOUNTED_SECRET_NAME` and `AGENT_MOUNTED_SECRET_FILE` when the reviewed
+catalog has the matching `mounted:<name>` reference. The source must remain
+outside the repository and service work directory; it is streamed only on the
+nonce-verified, pinned SSH connection into the private Agent volume as UID
+65532 with mode 0400 and never enters state, user-data, arguments, or logs. Do
+not use a provider key exposed in chat.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
 once; rerunning the deployer refreshes config and restarts the service-scoped
@@ -493,10 +524,14 @@ or disable temporary credentials and rotate/remove root access keys if used.
 Use `bash scripts/update.sh` for image-only refresh. It preserves infrastructure,
 TLS storage, local credentials, runtime checks, dirextalk-connect daemon
 state, and MCP artifacts unless verification proves credentials were regenerated.
+It fails closed before SSH when state contains a private ECR Agent image because
+the update path does not acquire fresh short-lived registry authentication.
 
 Use `bash scripts/reset-app-data.sh` only after an explicit semantic user
 confirmation that application data will be cleared. Set
 `DIREXTALK_RESET_APP_DATA_CONFIRM=1` internally; never make the user copy it.
+It fails closed before SSH when state contains a private ECR Agent image because
+the reset path does not acquire fresh short-lived registry authentication.
 It preserves the cloud instance, fixed public IP/static IP or Elastic IP, DNS, and Caddy TLS storage, clears
 application data, clears stale credential/runtime-check evidence, sets
 `connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped dirextalk-connect daemon. The follow-up
@@ -506,6 +541,11 @@ Destroy uses `bash scripts/destroy.sh` on every supported local host. Require a
 clear natural-language user instruction to destroy or cancel the named service;
 do not require a copied confirmation string. Destroy uses the same AWS identity boundary as deployment.
 Root AWS access-key identity is allowed when the operator explicitly chose it.
+Before deleting an Agent-enabled EC2 instance, destroy best-effort uses the
+pinned host key to log out of the private registry, remove
+`/run/dirextalk-ecr-auth`, prove it absent, and remove any mounted Agent secret;
+the de-secreted result is written to `destroy.evidence`. Instance deletion
+remains the final wipe when pinned cleanup cannot run.
 Destroy stops and uninstalls only the service-scoped daemon whose WorkDir
 matches `~/.dirextalk/nodes/<service_id>/dirextalk-connect`, then removes recorded AWS
 resources and writes `destroy.evidence`. If `possible_remaining_billable_resources`

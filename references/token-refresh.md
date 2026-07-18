@@ -6,7 +6,11 @@
 
 现有节点执行 `scripts/update.sh` 只做镜像刷新和远端服务重启，不清理应用卷，也不重置本地 `password`、`access_token`、`agent_token`、`agent_room_id`、`user_confirmations`、`runtime_checks`、dirextalk-connect daemon 状态或 MCP artifacts。除非验证发现远端确实重新生成了 bootstrap credentials，否则 update 后不要强制续跑 S4-S7。
 
+如果 state 中包含私有 ECR Agent 镜像，`scripts/update.sh` 会在 SSH 前失败关闭，因为该生命周期不获取新的短期 registry authentication。必须使用正常 S3 resume 获取 fresh auth，不能复用旧 ECR password 或 `/run/dirextalk-ecr-auth`。
+
 执行 `scripts/reset-app-data.sh`、清理应用挂载卷或重新部署服务后，本地旧证据必须作废。脚本会清掉旧 `password`、`access_token`、`agent_token`、`agent_room_id`、`user_confirmations` 和 `runtime_checks`，把 `connect_install_status` 和 `mcp_install_status` 标成 `refresh_pending`，并只在 `WorkDir` 匹配当前 service 时停止对应的本地 bridge（stops only the matching service-scoped dirextalk-connect daemon），再把 S4-S7 标回 pending。远端 reset 还必须显式删除宿主 bind-mounted `/var/dirextalk-message-server/p2p/bootstrap.json`；它不属于 Docker named volume，`docker volume rm message-data` 不会自动清掉该文件。这样旧的用户确认、MCP discovery、Agent runtime probe、旧 bridge 安装状态、旧 bootstrap 文件或 MCP 状态不会被误用到重置后的节点。后续必须续跑 `scripts/orchestrate.sh`，让 S5/S6/S7 重新生成本地 credentials/MCP snippets，并默认自动重新安装/重启 dirextalk-connect、刷新 HTTP MCP endpoint 配置，再通过 `verify runtime` 写入当前证据。
+
+如果 state 中包含私有 ECR Agent 镜像，`scripts/reset-app-data.sh` 同样会在 SSH 前失败关闭；reset 路径不能刷新短期 registry authentication，应改用受支持的 S3 resume/rebuild 流程。
 
 ## 远端凭据
 

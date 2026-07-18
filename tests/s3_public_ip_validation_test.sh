@@ -84,6 +84,8 @@ for ip in '203.0.113.044' '999.0.0.1' $'203.0.113.44\nssh'; do
 done
 
 : > "$CALLS"
+printf '203.0.113.44 ssh-ed25519 pinned-test-key\n' > "$tmp/known_hosts"
+res_set lightsail_ssh_known_hosts "$tmp/known_hosts"
 _resume_host_bootstrap 203.0.113.44 "$tmp/key.pem"
 [ "$(grep -c '^scp$' "$CALLS")" = 0 ]
 [ "$(grep -c '^ssh$' "$CALLS")" = 1 ]

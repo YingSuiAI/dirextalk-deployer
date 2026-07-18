@@ -174,3 +174,103 @@ agent_release_require_render_inputs() {
     return 1
   fi
 }
+
+# AWS control is opt-in and frozen alongside the optional Agent release. The
+# persisted record contains only public identifiers and a publication digest.
+agent_aws_control_enabled_is_explicit() { [ "${1:-}" = true ]; }
+
+agent_aws_reaper_image_uri_is_safe() {
+  local value=${1:-}
+  case "$value" in ''|*$'\n'*|*$'\r'*|*$'\t'*|*' '*|*'@'*'@'*) return 1 ;; esac
+  printf '%s\n' "$value" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$'
+}
+
+agent_worker_control_endpoint_is_safe() {
+  local value=${1:-}
+  # No user info, query, or credentials: only a TLS gRPC DNS target on 443.
+  printf '%s\n' "$value" | grep -Eq '^grpcs://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+:443$'
+}
+
+agent_managed_preparation_aws_is_safe() { case "${1:-}" in true|false) return 0 ;; *) return 1 ;; esac; }
+
+agent_aws_control_state_is_blank() { [ -z "${1:-}${2:-}${3:-}${4:-}${5:-}${6:-}${7:-}" ]; }
+agent_aws_control_state_is_disabled() {
+  [ "${1:-}" = disabled ] && [ "${2:-}" = false ] && [ -z "${3:-}" ] && [ -z "${4:-}" ] \
+    && [ -z "${5:-}" ] && [ -z "${6:-}" ] && [ -z "${7:-}" ]
+}
+agent_aws_control_state_is_enabled() {
+  case "${6:-}" in ''|*$'\n'*|*$'\r'*) return 1 ;; esac
+  [ "${1:-}" = operator_configuration ] && [ "${2:-}" = true ] \
+    && agent_aws_reaper_image_uri_is_safe "${3:-}" \
+    && agent_worker_control_endpoint_is_safe "${4:-}" \
+    && agent_managed_preparation_aws_is_safe "${5:-}" \
+    && printf '%s\n' "${7:-}" | grep -Eq '^[0-9a-f]{64}$'
+}
+
+agent_aws_control_record_disabled() {
+  local resolved_json
+  resolved_json=$(json_build object source=disabled enabled=false aws_reaper_image_uri= worker_control_endpoint= managed_preparation_aws= worker_ami_publication_snapshot_file= worker_ami_publication_sha256=) || return 1
+  state_set_raw agent_aws_control "$resolved_json"
+}
+
+agent_aws_control_record_enabled() {
+  local reaper_image_uri=$1 worker_control_endpoint=$2 managed_preparation_aws=$3 publication_snapshot_file=$4 publication_sha256=$5 resolved_json
+  resolved_json=$(json_build object source=operator_configuration enabled=true "aws_reaper_image_uri=$reaper_image_uri" "worker_control_endpoint=$worker_control_endpoint" "managed_preparation_aws=$managed_preparation_aws" "worker_ami_publication_snapshot_file=$publication_snapshot_file" "worker_ami_publication_sha256=$publication_sha256") || return 1
+  state_set_raw agent_aws_control "$resolved_json"
+}
+
+agent_aws_control_prepare_state() {
+  local source enabled reaper_image_uri worker_control_endpoint managed_preparation_aws publication_snapshot_file publication_sha256
+  local infrastructure_id agent_enabled current_sha256 expected_snapshot_file
+  source=$(state_get agent_aws_control.source); enabled=$(state_get agent_aws_control.enabled)
+  reaper_image_uri=$(state_get agent_aws_control.aws_reaper_image_uri); worker_control_endpoint=$(state_get agent_aws_control.worker_control_endpoint)
+  managed_preparation_aws=$(state_get agent_aws_control.managed_preparation_aws)
+  publication_snapshot_file=$(state_get agent_aws_control.worker_ami_publication_snapshot_file)
+  publication_sha256=$(state_get agent_aws_control.worker_ami_publication_sha256)
+  infrastructure_id=$(state_get resources.instance_id); agent_enabled=$(state_get agent_release.enabled)
+  expected_snapshot_file="$DIREXTALK_WORKDIR/agent-worker-ami-publication.json"
+
+  case "${AGENT_ENABLE_AWS_CONTROL:-false}" in
+    true|false) ;;
+    *) warn 'AGENT_ENABLE_AWS_CONTROL must be true or false.'; return 1 ;;
+  esac
+  if ! agent_aws_control_enabled_is_explicit "${AGENT_ENABLE_AWS_CONTROL:-false}"; then
+    if [ -n "${AGENT_AWS_REAPER_IMAGE_URI:-}${AGENT_WORKER_CONTROL_ENDPOINT:-}${AGENT_ENABLE_MANAGED_PREPARATION_AWS:-}${AGENT_WORKER_AMI_PUBLICATION_FILE:-}" ]; then warn 'AGENT AWS control inputs require AGENT_ENABLE_AWS_CONTROL=true.'; return 1; fi
+    if agent_aws_control_state_is_enabled "$source" "$enabled" "$reaper_image_uri" "$worker_control_endpoint" "$managed_preparation_aws" "$publication_snapshot_file" "$publication_sha256"; then warn 'Agent AWS control was selected for this deployment; refusing to disable it through an environment change.'; return 1; fi
+    if ! agent_aws_control_state_is_blank "$source" "$enabled" "$reaper_image_uri" "$worker_control_endpoint" "$managed_preparation_aws" "$publication_snapshot_file" "$publication_sha256" && ! agent_aws_control_state_is_disabled "$source" "$enabled" "$reaper_image_uri" "$worker_control_endpoint" "$managed_preparation_aws" "$publication_snapshot_file" "$publication_sha256"; then warn 'Agent AWS control state is incomplete or unsafe.'; return 1; fi
+    agent_aws_control_record_disabled; return $?
+  fi
+
+  [ "$agent_enabled" = true ] || { warn 'AGENT_ENABLE_AWS_CONTROL=true requires the optional Agent runtime.'; return 1; }
+  agent_aws_reaper_image_uri_is_safe "${AGENT_AWS_REAPER_IMAGE_URI:-}" || { warn 'AGENT_AWS_REAPER_IMAGE_URI must be an immutable credential-free image reference with a lowercase sha256 digest.'; return 1; }
+  agent_worker_control_endpoint_is_safe "${AGENT_WORKER_CONTROL_ENDPOINT:-}" || { warn 'AGENT_WORKER_CONTROL_ENDPOINT must be a credential-free grpcs:// DNS endpoint on port 443.'; return 1; }
+  agent_managed_preparation_aws_is_safe "${AGENT_ENABLE_MANAGED_PREPARATION_AWS:-}" || { warn 'AGENT_ENABLE_MANAGED_PREPARATION_AWS must be true or false when Agent AWS control is enabled.'; return 1; }
+  [ -n "${AGENT_WORKER_AMI_PUBLICATION_FILE:-}" ] || { warn 'AGENT_WORKER_AMI_PUBLICATION_FILE is required when Agent AWS control is enabled.'; return 1; }
+
+  if [ -n "$infrastructure_id" ]; then
+    agent_aws_control_state_is_enabled "$source" "$enabled" "$reaper_image_uri" "$worker_control_endpoint" "$managed_preparation_aws" "$publication_snapshot_file" "$publication_sha256" || { warn 'Agent AWS control state is missing or inconsistent for existing infrastructure; refusing a replacement configuration.'; return 1; }
+    [ "$publication_snapshot_file" = "$expected_snapshot_file" ] || { warn 'Agent AWS control snapshot location is inconsistent for existing infrastructure.'; return 1; }
+    current_sha256=$(json_worker_ami_publication_snapshot "$AGENT_WORKER_AMI_PUBLICATION_FILE" "$publication_snapshot_file" "$publication_sha256") || { warn 'AGENT_WORKER_AMI_PUBLICATION_FILE is missing, malformed, unsafe, or no longer matches the frozen snapshot.'; return 1; }
+    [ "$AGENT_AWS_REAPER_IMAGE_URI" = "$reaper_image_uri" ] && [ "$AGENT_WORKER_CONTROL_ENDPOINT" = "$worker_control_endpoint" ] && [ "$AGENT_ENABLE_MANAGED_PREPARATION_AWS" = "$managed_preparation_aws" ] && [ "$current_sha256" = "$publication_sha256" ] || { warn 'Agent AWS control configuration is frozen after infrastructure creation; a changed input is refused.'; return 1; }
+    return 0
+  fi
+  if agent_aws_control_state_is_enabled "$source" "$enabled" "$reaper_image_uri" "$worker_control_endpoint" "$managed_preparation_aws" "$publication_snapshot_file" "$publication_sha256"; then
+    [ "$publication_snapshot_file" = "$expected_snapshot_file" ] || { warn 'Agent AWS control snapshot location is inconsistent for this deployment.'; return 1; }
+    current_sha256=$(json_worker_ami_publication_snapshot "$AGENT_WORKER_AMI_PUBLICATION_FILE" "$publication_snapshot_file" "$publication_sha256") || { warn 'AGENT_WORKER_AMI_PUBLICATION_FILE is missing, malformed, unsafe, or no longer matches the frozen snapshot.'; return 1; }
+    [ "$AGENT_AWS_REAPER_IMAGE_URI" = "$reaper_image_uri" ] && [ "$AGENT_WORKER_CONTROL_ENDPOINT" = "$worker_control_endpoint" ] && [ "$AGENT_ENABLE_MANAGED_PREPARATION_AWS" = "$managed_preparation_aws" ] && [ "$current_sha256" = "$publication_sha256" ] || { warn 'Agent AWS control configuration is already frozen for this deployment.'; return 1; }
+    return 0
+  fi
+  if ! agent_aws_control_state_is_blank "$source" "$enabled" "$reaper_image_uri" "$worker_control_endpoint" "$managed_preparation_aws" "$publication_snapshot_file" "$publication_sha256" && ! agent_aws_control_state_is_disabled "$source" "$enabled" "$reaper_image_uri" "$worker_control_endpoint" "$managed_preparation_aws" "$publication_snapshot_file" "$publication_sha256"; then warn 'Agent AWS control state is incomplete or unsafe.'; return 1; fi
+  mkdir -p "$DIREXTALK_WORKDIR" || return 1
+  current_sha256=$(json_worker_ami_publication_snapshot "$AGENT_WORKER_AMI_PUBLICATION_FILE" "$expected_snapshot_file") || { warn 'AGENT_WORKER_AMI_PUBLICATION_FILE must be the exact strict Agent Worker-AMI publication in one readable regular non-symlink file.'; return 1; }
+  agent_aws_control_record_enabled "$AGENT_AWS_REAPER_IMAGE_URI" "$AGENT_WORKER_CONTROL_ENDPOINT" "$AGENT_ENABLE_MANAGED_PREPARATION_AWS" "$expected_snapshot_file" "$current_sha256"
+}
+
+agent_aws_control_require_render_inputs() {
+  local enabled publication_snapshot_file publication_sha256
+  enabled=$(state_get agent_aws_control.enabled); [ "$enabled" = true ] || return 0
+  publication_snapshot_file=$(state_get agent_aws_control.worker_ami_publication_snapshot_file)
+  publication_sha256=$(state_get agent_aws_control.worker_ami_publication_sha256)
+  [ "$publication_snapshot_file" = "$DIREXTALK_WORKDIR/agent-worker-ami-publication.json" ] || { warn 'Agent AWS control snapshot state is missing or inconsistent.'; return 1; }
+  json_worker_ami_publication_snapshot "$publication_snapshot_file" "$publication_snapshot_file" "$publication_sha256" >/dev/null || { warn 'The frozen Agent Worker-AMI publication snapshot is missing, unsafe, malformed, or changed.'; return 1; }
+}

@@ -146,21 +146,38 @@ DIREXTALK_CLOUD_PROVIDER=lightsail \
 bash scripts/orchestrate.sh
 ```
 
-S3 selects `dirextalk/message-server:latest` without querying message-server
-GitHub Releases and persists `server_release.source=default_latest`,
-`version=latest`, and the image reference before provisioning. Each new
-deployment pulls the image currently published under `latest`. S3 also records
-the deployer-owned independent updater version, commit, and
-SHA-256 pin. EC2 user-data on the verified Ubuntu 22.04 or 24.04 x86_64 host
-downloads that fixed Release asset, verifies the local pin, and atomically
-installs it. Lightsail instead receives only a one-time identity nonce in its
-small launch script; after a static IP is attached, the deployer verifies that
-nonce over first-contact SSH, pins the host key, and streams the frozen local
-bootstrap through that verified connection. In both paths, no local Go
-toolchain or updater SCP step is required.
+For legacy/no-Agent deployments S3 selects
+`dirextalk/message-server:latest` without querying message-server GitHub
+Releases and persists `server_release.source=default_latest`, `version=latest`,
+and the image reference before provisioning. Agent-enabled production instead
+requires `DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE` as an exact public stable
+`dirextalk/message-server:vX.Y.Z@sha256:<64-lowercase-hex>` reference and freezes
+it in state before AWS mutation; `latest`, prerelease, and the separate
+debug-only `MESSAGE_SERVER_IMAGE` override are rejected. S3 also records the
+deployer-owned independent updater version, commit, and SHA-256 pin.
+
+Both EC2 and Lightsail launch data contain only a one-time 64-hex host-identity
+nonce. After the stable IP is attached, the deployer verifies that nonce over
+first-contact SSH, pins the host key, and streams the complete locally frozen
+bootstrap through strict SSH. EC2 also freezes a stable client token before the
+first AWS mutation so a lost `run-instances` response cannot change the payload
+or create a second instance. The verified Ubuntu 22.04 or 24.04 x86_64 host
+downloads the fixed updater Release asset, verifies the deployer pin, and
+atomically installs it. No local Go toolchain or updater SCP step is required.
 The updater's fixed Release download and checksum contract is unchanged.
 
-An existing Lightsail instance from a deployment state created before this
+For Agent on EC2, `AGENT_IMAGE` must be the immutable prerelease `tag@sha256`
+in the same-account, same-region private ECR repository named exactly
+`dirextalk-agent`. S3 obtains a fresh one-hour least-privilege STS session on
+each attempt. A root/IAM-user caller uses `GetFederationToken`; an assumed-role
+caller fails unless `DIREXTALK_ECR_PULL_ROLE_ARN` explicitly names a
+same-account pull role. Only the ECR Docker password crosses SSH stdin into the
+root-only `/run/dirextalk-ecr-auth` directory. The remote sequence pre-cleans,
+logs in, pulls and starts, logs out, removes the directory, and proves it absent.
+AWS/STS credentials and registry passwords never enter launch data, `.env`,
+Compose, state, process arguments, logs, reports, or repository files.
+
+An existing EC2 or Lightsail instance from state created before the
 nonce-and-frozen-artifact flow is deliberately not migrated in place: it lacks
 the identity evidence required to stream replacement root code safely. Preserve
 that state for cleanup and destroy/rebuild the temporary node rather than
@@ -261,7 +278,9 @@ reruns `/var/dirextalk-message-server/init-tokens.sh`, clears stale local secret
 the matching service-scoped dirextalk-connect daemon when its `WorkDir` matches
 this service, and marks S4-S7 pending so health, credential sync, local
 MCP/agent wiring, and final verification run again. It does not remove Docker
-volumes.
+volumes. If state contains a private ECR Agent image, `update.sh` fails closed
+before SSH because this lifecycle does not refresh short-lived registry auth;
+resume the normal S3 flow instead.
 
 ## Existing Node App Data Reset
 
@@ -279,7 +298,9 @@ volumes can trigger certificate reissuance and Let's Encrypt rate limits. It
 stops only the matching service-scoped dirextalk-connect daemon when its `WorkDir`
 matches this service. After reset, treat old app users, rooms, messages,
 initialization code, access token, agent token, and agent room as stale until
-S5-S7 complete again.
+S5-S7 complete again. If state contains a private ECR Agent image,
+`reset-app-data.sh` fails closed before SSH because this lifecycle does not
+refresh short-lived registry auth; use a supported S3 resume/rebuild path.
 
 ## S4 Bootstrap Timeout / Certificate Rate Limit Recovery
 

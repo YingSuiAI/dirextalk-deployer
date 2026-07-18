@@ -35,6 +35,8 @@ export PATH="$tmp/bin:$PATH"
 source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null 2>&1
 state_set_raw updater_release '{"version":"v0.9.0","commit":"1111111111111111111111111111111111111111","sha256":"2222222222222222222222222222222222222222222222222222222222222222"}'
+printf '203.0.113.44 ssh-ed25519 pinned-test-key\n' > "$tmp/known_hosts"
+res_set lightsail_ssh_known_hosts "$tmp/known_hosts"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/phases/s3_provision.sh"
 

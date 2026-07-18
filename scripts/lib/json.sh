@@ -18,6 +18,14 @@ json_normalize_file_arguments() {
       [ "$#" -gt 0 ] || return 0
       set -- "$(json_native_file_path "$1")" "${@:2}"
       ;;
+    worker-ami-publication-snapshot)
+      [ "$#" -ge 2 ] || return 0
+      set -- "$(json_native_file_path "$1")" "$(json_native_file_path "$2")" "${@:3}"
+      ;;
+    deterministic-bundle)
+      [ "$#" -ge 2 ] || return 0
+      set -- "$(json_native_file_path "$1")" "$(json_native_file_path "$2")" "${@:3}"
+      ;;
     operation-report)
       [ "$#" -ge 3 ] || return 0
       set -- "$1" "$2" "$(json_native_file_path "$3")" "${@:4}"
@@ -208,6 +216,14 @@ json_mutate() {
 
 json_valid() {
   json_cli valid "$@"
+}
+
+json_worker_ami_publication_snapshot() {
+  json_cli worker-ami-publication-snapshot "$@"
+}
+
+json_deterministic_bundle() {
+  json_cli deterministic-bundle "$@"
 }
 
 if [ -n "${DIREXTALK_TEST_ROOT:-}" ] && \

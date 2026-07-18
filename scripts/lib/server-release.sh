@@ -5,6 +5,15 @@
 DEFAULT_MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
 
 server_release_validate_override() {
+  if [ -n "${DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE:-}" ] && [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
+    warn "DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE and MESSAGE_SERVER_IMAGE are mutually exclusive."
+    return 1
+  fi
+  if [ -n "${DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE:-}" ] \
+    && ! server_release_immutable_image_is_valid "$DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE"; then
+    warn "DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE must be exactly dirextalk/message-server:vX.Y.Z@sha256:<64 lowercase hex>."
+    return 1
+  fi
   if [ -n "${MESSAGE_SERVER_IMAGE:-}" ] && [ "${DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE:-0}" != "1" ]; then
     warn "MESSAGE_SERVER_IMAGE is a debug/legacy override and is disabled for normal production installs."
     warn "Use the default latest image, or explicitly set DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 for a debug/legacy deployment."
@@ -16,6 +25,13 @@ server_release_validate_override() {
       return 1
     fi
   fi
+}
+
+server_release_immutable_image_is_valid() {
+  case "${1:-}" in
+    ''|*$'\n'*|*$'\r'*|*$'\t'*|*' '*) return 1 ;;
+  esac
+  printf '%s\n' "$1" | grep -Eq '^dirextalk/message-server:v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)@sha256:[0-9a-f]{64}$'
 }
 
 server_release_image_is_safe() {
@@ -43,6 +59,17 @@ server_release_state_is_formal() {
     && server_release_is_digest "$digest" \
     && server_release_is_digest "$manifest_digest" \
     && [ "$image_ref" = "$image@$digest" ]
+}
+
+server_release_state_is_immutable() {
+  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
+  [ "$source" = immutable_release ] \
+    && server_release_is_version "$version" \
+    && [ "$image" = "dirextalk/message-server:$version" ] \
+    && server_release_is_digest "$digest" \
+    && [ "$manifest_digest" = "$digest" ] \
+    && [ "$image_ref" = "$image@$digest" ] \
+    && server_release_immutable_image_is_valid "$image_ref"
 }
 
 server_release_state_is_debug() {
@@ -78,6 +105,14 @@ server_release_prepare_state() {
   instance_id=$(state_get resources.instance_id)
 
   if [ -n "$instance_id" ]; then
+    if server_release_state_is_immutable "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
+      if [ -z "${DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE:-}" ] || [ "$DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE" = "$image_ref" ]; then
+        [ -z "${MESSAGE_SERVER_IMAGE:-}" ] || return 1
+        return 0
+      fi
+      warn "Server release is frozen after infrastructure creation; the immutable production release cannot be replaced."
+      return 1
+    fi
     if server_release_state_is_default_latest "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
       if [ -z "${MESSAGE_SERVER_IMAGE:-}" ] || [ "$MESSAGE_SERVER_IMAGE" = "$image_ref" ]; then
         return 0
@@ -113,6 +148,23 @@ server_release_prepare_state() {
     return 1
   fi
 
+  if [ -n "${DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE:-}" ]; then
+    local immutable_version immutable_image immutable_digest
+    immutable_version=${DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE#dirextalk/message-server:}
+    immutable_version=${immutable_version%%@*}
+    immutable_image="dirextalk/message-server:$immutable_version"
+    immutable_digest=${DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE##*@}
+    resolved_json=$(json_build object \
+      source=immutable_release \
+      "version=$immutable_version" \
+      "image=$immutable_image" \
+      "digest=$immutable_digest" \
+      "image_ref=$DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE" \
+      "manifest_digest=$immutable_digest") || return 1
+    state_set_raw server_release "$resolved_json"
+    return $?
+  fi
+
   if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
     resolved_json=$(json_build object \
       source=debug_override \
@@ -133,6 +185,20 @@ server_release_prepare_state() {
     "image_ref=$DEFAULT_MESSAGE_SERVER_IMAGE" \
     manifest_digest=) || return 1
   state_set_raw server_release "$resolved_json"
+}
+
+server_release_require_agent_compatible() {
+  [ "$(state_get agent_release.enabled)" = true ] || return 0
+  if ! server_release_state_is_immutable \
+      "$(state_get server_release.source)" \
+      "$(state_get server_release.version)" \
+      "$(state_get server_release.image)" \
+      "$(state_get server_release.digest)" \
+      "$(state_get server_release.image_ref)" \
+      "$(state_get server_release.manifest_digest)"; then
+    warn "Agent-enabled deployments require DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE with a canonical stable tag and sha256 digest; latest and debug overrides are refused."
+    return 1
+  fi
 }
 
 server_release_is_version() {

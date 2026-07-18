@@ -178,7 +178,7 @@ services:
       AGENT_SERVICE_KEY_PEPPER_FILE: /run/dirextalk-agent/agent-service-key-pepper
       AGENT_BOOTSTRAP_SERVICE_KEY_FILE: /run/dirextalk-agent/message-server.service-key
       AGENT_BOOTSTRAP_CLIENT_ID: "dirextalk-project:${DOMAIN}"
-      AGENT_BOOTSTRAP_SCOPES: runtime.read,runtime.write,runtime.chat,cloud.read,cloud.plan.write,cloud.connection.preview,cloud.approve,cloud.connection.write,cloud.destroy,secret.bootstrap,event.read
+      AGENT_BOOTSTRAP_SCOPES: runtime.read,runtime.write,runtime.chat,knowledge.read,knowledge.write,knowledge.search,cloud.read,cloud.plan.write,cloud.connection.preview,cloud.approve,cloud.connection.write,cloud.destroy,secret.bootstrap,event.read
     command: ["bootstrap-service-key"]
     volumes:
       - agent-runtime:/run/dirextalk-agent:ro
@@ -212,9 +212,18 @@ services:
       AGENT_MOUNTED_SECRETS_DIR: /run/dirextalk-agent/mounted-secrets
       AGENT_MODEL_PROFILES_FILE: /run/dirextalk-agent/agent-model-profiles.json
       AGENT_GRPC_HEALTHCHECK_SERVER_NAME: agent
-      AGENT_ENABLE_AWS_CONTROL: "false"
+      AGENT_ENABLE_AWS_CONTROL: "__AGENT_ENABLE_AWS_CONTROL__"
+      # DIREXTALK_AGENT_AWS_CONTROL_BEGIN
+      AGENT_AWS_REAPER_IMAGE_URI: "__AGENT_AWS_REAPER_IMAGE_URI__"
+      AGENT_WORKER_CONTROL_ENDPOINT: "__AGENT_WORKER_CONTROL_ENDPOINT__"
+      AGENT_ENABLE_MANAGED_PREPARATION_AWS: "__AGENT_ENABLE_MANAGED_PREPARATION_AWS__"
+      AGENT_WORKER_AMI_PUBLICATION_FILE: /run/dirextalk-agent/worker-ami-publication.json
+      # DIREXTALK_AGENT_AWS_CONTROL_END
     volumes:
       - agent-runtime:/run/dirextalk-agent:ro
+      # DIREXTALK_AGENT_AWS_CONTROL_BEGIN
+      - ./agent-worker-ami-publication.json:/run/dirextalk-agent/worker-ami-publication.json:ro
+      # DIREXTALK_AGENT_AWS_CONTROL_END
     restart: unless-stopped
   # DIREXTALK_AGENT_OPTIONAL_END
 

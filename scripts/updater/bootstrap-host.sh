@@ -142,6 +142,13 @@ if [ "$adopt_existing" = 1 ]; then
   touch "$base/.deploy-done"
   exit 0
 fi
+if [ "${DIREXTALK_BOOTSTRAP_DEFER_START:-0}" = 1 ]; then
+  # Private registries are authenticated only after the deployer has pinned the
+  # stable host key. Stage Docker/updater and service files, but do not let an
+  # unauthenticated first boot attempt pull or start any Compose service.
+  touch "$base/.bootstrap-staged"
+  exit 0
+fi
 mkdir -p "$base/p2p"
 chmod 0700 "$base"
 cd "$base"
@@ -150,4 +157,5 @@ docker compose --env-file .env up -d
 "$updater_binary" --config "$root/etc/dirextalk-updater/config.json" pin-initial-latest
 domain=$(awk -F= '$1 == "DOMAIN" { print substr($0, index($0, "=") + 1); exit }' .env)
 DOMAIN="$domain" bash init-tokens.sh
+rm -f .bootstrap-staged
 touch .deploy-done

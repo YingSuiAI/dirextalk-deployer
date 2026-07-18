@@ -155,13 +155,14 @@ chown 65532:65532 "$tmp"
 chmod 0400 "$tmp"
 mv -f "$tmp" "$dest/$name"
 trap - EXIT HUP INT TERM
+printf 'mounted-secret-ready uid=65532 mode=0400\n'
 ' agent-mounted-secret-delivery __DIREXTALK_AGENT_SECRET_NAME__
 EOF
 )
   printf '%s\n' "${remote/__DIREXTALK_AGENT_SECRET_NAME__/$quoted_name}"
 }
 
-agent_mounted_secret_deliver_lightsail() {
+agent_mounted_secret_deliver_pinned() {
   local public_ip=$1 keyfile=$2 known_hosts=$3 source=${AGENT_MOUNTED_SECRET_FILE_RESOLVED:-}
   local name=${AGENT_MOUNTED_SECRET_NAME:-} ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
   local diagnostic_log remote
@@ -189,6 +190,10 @@ agent_mounted_secret_deliver_lightsail() {
   return 1
 }
 
+agent_mounted_secret_deliver_lightsail() {
+  agent_mounted_secret_deliver_pinned "$@"
+}
+
 _agent_mounted_secret_cleanup_remote_command() {
   cat <<'EOF'
 set -eu
@@ -202,7 +207,7 @@ find "$dest" -mindepth 1 -maxdepth 1 -type f -delete
 EOF
 }
 
-agent_mounted_secret_cleanup_lightsail() {
+agent_mounted_secret_cleanup_pinned() {
   local public_ip=$1 keyfile=$2 known_hosts=$3 ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
   local remote
   _agent_mounted_secret_canonical_ipv4 "$public_ip" || return 2
@@ -218,4 +223,8 @@ agent_mounted_secret_cleanup_lightsail() {
     -o StrictHostKeyChecking=yes \
     -o "UserKnownHostsFile=$known_hosts" \
     "$ssh_user@$public_ip" "$remote" >/dev/null 2>&1
+}
+
+agent_mounted_secret_cleanup_lightsail() {
+  agent_mounted_secret_cleanup_pinned "$@"
 }

@@ -25,6 +25,8 @@ source "$HERE/lib/local-paths.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/agent-secret-delivery.sh"
 # shellcheck disable=SC1090
+source "$HERE/lib/agent-ecr-pull.sh"
+# shellcheck disable=SC1090
 source "$HERE/lib/connect-agent-adapters.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/mcp-client-adapters.sh"
@@ -242,7 +244,10 @@ SG_ID=$(json_get "$SRC" resources.sg_id)
 KEY_NAME=$(json_get "$SRC" resources.key_name)
 KEY_FILE=$(json_get "$SRC" resources.key_file)
 LIGHTSAIL_SSH_KNOWN_HOSTS=$(json_get "$SRC" resources.lightsail_ssh_known_hosts)
+EC2_SSH_KNOWN_HOSTS=$(json_get "$SRC" resources.ec2_ssh_known_hosts)
 AGENT_RUNTIME_ENABLED=$(json_get "$SRC" agent_release.enabled)
+AGENT_REGISTRY_SOURCE=$(json_get "$SRC" agent_registry.source)
+AGENT_REGISTRY_HOST=$(json_get "$SRC" agent_registry.registry)
 DOMAIN_MODE=$(json_get "$SRC" domain_mode)
 DOMAIN=$(json_get "$SRC" domain)
 AS_URL=$(json_get "$SRC" as_url)
@@ -499,7 +504,7 @@ stop_current_connect_daemon() {
 }
 
 mark_remote_deprovisioned() {
-  local key_file=$1 public_ip=$2 helper_payload remote remote_q
+  local key_file=$1 public_ip=$2 known_hosts=${3:-} helper_payload remote remote_q
   [ -n "$key_file" ] && [ -f "$key_file" ] && [ -n "$public_ip" ] || return 0
   helper_payload=$(base64 < "$HERE/updater/set-desired-state.sh" | tr -d '\r\n')
   remote=$(cat <<'EOF'
@@ -517,7 +522,20 @@ EOF
 )
   remote=${remote/__DIREXTALK_DESIRED_HELPER__/$helper_payload}
   printf -v remote_q '%q' "$remote"
-  if ssh -T -i "$key_file" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
+  local -a host_key_args=(-o StrictHostKeyChecking=accept-new)
+  if [ -s "$known_hosts" ]; then
+    host_key_args=(-o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts")
+  elif [ "$AGENT_RUNTIME_ENABLED" = true ]; then
+    log "pinned SSH host data is unavailable; skipping remote root desired-state mutation"
+    return 0
+  fi
+  if ssh -T -i "$key_file" \
+      -o BatchMode=yes \
+      -o IdentitiesOnly=yes \
+      -o PreferredAuthentications=publickey \
+      -o PasswordAuthentication=no \
+      -o KbdInteractiveAuthentication=no \
+      "${host_key_args[@]}" -o ConnectTimeout=5 \
       ubuntu@"$public_ip" "sudo bash -lc $remote_q" >/dev/null 2>&1; then
     log "remote updater desired-state reconciliation completed before termination"
   else
@@ -526,12 +544,17 @@ EOF
 }
 
 cleanup_remote_agent_mounted_secrets() {
-  local cleanup_rc
-  if [ "$CLOUD_PROVIDER" != lightsail ] || [ "$AGENT_RUNTIME_ENABLED" != true ]; then
-    destroy_evidence_set agent_mounted_secrets skipped "optional Agent runtime is not enabled on a Lightsail host"
+  local cleanup_rc known_hosts
+  if [ "$AGENT_RUNTIME_ENABLED" != true ]; then
+    destroy_evidence_set agent_mounted_secrets skipped "optional Agent runtime is not enabled"
     return 0
   fi
-  agent_mounted_secret_cleanup_lightsail "$PUBLIC_IP" "$KEY_FILE" "$LIGHTSAIL_SSH_KNOWN_HOSTS"
+  case "$CLOUD_PROVIDER" in
+    lightsail) known_hosts=$LIGHTSAIL_SSH_KNOWN_HOSTS ;;
+    ec2) known_hosts=$EC2_SSH_KNOWN_HOSTS ;;
+    *) known_hosts= ;;
+  esac
+  agent_mounted_secret_cleanup_pinned "$PUBLIC_IP" "$KEY_FILE" "$known_hosts"
   cleanup_rc=$?
   case "$cleanup_rc" in
     0)
@@ -546,6 +569,26 @@ cleanup_remote_agent_mounted_secrets() {
       log "private mounted Agent secret cleanup failed; cloud deletion will still wipe the volume"
       destroy_evidence_set agent_mounted_secrets cleanup_failed "remote cleanup failed; instance deletion remains the final wipe"
       ;;
+  esac
+}
+
+cleanup_remote_agent_registry_auth() {
+  local cleanup_rc known_hosts
+  if [ "$AGENT_REGISTRY_SOURCE" != private_ecr ]; then
+    destroy_evidence_set agent_registry_auth skipped "private Agent registry auth was not configured"
+    return 0
+  fi
+  case "$CLOUD_PROVIDER" in
+    lightsail) known_hosts=$LIGHTSAIL_SSH_KNOWN_HOSTS ;;
+    ec2) known_hosts=$EC2_SSH_KNOWN_HOSTS ;;
+    *) known_hosts= ;;
+  esac
+  agent_ecr_auth_cleanup_pinned "$PUBLIC_IP" "$KEY_FILE" "$known_hosts" "$AGENT_REGISTRY_HOST"
+  cleanup_rc=$?
+  case "$cleanup_rc" in
+    0) destroy_evidence_set agent_registry_auth cleared "temporary Docker registry auth directory proved absent before cloud deletion" ;;
+    2) destroy_evidence_set agent_registry_auth skipped "pinned SSH host data unavailable; instance deletion remains the final wipe" ;;
+    *) destroy_evidence_set agent_registry_auth cleanup_failed "registry auth cleanup failed; instance deletion remains the final wipe" ;;
   esac
 }
 
@@ -629,8 +672,14 @@ cleanup_host_mcp_registry() {
 # 0. Remove DNS record if ops created it through Route53 mode.
 CURRENT_SERVICE_DIR=$(current_service_dir "$AGENT_SERVICE_DIR" "$AS_URL" "$DOMAIN" "$CONNECT_CONFIG")
 CURRENT_SERVICE_NAME=$(connect_service_name "$AGENT_SERVICE_ID" "$CURRENT_SERVICE_DIR" "$AS_URL" "$DOMAIN")
+cleanup_remote_agent_registry_auth
 cleanup_remote_agent_mounted_secrets
-mark_remote_deprovisioned "$KEY_FILE" "$PUBLIC_IP"
+case "$CLOUD_PROVIDER" in
+  lightsail) HOST_SSH_KNOWN_HOSTS=$LIGHTSAIL_SSH_KNOWN_HOSTS ;;
+  ec2) HOST_SSH_KNOWN_HOSTS=$EC2_SSH_KNOWN_HOSTS ;;
+  *) HOST_SSH_KNOWN_HOSTS= ;;
+esac
+mark_remote_deprovisioned "$KEY_FILE" "$PUBLIC_IP" "$HOST_SSH_KNOWN_HOSTS"
 stop_current_connect_daemon "$CONNECT_CONFIG" "$CONNECT_BINARY" "$CONNECT_RUNTIME_DIR" "$CURRENT_SERVICE_DIR" "$CURRENT_SERVICE_NAME"
 
 if [ "${DOMAIN_MODE:-}" = "route53" ]; then

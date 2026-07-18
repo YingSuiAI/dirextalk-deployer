@@ -46,6 +46,15 @@ ops_require_state() {
   }
 }
 
+ops_require_safe_registry_refresh() {
+  local state=$1 operation=${2:-operation} registry_source
+  registry_source=$(ops_state_get "$state" '.agent_registry.source')
+  if [ "$registry_source" = private_ecr ]; then
+    echo "$operation is refused for a private Agent ECR deployment because this lifecycle command has no pinned-SSH short-lived registry-auth refresh path. Resume the reviewed deployment workflow instead." >&2
+    return 1
+  fi
+}
+
 ops_state_get() {
   local state=$1 path=$2
   path=${path#\.}

@@ -10,7 +10,7 @@ component only from an immutable prerelease `AGENT_IMAGE` digest, canonical
 separate database/role, keeps gRPC off public ports, and binds the Message Server
 to TLS 1.3 plus a mounted service key. See
 [the Agent runtime contract](references/agent-runtime.md) before enabling it,
-especially the real z3 Lightsail registry prerequisite and the explicit
+especially the private ECR/nonce-pinned EC2 prerequisite and the explicit
 non-YOLO approval-card setting for S6.
 
 ## Platform Architecture
@@ -136,10 +136,12 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-Normal deployment uses `dirextalk/message-server:latest` directly and records
-that selection in `state.json`; it does not query message-server GitHub Releases
-before provisioning. Each new deployment therefore pulls the image currently
-published under `latest`. The host updater is a separate
+Legacy/no-Agent deployment uses `dirextalk/message-server:latest` directly and
+records that selection in `state.json`; it does not query Message Server GitHub
+Releases before provisioning. An Agent-enabled deployment instead requires
+`DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE` as the exact public stable
+`dirextalk/message-server:vX.Y.Z@sha256:<digest>` reference. It cannot use
+`latest` or the separate debug-only `MESSAGE_SERVER_IMAGE` override. The host updater is a separate
 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release:
 the supported Ubuntu 22.04 or 24.04 x86_64 host downloads the deployer-pinned updater asset and
 verifies the deployer-pinned SHA-256 before atomic installation. The local
@@ -159,7 +161,7 @@ Compose view, copies live P2P state, installs the pinned updater, and adds only
 the public updater jobs route to validated host Caddy. Other legacy topologies
 and existing formal release state are rejected.
 
-`DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
+`DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. EC2 receives only a 64-hex nonce in user-data; after the Elastic IP is attached, S3 verifies that nonce, pins the SSH host key, and streams the frozen full bootstrap through strict SSH. When Agent is enabled, its image must be the immutable digest in the same-account/same-region private ECR repository named exactly `dirextalk-agent`; S3 uses a one-hour least-privilege STS session locally, streams only the Docker password on SSH stdin, and proves `/run/dirextalk-ecr-auth` absent after the pull. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
 
 On native Windows, install Git for Windows, open **Git Bash**, and use the same commands as Linux/macOS. Run the Git Bash preflight in **Skill Installation And Updates** before any lifecycle command; if it fails, install Git from `https://git-scm.com/download/win` and reopen Git Bash. Native WSL is supported as Linux, but a service directory must stay owned by one environment: do not switch a Git-Bash-owned service directory into WSL or a WSL-owned directory into Windows tooling.
 
@@ -216,6 +218,8 @@ DOMAIN=<domain> MESSAGE_SERVER_IMAGE=dirextalk/message-server:<debug-tag> bash s
 This is an explicit debug/legacy override, not the normal production upgrade
 path. Image refresh restarts the remote service only. It leaves local credentials,
 `dirextalk-connect`, MCP artifacts, and runtime checks intact.
+For private Agent ECR state, `update.sh` fails before SSH until it owns the same
+short-lived pinned-host auth refresh; resume the reviewed orchestrator instead.
 
 Reset application data while preserving EC2, DNS, fixed IP, and Caddy TLS:
 
@@ -229,6 +233,8 @@ orchestrate run regenerates local credentials/MCP artifacts and automatically
 reinstalls/restarts `dirextalk-connect` unless explicitly overridden with
 `DIREXTALK_AGENT_INSTALL=recommend` or `skip`. MCP uses the server HTTP endpoint
 and does not install a local MCP CLI.
+`reset-app-data.sh` likewise fails before remote mutation for private Agent ECR
+state until that lifecycle has an equivalent safe registry-auth refresh.
 
 ## Local Bridge
 

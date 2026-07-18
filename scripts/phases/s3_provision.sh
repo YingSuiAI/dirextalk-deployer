@@ -8,6 +8,7 @@ S3_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 source "$S3_PHASE_DIR/lib/domain.sh"
 source "$S3_PHASE_DIR/lib/server-release.sh"
 source "$S3_PHASE_DIR/lib/agent-release.sh"
+source "$S3_PHASE_DIR/lib/agent-ecr-pull.sh"
 source "$S3_PHASE_DIR/lib/agent-secret-delivery.sh"
 source "$S3_PHASE_DIR/lib/updater-release.sh"
 
@@ -35,8 +36,20 @@ run_phase() {
     phase_set S3_PROVISION failed "Agent image selection failed"
     return 1
   fi
+  if ! agent_aws_control_prepare_state; then
+    phase_set S3_PROVISION failed "Agent AWS control selection failed"
+    return 1
+  fi
+  if ! server_release_require_agent_compatible; then
+    phase_set S3_PROVISION failed "Agent requires an immutable Message Server release"
+    return 1
+  fi
   if ! agent_release_require_render_inputs; then
     phase_set S3_PROVISION failed "Agent model-profile catalog is unavailable"
+    return 1
+  fi
+  if ! agent_aws_control_require_render_inputs; then
+    phase_set S3_PROVISION failed "Agent Worker AMI publication is unavailable"
     return 1
   fi
   if ! agent_mounted_secret_delivery_inputs_validate; then
@@ -45,11 +58,6 @@ run_phase() {
   fi
   local cloud_provider
   cloud_provider=$(_resolve_cloud_provider)
-  if agent_mounted_secret_delivery_is_configured && [ "$cloud_provider" != lightsail ]; then
-    phase_set S3_PROVISION failed "Agent mounted-secret delivery requires verified Lightsail SSH"
-    warn "Mounted Agent secret delivery is currently supported only for the verified Lightsail SSH path."
-    return 1
-  fi
   aws_env_prep
   state_set cloud_provider "$cloud_provider"
   case "$cloud_provider" in
@@ -66,7 +74,13 @@ run_phase() {
 _run_phase_ec2() {
   phase_set S3_PROVISION in_progress "provisioning EC2"
 
-  local name region instance_type ami sg vpc
+  local name region instance_type ami sg vpc domain_mode domain scripts_dir
+  local message_server_image agent_image agent_instance_id agent_enabled agent_aws_control_enabled
+  local agent_aws_reaper_image_uri agent_worker_control_endpoint agent_managed_preparation_aws
+  local agent_worker_ami_publication_snapshot_file agent_worker_ami_publication_sha256
+  local bootstrap_script bootstrap_sha256 bootstrap_nonce_file bootstrap_nonce launch_userdata launch_userdata_aws bootstrap_tmp known_hosts
+  local iid instance_state keyfile pubip eip defer_start=0 client_token frozen_artifacts
+  local -a agent_render_args=() render_args=()
   name=$(state_get run_id)
   region=$(state_get region)
   instance_type=$(state_get instance_type)
@@ -103,22 +117,143 @@ _run_phase_ec2() {
   fi
   ami=$(res_get ami_id)
   vpc=$(res_get vpc_id)
-  local message_server_image agent_image agent_instance_id
-  local -a agent_render_args=()
+  domain_mode=$(state_get domain_mode)
+  domain=$(domain_normalize "$(state_get domain)")
+  if [ -z "$domain" ]; then
+    phase_set S3_PROVISION waiting_user "production domain missing"
+    warn "S3 requires a production DOMAIN. Complete S2_DOMAIN first."
+    return 2
+  fi
   message_server_image=$(state_get server_release.image_ref)
   agent_image=$(state_get agent_release.image_ref)
   agent_instance_id=$(state_get agent_release.instance_id)
+  agent_enabled=$(state_get agent_release.enabled)
+  agent_aws_control_enabled=$(state_get agent_aws_control.enabled)
+  agent_aws_reaper_image_uri=$(state_get agent_aws_control.aws_reaper_image_uri)
+  agent_worker_control_endpoint=$(state_get agent_aws_control.worker_control_endpoint)
+  agent_managed_preparation_aws=$(state_get agent_aws_control.managed_preparation_aws)
+  agent_worker_ami_publication_snapshot_file=$(state_get agent_aws_control.worker_ami_publication_snapshot_file)
+  agent_worker_ami_publication_sha256=$(state_get agent_aws_control.worker_ami_publication_sha256)
   if [ -n "$agent_image" ]; then
+    agent_ecr_prepare_state "$agent_image" || {
+      phase_set S3_PROVISION failed "private Agent ECR selection failed"
+      return 1
+    }
     agent_render_args=(
       --agent-image "$agent_image"
       --agent-instance-id "$agent_instance_id"
       --agent-model-profiles-file "$AGENT_MODEL_PROFILES_FILE"
     )
+    if [ "$agent_aws_control_enabled" = true ]; then
+      agent_render_args+=(
+        --agent-enable-aws-control true
+        --agent-aws-reaper-image-uri "$agent_aws_reaper_image_uri"
+        --agent-worker-control-endpoint "$agent_worker_control_endpoint"
+        --agent-enable-managed-preparation-aws "$agent_managed_preparation_aws"
+        --agent-worker-ami-publication-file "$agent_worker_ami_publication_snapshot_file"
+        --agent-worker-ami-publication-sha256 "$agent_worker_ami_publication_sha256"
+      )
+    fi
+    defer_start=1
   fi
-  local scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
+  scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
+
+  # Freeze the full root bootstrap before any AWS mutation. EC2 receives only
+  # the same 64-hex identity nonce launcher used by the verified SSH model.
+  iid=$(res_get instance_id)
+  bootstrap_script=$(res_get ec2_bootstrap_script)
+  bootstrap_sha256=$(res_get ec2_bootstrap_sha256)
+  bootstrap_nonce_file=$(res_get ec2_bootstrap_nonce_file)
+  launch_userdata=$(res_get user_data)
+  known_hosts=$(res_get ec2_ssh_known_hosts)
+  known_hosts=${known_hosts:-"$DIREXTALK_WORKDIR/ec2-known-hosts"}
+  client_token=$(res_get ec2_client_token)
+  if [ -n "$client_token" ] && ! printf '%s\n' "$client_token" | grep -Eq '^[0-9a-f]{64}$'; then
+    phase_set S3_PROVISION failed "EC2 idempotency token is invalid"
+    return 1
+  fi
+  if [ -n "$iid" ]; then
+    instance_state=$(aws ec2 describe-instances --instance-ids "$iid" --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null) || {
+      phase_set S3_PROVISION failed "could not determine whether EC2 instance exists"
+      warn "Could not prove the recorded EC2 instance state. Refusing to replace bootstrap artifacts or create a duplicate instance."
+      return 1
+    }
+    printf '%s\n' "$instance_state" | grep -Eq '^(running|pending)$' || {
+      phase_set S3_PROVISION failed "recorded EC2 instance is not resumable"
+      warn "Recorded EC2 instance $iid is $instance_state; refusing to create a replacement under the frozen identity."
+      return 1
+    }
+  fi
+  frozen_artifacts=$bootstrap_script$bootstrap_sha256$bootstrap_nonce_file$launch_userdata$client_token
+  if [ -n "$frozen_artifacts" ]; then
+    [ -n "$bootstrap_script" ] && [ -n "$bootstrap_sha256" ] \
+      && [ -n "$bootstrap_nonce_file" ] && [ -n "$launch_userdata" ] \
+      && [ -f "$bootstrap_script" ] && [ -f "$bootstrap_nonce_file" ] && [ -f "$launch_userdata" ] || {
+        phase_set S3_PROVISION failed "EC2 bootstrap artifact is unavailable"
+        warn "EC2 provisioning state has no complete locally frozen bootstrap artifact."
+        return 1
+      }
+    [ "$(_s3_file_sha256 "$bootstrap_script")" = "$bootstrap_sha256" ] || {
+      phase_set S3_PROVISION failed "EC2 bootstrap artifact changed"
+      return 1
+    }
+    bootstrap_nonce=$(_bootstrap_nonce_read "$bootstrap_nonce_file") || return 1
+    bash -n "$launch_userdata" || return 1
+    if [ -z "$iid" ] && ! printf '%s\n' "$client_token" | grep -Eq '^[0-9a-f]{64}$'; then
+      phase_set S3_PROVISION failed "EC2 idempotency token is unavailable"
+      warn "Partial EC2 provisioning has frozen artifacts but no safe client token; refusing a duplicate run-instances request."
+      return 1
+    fi
+  elif [ -n "$iid" ]; then
+    phase_set S3_PROVISION failed "EC2 bootstrap artifact is unavailable"
+    warn "Existing EC2 infrastructure has no complete locally frozen bootstrap artifact."
+    return 1
+  else
+    bootstrap_script="$DIREXTALK_WORKDIR/ec2-bootstrap.sh"
+    launch_userdata="$DIREXTALK_WORKDIR/ec2-launch.sh"
+    bootstrap_nonce_file="$DIREXTALK_WORKDIR/ec2-bootstrap.nonce"
+    rm -f "$known_hosts"
+    bootstrap_tmp=$(mktemp "$DIREXTALK_WORKDIR/.ec2-bootstrap.XXXXXX") || return 1
+    render_args=(
+      --format shell
+      --domain "$domain"
+      --acme "${ACME_EMAIL:-}"
+      --message-server-image "$message_server_image"
+      "${agent_render_args[@]}"
+    )
+    [ "$defer_start" = 1 ] && render_args+=(--defer-compose-start)
+    if ! bash "$scripts_dir/render/render-userdata.sh" "${render_args[@]}" > "$bootstrap_tmp"; then
+      rm -f "$bootstrap_tmp"
+      phase_set S3_PROVISION failed "EC2 bootstrap script could not be rendered"
+      return 1
+    fi
+    [ -s "$bootstrap_tmp" ] && bash -n "$bootstrap_tmp" || {
+      rm -f "$bootstrap_tmp"
+      phase_set S3_PROVISION failed "EC2 bootstrap script is invalid"
+      return 1
+    }
+    mv -f "$bootstrap_tmp" "$bootstrap_script"
+    restrict_private_file "$bootstrap_script"
+    bootstrap_sha256=$(_s3_file_sha256 "$bootstrap_script") || return 1
+    bootstrap_nonce=$(_bootstrap_nonce_ensure "$bootstrap_nonce_file") || return 1
+    _render_nonce_launch_userdata "$launch_userdata" "$bootstrap_nonce" || return 1
+    client_token=$(printf '%s\0%s\0%s' "$name" "$domain" "$region" | sha256sum | awk '{print $1}') || return 1
+    printf '%s\n' "$client_token" | grep -Eq '^[0-9a-f]{64}$' || return 1
+    res_set user_data "$launch_userdata" || return 1
+    res_set ec2_bootstrap_script "$bootstrap_script" || return 1
+    res_set ec2_bootstrap_sha256 "$bootstrap_sha256" || return 1
+    res_set ec2_bootstrap_nonce_file "$bootstrap_nonce_file" || return 1
+    res_set ec2_ssh_known_hosts "$known_hosts" || return 1
+    res_set ec2_client_token "$client_token" || return 1
+  fi
+  [ "$(wc -c < "$launch_userdata" | tr -d '[:space:]')" -lt 512 ] || {
+    phase_set S3_PROVISION failed "EC2 launch user-data is not minimal"
+    return 1
+  }
+  launch_userdata_aws=$(dirextalk_native_tool_path "$launch_userdata") || return 1
 
   # 1) Key pair (idempotent).
-  local keyfile="$DIREXTALK_WORKDIR/${name}.pem"
+  keyfile="$DIREXTALK_WORKDIR/${name}.pem"
   if [ -z "$(res_get key_name)" ]; then
     log "Creating key pair $name ..."
     aws ec2 create-key-pair --key-name "$name" --query KeyMaterial --output text > "$keyfile"
@@ -150,40 +285,16 @@ _run_phase_ec2() {
     log "Security group already exists; skipping."; sg=$(res_get sg_id)
   fi
 
-  # 3) Render cloud-init with compose/Caddyfile/init-tokens embedded.
-  local domain_mode domain
-  domain_mode=$(state_get domain_mode)
-  domain=$(state_get domain)
-  domain=$(domain_normalize "$domain")
-  if [ -z "$domain" ]; then
-    phase_set S3_PROVISION waiting_user "production domain missing"
-    warn "S3 requires a production DOMAIN. Complete S2_DOMAIN first."
-    return 2
-  fi
-  local userdata="$DIREXTALK_WORKDIR/user-data.yaml"
-  log "Rendering cloud-init (domain_mode=$domain_mode)..."
-  bash "$scripts_dir/render/render-userdata.sh" \
-    --domain "$domain" \
-    --acme "${ACME_EMAIL:-}" \
-    --message-server-image "$message_server_image" \
-    "${agent_render_args[@]}" \
-    > "$userdata"
-  local userdata_aws
-  userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
-
-  # 4) Launch EC2 (idempotent: reuse running/pending instance).
-  local iid
-  iid=$(res_get instance_id)
-  if [ -n "$iid" ] && aws ec2 describe-instances --instance-ids "$iid" \
-        --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null \
-        | grep -qE 'running|pending'; then
+  # 3) Launch EC2 with nonce-only user-data (idempotent).
+  if [ -n "$iid" ]; then
     log "Instance $iid already exists; skipping creation."
   else
     log "Launching EC2 instance (x86 $instance_type, $ami)..."
     res_set root_volume_gb "$DIREXTALK_ROOT_VOLUME_GB"
     iid=$(aws ec2 run-instances --image-id "$ami" --instance-type "$instance_type" \
       --key-name "$name" --security-group-ids "$sg" \
-      --user-data "file://$userdata_aws" \
+      --client-token "$client_token" \
+      --user-data "file://$launch_userdata_aws" \
       --block-device-mappings "$(_root_block_device_mappings)" \
       --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$name}]" \
       --query 'Instances[0].InstanceId' --output text) || {
@@ -224,9 +335,25 @@ _run_phase_ec2() {
     return 1
   }
   res_set public_ip "$pubip"
-  if ! _resume_host_bootstrap "$pubip" "$keyfile"; then
+  if ! _bootstrap_ec2_host "$pubip" "$keyfile" "$bootstrap_script" "$bootstrap_nonce"; then
+    phase_set S3_PROVISION failed "failed to bootstrap EC2 host over verified SSH"
+    return 1
+  fi
+  if ! _resume_host_bootstrap "$pubip" "$keyfile" "" "$defer_start"; then
     phase_set S3_PROVISION failed "failed to resume host bootstrap on EC2"
     return 1
+  fi
+  if [ "$agent_enabled" = true ]; then
+    if ! _resume_private_agent_with_ecr "$pubip" "$keyfile" "$known_hosts"; then
+      phase_set S3_PROVISION failed "private Agent ECR pull/start failed"
+      return 1
+    fi
+  fi
+  if agent_mounted_secret_delivery_is_configured; then
+    if ! agent_mounted_secret_deliver_pinned "$pubip" "$keyfile" "$known_hosts"; then
+      phase_set S3_PROVISION failed "failed to deliver mounted Agent secret over verified SSH"
+      return 1
+    fi
   fi
   log "Public IP = $pubip; domain = $(state_get domain)"
 
@@ -248,6 +375,8 @@ _run_phase_lightsail() {
   phase_set S3_PROVISION in_progress "provisioning Lightsail"
 
   local name region bundle blueprint zone keyfile domain_mode domain message_server_image agent_image agent_instance_id scripts_dir
+  local agent_aws_control_enabled agent_aws_reaper_image_uri agent_worker_control_endpoint agent_managed_preparation_aws
+  local agent_worker_ami_publication_snapshot_file agent_worker_ami_publication_sha256
   local bootstrap_script bootstrap_sha256 bootstrap_nonce_file bootstrap_nonce launch_userdata launch_userdata_bytes launch_userdata_aws bootstrap_tmp
   local known_hosts instance_exists instance_lookup instance_lookup_rc
   local -a agent_render_args=()
@@ -294,12 +423,28 @@ _run_phase_lightsail() {
   message_server_image=$(state_get server_release.image_ref)
   agent_image=$(state_get agent_release.image_ref)
   agent_instance_id=$(state_get agent_release.instance_id)
+  agent_aws_control_enabled=$(state_get agent_aws_control.enabled)
+  agent_aws_reaper_image_uri=$(state_get agent_aws_control.aws_reaper_image_uri)
+  agent_worker_control_endpoint=$(state_get agent_aws_control.worker_control_endpoint)
+  agent_managed_preparation_aws=$(state_get agent_aws_control.managed_preparation_aws)
+  agent_worker_ami_publication_snapshot_file=$(state_get agent_aws_control.worker_ami_publication_snapshot_file)
+  agent_worker_ami_publication_sha256=$(state_get agent_aws_control.worker_ami_publication_sha256)
   if [ -n "$agent_image" ]; then
     agent_render_args=(
       --agent-image "$agent_image"
       --agent-instance-id "$agent_instance_id"
       --agent-model-profiles-file "$AGENT_MODEL_PROFILES_FILE"
     )
+    if [ "$agent_aws_control_enabled" = true ]; then
+      agent_render_args+=(
+        --agent-enable-aws-control true
+        --agent-aws-reaper-image-uri "$agent_aws_reaper_image_uri"
+        --agent-worker-control-endpoint "$agent_worker_control_endpoint"
+        --agent-enable-managed-preparation-aws "$agent_managed_preparation_aws"
+        --agent-worker-ami-publication-file "$agent_worker_ami_publication_snapshot_file"
+        --agent-worker-ami-publication-sha256 "$agent_worker_ami_publication_sha256"
+      )
+    fi
   fi
   scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
 
@@ -342,7 +487,7 @@ _run_phase_lightsail() {
       warn "The stored Lightsail bootstrap checksum no longer matches. Refusing to stream changed root code."
       return 1
     }
-    bootstrap_nonce=$(_lightsail_bootstrap_nonce_read "$bootstrap_nonce_file") || {
+    bootstrap_nonce=$(_bootstrap_nonce_read "$bootstrap_nonce_file") || {
       phase_set S3_PROVISION failed "Lightsail bootstrap identity nonce is invalid"
       warn "The stored Lightsail bootstrap identity nonce is unavailable."
       return 1
@@ -383,11 +528,11 @@ _run_phase_lightsail() {
       phase_set S3_PROVISION failed "Lightsail bootstrap checksum could not be computed"
       return 1
     }
-    bootstrap_nonce=$(_lightsail_bootstrap_nonce_ensure "$bootstrap_nonce_file") || {
+    bootstrap_nonce=$(_bootstrap_nonce_ensure "$bootstrap_nonce_file") || {
       phase_set S3_PROVISION failed "Lightsail bootstrap identity nonce could not be prepared"
       return 1
     }
-    if ! _render_lightsail_launch_userdata "$launch_userdata" "$bootstrap_nonce"; then
+    if ! _render_nonce_launch_userdata "$launch_userdata" "$bootstrap_nonce"; then
       phase_set S3_PROVISION failed "Lightsail launch user-data could not be prepared"
       return 1
     fi
@@ -575,7 +720,7 @@ _s3_file_sha256() {
   printf '%s\n' "$digest"
 }
 
-_lightsail_bootstrap_nonce_read() {
+_bootstrap_nonce_read() {
   local path=${1:-} nonce
   [ -f "$path" ] || return 1
   nonce=$(tr -d '\r\n' < "$path") || return 1
@@ -583,9 +728,9 @@ _lightsail_bootstrap_nonce_read() {
   printf '%s\n' "$nonce"
 }
 
-_lightsail_bootstrap_nonce_ensure() {
+_bootstrap_nonce_ensure() {
   local path=${1:-} nonce tmp
-  if nonce=$(_lightsail_bootstrap_nonce_read "$path"); then
+  if nonce=$(_bootstrap_nonce_read "$path"); then
     printf '%s\n' "$nonce"
     return 0
   fi
@@ -601,7 +746,7 @@ _lightsail_bootstrap_nonce_ensure() {
   printf '%s\n' "$nonce"
 }
 
-_render_lightsail_launch_userdata() {
+_render_nonce_launch_userdata() {
   local path=${1:-} nonce=${2:-} tmp
   printf '%s' "$nonce" | grep -Eq '^[0-9a-f]{64}$' || return 1
   tmp=$(mktemp "$DIREXTALK_WORKDIR/.lightsail-launch.XXXXXX") || return 1
@@ -623,34 +768,43 @@ EOF
 }
 
 _bootstrap_lightsail_host() {
-  local public_ip=$1 keyfile=$2 bootstrap_script=$3 expected_nonce=$4
+  _bootstrap_verified_host Lightsail lightsail_ssh_known_hosts lightsail-bootstrap-ssh.log "$@"
+}
+
+_bootstrap_ec2_host() {
+  _bootstrap_verified_host EC2 ec2_ssh_known_hosts ec2-bootstrap-ssh.log "$@"
+}
+
+_bootstrap_verified_host() {
+  local provider_label=$1 known_hosts_state_key=$2 diagnostic_name=$3
+  local public_ip=$4 keyfile=$5 bootstrap_script=$6 expected_nonce=$7
   local known_hosts candidate_known_hosts diagnostic_log remote_nonce attempt
   local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
   local attempts=${DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS:-60}
   local delay=${DIREXTALK_BOOTSTRAP_SSH_DELAY:-5}
   _is_canonical_ipv4 "$public_ip" || {
-    warn "Lightsail bootstrap rejected a non-canonical public IPv4 address."
+    warn "$provider_label bootstrap rejected a non-canonical public IPv4 address."
     return 1
   }
   [ -f "$keyfile" ] && [ -s "$bootstrap_script" ] || {
-    warn "Lightsail bootstrap requires the recorded SSH key and rendered bootstrap script."
+    warn "$provider_label bootstrap requires the recorded SSH key and rendered bootstrap script."
     return 1
   }
   bash -n "$bootstrap_script" || {
-    warn "Lightsail bootstrap script is invalid."
+    warn "$provider_label bootstrap script is invalid."
     return 1
   }
   printf '%s' "$expected_nonce" | grep -Eq '^[0-9a-f]{64}$' || {
-    warn "Lightsail bootstrap identity nonce is invalid."
+    warn "$provider_label bootstrap identity nonce is invalid."
     return 1
   }
   [ "$ssh_user" = ubuntu ] || {
-    warn "Lightsail bootstrap requires the ubuntu SSH user."
+    warn "$provider_label bootstrap requires the ubuntu SSH user."
     return 1
   }
-  known_hosts=$(res_get lightsail_ssh_known_hosts)
-  known_hosts=${known_hosts:-"$DIREXTALK_WORKDIR/known_hosts"}
-  diagnostic_log="$DIREXTALK_WORKDIR/lightsail-bootstrap-ssh.log"
+  known_hosts=$(res_get "$known_hosts_state_key")
+  known_hosts=${known_hosts:-"$DIREXTALK_WORKDIR/${provider_label,,}-known-hosts"}
+  diagnostic_log="$DIREXTALK_WORKDIR/$diagnostic_name"
   : > "$diagnostic_log"
   restrict_private_file "$diagnostic_log"
   candidate_known_hosts=
@@ -666,13 +820,13 @@ _bootstrap_lightsail_host() {
       -o "UserKnownHostsFile=$known_hosts" \
       "$ssh_user@$public_ip" \
       'sudo -n -- /bin/cat /var/lib/dirextalk-bootstrap/nonce' 2>>"$diagnostic_log") || {
-      warn "Could not authenticate the pinned Lightsail SSH host."
+      warn "Could not authenticate the pinned $provider_label SSH host."
       return 1
     }
   else
     attempt=1
     while [ "$attempt" -le "$attempts" ]; do
-      candidate_known_hosts=$(mktemp "$DIREXTALK_WORKDIR/.lightsail-known-hosts.XXXXXX") || return 1
+      candidate_known_hosts=$(mktemp "$DIREXTALK_WORKDIR/.verified-known-hosts.XXXXXX") || return 1
       if remote_nonce=$(ssh -T -i "$keyfile" \
           -o BatchMode=yes \
           -o IdentitiesOnly=yes \
@@ -690,31 +844,31 @@ _bootstrap_lightsail_host() {
       fi
       rm -f "$candidate_known_hosts"
       candidate_known_hosts=
-      warn "Lightsail SSH identity nonce is not ready (attempt $attempt/$attempts); retrying in ${delay}s."
+      warn "$provider_label SSH identity nonce is not ready (attempt $attempt/$attempts); retrying in ${delay}s."
       attempt=$((attempt + 1))
       [ "$attempt" -le "$attempts" ] && sleep "$delay"
     done
     [ "$attempt" -le "$attempts" ] || {
-      warn "Timed out waiting for the Lightsail SSH identity nonce. Rerun S3 to retry the frozen bootstrap."
+      warn "Timed out waiting for the $provider_label SSH identity nonce. Rerun S3 to retry the frozen bootstrap."
       return 1
     }
   fi
   if [ "$remote_nonce" != "$expected_nonce" ]; then
     [ -n "$candidate_known_hosts" ] && rm -f "$candidate_known_hosts"
-    warn "Lightsail SSH identity nonce did not match. Refusing to stream root bootstrap code."
+    warn "$provider_label SSH identity nonce did not match. Refusing to stream root bootstrap code."
     return 1
   fi
   if [ -n "$candidate_known_hosts" ]; then
     [ -s "$candidate_known_hosts" ] || {
       rm -f "$candidate_known_hosts"
-      warn "Lightsail SSH host key was not recorded during identity enrollment."
+      warn "$provider_label SSH host key was not recorded during identity enrollment."
       return 1
     }
     mv -f "$candidate_known_hosts" "$known_hosts"
     restrict_private_file "$known_hosts"
-    res_set lightsail_ssh_known_hosts "$known_hosts"
+    res_set "$known_hosts_state_key" "$known_hosts"
   fi
-  log "Streaming frozen Lightsail bootstrap through the verified stable public IP before DNS gating..."
+  log "Streaming frozen $provider_label bootstrap through the verified stable public IP before DNS gating..."
   attempt=1
   while [ "$attempt" -le "$attempts" ]; do
     if ssh -T -i "$keyfile" \
@@ -730,24 +884,26 @@ _bootstrap_lightsail_host() {
         "sudo -n -- /bin/bash -s -- '$public_ip'" < "$bootstrap_script" >>"$diagnostic_log" 2>&1; then
       return 0
     fi
-    warn "Lightsail SSH bootstrap is not ready (attempt $attempt/$attempts); retrying in ${delay}s."
+    warn "$provider_label SSH bootstrap is not ready (attempt $attempt/$attempts); retrying in ${delay}s."
     attempt=$((attempt + 1))
     [ "$attempt" -le "$attempts" ] && sleep "$delay"
   done
-  warn "Timed out bootstrapping Lightsail through $public_ip. Rerun S3 to retry the frozen bootstrap."
+  warn "Timed out bootstrapping $provider_label through $public_ip. Rerun S3 to retry the frozen bootstrap."
   return 1
 }
 
 _resume_host_bootstrap() {
-  local public_ip=$1 keyfile=$2 legacy_source=${3:-}
-  local known_hosts attempt result identity integration_bundle remote_command strict_host_key_checking
+  local public_ip=$1 keyfile=$2 legacy_source=${3:-} defer_start=${4:-0}
+  local known_hosts attempt result identity integration_bundle remote_command provider
   local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
   local attempts=${DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS:-60}
   local delay=${DIREXTALK_BOOTSTRAP_SSH_DELAY:-5}
-  known_hosts=$(res_get lightsail_ssh_known_hosts)
-  known_hosts=${known_hosts:-"$DIREXTALK_WORKDIR/known_hosts"}
-  strict_host_key_checking=accept-new
-  [ -s "$known_hosts" ] && strict_host_key_checking=yes
+  provider=$(_resolve_cloud_provider)
+  case "$provider" in
+    lightsail) known_hosts=$(res_get lightsail_ssh_known_hosts) ;;
+    ec2) known_hosts=$(res_get ec2_ssh_known_hosts) ;;
+    *) return 1 ;;
+  esac
   _is_canonical_ipv4 "$public_ip" || {
     warn "Host bootstrap resume rejected a non-canonical public IPv4 address."
     return 1
@@ -756,6 +912,10 @@ _resume_host_bootstrap() {
     warn "Host bootstrap resume requires a stable public IP and the recorded SSH key."
     return 1
   }
+  if [ "$ssh_user" = ubuntu ] && [ ! -s "$known_hosts" ]; then
+    warn "Host bootstrap resume requires a nonce-verified pinned SSH host key."
+    return 1
+  fi
   integration_bundle=$(mktemp "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz") || return 1
   if ! tar -C "$S3_PHASE_DIR" -cf - \
       cloud-init/init-tokens.sh \
@@ -777,7 +937,13 @@ _resume_host_bootstrap() {
     return 1
   fi
   case "$ssh_user:$legacy_source" in
-    ubuntu:) remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo -n -- /bin/bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'" ;;
+    ubuntu:)
+      if [ "$defer_start" = 1 ]; then
+        remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo -n -- /usr/bin/env DIREXTALK_BOOTSTRAP_DEFER_START=1 /bin/bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'"
+      else
+        remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo -n -- /bin/bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'"
+      fi
+      ;;
     root:/root/dirextalk/dirextalk-message-server) remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip' '$legacy_source'" ;;
     *) rm -f "$integration_bundle"; warn "Host bootstrap rejected an unsupported SSH user or legacy source."; return 1 ;;
   esac
@@ -792,7 +958,7 @@ _resume_host_bootstrap() {
         -o PasswordAuthentication=no \
         -o KbdInteractiveAuthentication=no \
         -o ConnectTimeout=10 \
-        -o "StrictHostKeyChecking=$strict_host_key_checking" \
+        -o StrictHostKeyChecking=yes \
         -o "UserKnownHostsFile=$known_hosts" \
         "$ssh_user@$public_ip" \
         "$remote_command" < "$integration_bundle"); then
@@ -809,6 +975,89 @@ _resume_host_bootstrap() {
   done
   rm -f "$integration_bundle"
   warn "Timed out resuming host bootstrap through $public_ip. Rerun S3 to retry the idempotent bootstrap."
+  return 1
+}
+
+_resume_private_agent_with_ecr() {
+  local public_ip=$1 keyfile=$2 known_hosts=$3 registry repository_arn auth_mode pull_role_arn
+  local remote_script remote_payload remote_command diagnostic_log result expected attempt
+  local attempts=${DIREXTALK_ECR_AUTH_ATTEMPTS:-3}
+  local delay=${DIREXTALK_ECR_AUTH_DELAY_SECONDS:-2}
+  local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
+  _is_canonical_ipv4 "$public_ip" || return 1
+  [ "$ssh_user" = ubuntu ] && [ -f "$keyfile" ] && [ -s "$known_hosts" ] || return 1
+  registry=$(state_get agent_registry.registry)
+  repository_arn=$(state_get agent_registry.repository_arn)
+  auth_mode=$(state_get agent_registry.auth_mode)
+  pull_role_arn=$(state_get agent_registry.pull_role_arn)
+  agent_ecr_state_is_enabled \
+    "$(state_get agent_registry.source)" \
+    "$(state_get agent_registry.account_id)" \
+    "$(state_get agent_registry.region)" \
+    "$registry" \
+    "$(state_get agent_registry.repository)" \
+    "$repository_arn" \
+    "$auth_mode" \
+    "$pull_role_arn" || return 1
+  remote_script=$(cat <<'EOF'
+set -euo pipefail
+registry=$1
+stable_ip=$2
+auth_dir=/run/dirextalk-ecr-auth
+cleanup_registry_auth() {
+  docker --config "$auth_dir" logout "$registry" >/dev/null 2>&1 || true
+  rm -rf -- "$auth_dir"
+  [ ! -e "$auth_dir" ]
+}
+trap cleanup_registry_auth EXIT HUP INT TERM
+# Lost-response resume always removes any prior auth directory before obtaining
+# and consuming the newly streamed password.
+rm -rf -- "$auth_dir"
+install -d -m 0700 -o root -g root "$auth_dir"
+docker --config "$auth_dir" login --username AWS --password-stdin "$registry" >/dev/null
+DOCKER_CONFIG="$auth_dir" /bin/bash /var/dirextalk-message-server/updater/bootstrap-host.sh "$stable_ip"
+cleanup_registry_auth
+trap - EXIT HUP INT TERM
+[ ! -e "$auth_dir" ]
+# shellcheck disable=SC1091
+source /var/dirextalk-message-server/updater/release.env
+identity=$(/usr/local/bin/dirextalk-updater version)
+version=$(printf '%s\n' "$identity" | awk -F'"' '$2 == "version" { print $4; exit }')
+commit=$(printf '%s\n' "$identity" | awk -F'"' '$2 == "commit" { print $4; exit }')
+sha256=$(sha256sum /usr/local/bin/dirextalk-updater | awk '{print $1}')
+[ "$version" = "$UPDATER_PIN_VERSION" ] && [ "$commit" = "$UPDATER_PIN_COMMIT" ] && [ "$sha256" = "$UPDATER_PIN_SHA256" ]
+printf '%s\t%s\t%s\tecr-auth-clean=true\n' "$version" "$commit" "$sha256"
+EOF
+)
+  remote_payload=$(printf '%s' "$remote_script" | base64 | tr -d '\r\n') || return 1
+  remote_command="stage=\$(mktemp /tmp/dirextalk-ecr-pull.XXXXXX) && trap 'rm -f \"\$stage\"' EXIT && printf '%s' '$remote_payload' | base64 --decode > \"\$stage\" && chmod 0700 \"\$stage\" && sudo -n -- /bin/bash \"\$stage\" '$registry' '$public_ip'"
+  diagnostic_log="$DIREXTALK_WORKDIR/agent-ecr-pull-ssh.log"
+  : > "$diagnostic_log"
+  restrict_private_file "$diagnostic_log"
+  expected=$(printf '%s\t%s\t%s\tecr-auth-clean=true' "$UPDATER_PIN_VERSION" "$UPDATER_PIN_COMMIT" "$UPDATER_PIN_SHA256")
+  attempt=1
+  while [ "$attempt" -le "$attempts" ]; do
+    if result=$(set -o pipefail; agent_ecr_stream_login_password | ssh -T -i "$keyfile" \
+        -o BatchMode=yes \
+        -o IdentitiesOnly=yes \
+        -o PreferredAuthentications=publickey \
+        -o PasswordAuthentication=no \
+        -o KbdInteractiveAuthentication=no \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=yes \
+        -o "UserKnownHostsFile=$known_hosts" \
+        "$ssh_user@$public_ip" "$remote_command" 2>>"$diagnostic_log"); then
+      if [ "$(printf '%s\n' "$result" | tail -n 1)" = "$expected" ]; then
+        res_set agent_registry_auth_cleanup_verified true
+        updater_release_record_state
+        return $?
+      fi
+    fi
+    warn "Private Agent ECR pull/start did not complete (attempt $attempt/$attempts); the next retry will pre-clean and obtain fresh auth."
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$attempts" ] && sleep "$delay"
+  done
+  res_set agent_registry_auth_cleanup_verified false
   return 1
 }
 

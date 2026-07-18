@@ -47,8 +47,35 @@ export MSYS_NO_PATHCONV=1
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/server-release.sh"
 
+formal_image='dirextalk/message-server:v1.2.3@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE="$formal_image" server_release_prepare_state
+json_test_check "$STATE_JSON" 'data.server_release.source === "immutable_release" && data.server_release.version === "v1.2.3" && data.server_release.image === "dirextalk/message-server:v1.2.3" && data.server_release.digest === "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" && data.server_release.image_ref === "dirextalk/message-server:v1.2.3@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" && data.server_release.manifest_digest === "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+state_set agent_release.enabled true
+server_release_require_agent_compatible
+state_set agent_release.enabled false
+
+state_set_raw server_release '{}'
+for unsafe_formal in \
+  'dirextalk/message-server:latest' \
+  'other/message-server:v1.2.3@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  'dirextalk/message-server:v1.2.3' \
+  'dirextalk/message-server:v1.2.3@sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'; do
+  if DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE="$unsafe_formal" server_release_prepare_state >/dev/null 2>&1; then
+    echo "production Message Server release accepted a noncanonical immutable reference: $unsafe_formal" >&2
+    exit 1
+  fi
+done
+
+state_set_raw server_release '{}'
+
 server_release_prepare_state
 json_test_check "$STATE_JSON" 'data.server_release.source === "default_latest" && data.server_release.version === "latest" && data.server_release.image === "dirextalk/message-server:latest" && data.server_release.image_ref === "dirextalk/message-server:latest" && data.server_release.digest === "" && data.server_release.manifest_digest === ""'
+state_set agent_release.enabled true
+if server_release_require_agent_compatible >/dev/null 2>&1; then
+  echo "Agent-enabled production accepted the mutable default Message Server image" >&2
+  exit 1
+fi
+state_set agent_release.enabled false
 
 state_set server_release.image attacker/image:v1.1.0
 server_release_prepare_state
@@ -84,6 +111,15 @@ fi
 
 state_set_raw server_release '{}'
 res_set instance_id ""
+if DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE="$formal_image" \
+  MESSAGE_SERVER_IMAGE=dirextalk/message-server:debug \
+  DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
+  server_release_prepare_state 2>"$tmp/mixed-selection.err"; then
+  echo "formal and debug Message Server selectors must be mutually exclusive" >&2
+  exit 1
+fi
+grep -q 'mutually exclusive' "$tmp/mixed-selection.err"
+
 if MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest server_release_prepare_state 2>"$tmp/override.err"; then
   echo "MESSAGE_SERVER_IMAGE must not silently replace the default image policy" >&2
   exit 1

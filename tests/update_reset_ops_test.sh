@@ -220,4 +220,23 @@ reset_report="$service_dir/operation-report.json"
 assert_file_exists "$reset_report"
 json_test_check "$reset_report" "data.operation_type === 'reset_app_data' && data.status === 'reset_remote_data_cleared_refresh_pending' && data.security.secrets_included === false && !('user_confirmation' in data.gates) && data.runtime_checks.summary.status === 'not_run' && data.connect.install_status === 'refresh_pending' && data.credentials.status === 'refresh_pending' && data.mcp.status === 'refresh_pending' && data.mcp.install_status === 'refresh_pending' && !('daemon_install_status' in data.mcp)"
 
+# Private Agent ECR nodes must fail before SSH until update/reset own the same
+# short-lived, pinned-host auth refresh implemented by the deployment workflow.
+write_state "$state" "$service_dir"
+json_mutate "$state" set-json agent_registry '{"source":"private_ecr"}'
+: > "$update_calls"
+if CALLS="$update_calls" PATH="$fakebin:$PATH" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-private-ecr.out" 2>&1; then
+  echo "update must fail closed for private Agent ECR without safe auth refresh" >&2
+  exit 1
+fi
+grep -q 'no pinned-SSH short-lived registry-auth refresh path' "$tmp/update-private-ecr.out"
+[ ! -s "$update_calls" ]
+: > "$reset_calls"
+if CALLS="$reset_calls" PATH="$fakebin:$PATH" DIREXTALK_RESET_APP_DATA_CONFIRM=1 bash "$ROOT/scripts/reset-app-data.sh" "$state" > "$tmp/reset-private-ecr.out" 2>&1; then
+  echo "reset must fail closed for private Agent ECR without safe auth refresh" >&2
+  exit 1
+fi
+grep -q 'no pinned-SSH short-lived registry-auth refresh path' "$tmp/reset-private-ecr.out"
+[ ! -s "$reset_calls" ]
+
 echo "update reset ops ok"

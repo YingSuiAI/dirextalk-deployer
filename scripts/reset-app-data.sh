@@ -26,6 +26,8 @@ EOF
   exit 2
 fi
 
+ops_require_safe_registry_refresh "$STATE_JSON" reset-app-data
+
 remote_command=$(ops_reset_remote_command)
 ops_ssh "$STATE_JSON" "$remote_command"
 ops_mark_refresh_pending "$STATE_JSON" S4_BOOTSTRAP_STACK

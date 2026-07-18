@@ -19,6 +19,7 @@ dirextalk_require_git_bash_on_windows || exit 1
 
 STATE_JSON=$(ops_state_path "${1:-}")
 ops_require_state "$STATE_JSON"
+ops_require_safe_registry_refresh "$STATE_JSON" update
 
 server_release_validate_override
 

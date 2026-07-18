@@ -1,7 +1,24 @@
 #!/usr/bin/env node
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  fsyncSync,
+  linkSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 class JsonCommandExit extends Error {
   constructor(status) {
@@ -73,6 +90,12 @@ function dispatch(command, args) {
     case "valid":
       readJsonFile(required(args, 0, "file"));
       break;
+    case "worker-ami-publication-snapshot":
+      cmdWorkerAMIPublicationSnapshot(args);
+      break;
+    case "deterministic-bundle":
+      cmdDeterministicBundle(args);
+      break;
     default:
       usage(command ? `unknown command: ${command}` : "missing command");
   }
@@ -111,14 +134,6 @@ function parseCliArgs() {
   return cliArgs;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [command, ...args] = parseCliArgs();
-  const result = executeJsonCommand(command, args);
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-  process.exitCode = result.status;
-}
-
 function cmdGet(args) {
   const file = required(args, 0, "file");
   const jsonPath = required(args, 1, "path");
@@ -130,6 +145,511 @@ function cmdStdinGet(args) {
   const jsonPath = required(args, 0, "path");
   const fallback = args.length > 1 ? args[1] : "";
   printValue(getPath(readJsonStdin(), jsonPath, fallback));
+}
+
+const workerAMIPublicationMaxBytes = 1 << 20;
+const workerAMIPublicationSchema = "dirextalk.agent.worker-ami-publication/v1";
+const workerAMIImageManifestSchema = "dirextalk.agent.worker-ami/v1";
+const digestPattern = /^sha256:[0-9a-f]{64}$/;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const amiPattern = /^ami-[0-9a-f]{8,17}$/;
+const snapshotPattern = /^snap-[0-9a-f]{8,17}$/;
+const accountPattern = /^[0-9]{12}$/;
+const regionPattern = /^[a-z]{2}(?:-gov)?-[a-z]+-[0-9]+$/;
+const rootDevicePattern = /^\/dev\/[a-z0-9]{2,32}$/;
+const rfc3339Pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function workerAMIPublicationInvalid() {
+  throw new Error("invalid Agent Worker-AMI publication");
+}
+
+function exactObjectKeys(value, keys) {
+  if (!isObject(value)) workerAMIPublicationInvalid();
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    workerAMIPublicationInvalid();
+  }
+}
+
+function requiredString(value, pattern) {
+  if (typeof value !== "string" || (pattern && !pattern.test(value))) workerAMIPublicationInvalid();
+}
+
+function publicationTime(value) {
+  requiredString(value, rfc3339Pattern);
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) workerAMIPublicationInvalid();
+  return parsed;
+}
+
+function imageNameIsSafe(value) {
+  requiredString(value);
+  if (value.length > 128 || !value.startsWith("dtx-worker-ami-") ||
+      !/^[A-Za-z0-9][A-Za-z0-9._+=/-]{0,255}$/.test(value)) {
+    workerAMIPublicationInvalid();
+  }
+  const lower = value.toLowerCase();
+  const forbidden = [
+    "latest", "v1.0.3", ":stable", "presign", "x-amz-", "authorization",
+    "credential=", "access_key", "access-key", "secret_key", "secret-key",
+    "password", "passwd", "token=", "bearer ", "sessiontoken", "://", "?",
+  ];
+  if (forbidden.some((marker) => lower.includes(marker)) ||
+      /(?:AKIA|ASIA)[0-9A-Z]{16}/.test(value)) {
+    workerAMIPublicationInvalid();
+  }
+}
+
+function parseJSONWithoutDuplicateKeys(input) {
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(input);
+  } catch {
+    workerAMIPublicationInvalid();
+  }
+  let cursor = 0;
+  const whitespace = () => {
+    while (cursor < text.length && /[\u0020\u0009\u000a\u000d]/.test(text[cursor])) cursor += 1;
+  };
+  const string = () => {
+    if (text[cursor] !== '"') workerAMIPublicationInvalid();
+    const start = cursor++;
+    while (cursor < text.length) {
+      const code = text.charCodeAt(cursor);
+      if (code === 0x22) {
+        cursor += 1;
+        try {
+          return JSON.parse(text.slice(start, cursor));
+        } catch {
+          workerAMIPublicationInvalid();
+        }
+      }
+      if (code <= 0x1f) workerAMIPublicationInvalid();
+      if (code === 0x5c) {
+        cursor += 1;
+        const escape = text[cursor];
+        if (escape === "u") {
+          if (!/^[0-9a-fA-F]{4}$/.test(text.slice(cursor + 1, cursor + 5))) workerAMIPublicationInvalid();
+          cursor += 5;
+          continue;
+        }
+        if (!'"\\/bfnrt'.includes(escape || "")) workerAMIPublicationInvalid();
+      }
+      cursor += 1;
+    }
+    workerAMIPublicationInvalid();
+  };
+  const value = () => {
+    whitespace();
+    const token = text[cursor];
+    if (token === "{") {
+      cursor += 1;
+      whitespace();
+      const keys = new Set();
+      if (text[cursor] === "}") {
+        cursor += 1;
+        return;
+      }
+      while (cursor < text.length) {
+        const key = string();
+        if (keys.has(key)) workerAMIPublicationInvalid();
+        keys.add(key);
+        whitespace();
+        if (text[cursor++] !== ":") workerAMIPublicationInvalid();
+        value();
+        whitespace();
+        const separator = text[cursor++];
+        if (separator === "}") return;
+        if (separator !== ",") workerAMIPublicationInvalid();
+        whitespace();
+      }
+      workerAMIPublicationInvalid();
+    }
+    if (token === "[") {
+      cursor += 1;
+      whitespace();
+      if (text[cursor] === "]") {
+        cursor += 1;
+        return;
+      }
+      while (cursor < text.length) {
+        value();
+        whitespace();
+        const separator = text[cursor++];
+        if (separator === "]") return;
+        if (separator !== ",") workerAMIPublicationInvalid();
+        whitespace();
+      }
+      workerAMIPublicationInvalid();
+    }
+    if (token === '"') {
+      string();
+      return;
+    }
+    for (const literal of ["true", "false", "null"]) {
+      if (text.startsWith(literal, cursor)) {
+        cursor += literal.length;
+        return;
+      }
+    }
+    const number = text.slice(cursor).match(/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/);
+    if (!number) workerAMIPublicationInvalid();
+    cursor += number[0].length;
+  };
+  try {
+    value();
+    whitespace();
+    if (cursor !== text.length) workerAMIPublicationInvalid();
+    return JSON.parse(text);
+  } catch {
+    workerAMIPublicationInvalid();
+  }
+}
+
+function validateWorkerAMIPublication(input) {
+  const publication = parseJSONWithoutDuplicateKeys(input);
+  exactObjectKeys(publication, ["schema_version", "image_manifest", "image_digest", "attestation"]);
+  if (publication.schema_version !== workerAMIPublicationSchema) workerAMIPublicationInvalid();
+  requiredString(publication.image_digest, digestPattern);
+
+  const image = publication.image_manifest;
+  exactObjectKeys(image, [
+    "schema_version", "agent_instance_id", "image_id", "image_name", "root_snapshot_id",
+    "account_id", "region", "architecture", "base_ami_id", "base_ami_owner_id",
+    "root_device_name", "release_manifest_digest", "worker_rootfs_digest",
+    "worker_binary_digest", "created_at",
+  ]);
+  if (image.schema_version !== workerAMIImageManifestSchema) workerAMIPublicationInvalid();
+  requiredString(image.agent_instance_id, uuidPattern);
+  requiredString(image.image_id, amiPattern);
+  imageNameIsSafe(image.image_name);
+  requiredString(image.root_snapshot_id, snapshotPattern);
+  requiredString(image.account_id, accountPattern);
+  requiredString(image.region, regionPattern);
+  if (image.architecture !== "amd64" && image.architecture !== "arm64") workerAMIPublicationInvalid();
+  requiredString(image.base_ami_id, amiPattern);
+  requiredString(image.base_ami_owner_id, accountPattern);
+  requiredString(image.root_device_name, rootDevicePattern);
+  requiredString(image.release_manifest_digest, digestPattern);
+  requiredString(image.worker_rootfs_digest, digestPattern);
+  requiredString(image.worker_binary_digest, digestPattern);
+  const createdAt = publicationTime(image.created_at);
+
+  const attestation = publication.attestation;
+  exactObjectKeys(attestation, [
+    "schema_version", "agent_instance_id", "ami_id", "root_snapshot_id", "account_id",
+    "region", "architecture", "release_manifest_digest", "worker_rootfs_digest",
+    "worker_binary_digest", "observed_at",
+  ]);
+  if (attestation.schema_version !== 1) workerAMIPublicationInvalid();
+  requiredString(attestation.agent_instance_id, uuidPattern);
+  requiredString(attestation.ami_id, amiPattern);
+  requiredString(attestation.root_snapshot_id, snapshotPattern);
+  requiredString(attestation.account_id, accountPattern);
+  requiredString(attestation.region, regionPattern);
+  if (attestation.architecture !== "amd64" && attestation.architecture !== "arm64") workerAMIPublicationInvalid();
+  requiredString(attestation.release_manifest_digest, digestPattern);
+  requiredString(attestation.worker_rootfs_digest, digestPattern);
+  requiredString(attestation.worker_binary_digest, digestPattern);
+  const observedAt = publicationTime(attestation.observed_at);
+  if (observedAt < createdAt ||
+      image.agent_instance_id !== attestation.agent_instance_id ||
+      image.image_id !== attestation.ami_id ||
+      image.root_snapshot_id !== attestation.root_snapshot_id ||
+      image.account_id !== attestation.account_id ||
+      image.region !== attestation.region ||
+      image.architecture !== attestation.architecture ||
+      image.release_manifest_digest !== attestation.release_manifest_digest ||
+      image.worker_rootfs_digest !== attestation.worker_rootfs_digest ||
+      image.worker_binary_digest !== attestation.worker_binary_digest) {
+    workerAMIPublicationInvalid();
+  }
+}
+
+function sameRegularFile(opened, current) {
+  return opened.isFile() && current.isFile() &&
+    opened.dev === current.dev && opened.ino === current.ino &&
+    opened.size === current.size && opened.mtimeNs === current.mtimeNs;
+}
+
+function readStableRegularFile(file, maxBytes = workerAMIPublicationMaxBytes) {
+  const target = String(file || "").trim();
+  if (!target) workerAMIPublicationInvalid();
+  let before;
+  try {
+    before = lstatSync(target, { bigint: true });
+  } catch {
+    workerAMIPublicationInvalid();
+  }
+  if (!before.isFile() || before.isSymbolicLink() || before.size <= 0n || before.size > BigInt(maxBytes)) {
+    workerAMIPublicationInvalid();
+  }
+  let descriptor;
+  try {
+    descriptor = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const opened = fstatSync(descriptor, { bigint: true });
+    if (!sameRegularFile(opened, before)) workerAMIPublicationInvalid();
+    const input = readFileSync(descriptor);
+    const afterRead = fstatSync(descriptor, { bigint: true });
+    const afterPath = lstatSync(target, { bigint: true });
+    if (BigInt(input.length) !== opened.size ||
+        !sameRegularFile(opened, afterRead) ||
+        !sameRegularFile(opened, afterPath) ||
+        afterPath.isSymbolicLink()) {
+      workerAMIPublicationInvalid();
+    }
+    return input;
+  } catch {
+    workerAMIPublicationInvalid();
+  } finally {
+    if (typeof descriptor === "number") closeSync(descriptor);
+  }
+}
+
+function fsyncSnapshotDirectory(directory) {
+  let descriptor;
+  try {
+    descriptor = openSync(directory, constants.O_RDONLY);
+    fsyncSync(descriptor);
+  } catch (error) {
+    // Windows does not expose a flushable directory handle through Node. The
+    // file and no-clobber hard-link are still flushed; POSIX must durably flush
+    // both directory-entry creation and temp cleanup.
+    if (process.platform !== "win32") throw error;
+  } finally {
+    if (typeof descriptor === "number") closeSync(descriptor);
+  }
+}
+
+function snapshotPathEntryExists(file) {
+  try {
+    lstatSync(file);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function unlinkSnapshotTemp(temp, directory) {
+  if (!snapshotPathEntryExists(temp)) return;
+  unlinkSync(temp);
+  fsyncSnapshotDirectory(directory);
+}
+
+function validateExactPublicationFile(file, input) {
+  const existing = readStableRegularFile(file);
+  validateWorkerAMIPublication(existing);
+  if (!existing.equals(input)) workerAMIPublicationInvalid();
+}
+
+function fsyncSnapshotTemp(temp) {
+  let descriptor;
+  try {
+    descriptor = openSync(temp, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    fsyncSync(descriptor);
+  } finally {
+    if (typeof descriptor === "number") closeSync(descriptor);
+  }
+}
+
+function secureExactPublishedSnapshot(snapshot, input) {
+  validateExactPublicationFile(snapshot, input);
+  chmodSync(snapshot, 0o600);
+  fsyncSnapshotTemp(snapshot);
+  validateExactPublicationFile(snapshot, input);
+}
+
+function prepareSnapshotTemp(temp, directory, input) {
+  if (snapshotPathEntryExists(temp)) {
+    try {
+      validateExactPublicationFile(temp, input);
+      chmodSync(temp, 0o600);
+      fsyncSnapshotTemp(temp);
+      validateExactPublicationFile(temp, input);
+      fsyncSnapshotDirectory(directory);
+      return;
+    } catch {
+      // This exact private path is owned by the snapshot transaction. A crash
+      // during its write may leave partial bytes; remove them durably and
+      // restart from the already-validated source.
+      unlinkSnapshotTemp(temp, directory);
+    }
+  }
+  let descriptor;
+  let created = false;
+  try {
+    descriptor = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0), 0o600);
+    created = true;
+    writeFileSync(descriptor, input);
+    fsyncSync(descriptor);
+  } catch {
+    if (typeof descriptor === "number") {
+      closeSync(descriptor);
+      descriptor = undefined;
+    }
+    if (created) {
+      try {
+        unlinkSnapshotTemp(temp, directory);
+      } catch {
+        // The operation still fails closed; a later retry will recover the
+        // fixed private temp before publishing anything.
+      }
+    }
+    workerAMIPublicationInvalid();
+  } finally {
+    if (typeof descriptor === "number") closeSync(descriptor);
+  }
+  try {
+    chmodSync(temp, 0o600);
+    validateExactPublicationFile(temp, input);
+    fsyncSnapshotDirectory(directory);
+  } catch {
+    try {
+      unlinkSnapshotTemp(temp, directory);
+    } catch {
+      // A later retry will recover the fixed private temp before publishing.
+    }
+    workerAMIPublicationInvalid();
+  }
+}
+
+function cmdWorkerAMIPublicationSnapshot(args) {
+  const source = required(args, 0, "publication source");
+  const snapshot = String(required(args, 1, "publication snapshot")).trim();
+  const expectedDigest = String(args[2] || "");
+  if (!snapshot) workerAMIPublicationInvalid();
+  const input = readStableRegularFile(source);
+  validateWorkerAMIPublication(input);
+  const digest = createHash("sha256").update(input).digest("hex");
+  if (expectedDigest && (!/^[0-9a-f]{64}$/.test(expectedDigest) || digest !== expectedDigest)) {
+    workerAMIPublicationInvalid();
+  }
+  const directory = path.dirname(snapshot);
+  const temp = path.join(directory, `.${path.basename(snapshot)}.tmp`);
+  if (snapshotPathEntryExists(snapshot)) {
+    try {
+      secureExactPublishedSnapshot(snapshot, input);
+    } catch {
+      try {
+        unlinkSnapshotTemp(temp, directory);
+      } catch {
+        // Never alter the conflicting snapshot even if temp cleanup also fails.
+      }
+      workerAMIPublicationInvalid();
+    }
+    fsyncSnapshotDirectory(directory);
+    unlinkSnapshotTemp(temp, directory);
+    writeOutput(`${digest}\n`);
+    return;
+  }
+  prepareSnapshotTemp(temp, directory, input);
+  try {
+    linkSync(temp, snapshot);
+  } catch (error) {
+    if (error?.code !== "EEXIST") {
+      try {
+        unlinkSnapshotTemp(temp, directory);
+      } catch {
+        // Preserve the original fail-closed publication failure.
+      }
+      workerAMIPublicationInvalid();
+    }
+    try {
+      secureExactPublishedSnapshot(snapshot, input);
+    } catch {
+      try {
+        unlinkSnapshotTemp(temp, directory);
+      } catch {
+        // Never alter the conflicting snapshot even if temp cleanup also fails.
+      }
+      workerAMIPublicationInvalid();
+    }
+  }
+  fsyncSnapshotDirectory(directory);
+  secureExactPublishedSnapshot(snapshot, input);
+  unlinkSnapshotTemp(temp, directory);
+  writeOutput(`${digest}\n`);
+}
+
+function tarString(header, offset, length, value) {
+  const encoded = Buffer.from(String(value), "utf8");
+  if (encoded.length > length) throw new Error("deterministic bundle path or field is too long");
+  encoded.copy(header, offset);
+}
+
+function tarOctal(header, offset, length, value) {
+  const encoded = Math.trunc(value).toString(8).padStart(length - 1, "0");
+  if (encoded.length >= length) throw new Error("deterministic bundle numeric field is too large");
+  tarString(header, offset, length, `${encoded}\0`);
+}
+
+function tarHeader(name, mode, size, type) {
+  const header = Buffer.alloc(512);
+  tarString(header, 0, 100, name);
+  tarOctal(header, 100, 8, mode);
+  tarOctal(header, 108, 8, 0);
+  tarOctal(header, 116, 8, 0);
+  tarOctal(header, 124, 12, size);
+  tarOctal(header, 136, 12, 0);
+  header.fill(0x20, 148, 156);
+  tarString(header, 156, 1, type);
+  tarString(header, 257, 6, "ustar\0");
+  tarString(header, 263, 2, "00");
+  tarString(header, 265, 32, "root");
+  tarString(header, 297, 32, "root");
+  let checksum = 0;
+  for (const byte of header) checksum += byte;
+  const encoded = checksum.toString(8).padStart(6, "0");
+  tarString(header, 148, 8, `${encoded}\0 `);
+  return header;
+}
+
+function deterministicBundleEntries(root, requested) {
+  const entries = [];
+  const visit = (relative) => {
+    if (!relative || path.isAbsolute(relative) || relative.split(/[\\/]/).includes("..")) {
+      throw new Error("invalid deterministic bundle entry");
+    }
+    const normalized = relative.replaceAll("\\", "/").replace(/\/+$/, "");
+    const absolute = path.join(root, ...normalized.split("/"));
+    const info = lstatSync(absolute);
+    if (info.isSymbolicLink()) throw new Error("deterministic bundle rejects symlinks");
+    if (info.isDirectory()) {
+      entries.push({ name: `${normalized}/`, absolute, directory: true });
+      for (const child of readdirSync(absolute).sort()) visit(`${normalized}/${child}`);
+      return;
+    }
+    if (!info.isFile()) throw new Error("deterministic bundle accepts only regular files");
+    entries.push({ name: normalized, absolute, directory: false, executable: (info.mode & 0o111) !== 0 });
+  };
+  for (const entry of requested) visit(entry);
+  return entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+}
+
+function cmdDeterministicBundle(args) {
+  const root = required(args, 0, "bundle root");
+  const output = required(args, 1, "bundle output");
+  const requested = args.slice(2);
+  if (!requested.length || existsSync(output)) throw new Error("invalid deterministic bundle destination or entry list");
+  const chunks = [];
+  for (const entry of deterministicBundleEntries(root, requested)) {
+    if (entry.directory) {
+      chunks.push(tarHeader(entry.name, 0o755, 0, "5"));
+      continue;
+    }
+    const content = readStableRegularFile(entry.absolute, 16 << 20);
+    chunks.push(tarHeader(entry.name, entry.executable ? 0o755 : 0o644, content.length, "0"));
+    chunks.push(content);
+    const padding = (512 - (content.length % 512)) % 512;
+    if (padding) chunks.push(Buffer.alloc(padding));
+  }
+  chunks.push(Buffer.alloc(1024));
+  const compressed = gzipSync(Buffer.concat(chunks), { level: 9, mtime: 0 });
+  compressed.fill(0, 4, 8);
+  compressed[9] = 255;
+  writeFileSync(output, compressed, { flag: "wx", mode: 0o600 });
 }
 
 function cmdLightsailAvailabilityZone(args) {
@@ -993,7 +1513,7 @@ function isObject(value) {
 }
 
 function usage(message) {
-  throw new Error(`${message}\nUsage: scripts/json.mjs <get|stdin-get|assert|stdin-assert|check|entries|stdin-tsv|stdin-join|stdin-route53-a-values|stdin-route53-a-present|stdin-price-usd|lightsail-availability-zone|lightsail-bundle-select|length|type|build|mutate|operation-report|valid> ...`);
+  throw new Error(`${message}\nUsage: scripts/json.mjs <get|stdin-get|assert|stdin-assert|check|entries|stdin-tsv|stdin-join|stdin-route53-a-values|stdin-route53-a-present|stdin-price-usd|lightsail-availability-zone|lightsail-bundle-select|length|type|build|mutate|operation-report|valid|worker-ami-publication-snapshot|deterministic-bundle> ...`);
 }
 
 function writeOutput(value) {
@@ -1018,4 +1538,12 @@ function objectValue(value) {
 
 function stringValue(value) {
   return typeof value === "undefined" || value === null ? "" : String(value);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [command, ...args] = parseCliArgs();
+  const result = executeJsonCommand(command, args);
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  process.exitCode = result.status;
 }

@@ -288,6 +288,20 @@ _run_phase_lightsail() {
   fi
   scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
 
+  # Validate and render before creating any remote state, so an oversized or
+  # otherwise invalid launch script cannot leave an orphaned Lightsail key.
+  userdata="$DIREXTALK_WORKDIR/user-data.sh"
+  log "Rendering Lightsail launch script (domain_mode=$domain_mode, provider=lightsail)..."
+  bash "$scripts_dir/render/render-userdata.sh" \
+    --format shell \
+    --domain "$domain" \
+    --acme "${ACME_EMAIL:-}" \
+    --message-server-image "$message_server_image" \
+    "${agent_render_args[@]}" \
+    > "$userdata"
+  userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
+  res_set user_data "$userdata"
+
   keyfile="$DIREXTALK_WORKDIR/${name}.pem"
   if [ -z "$(res_get key_name)" ]; then
     log "Creating Lightsail key pair $name ..."
@@ -303,18 +317,6 @@ _run_phase_lightsail() {
   else
     log "Lightsail key pair already exists; skipping."; keyfile=$(res_get key_file)
   fi
-
-  userdata="$DIREXTALK_WORKDIR/user-data.sh"
-  log "Rendering Lightsail launch script (domain_mode=$domain_mode, provider=lightsail)..."
-  bash "$scripts_dir/render/render-userdata.sh" \
-    --format shell \
-    --domain "$domain" \
-    --acme "${ACME_EMAIL:-}" \
-    --message-server-image "$message_server_image" \
-    "${agent_render_args[@]}" \
-    > "$userdata"
-  userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
-  res_set user_data "$userdata"
 
   if [ -n "$(res_get instance_id)" ] && aws lightsail get-instance --instance-name "$instance_name" >/dev/null 2>&1; then
     log "Lightsail instance $instance_name already exists; skipping creation."

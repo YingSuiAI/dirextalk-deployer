@@ -102,7 +102,10 @@ bundle_files=(docker-compose.yml Caddyfile init-tokens.sh p2p-http-request.sh up
 if [ "$agent_enabled" = 1 ]; then
   bundle_files+=(agent-db-init.sh agent-runtime-init.sh agent-model-profiles.json)
 fi
-BUNDLE_B64=$(COPYFILE_DISABLE=1 tar -C "$WORK" -cf - "${bundle_files[@]}" | gzip -n | b64)
+# Use deterministic maximum compression: the Lightsail shell user-data limit is
+# 16 KiB, and the optional Agent bundle leaves little headroom with long pinned
+# image references.
+BUNDLE_B64=$(COPYFILE_DISABLE=1 tar -C "$WORK" -cf - "${bundle_files[@]}" | gzip -9n | b64)
 
 if [ "$FORMAT" = "shell" ]; then
   cat <<EOF
@@ -110,7 +113,8 @@ if [ "$FORMAT" = "shell" ]; then
 set -eux
 
 mkdir -p /var/dirextalk-message-server
-cat > /var/dirextalk-message-server/.env <<'DIREXTALK_ENV'
+cd /var/dirextalk-message-server
+cat > .env <<'DIREXTALK_ENV'
 DOMAIN=$DOMAIN
 ACME_EMAIL=$ACME
 MESSAGE_SERVER_IMAGE=$MESSAGE_SERVER_IMAGE
@@ -118,18 +122,18 @@ AGENT_IMAGE=$AGENT_IMAGE
 AGENT_INSTANCE_ID=$AGENT_INSTANCE_ID
 DIREXTALK_ENV
 
-base64 --decode > /var/dirextalk-message-server/bundle.tar.gz <<'DIREXTALK_BUNDLE'
+base64 --decode > bundle.tar.gz <<'DIREXTALK_BUNDLE'
 $BUNDLE_B64
 DIREXTALK_BUNDLE
 
-tar -xzf /var/dirextalk-message-server/bundle.tar.gz -C /var/dirextalk-message-server
-chmod 0755 /var/dirextalk-message-server/init-tokens.sh /var/dirextalk-message-server/p2p-http-request.sh /var/dirextalk-message-server/updater/install.sh /var/dirextalk-message-server/updater/bootstrap-host.sh
+tar -xzf bundle.tar.gz
+chmod 0755 init-tokens.sh p2p-http-request.sh updater/install.sh updater/bootstrap-host.sh
 
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
 fi
 systemctl enable --now docker
-bash /var/dirextalk-message-server/updater/bootstrap-host.sh
+bash updater/bootstrap-host.sh
 EOF
   exit 0
 fi

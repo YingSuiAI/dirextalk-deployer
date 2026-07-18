@@ -6,6 +6,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 image='registry.example/dirextalk-agent:v0.1.0-alpha.20260718.1-abcdef123456@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+lightsail_message_image='dirextalk/z3-message-server-20260718:v0.1.0-alpha.20260718.1-0258d0a493ad@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 changed_image='registry.example/dirextalk-agent:v0.1.0-alpha.20260718.2-bbbbbbbbbbbb@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 instance_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 profiles="$tmp/model-profiles.json"
@@ -125,6 +126,25 @@ tar -tzf "$tmp/agent-bundle.tar.gz" | grep -qx agent-model-profiles.json
 tar -tzf "$tmp/agent-bundle.tar.gz" | grep -qx p2p-http-request.sh
 grep -F -q "AGENT_IMAGE=$image" "$agent_bundle"
 grep -F -q "AGENT_INSTANCE_ID=$instance_id" "$agent_bundle"
+
+# Lightsail accepts shell user-data only up to 16 KiB. The long digest-pinned
+# images used by an enabled private Agent must still fit that provider limit.
+lightsail_user_data="$tmp/agent-user-data.sh"
+bash "$ROOT/scripts/render/render-userdata.sh" \
+  --format shell \
+  --domain service.example.test \
+  --acme ops@example.test \
+  --message-server-image "$lightsail_message_image" \
+  --agent-image "$image" \
+  --agent-instance-id "$instance_id" \
+  --agent-model-profiles-file "$profiles" \
+  > "$lightsail_user_data"
+lightsail_user_data_bytes=$(wc -c < "$lightsail_user_data")
+[ "$lightsail_user_data_bytes" -le 16384 ] || {
+  echo "enabled Agent Lightsail shell user-data exceeds the 16384-byte limit ($lightsail_user_data_bytes bytes)" >&2
+  exit 1
+}
+
 grep -q '^  agent-runtime-init:$' "$tmp/agent-bundle/docker-compose.yml"
 grep -q '^  agent-db-init:$' "$tmp/agent-bundle/docker-compose.yml"
 grep -q '^  agent-migrate:$' "$tmp/agent-bundle/docker-compose.yml"

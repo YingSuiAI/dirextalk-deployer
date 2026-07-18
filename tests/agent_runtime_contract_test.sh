@@ -168,6 +168,7 @@ grep -q 'P2P_AGENT_GRPC_SERVER_NAME: agent' "$tmp/agent-bundle/docker-compose.ym
 grep -q 'P2P_AGENT_GRPC_SERVICE_KEY_FILE: /run/dirextalk-agent/message-server.service-key' "$tmp/agent-bundle/docker-compose.yml"
 grep -q "P2P_AGENT_GRPC_INSTANCE_ID: \${AGENT_INSTANCE_ID}" "$tmp/agent-bundle/docker-compose.yml"
 grep -q 'AGENT_BOOTSTRAP_CLIENT_ID: "dirextalk-project:${DOMAIN}"' "$tmp/agent-bundle/docker-compose.yml"
+grep -q 'AGENT_BOOTSTRAP_SCOPES: runtime.read,runtime.write,runtime.chat,cloud.read,cloud.plan.write,cloud.connection.preview,cloud.approve,cloud.connection.write,cloud.destroy,secret.bootstrap,event.read' "$tmp/agent-bundle/docker-compose.yml"
 grep -q 'AGENT_ENABLE_AWS_CONTROL: "false"' "$tmp/agent-bundle/docker-compose.yml"
 grep -q 'user: "65532:65532"' "$tmp/agent-bundle/docker-compose.yml"
 grep -q 'condition: service_healthy' "$tmp/agent-bundle/docker-compose.yml"

@@ -178,7 +178,7 @@ services:
       AGENT_SERVICE_KEY_PEPPER_FILE: /run/dirextalk-agent/agent-service-key-pepper
       AGENT_BOOTSTRAP_SERVICE_KEY_FILE: /run/dirextalk-agent/message-server.service-key
       AGENT_BOOTSTRAP_CLIENT_ID: "dirextalk-project:${DOMAIN}"
-      AGENT_BOOTSTRAP_SCOPES: runtime.chat,cloud.read,cloud.plan.write,cloud.connection.preview,cloud.approve,cloud.connection.write,cloud.destroy,secret.bootstrap,event.read
+      AGENT_BOOTSTRAP_SCOPES: runtime.read,runtime.write,runtime.chat,cloud.read,cloud.plan.write,cloud.connection.preview,cloud.approve,cloud.connection.write,cloud.destroy,secret.bootstrap,event.read
     command: ["bootstrap-service-key"]
     volumes:
       - agent-runtime:/run/dirextalk-agent:ro

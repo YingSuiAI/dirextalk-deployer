@@ -73,7 +73,9 @@ S3 renders these services only when the inputs above pass preflight:
 - `agent-migrate` and `agent-bootstrap` run before `agent`. The bootstrap key
   is bound to the Message Server remote adapter's stable client ID
   `dirextalk-project:<lowercase-domain>` and receives only the scopes required
-  by the current remote contract; it is not an `admin` credential.
+  by the current remote contract, including `runtime.read`, `runtime.write`,
+  and `runtime.chat` for the owner-only runtime-profile façade and remote Chat;
+  it is not an `admin` credential.
 - `agent` has no `ports` entry, no Docker socket, a read-only root filesystem,
   dropped Linux capabilities, and `AGENT_ENABLE_AWS_CONTROL=false`. Its image
   health check performs TLS 1.3 gRPC health only against its own loopback

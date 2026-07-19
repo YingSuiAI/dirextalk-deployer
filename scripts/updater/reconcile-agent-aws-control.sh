@@ -14,7 +14,6 @@ expected_agent_instance_id=${8:-}
 expected_model_profiles_sha256=${9:-}
 expected_reaper_image=${10:-}
 expected_worker_endpoint=${11:-}
-expected_endpoint_service_name=${12:-}
 state_root=${DIREXTALK_AGENT_AWS_CONTROL_ROOT:-}
 marker_dir="$state_root/var/lib/dirextalk-bootstrap"
 marker="$marker_dir/agent-aws-control-import"
@@ -81,7 +80,6 @@ active_agent_mode() {
       || ! runtime_env_value_is_exact "$environment" AGENT_ENABLE_AWS_CONTROL true \
       || ! runtime_env_value_is_exact "$environment" AGENT_AWS_REAPER_IMAGE_URI "$expected_reaper_image" \
       || ! runtime_env_value_is_exact "$environment" AGENT_WORKER_CONTROL_ENDPOINT "$expected_worker_endpoint" \
-      || ! runtime_env_value_is_exact "$environment" AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME "$expected_endpoint_service_name" \
       || ! runtime_env_value_is_exact "$environment" AGENT_MODEL_PROFILES_FILE /run/dirextalk-agent/agent-model-profiles.json \
       || [ ! -f "$profiles_file" ] || [ -L "$profiles_file" ] \
       || [ "$(sha256_file "$profiles_file")" != "$expected_model_profiles_sha256" ]; then
@@ -160,11 +158,6 @@ for digest in "$foundation_compose_sha256" "$managed_compose_sha256" "$publicati
 done
 valid_sha256 "$expected_model_profiles_sha256" || {
   echo "Agent model-profile digest is invalid" >&2
-  exit 1
-}
-printf '%s\n' "$expected_endpoint_service_name" \
-  | grep -Eq '^com\.amazonaws\.vpce\.ap-northeast-3\.vpce-svc-[0-9a-f]{17}$' || {
-  echo "Agent worker-control endpoint service name is invalid" >&2
   exit 1
 }
 [ -f "$target_compose" ] && [ ! -L "$target_compose" ] \

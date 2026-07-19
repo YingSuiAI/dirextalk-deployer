@@ -42,8 +42,6 @@ source "$HERE/lib/connect-daemon-logs.sh"
 source "$HERE/lib/region.sh"
 source "$HERE/lib/http-secrets.sh"
 source "$HERE/lib/server-release.sh"
-source "$HERE/lib/agent-release.sh"
-source "$HERE/lib/agent-worker-control.sh"
 
 # Phase -> script mapping. Use case instead of declare -A for macOS bash 3.2.
 phase_file() {
@@ -1143,9 +1141,6 @@ cmd_agent_aws_import() (
   agent_aws_control_import_ec2
 )
 
-cmd_agent_worker_control_enable() ( agent_worker_control_enable )
-cmd_agent_worker_control_authorize() ( agent_worker_control_authorize )
-
 if [ "${DIREXTALK_ORCHESTRATE_LIB_ONLY:-0}" = "1" ]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -1159,14 +1154,8 @@ case "${1:-run}" in
   report) shift; cmd_report "${1:-new_deploy}" ;;
   verify) shift; cmd_verify "${1:-}" ;;
   agent-aws-import) cmd_agent_aws_import ;;
-  agent-worker-control-enable) cmd_agent_worker_control_enable ;;
-  agent-worker-control-authorize) cmd_agent_worker_control_authorize ;;
   reset)
     [ -f "$STATE_JSON" ] && { mv "$STATE_JSON" "$STATE_JSON.reset-$(date -u +%Y%m%d%H%M%S)"; warn "Archived old state.json."; }
     warn "Warning: after reset, destroy no longer has state data. Any remaining AWS resources must be removed manually." ;;
-  *)
-    echo "Usage: $0 [run|status|report|verify|agent-aws-import|reset]"
-    echo "Worker-control operations: agent-worker-control-enable|agent-worker-control-authorize"
-    exit 1
-    ;;
+  *) echo "Usage: $0 [run|status|report|verify|agent-aws-import|reset]"; exit 1 ;;
 esac

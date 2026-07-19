@@ -259,7 +259,7 @@ rm -f "$tmp/instance.created" "$tmp/static-ip.allocated" "$tmp/static-ip.attache
 
 export AGENT_ENABLE_AWS_CONTROL=true
 export AGENT_AWS_REAPER_IMAGE_URI='registry.example/dirextalk-aws-reaper:v0.1.0-alpha.20260718.1-abcdef123456@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
-export AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.y1.dirextalk.ai:443'
+export AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.example.test:443'
 export AGENT_ENABLE_MANAGED_PREPARATION_AWS=false
 unset AGENT_WORKER_AMI_PUBLICATION_FILE
 if AGENT_MOUNTED_SECRET_FILE="$secret_source" AGENT_MOUNTED_SECRET_NAME=test-token run_phase > "$tmp/s3-lightsail-aws-control.out" 2>&1; then

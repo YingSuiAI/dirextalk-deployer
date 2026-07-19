@@ -43,23 +43,16 @@ AGENT_INSTANCE_ID='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' \
 AGENT_MODEL_PROFILES_FILE='/absolute/path/model-profiles.json' \
 AGENT_ENABLE_AWS_CONTROL=true \
 AGENT_AWS_REAPER_IMAGE_URI='<registry>/<repository>:<immutable-tag>@sha256:<64-lowercase-hex>' \
-AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.y1.dirextalk.ai:443' \
+AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.__DOMAIN__:443' \
 AGENT_ENABLE_MANAGED_PREPARATION_AWS=false \
 bash scripts/orchestrate.sh
 ```
 
-This phase renders the reaper image and literal credential-free Worker
-endpoint with `AGENT_ENABLE_MANAGED_PREPARATION_AWS=false`, no endpoint service
-name, and no Worker-AMI record. It is identity-preview only: capture and review
-the Foundation/device identity, but do not create the Foundation role or Worker
-AMI yet.
-
-Next run `agent-worker-control-enable` with the owning public Route 53 zone.
-Enable creates the producer, persists the exact endpoint service name, and
-atomically reconciles only the Agent container. The user may then complete the
-Foundation/signature workflow, creating the exact control role, and run
-`agent-worker-control-authorize`. Only after authorization may the Agent create
-the Worker AMI and publication for phase 2.
+This phase renders the reaper image and credential-free Worker endpoint, with
+`AGENT_ENABLE_MANAGED_PREPARATION_AWS=false`. It neither publishes nor mounts a
+Worker-AMI record. The resulting Agent can complete Foundation/device approval
+and build the Worker AMI while the original Agent release, instance identity,
+model-profile catalog, reaper digest, and Worker endpoint remain frozen.
 
 After the Agent has produced one reviewed publication, explicitly advance the
 same EC2 deployment with the exact original runtime inputs:
@@ -72,16 +65,15 @@ AGENT_INSTANCE_ID='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' \
 AGENT_MODEL_PROFILES_FILE='/absolute/path/same-model-profiles.json' \
 AGENT_ENABLE_AWS_CONTROL=true \
 AGENT_AWS_REAPER_IMAGE_URI='<same-reaper-reference>@sha256:<same-digest>' \
-AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.y1.dirextalk.ai:443' \
+AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.__DOMAIN__:443' \
 AGENT_ENABLE_MANAGED_PREPARATION_AWS=true \
 AGENT_WORKER_AMI_PUBLICATION_FILE='/absolute/path/worker-ami-publication.json' \
 bash scripts/orchestrate.sh agent-aws-import
 ```
 
 `AGENT_ENABLE_MANAGED_PREPARATION_AWS` must be exactly `true` or `false`. The
-worker-control endpoint must be the literal
-`grpcs://worker-control.y1.dirextalk.ai:443` value. The reaper image must be
-digest-pinned. The
+worker-control endpoint must be a credential-free TLS gRPC DNS target on port
+443, with no user info or query. The reaper image must be digest-pinned. The
 publication source must be one non-empty regular non-symlink file of at most
 1 MiB containing exactly the Agent
 `dirextalk.agent.worker-ami-publication/v1` object: the fixed top-level,
@@ -123,61 +115,6 @@ byte-identical.
 AWS control remains rejected for Lightsail. The legacy Agent-disabled path is
 unchanged, and a normal deployment resume cannot bypass the explicit
 `agent-aws-import` transition.
-
-## Retained Worker-control PrivateLink producer
-
-The deployer owns the retained producer for the fixed private DNS name
-`worker-control.y1.dirextalk.ai`; the Agent import consumes the opaque
-`grpcs://worker-control.y1.dirextalk.ai:443` endpoint and must not create
-network or DNS resources. First provide only the Route 53 zone that owns the
-fixed name:
-
-```bash
-AGENT_WORKER_CONTROL_ROUTE53_ZONE_ID='<hosted-zone-id>' \
-bash scripts/orchestrate.sh agent-worker-control-enable
-```
-
-Enable deliberately runs before the Foundation role exists. It leaves the
-endpoint service at `AcceptanceRequired=true` with no allowed principals,
-persists the exact AWS endpoint service name, and uses the pinned-SSH host
-reconciler to atomically install that name in Compose and recreate only the
-Agent container. The existing UUID, image, model-profile catalog, and mounted
-runtime/secret volume are read back exactly; no secret is copied.
-
-After Foundation creates the exact control role, authorize it separately:
-
-```bash
-AGENT_WORKER_CONTROL_FOUNDATION_ROLE_ARN='arn:aws:iam::<account>:role/dirextalk-foundation-control' \
-bash scripts/orchestrate.sh agent-worker-control-authorize
-```
-
-The lifecycle is `absent -> provisioning/dns_pending -> provisioned -> ready ->
-destroying -> absent`. State stores only public resource IDs, the endpoint
-service name, and exact account/Region/role/target readback and is fixed to
-`ap-northeast-3`. The producer selects one
-deterministic available subnet from each distinct AZ and creates an internal
-NLB (TLS 443, `HTTP2Only` ALPN) to the recorded private EC2 IP TLS target on
-9443. The target group remains TLS/9443, but AWS target health is explicitly
-TCP/9443; readiness separately requires the existing Agent image gRPC health
-check read through the pinned,
-authenticated SSH host without printing or transporting a service key. It
-creates only ACM or PrivateLink validation CNAME/TXT records and never writes
-a public A/AAAA record. Authorize proves the role exists with its exact ARN,
-sets it as the sole allowed principal, reads it back, and only then sets
-`AcceptanceRequired=false`. Retries read back either completed stage without
-replaying its mutation. Phase-2 `agent-aws-import` fails closed until this
-producer is ready and renders the exact recorded endpoint service name.
-
-Every retry reads back the certificate name/SAN/status, instance
-running state/Region/VPC/private IP/recorded Agent security-group attachment,
-the complete ingress shape covering 9443, NLB scheme/VPC/security group/subnets
-and PrivateLink inbound-rule setting, target group and sole healthy target, listener
-certificate/ALPN/action, and endpoint-service ownership/NLB/private DNS/state/
-acceptance/principals before mutation or ready. Parent destroy refuses to
-continue if a Worker endpoint connection is active. Otherwise it deletes in
-reverse dependency order, tolerates already-absent resources, and retains
-`destroying` state until all owned billable resources and the exact validation
-records have absent readback.
 
 ### One-time mounted provider secret (verified pinned SSH)
 
@@ -233,12 +170,9 @@ S3 renders these services only when the inputs above pass preflight:
   and `runtime.chat` for the owner-only runtime-profile façade and remote Chat,
   plus `knowledge.read`, `knowledge.write`, and `knowledge.search` for the
   owner-only Knowledge façade; it is not an `admin` credential.
-- `agent` has no Docker socket, has a read-only root filesystem, and drops
-  Linux capabilities. The AWS-control Foundation alone binds host 9443 for the
-  retained NLB; the Agent-host security group admits it only from the owned NLB
-  security group, so it is never a public gRPC listener.
-  `AGENT_ENABLE_AWS_CONTROL=false` is the default and remains the disabled
-  behavior; the separate explicit opt-in is
+- `agent` has no `ports` entry, no Docker socket, a read-only root filesystem,
+  and dropped Linux capabilities. `AGENT_ENABLE_AWS_CONTROL=false` is the
+  default and remains the disabled behavior; the separate explicit opt-in is
   defined in [Explicit Agent AWS-control opt-in](#explicit-agent-aws-control-opt-in).
   Its image health check performs TLS 1.3 gRPC health only against its own
   loopback listener with the `agent` SAN.

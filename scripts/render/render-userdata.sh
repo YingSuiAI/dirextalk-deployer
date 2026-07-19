@@ -28,7 +28,7 @@ source "$HERE/lib/agent-release.sh"
 
 DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; FORMAT="cloud-config"; BUNDLE_OUTPUT=""; DEFER_COMPOSE_START=0
 AGENT_IMAGE=""; AGENT_INSTANCE_ID=""; AGENT_MODEL_PROFILES_FILE=""
-AGENT_ENABLE_AWS_CONTROL=false; AGENT_AWS_REAPER_IMAGE_URI=""; AGENT_WORKER_CONTROL_ENDPOINT=""; AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME=""
+AGENT_ENABLE_AWS_CONTROL=false; AGENT_AWS_REAPER_IMAGE_URI=""; AGENT_WORKER_CONTROL_ENDPOINT=""
 AGENT_ENABLE_MANAGED_PREPARATION_AWS=""; AGENT_WORKER_AMI_PUBLICATION_FILE=""
 AGENT_WORKER_AMI_PUBLICATION_SHA256=""
 while [ $# -gt 0 ]; do
@@ -45,7 +45,6 @@ while [ $# -gt 0 ]; do
     --agent-enable-aws-control) AGENT_ENABLE_AWS_CONTROL=$2; shift 2;;
     --agent-aws-reaper-image-uri) AGENT_AWS_REAPER_IMAGE_URI=$2; shift 2;;
     --agent-worker-control-endpoint) AGENT_WORKER_CONTROL_ENDPOINT=$2; shift 2;;
-    --agent-worker-control-endpoint-service-name) AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME=$2; shift 2;;
     --agent-enable-managed-preparation-aws) AGENT_ENABLE_MANAGED_PREPARATION_AWS=$2; shift 2;;
     --agent-worker-ami-publication-file) AGENT_WORKER_AMI_PUBLICATION_FILE=$2; shift 2;;
     --agent-worker-ami-publication-sha256) AGENT_WORKER_AMI_PUBLICATION_SHA256=$2; shift 2;;
@@ -88,10 +87,8 @@ if [ "$AGENT_ENABLE_AWS_CONTROL" = true ]; then
   [ "$agent_enabled" = 1 ] || { echo "--agent-enable-aws-control true requires Agent inputs" >&2; exit 1; }
   agent_aws_reaper_image_uri_is_safe "$AGENT_AWS_REAPER_IMAGE_URI" || { echo "--agent-aws-reaper-image-uri must be an immutable credential-free image reference with a lowercase sha256 digest" >&2; exit 1; }
   agent_worker_control_endpoint_is_safe "$AGENT_WORKER_CONTROL_ENDPOINT" || { echo "--agent-worker-control-endpoint must be a credential-free grpcs:// DNS endpoint on port 443" >&2; exit 1; }
-  [ -z "$AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME" ] || agent_worker_control_endpoint_service_name_is_safe "$AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME" || { echo "--agent-worker-control-endpoint-service-name must be the exact ap-northeast-3 endpoint service name" >&2; exit 1; }
   agent_managed_preparation_aws_is_safe "$AGENT_ENABLE_MANAGED_PREPARATION_AWS" || { echo "--agent-enable-managed-preparation-aws must be true or false" >&2; exit 1; }
   if [ "$AGENT_ENABLE_MANAGED_PREPARATION_AWS" = true ]; then
-    agent_worker_control_endpoint_service_name_is_safe "$AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME" || { echo "--agent-enable-managed-preparation-aws true requires the exact endpoint service name" >&2; exit 1; }
     [ -n "$AGENT_WORKER_AMI_PUBLICATION_FILE" ] || { echo "--agent-worker-ami-publication-file is required when managed preparation is enabled" >&2; exit 1; }
     printf '%s\n' "$AGENT_WORKER_AMI_PUBLICATION_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "--agent-worker-ami-publication-sha256 must be the frozen lowercase sha256 digest" >&2; exit 1; }
     agent_aws_publication_enabled=1
@@ -100,7 +97,7 @@ if [ "$AGENT_ENABLE_AWS_CONTROL" = true ]; then
     exit 1
   fi
   agent_aws_control_enabled=1
-elif [ "$AGENT_ENABLE_AWS_CONTROL" != false ] || [ -n "$AGENT_AWS_REAPER_IMAGE_URI$AGENT_WORKER_CONTROL_ENDPOINT$AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME$AGENT_ENABLE_MANAGED_PREPARATION_AWS$AGENT_WORKER_AMI_PUBLICATION_FILE$AGENT_WORKER_AMI_PUBLICATION_SHA256" ]; then
+elif [ "$AGENT_ENABLE_AWS_CONTROL" != false ] || [ -n "$AGENT_AWS_REAPER_IMAGE_URI$AGENT_WORKER_CONTROL_ENDPOINT$AGENT_ENABLE_MANAGED_PREPARATION_AWS$AGENT_WORKER_AMI_PUBLICATION_FILE$AGENT_WORKER_AMI_PUBLICATION_SHA256" ]; then
   echo "Agent AWS control inputs require --agent-enable-aws-control true" >&2
   exit 1
 fi
@@ -108,17 +105,15 @@ fi
 b64() { base64 | tr -d '\n'; }
 sed_replacement_escape() { printf '%s' "$1" | sed 's/[\\&#]/\\&/g'; }
 render_optional_agent_sections() {
-  local enabled=$1 aws_control_enabled=$2 aws_publication_enabled=$3 aws_service_enabled=$4
-  awk -v enabled="$enabled" -v aws_control_enabled="$aws_control_enabled" -v aws_publication_enabled="$aws_publication_enabled" -v aws_service_enabled="$aws_service_enabled" '
+  local enabled=$1 aws_control_enabled=$2 aws_publication_enabled=$3
+  awk -v enabled="$enabled" -v aws_control_enabled="$aws_control_enabled" -v aws_publication_enabled="$aws_publication_enabled" '
     /DIREXTALK_AGENT_OPTIONAL_BEGIN/ { agent_skip = (enabled != 1); next }
     /DIREXTALK_AGENT_OPTIONAL_END/ { agent_skip = 0; next }
     /DIREXTALK_AGENT_AWS_CONTROL_BEGIN/ { aws_skip = (aws_control_enabled != 1); next }
     /DIREXTALK_AGENT_AWS_CONTROL_END/ { aws_skip = 0; next }
     /DIREXTALK_AGENT_AWS_PUBLICATION_BEGIN/ { publication_skip = (aws_publication_enabled != 1); next }
     /DIREXTALK_AGENT_AWS_PUBLICATION_END/ { publication_skip = 0; next }
-    /DIREXTALK_AGENT_WORKER_CONTROL_SERVICE_BEGIN/ { service_skip = (aws_service_enabled != 1); next }
-    /DIREXTALK_AGENT_WORKER_CONTROL_SERVICE_END/ { service_skip = 0; next }
-    !agent_skip && !aws_skip && !publication_skip && !service_skip { print }
+    !agent_skip && !aws_skip && !publication_skip { print }
   ' "$CI/docker-compose.yml"
 }
 
@@ -131,10 +126,8 @@ strip_bundle_comments() {
 # Build a deterministic tar.gz bundle with fixed permissions and no extra attrs.
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-agent_aws_service_enabled=0
-[ -n "$AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME" ] && agent_aws_service_enabled=1
-render_optional_agent_sections "$agent_enabled" "$agent_aws_control_enabled" "$agent_aws_publication_enabled" "$agent_aws_service_enabled" \
-  | sed "s#__AGENT_ENABLE_AWS_CONTROL__#$(sed_replacement_escape "$AGENT_ENABLE_AWS_CONTROL")#g; s#__AGENT_AWS_REAPER_IMAGE_URI__#$(sed_replacement_escape "$AGENT_AWS_REAPER_IMAGE_URI")#g; s#__AGENT_WORKER_CONTROL_ENDPOINT__#$(sed_replacement_escape "$AGENT_WORKER_CONTROL_ENDPOINT")#g; s#__AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME__#$(sed_replacement_escape "$AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME")#g; s#__AGENT_ENABLE_MANAGED_PREPARATION_AWS__#$(sed_replacement_escape "$AGENT_ENABLE_MANAGED_PREPARATION_AWS")#g" \
+render_optional_agent_sections "$agent_enabled" "$agent_aws_control_enabled" "$agent_aws_publication_enabled" \
+  | sed "s#__AGENT_ENABLE_AWS_CONTROL__#$(sed_replacement_escape "$AGENT_ENABLE_AWS_CONTROL")#g; s#__AGENT_AWS_REAPER_IMAGE_URI__#$(sed_replacement_escape "$AGENT_AWS_REAPER_IMAGE_URI")#g; s#__AGENT_WORKER_CONTROL_ENDPOINT__#$(sed_replacement_escape "$AGENT_WORKER_CONTROL_ENDPOINT")#g; s#__AGENT_ENABLE_MANAGED_PREPARATION_AWS__#$(sed_replacement_escape "$AGENT_ENABLE_MANAGED_PREPARATION_AWS")#g" \
   | strip_bundle_comments > "$WORK/docker-compose.yml"
 strip_bundle_comments < "$CI/Caddyfile" > "$WORK/Caddyfile"
 tr -d '\r' < "$CI/init-tokens.sh" > "$WORK/init-tokens.sh"
@@ -156,7 +149,6 @@ for updater_file in install.sh bootstrap-host.sh set-desired-state.sh release.en
 done
 if [ "$agent_enabled" = 1 ]; then
   tr -d '\r' < "$HERE/updater/reconcile-agent-aws-control.sh" > "$WORK/updater/reconcile-agent-aws-control.sh"
-  tr -d '\r' < "$HERE/updater/reconcile-agent-worker-control.sh" > "$WORK/updater/reconcile-agent-worker-control.sh"
 fi
 chmod 0644 "$WORK/docker-compose.yml" "$WORK/Caddyfile"
 if [ "$agent_enabled" = 1 ]; then
@@ -166,7 +158,7 @@ if [ "$agent_enabled" = 1 ]; then
 fi
 chmod 0644 "$WORK/updater/release.env" "$WORK/updater/config.json" "$WORK/updater/config.legacy-compose-caddy.json" "$WORK/updater/"*.service
 chmod 0755 "$WORK/init-tokens.sh" "$WORK/p2p-http-request.sh" "$WORK/updater/install.sh" "$WORK/updater/bootstrap-host.sh" "$WORK/updater/set-desired-state.sh"
-[ "$agent_enabled" = 1 ] && chmod 0755 "$WORK/updater/reconcile-agent-aws-control.sh" "$WORK/updater/reconcile-agent-worker-control.sh"
+[ "$agent_enabled" = 1 ] && chmod 0755 "$WORK/updater/reconcile-agent-aws-control.sh"
 find "$WORK" -name '._*' -delete
 bundle_files=(docker-compose.yml Caddyfile init-tokens.sh p2p-http-request.sh updater)
 if [ "$agent_enabled" = 1 ]; then

@@ -421,18 +421,13 @@ digest, a separate Agent database/role, no public gRPC port, and an actual
 Message Server remote gRPC acceptance in S5. The generated Matrix platform
 options bind `approval_owner_id` to the same `@owner:<domain>` as `admin_from`.
 Agent AWS control is a separate explicit opt-in requiring
-`AGENT_ENABLE_AWS_CONTROL=true`, a digest-pinned reaper image, the literal
-`grpcs://worker-control.y1.dirextalk.ai:443` endpoint, and the EC2/private-ECR
-path. Initial deployment must use
-`AGENT_ENABLE_MANAGED_PREPARATION_AWS=false` with no endpoint service name and
-no Worker-AMI publication. This first runtime is identity-preview only. Next,
-`agent-worker-control-enable` creates the producer, persists its exact endpoint
-service name, and reconciles only the Agent container. Only then may the user
-complete the Foundation/signature workflow that creates the control role;
-`agent-worker-control-authorize` proves and authorizes that exact role. Finally,
-after the Worker AMI exists, run
-`bash scripts/orchestrate.sh agent-aws-import` with the exact frozen core
-inputs, `AGENT_ENABLE_MANAGED_PREPARATION_AWS=true`, and one strict Agent
+`AGENT_ENABLE_AWS_CONTROL=true`, a digest-pinned reaper image, a credential-free
+`grpcs://` DNS endpoint on port 443, and the EC2/private-ECR path. Initial
+deployment must use `AGENT_ENABLE_MANAGED_PREPARATION_AWS=false` with no
+Worker-AMI publication, allowing Foundation/device approval and AMI creation
+without mounting publication bytes. Afterward, run the explicit
+`bash scripts/orchestrate.sh agent-aws-import` command with the exact frozen
+core inputs, `AGENT_ENABLE_MANAGED_PREPARATION_AWS=true`, and one strict Agent
 Worker-AMI publication file. The deployer durably freezes and validates exactly
 one regular non-symlink snapshot before pinned-SSH reconciliation; it advances
 state only after exact image/environment/mount/profile runtime readback,
@@ -445,26 +440,6 @@ disable, or revert fail closed. The publication is mounted read-only and the
 Agent remains its final cryptographic `image_digest` verifier. Lightsail
 continues to reject AWS control; see `references/agent-runtime.md` for the exact
 two-phase, schema, input, private-ECR, and retry contract.
-For the retained PrivateLink producer, provide the Route 53 zone for
-`worker-control.y1.dirextalk.ai` and run
-`bash scripts/orchestrate.sh agent-worker-control-enable` before the Foundation
-role exists. The deployer records the resumable producer lifecycle in
-`ap-northeast-3`, creates only
-ACM/PrivateLink validation CNAME/TXT records (never a public A/AAAA), and
-requires a TCP-healthy private Agent TLS target plus the existing pinned-host
-Agent gRPC health contract before it marks the internal TLS/HTTP2 NLB endpoint
-service provisioned with acceptance on and no principals. Enable persists the
-exact endpoint service name and safely recreates only the Agent container with
-that environment; it does not transfer runtime secrets. After Foundation
-creates the exact same-account
-`arn:aws:iam::<account>:role/dirextalk-foundation-control` role, run
-`bash scripts/orchestrate.sh agent-worker-control-authorize`. That separate
-idempotent transition proves the singleton role before setting endpoint
-acceptance off and marking the producer ready. `agent-aws-import` requires this
-ready producer and renders its exact service name. Parent destroy blocks
-while Worker endpoint consumers remain and retains cleanup state until all
-owned resources and validation records are absent; see
-`references/agent-runtime.md`.
 Real approval-card validation must explicitly select a reviewed non-YOLO mode,
 for example `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"'`.
 For real provider-model acceptance on a nonce-verified Lightsail or EC2 host,

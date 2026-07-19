@@ -188,7 +188,7 @@ export AGENT_MOUNTED_SECRET_FILE="$secret_source"
 export DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE="$message_image"
 export AGENT_ENABLE_AWS_CONTROL=true
 export AGENT_AWS_REAPER_IMAGE_URI='123456789012.dkr.ecr.ap-northeast-3.amazonaws.com/dirextalk-aws-reaper:v0.1.0-alpha.20260718.1-abcdef123456@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
-export AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.y1.dirextalk.ai:443'
+export AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.example.test:443'
 export AGENT_ENABLE_MANAGED_PREPARATION_AWS=false
 unset AGENT_WORKER_AMI_PUBLICATION_FILE
 
@@ -310,9 +310,6 @@ grep -q '# Lost-response resume always removes any prior auth directory' "$ECR_R
 
 # The explicit phase-2 transition validates and durably prepares the frozen
 # publication before any remote call, and never makes an AWS API call.
-endpoint_service_name='com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef0'
-agent_aws_control_record_enabled "$AGENT_AWS_REAPER_IMAGE_URI" "$AGENT_WORKER_CONTROL_ENDPOINT" false "" "" "$endpoint_service_name"
-state_set_object agent_worker_control status=ready "endpoint_service_name=$endpoint_service_name"
 export AGENT_ENABLE_MANAGED_PREPARATION_AWS=true
 unset AGENT_WORKER_AMI_PUBLICATION_FILE
 before_import_calls=$(wc -l < "$CALLS")
@@ -330,17 +327,6 @@ if AGENT_WORKER_CONTROL_ENDPOINT='grpcs://drift.example.test:443' agent_aws_cont
   exit 1
 fi
 [ "$(wc -l < "$CALLS")" = "$before_import_calls" ]
-
-unsafe_service_name='com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef'
-state_set agent_aws_control.worker_control_endpoint_service_name "$unsafe_service_name"
-state_set agent_worker_control.endpoint_service_name "$unsafe_service_name"
-if agent_aws_control_import_ec2 > "$tmp/agent-aws-import-service-name-drift.out" 2>&1; then
-  echo "Agent AWS-control import accepted an unsafe endpoint service name" >&2
-  exit 1
-fi
-[ "$(wc -l < "$CALLS")" = "$before_import_calls" ]
-state_set agent_aws_control.worker_control_endpoint_service_name "$endpoint_service_name"
-state_set agent_worker_control.endpoint_service_name "$endpoint_service_name"
 
 aws_calls_before_import=$(grep -c '^aws ' "$CALLS")
 touch "$AGENT_AWS_IMPORT_FAIL_ONCE_FILE"

@@ -116,6 +116,30 @@ AWS control remains rejected for Lightsail. The legacy Agent-disabled path is
 unchanged, and a normal deployment resume cannot bypass the explicit
 `agent-aws-import` transition.
 
+## Retained Worker-control PrivateLink producer
+
+The deployer owns the retained producer for the fixed private DNS name
+`worker-control.__DOMAIN__`; the Agent import consumes the opaque
+`grpcs://worker-control.__DOMAIN__:443` endpoint and must not create
+network or DNS resources. Use only the exact Foundation control role from the
+same AWS account and the Route 53 zone that owns the fixed name:
+
+```bash
+AGENT_WORKER_CONTROL_FOUNDATION_ROLE_ARN='arn:aws:iam::<account>:role/dirextalk-foundation-control' \
+AGENT_WORKER_CONTROL_ROUTE53_ZONE_ID='<hosted-zone-id>' \
+bash scripts/orchestrate.sh agent-worker-control-enable
+```
+
+The lifecycle is `absent -> provisioning/dns_pending -> ready -> destroying ->
+absent`. State stores only public resource IDs and exact account/Region/role/
+target readback. The producer creates an internal NLB (TLS 443, `HTTP2Only`
+ALPN) to the recorded private EC2 IP TLS target on 9443, an endpoint service,
+and only ACM or PrivateLink validation CNAME/TXT records. It never writes a
+public A/AAAA record. The endpoint-service role gate is authoritative: the
+deployer adds the one exact role before it sets `AcceptanceRequired=false`.
+Parent destroy refuses to continue if a Worker endpoint connection is still
+active and otherwise removes the producer before the Agent host.
+
 ### One-time mounted provider secret (verified pinned SSH)
 
 An actual provider-model acceptance can opt in to one external local source

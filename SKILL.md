@@ -440,6 +440,15 @@ disable, or revert fail closed. The publication is mounted read-only and the
 Agent remains its final cryptographic `image_digest` verifier. Lightsail
 continues to reject AWS control; see `references/agent-runtime.md` for the exact
 two-phase, schema, input, private-ECR, and retry contract.
+For the retained PrivateLink producer, use only the same-account
+`arn:aws:iam::<account>:role/dirextalk-foundation-control` role and the Route
+53 zone for `worker-control.__DOMAIN__` with
+`bash scripts/orchestrate.sh agent-worker-control-enable`. The deployer records
+the resumable producer lifecycle, creates only ACM/PrivateLink validation
+CNAME/TXT records (never a public A/AAAA), and requires a healthy private Agent
+target before it creates an internal TLS/HTTP2 NLB endpoint service. It adds
+that exact role before setting endpoint acceptance off. Parent destroy blocks
+while Worker endpoint consumers remain; see `references/agent-runtime.md`.
 Real approval-card validation must explicitly select a reviewed non-YOLO mode,
 for example `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"'`.
 For real provider-model acceptance on a nonce-verified Lightsail or EC2 host,

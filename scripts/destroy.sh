@@ -26,6 +26,7 @@ source "$HERE/lib/local-paths.sh"
 source "$HERE/lib/agent-secret-delivery.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/agent-ecr-pull.sh"
+source "$HERE/lib/agent-worker-control.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/connect-agent-adapters.sh"
 # shellcheck disable=SC1090
@@ -284,6 +285,26 @@ if [ -z "$AWS_IDENTITY_ARN" ] || [ "$AWS_IDENTITY_ARN" = "None" ]; then
   echo "AWS credentials are required before destroy can remove cloud resources or local state."
   exit 1
 fi
+
+# destroy.sh deliberately does not load the orchestrator state library. Adapt
+# its already-open source file to the same narrow state seam used by the
+# retained producer, so cleanup writes remain atomic and local to this state.
+state_get() { json_get "$SRC" "$1"; }
+state_set_raw() { json_mutate "$SRC" set-json "$1" "$2"; }
+state_set_object() {
+  local path=$1 object_json
+  shift
+  object_json=$(json_build object "$@") || return 1
+  state_set_raw "$path" "$object_json"
+}
+res_get() { json_get "$SRC" "resources.$1"; }
+
+# The retained producer is independent of the parent host. Never terminate the
+# host while active Worker endpoint consumers would make cleanup unsafe.
+agent_worker_control_destroy || {
+  echo "worker-control PrivateLink cleanup is incomplete or has active Workers; parent destroy is blocked."
+  exit 1
+}
 
 find_route53_zone() {
   local domain=$1 best_id="" best_name="" best_len=0 id name clean len

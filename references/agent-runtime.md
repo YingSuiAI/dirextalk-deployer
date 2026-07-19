@@ -132,13 +132,26 @@ bash scripts/orchestrate.sh agent-worker-control-enable
 
 The lifecycle is `absent -> provisioning/dns_pending -> ready -> destroying ->
 absent`. State stores only public resource IDs and exact account/Region/role/
-target readback. The producer creates an internal NLB (TLS 443, `HTTP2Only`
-ALPN) to the recorded private EC2 IP TLS target on 9443, an endpoint service,
-and only ACM or PrivateLink validation CNAME/TXT records. It never writes a
-public A/AAAA record. The endpoint-service role gate is authoritative: the
-deployer adds the one exact role before it sets `AcceptanceRequired=false`.
-Parent destroy refuses to continue if a Worker endpoint connection is still
-active and otherwise removes the producer before the Agent host.
+target readback and is fixed to `ap-northeast-3`. The producer selects one
+deterministic available subnet from each distinct AZ and creates an internal
+NLB (TLS 443, `HTTP2Only` ALPN) to the recorded private EC2 IP TLS target on
+9443. NLB target health uses TLS, not an incompatible HTTPS probe; ready also
+requires the existing Agent image gRPC health check read through the pinned,
+authenticated SSH host without printing or transporting a service key. It
+creates only ACM or PrivateLink validation CNAME/TXT records and never writes
+a public A/AAAA record. The endpoint-service role gate is authoritative: the
+deployer proves the allowed-principal set is exactly the singleton Foundation
+role before it sets `AcceptanceRequired=false`.
+
+Every retry reads back the certificate name/SAN/status, instance
+Region/VPC/private IP, NLB scheme/VPC/security group/subnets and PrivateLink
+inbound-rule setting, target group and sole healthy target, listener
+certificate/ALPN/action, and endpoint-service ownership/NLB/private DNS/state/
+acceptance/principals before mutation or ready. Parent destroy refuses to
+continue if a Worker endpoint connection is active. Otherwise it deletes in
+reverse dependency order, tolerates already-absent resources, and retains
+`destroying` state until all owned billable resources and the exact validation
+records have absent readback.
 
 ### One-time mounted provider secret (verified pinned SSH)
 
@@ -194,9 +207,12 @@ S3 renders these services only when the inputs above pass preflight:
   and `runtime.chat` for the owner-only runtime-profile façade and remote Chat,
   plus `knowledge.read`, `knowledge.write`, and `knowledge.search` for the
   owner-only Knowledge façade; it is not an `admin` credential.
-- `agent` has no `ports` entry, no Docker socket, a read-only root filesystem,
-  and dropped Linux capabilities. `AGENT_ENABLE_AWS_CONTROL=false` is the
-  default and remains the disabled behavior; the separate explicit opt-in is
+- `agent` has no Docker socket, has a read-only root filesystem, and drops
+  Linux capabilities. The AWS-control Foundation alone binds host 9443 for the
+  retained NLB; the Agent-host security group admits it only from the owned NLB
+  security group, so it is never a public gRPC listener.
+  `AGENT_ENABLE_AWS_CONTROL=false` is the default and remains the disabled
+  behavior; the separate explicit opt-in is
   defined in [Explicit Agent AWS-control opt-in](#explicit-agent-aws-control-opt-in).
   Its image health check performs TLS 1.3 gRPC health only against its own
   loopback listener with the `agent` SAN.

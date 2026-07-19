@@ -476,6 +476,7 @@ awk '/encoding: b64/ { getline; sub(/^    content: /, ""); print; exit }' "$lega
 mkdir "$tmp/legacy-agent-bundle"
 tar -xzf "$tmp/legacy-agent-bundle.tar.gz" -C "$tmp/legacy-agent-bundle"
 grep -q 'AGENT_ENABLE_AWS_CONTROL: "false"' "$tmp/legacy-agent-bundle/docker-compose.yml"
+! grep -q '9443:9443' "$tmp/legacy-agent-bundle/docker-compose.yml"
 if grep -q 'AGENT_AWS_REAPER_IMAGE_URI\|AGENT_WORKER_CONTROL_ENDPOINT\|worker-ami-publication' "$tmp/legacy-agent-bundle/docker-compose.yml"; then
   echo "legacy Agent render must omit AWS control wiring" >&2
   exit 1
@@ -505,12 +506,8 @@ if grep -q 'P2P_AGENT_GRPC_SERVICE_KEY:' "$tmp/agent-bundle/docker-compose.yml";
   echo "Agent service key must be mounted, never inline" >&2
   exit 1
 fi
-awk '
-  /^  agent:$/ { in_agent=1; next }
-  /^  [A-Za-z0-9_-]+:$/ { in_agent=0 }
-  in_agent && /^[[:space:]]+ports:/ { bad=1 }
-  END { exit bad }
-' "$tmp/agent-bundle/docker-compose.yml"
+grep -q '9443:9443' "$tmp/agent-bundle/docker-compose.yml"
+grep -q '9443:9443' "$tmp/agent-foundation-bundle/docker-compose.yml"
 
 disabled_bundle="$tmp/disabled-user-data.yaml"
 bash "$ROOT/scripts/render/render-userdata.sh" \

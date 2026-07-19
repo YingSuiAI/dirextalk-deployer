@@ -187,6 +187,11 @@ services:
   agent:
     image: ${AGENT_IMAGE}
     networks: [dirextalk-net]
+    # DIREXTALK_AGENT_AWS_CONTROL_BEGIN
+    # The host security group admits this bind only from the owned NLB SG.
+    ports:
+      - "9443:9443"
+    # DIREXTALK_AGENT_AWS_CONTROL_END
     user: "65532:65532"
     read_only: true
     cap_drop: ["ALL"]

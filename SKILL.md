@@ -421,8 +421,9 @@ digest, a separate Agent database/role, no public gRPC port, and an actual
 Message Server remote gRPC acceptance in S5. The generated Matrix platform
 options bind `approval_owner_id` to the same `@owner:<domain>` as `admin_from`.
 Agent AWS control is a separate explicit opt-in requiring
-`AGENT_ENABLE_AWS_CONTROL=true`, a digest-pinned reaper image, a credential-free
-`grpcs://` DNS endpoint on port 443, and the EC2/private-ECR path. Initial
+`AGENT_ENABLE_AWS_CONTROL=true`, a digest-pinned reaper image, the exact
+configured `grpcs://worker-control.__DOMAIN__:443` endpoint, and the EC2/private-ECR
+path. Initial
 deployment must use `AGENT_ENABLE_MANAGED_PREPARATION_AWS=false` with no
 Worker-AMI publication, allowing Foundation/device approval and AMI creation
 without mounting publication bytes. Afterward, run the explicit
@@ -440,16 +441,23 @@ disable, or revert fail closed. The publication is mounted read-only and the
 Agent remains its final cryptographic `image_digest` verifier. Lightsail
 continues to reject AWS control; see `references/agent-runtime.md` for the exact
 two-phase, schema, input, private-ECR, and retry contract.
-For the retained PrivateLink producer, use only the same-account
-`arn:aws:iam::<account>:role/dirextalk-foundation-control` role and the Route
-53 zone for `worker-control.__DOMAIN__` with
-`bash scripts/orchestrate.sh agent-worker-control-enable`. The deployer records
-the resumable producer lifecycle in `ap-northeast-3`, creates only
+For the retained PrivateLink producer, provide the Route 53 zone for
+`worker-control.__DOMAIN__` and run
+`bash scripts/orchestrate.sh agent-worker-control-enable` before the Foundation
+role exists. The deployer records the resumable producer lifecycle in
+`ap-northeast-3`, creates only
 ACM/PrivateLink validation CNAME/TXT records (never a public A/AAAA), and
-requires a healthy private Agent TLS target plus the existing pinned-host Agent
-gRPC health contract before it
-marks an internal TLS/HTTP2 NLB endpoint service ready. It reads back the exact
-singleton role before setting endpoint acceptance off. Parent destroy blocks
+requires a TCP-healthy private Agent TLS target plus the existing pinned-host
+Agent gRPC health contract before it marks the internal TLS/HTTP2 NLB endpoint
+service provisioned with acceptance on and no principals. Enable persists the
+exact endpoint service name and safely recreates only the Agent container with
+that environment; it does not transfer runtime secrets. After Foundation
+creates the exact same-account
+`arn:aws:iam::<account>:role/dirextalk-foundation-control` role, run
+`bash scripts/orchestrate.sh agent-worker-control-authorize`. That separate
+idempotent transition proves the singleton role before setting endpoint
+acceptance off and marking the producer ready. `agent-aws-import` requires this
+ready producer and renders its exact service name. Parent destroy blocks
 while Worker endpoint consumers remain and retains cleanup state until all
 owned resources and validation records are absent; see
 `references/agent-runtime.md`.

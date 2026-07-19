@@ -40,6 +40,7 @@ test_aws_source=
 test_aws_enabled=
 test_aws_reaper_image_uri=
 test_worker_control_endpoint=
+test_worker_control_endpoint_service_name=
 test_managed_preparation_aws=
 test_worker_publication_snapshot_file=
 test_worker_publication_sha256=
@@ -48,6 +49,8 @@ test_cloud_provider=ec2
 test_import_status=
 test_import_publication_snapshot_file=
 test_import_publication_sha256=
+test_producer_status=
+test_producer_service_name=
 
 warn() { :; }
 json_build() {
@@ -76,12 +79,15 @@ state_get() {
     agent_aws_control.enabled) printf '%s' "$test_aws_enabled" ;;
     agent_aws_control.aws_reaper_image_uri) printf '%s' "$test_aws_reaper_image_uri" ;;
     agent_aws_control.worker_control_endpoint) printf '%s' "$test_worker_control_endpoint" ;;
+    agent_aws_control.worker_control_endpoint_service_name) printf '%s' "$test_worker_control_endpoint_service_name" ;;
     agent_aws_control.managed_preparation_aws) printf '%s' "$test_managed_preparation_aws" ;;
     agent_aws_control.worker_ami_publication_snapshot_file) printf '%s' "$test_worker_publication_snapshot_file" ;;
     agent_aws_control.worker_ami_publication_sha256) printf '%s' "$test_worker_publication_sha256" ;;
     agent_aws_control_import.status) printf '%s' "$test_import_status" ;;
     agent_aws_control_import.worker_ami_publication_snapshot_file) printf '%s' "$test_import_publication_snapshot_file" ;;
     agent_aws_control_import.worker_ami_publication_sha256) printf '%s' "$test_import_publication_sha256" ;;
+    agent_worker_control.status) printf '%s' "$test_producer_status" ;;
+    agent_worker_control.endpoint_service_name) printf '%s' "$test_producer_service_name" ;;
     cloud_provider) printf '%s' "$test_cloud_provider" ;;
     *) return 1 ;;
   esac
@@ -115,6 +121,7 @@ state_set_raw() {
       test_aws_enabled=$(printf '%s' "$value" | sed -nE 's/.*"enabled":"([^"]*)".*/\1/p')
       test_aws_reaper_image_uri=$(printf '%s' "$value" | sed -nE 's/.*"aws_reaper_image_uri":"([^"]*)".*/\1/p')
       test_worker_control_endpoint=$(printf '%s' "$value" | sed -nE 's/.*"worker_control_endpoint":"([^"]*)".*/\1/p')
+      test_worker_control_endpoint_service_name=$(printf '%s' "$value" | sed -nE 's/.*"worker_control_endpoint_service_name":"([^"]*)".*/\1/p')
       test_managed_preparation_aws=$(printf '%s' "$value" | sed -nE 's/.*"managed_preparation_aws":"([^"]*)".*/\1/p')
       test_worker_publication_snapshot_file=$(printf '%s' "$value" | sed -nE 's/.*"worker_ami_publication_snapshot_file":"([^"]*)".*/\1/p')
       test_worker_publication_sha256=$(printf '%s' "$value" | sed -nE 's/.*"worker_ami_publication_sha256":"([^"]*)".*/\1/p')
@@ -208,7 +215,8 @@ cmp "$different_publication" "$conflict_snapshot"
 agent_aws_reaper_image_uri_is_safe 'registry.example/dirextalk-aws-reaper:v0.1.0-alpha.1-abcdef1@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 ! agent_worker_control_endpoint_is_safe 'https://worker-control.example.test:443'
 ! agent_worker_control_endpoint_is_safe 'grpcs://user@worker-control.example.test:443'
-agent_worker_control_endpoint_is_safe 'grpcs://worker-control.example.test:443'
+agent_worker_control_endpoint_is_safe 'grpcs://worker-control.y1.dirextalk.ai:443'
+! agent_worker_control_endpoint_is_safe 'grpcs://worker-control.example.test:443'
 
 # Git Bash/coreutils uses this leading marker when escaping a Windows path.
 # Persisting that marker would make the later infrastructure-bound comparison
@@ -234,7 +242,7 @@ AGENT_IMAGE="$image" AGENT_INSTANCE_ID="$instance_id" AGENT_MODEL_PROFILES_FILE=
 
 # AWS control remains disabled unless deliberately enabled, and its state only
 # records public wire values plus a content digest for deterministic resumes.
-unset AGENT_ENABLE_AWS_CONTROL AGENT_AWS_REAPER_IMAGE_URI AGENT_WORKER_CONTROL_ENDPOINT AGENT_ENABLE_MANAGED_PREPARATION_AWS AGENT_WORKER_AMI_PUBLICATION_FILE
+unset AGENT_ENABLE_AWS_CONTROL AGENT_AWS_REAPER_IMAGE_URI AGENT_WORKER_CONTROL_ENDPOINT AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME AGENT_ENABLE_MANAGED_PREPARATION_AWS AGENT_WORKER_AMI_PUBLICATION_FILE
 agent_aws_control_prepare_state
 [ "$test_aws_source" = disabled ]
 [ "$test_aws_enabled" = false ]
@@ -247,7 +255,8 @@ if AGENT_ENABLE_AWS_CONTROL=true agent_aws_control_prepare_state; then
   exit 1
 fi
 reaper_image='registry.example/dirextalk-aws-reaper:v0.1.0-alpha.1-abcdef1@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
-worker_endpoint='grpcs://worker-control.example.test:443'
+worker_endpoint='grpcs://worker-control.y1.dirextalk.ai:443'
+endpoint_service_name='com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef0'
 test_aws_source= test_aws_enabled= test_aws_reaper_image_uri= test_worker_control_endpoint= test_managed_preparation_aws=
 test_worker_publication_snapshot_file= test_worker_publication_sha256=
 AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=false agent_aws_control_prepare_state
@@ -257,6 +266,7 @@ AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_W
 [ "$test_worker_control_endpoint" = "$worker_endpoint" ]
 [ "$test_managed_preparation_aws" = false ]
 [ -z "$test_worker_publication_snapshot_file$test_worker_publication_sha256" ]
+[ -z "$test_worker_control_endpoint_service_name" ]
 agent_aws_control_require_render_inputs
 test_infrastructure_id=i-agent-existing
 AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=false agent_aws_control_prepare_state
@@ -269,6 +279,9 @@ if AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGEN
   exit 1
 fi
 
+agent_aws_control_record_enabled "$reaper_image" "$worker_endpoint" false "" "" "$endpoint_service_name"
+test_producer_status=ready
+test_producer_service_name=$endpoint_service_name
 AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication" agent_aws_control_import_prepare_state
 [ "$test_managed_preparation_aws" = false ]
 [ "$test_import_status" = prepared ]
@@ -329,6 +342,10 @@ tar -xzf "$foundation_archive" -C "$tmp/agent-foundation-bundle"
 grep -q 'AGENT_ENABLE_AWS_CONTROL: "true"' "$tmp/agent-foundation-bundle/docker-compose.yml"
 grep -F -q "AGENT_AWS_REAPER_IMAGE_URI: \"$reaper_image\"" "$tmp/agent-foundation-bundle/docker-compose.yml"
 grep -F -q "AGENT_WORKER_CONTROL_ENDPOINT: \"$worker_endpoint\"" "$tmp/agent-foundation-bundle/docker-compose.yml"
+if grep -q 'AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME' "$tmp/agent-foundation-bundle/docker-compose.yml"; then
+  echo "phase-1 Agent AWS-control foundation rendered a service name before producer creation" >&2
+  exit 1
+fi
 grep -q 'AGENT_ENABLE_MANAGED_PREPARATION_AWS: "false"' "$tmp/agent-foundation-bundle/docker-compose.yml"
 if tar -tzf "$foundation_archive" | grep -q 'agent-worker-ami-publication.json' \
     || grep -q 'AGENT_WORKER_AMI_PUBLICATION_FILE\|agent-worker-ami-publication.json:/run/dirextalk-agent' "$tmp/agent-foundation-bundle/docker-compose.yml"; then
@@ -347,6 +364,7 @@ bash "$ROOT/scripts/render/render-userdata.sh" \
   --agent-enable-aws-control true \
   --agent-aws-reaper-image-uri "$reaper_image" \
   --agent-worker-control-endpoint "$worker_endpoint" \
+  --agent-worker-control-endpoint-service-name "$endpoint_service_name" \
   --agent-enable-managed-preparation-aws true \
   --agent-worker-ami-publication-file "$worker_publication" \
   --agent-worker-ami-publication-sha256 "$worker_publication_sha256" \
@@ -362,6 +380,7 @@ bash "$ROOT/scripts/render/render-userdata.sh" \
   --agent-enable-aws-control true \
   --agent-aws-reaper-image-uri "$reaper_image" \
   --agent-worker-control-endpoint "$worker_endpoint" \
+  --agent-worker-control-endpoint-service-name "$endpoint_service_name" \
   --agent-enable-managed-preparation-aws true \
   --agent-worker-ami-publication-file "$worker_publication" \
   --agent-worker-ami-publication-sha256 "$worker_publication_sha256" \
@@ -451,6 +470,7 @@ grep -q 'AGENT_BOOTSTRAP_SCOPES: runtime.read,runtime.write,runtime.chat,knowled
 grep -q 'AGENT_ENABLE_AWS_CONTROL: "true"' "$tmp/agent-bundle/docker-compose.yml"
 grep -F -q "AGENT_AWS_REAPER_IMAGE_URI: \"$reaper_image\"" "$tmp/agent-bundle/docker-compose.yml"
 grep -F -q "AGENT_WORKER_CONTROL_ENDPOINT: \"$worker_endpoint\"" "$tmp/agent-bundle/docker-compose.yml"
+grep -F -q "AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME: \"$endpoint_service_name\"" "$tmp/agent-bundle/docker-compose.yml"
 grep -q 'AGENT_ENABLE_MANAGED_PREPARATION_AWS: "true"' "$tmp/agent-bundle/docker-compose.yml"
 grep -q 'AGENT_WORKER_AMI_PUBLICATION_FILE: /run/dirextalk-agent/worker-ami-publication.json' "$tmp/agent-bundle/docker-compose.yml"
 grep -q './agent-worker-ami-publication.json:/run/dirextalk-agent/worker-ami-publication.json:ro' "$tmp/agent-bundle/docker-compose.yml"

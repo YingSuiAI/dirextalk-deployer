@@ -72,8 +72,9 @@ bash scripts/orchestrate.sh agent-aws-import
 ```
 
 `AGENT_ENABLE_MANAGED_PREPARATION_AWS` must be exactly `true` or `false`. The
-worker-control endpoint must be a credential-free TLS gRPC DNS target on port
-443, with no user info or query. The reaper image must be digest-pinned. The
+worker-control endpoint must be the exact configured
+`grpcs://worker-control.__DOMAIN__:443` value. The reaper image must be
+digest-pinned. The
 publication source must be one non-empty regular non-symlink file of at most
 1 MiB containing exactly the Agent
 `dirextalk.agent.worker-ami-publication/v1` object: the fixed top-level,
@@ -121,31 +122,49 @@ unchanged, and a normal deployment resume cannot bypass the explicit
 The deployer owns the retained producer for the fixed private DNS name
 `worker-control.__DOMAIN__`; the Agent import consumes the opaque
 `grpcs://worker-control.__DOMAIN__:443` endpoint and must not create
-network or DNS resources. Use only the exact Foundation control role from the
-same AWS account and the Route 53 zone that owns the fixed name:
+network or DNS resources. First provide only the Route 53 zone that owns the
+fixed name:
 
 ```bash
-AGENT_WORKER_CONTROL_FOUNDATION_ROLE_ARN='arn:aws:iam::<account>:role/dirextalk-foundation-control' \
 AGENT_WORKER_CONTROL_ROUTE53_ZONE_ID='<hosted-zone-id>' \
 bash scripts/orchestrate.sh agent-worker-control-enable
 ```
 
-The lifecycle is `absent -> provisioning/dns_pending -> ready -> destroying ->
-absent`. State stores only public resource IDs and exact account/Region/role/
-target readback and is fixed to `ap-northeast-3`. The producer selects one
+Enable deliberately runs before the Foundation role exists. It leaves the
+endpoint service at `AcceptanceRequired=true` with no allowed principals,
+persists the exact AWS endpoint service name, and uses the pinned-SSH host
+reconciler to atomically install that name in Compose and recreate only the
+Agent container. The existing UUID, image, model-profile catalog, and mounted
+runtime/secret volume are read back exactly; no secret is copied.
+
+After Foundation creates the exact control role, authorize it separately:
+
+```bash
+AGENT_WORKER_CONTROL_FOUNDATION_ROLE_ARN='arn:aws:iam::<account>:role/dirextalk-foundation-control' \
+bash scripts/orchestrate.sh agent-worker-control-authorize
+```
+
+The lifecycle is `absent -> provisioning/dns_pending -> provisioned -> ready ->
+destroying -> absent`. State stores only public resource IDs, the endpoint
+service name, and exact account/Region/role/target readback and is fixed to
+`ap-northeast-3`. The producer selects one
 deterministic available subnet from each distinct AZ and creates an internal
 NLB (TLS 443, `HTTP2Only` ALPN) to the recorded private EC2 IP TLS target on
-9443. NLB target health uses TLS, not an incompatible HTTPS probe; ready also
-requires the existing Agent image gRPC health check read through the pinned,
+9443. The target group remains TLS/9443, but AWS target health is explicitly
+TCP/9443; readiness separately requires the existing Agent image gRPC health
+check read through the pinned,
 authenticated SSH host without printing or transporting a service key. It
 creates only ACM or PrivateLink validation CNAME/TXT records and never writes
-a public A/AAAA record. The endpoint-service role gate is authoritative: the
-deployer proves the allowed-principal set is exactly the singleton Foundation
-role before it sets `AcceptanceRequired=false`.
+a public A/AAAA record. Authorize proves the role exists with its exact ARN,
+sets it as the sole allowed principal, reads it back, and only then sets
+`AcceptanceRequired=false`. Retries read back either completed stage without
+replaying its mutation. Phase-2 `agent-aws-import` fails closed until this
+producer is ready and renders the exact recorded endpoint service name.
 
 Every retry reads back the certificate name/SAN/status, instance
-Region/VPC/private IP, NLB scheme/VPC/security group/subnets and PrivateLink
-inbound-rule setting, target group and sole healthy target, listener
+running state/Region/VPC/private IP/recorded Agent security-group attachment,
+the complete ingress shape covering 9443, NLB scheme/VPC/security group/subnets
+and PrivateLink inbound-rule setting, target group and sole healthy target, listener
 certificate/ALPN/action, and endpoint-service ownership/NLB/private DNS/state/
 acceptance/principals before mutation or ready. Parent destroy refuses to
 continue if a Worker endpoint connection is active. Otherwise it deletes in

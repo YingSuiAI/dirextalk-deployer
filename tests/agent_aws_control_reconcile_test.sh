@@ -19,7 +19,8 @@ publication="$source_dir/agent-worker-ami-publication.json"
 runtime_source="$tmp/agent-runtime"
 profiles_file="$runtime_source/agent-model-profiles.json"
 reaper_image='registry.example/dirextalk-aws-reaper:v0.1.0@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
-worker_endpoint='grpcs://worker-control.example.test:443'
+worker_endpoint='grpcs://worker-control.y1.dirextalk.ai:443'
+endpoint_service_name='com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef0'
 mkdir -p "$runtime_source"
 
 cat > "$foundation_compose" <<'EOF'
@@ -56,6 +57,7 @@ export FAKE_AGENT_IMAGE="$agent_image"
 export FAKE_AGENT_INSTANCE_ID="$agent_instance_id"
 export FAKE_REAPER_IMAGE="$reaper_image"
 export FAKE_WORKER_ENDPOINT="$worker_endpoint"
+export FAKE_ENDPOINT_SERVICE_NAME="$endpoint_service_name"
 export FAKE_PUBLICATION_SOURCE_OVERRIDE=
 export FAKE_DUPLICATE_MANAGED_ENV=
 printf 'foundation\n' > "$FAKE_ACTIVE_MODE"
@@ -106,6 +108,7 @@ case "${1:-}" in
         printf 'AGENT_ENABLE_AWS_CONTROL=true\n'
         printf 'AGENT_AWS_REAPER_IMAGE_URI=%s\n' "$FAKE_REAPER_IMAGE"
         printf 'AGENT_WORKER_CONTROL_ENDPOINT=%s\n' "$FAKE_WORKER_ENDPOINT"
+        printf 'AGENT_WORKER_CONTROL_ENDPOINT_SERVICE_NAME=%s\n' "$FAKE_ENDPOINT_SERVICE_NAME"
         printf 'AGENT_MODEL_PROFILES_FILE=/run/dirextalk-agent/agent-model-profiles.json\n'
         case "$mode" in
           foundation) printf 'AGENT_ENABLE_MANAGED_PREPARATION_AWS=false\n' ;;
@@ -150,7 +153,7 @@ reconcile() {
     bash "$ROOT/scripts/updater/reconcile-agent-aws-control.sh" \
       "$source_dir" "$base" "$foundation_sha" "$managed_sha" "$publication_sha" \
       "$message_image" "$agent_image" "$agent_instance_id" "$profiles_sha" \
-      "$reaper_image" "$worker_endpoint"
+      "$reaper_image" "$worker_endpoint" "$endpoint_service_name"
 }
 
 # First application installs exact bytes and restarts the Agent once.

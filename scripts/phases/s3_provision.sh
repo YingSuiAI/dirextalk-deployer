@@ -78,7 +78,7 @@ run_phase() {
 
 _agent_aws_control_render_bundle() {
   local output=$1 managed=$2 publication_file=${3:-} publication_sha256=${4:-}
-  local scripts_dir domain message_server_image agent_image agent_instance_id reaper_image endpoint
+  local scripts_dir domain message_server_image agent_image agent_instance_id reaper_image endpoint endpoint_service_name
   local -a args
   scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
   domain=$(domain_normalize "$(state_get domain)")
@@ -87,6 +87,7 @@ _agent_aws_control_render_bundle() {
   agent_instance_id=$(state_get agent_release.instance_id)
   reaper_image=$(state_get agent_aws_control.aws_reaper_image_uri)
   endpoint=$(state_get agent_aws_control.worker_control_endpoint)
+  endpoint_service_name=$(state_get agent_aws_control.worker_control_endpoint_service_name)
   args=(
     --format bundle
     --bundle-output "$output"
@@ -101,6 +102,7 @@ _agent_aws_control_render_bundle() {
     --agent-worker-control-endpoint "$endpoint"
     --agent-enable-managed-preparation-aws "$managed"
   )
+  [ -z "$endpoint_service_name" ] || args+=(--agent-worker-control-endpoint-service-name "$endpoint_service_name")
   if [ "$managed" = true ]; then
     args+=(--agent-worker-ami-publication-file "$publication_file" --agent-worker-ami-publication-sha256 "$publication_sha256")
   fi
@@ -109,7 +111,7 @@ _agent_aws_control_render_bundle() {
 
 agent_aws_control_import_ec2() {
   local public_ip keyfile known_hosts publication_file publication_sha256
-  local message_server_image agent_image agent_instance_id model_profiles_sha256 reaper_image endpoint
+  local message_server_image agent_image agent_instance_id model_profiles_sha256 reaper_image endpoint endpoint_service_name
   local foundation_bundle managed_bundle render_dir remote_command result transition_status
   local foundation_compose_sha256 managed_compose_sha256 diagnostic_log attempt
   local attempts=${DIREXTALK_AGENT_AWS_IMPORT_ATTEMPTS:-3}
@@ -181,7 +183,8 @@ agent_aws_control_import_ec2() {
   model_profiles_sha256=$(state_get agent_release.model_profiles_sha256)
   reaper_image=$(state_get agent_aws_control.aws_reaper_image_uri)
   endpoint=$(state_get agent_aws_control.worker_control_endpoint)
-  remote_command="stage=\$(mktemp -d /tmp/dirextalk-agent-aws-control.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo -n -- /bin/bash \"\$stage/updater/reconcile-agent-aws-control.sh\" \"\$stage\" /var/dirextalk-message-server '$foundation_compose_sha256' '$managed_compose_sha256' '$publication_sha256' '$message_server_image' '$agent_image' '$agent_instance_id' '$model_profiles_sha256' '$reaper_image' '$endpoint'"
+  endpoint_service_name=$(state_get agent_aws_control.worker_control_endpoint_service_name)
+  remote_command="stage=\$(mktemp -d /tmp/dirextalk-agent-aws-control.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo -n -- /bin/bash \"\$stage/updater/reconcile-agent-aws-control.sh\" \"\$stage\" /var/dirextalk-message-server '$foundation_compose_sha256' '$managed_compose_sha256' '$publication_sha256' '$message_server_image' '$agent_image' '$agent_instance_id' '$model_profiles_sha256' '$reaper_image' '$endpoint' '$endpoint_service_name'"
   diagnostic_log="$DIREXTALK_WORKDIR/agent-aws-control-import-ssh.log"
   : > "$diagnostic_log"
   restrict_private_file "$diagnostic_log" || { rm -rf "$render_dir"; return 1; }
@@ -219,7 +222,7 @@ _run_phase_ec2() {
 
   local name region instance_type ami sg vpc domain_mode domain scripts_dir
   local message_server_image agent_image agent_instance_id agent_enabled agent_aws_control_enabled
-  local agent_aws_reaper_image_uri agent_worker_control_endpoint agent_managed_preparation_aws
+  local agent_aws_reaper_image_uri agent_worker_control_endpoint agent_worker_control_endpoint_service_name agent_managed_preparation_aws
   local agent_worker_ami_publication_snapshot_file agent_worker_ami_publication_sha256
   local bootstrap_script bootstrap_sha256 bootstrap_nonce_file bootstrap_nonce launch_userdata launch_userdata_aws bootstrap_tmp known_hosts
   local iid instance_state keyfile pubip eip defer_start=0 client_token frozen_artifacts
@@ -274,6 +277,7 @@ _run_phase_ec2() {
   agent_aws_control_enabled=$(state_get agent_aws_control.enabled)
   agent_aws_reaper_image_uri=$(state_get agent_aws_control.aws_reaper_image_uri)
   agent_worker_control_endpoint=$(state_get agent_aws_control.worker_control_endpoint)
+  agent_worker_control_endpoint_service_name=$(state_get agent_aws_control.worker_control_endpoint_service_name)
   agent_managed_preparation_aws=$(state_get agent_aws_control.managed_preparation_aws)
   agent_worker_ami_publication_snapshot_file=$(state_get agent_aws_control.worker_ami_publication_snapshot_file)
   agent_worker_ami_publication_sha256=$(state_get agent_aws_control.worker_ami_publication_sha256)
@@ -296,6 +300,8 @@ _run_phase_ec2() {
         --agent-worker-ami-publication-file "$agent_worker_ami_publication_snapshot_file"
         --agent-worker-ami-publication-sha256 "$agent_worker_ami_publication_sha256"
       )
+      [ -z "$agent_worker_control_endpoint_service_name" ] \
+        || agent_render_args+=(--agent-worker-control-endpoint-service-name "$agent_worker_control_endpoint_service_name")
     fi
     defer_start=1
   fi
@@ -518,7 +524,7 @@ _run_phase_lightsail() {
   phase_set S3_PROVISION in_progress "provisioning Lightsail"
 
   local name region bundle blueprint zone keyfile domain_mode domain message_server_image agent_image agent_instance_id scripts_dir
-  local agent_aws_control_enabled agent_aws_reaper_image_uri agent_worker_control_endpoint agent_managed_preparation_aws
+  local agent_aws_control_enabled agent_aws_reaper_image_uri agent_worker_control_endpoint agent_worker_control_endpoint_service_name agent_managed_preparation_aws
   local agent_worker_ami_publication_snapshot_file agent_worker_ami_publication_sha256
   local bootstrap_script bootstrap_sha256 bootstrap_nonce_file bootstrap_nonce launch_userdata launch_userdata_bytes launch_userdata_aws bootstrap_tmp
   local known_hosts instance_exists instance_lookup instance_lookup_rc
@@ -569,6 +575,7 @@ _run_phase_lightsail() {
   agent_aws_control_enabled=$(state_get agent_aws_control.enabled)
   agent_aws_reaper_image_uri=$(state_get agent_aws_control.aws_reaper_image_uri)
   agent_worker_control_endpoint=$(state_get agent_aws_control.worker_control_endpoint)
+  agent_worker_control_endpoint_service_name=$(state_get agent_aws_control.worker_control_endpoint_service_name)
   agent_managed_preparation_aws=$(state_get agent_aws_control.managed_preparation_aws)
   agent_worker_ami_publication_snapshot_file=$(state_get agent_aws_control.worker_ami_publication_snapshot_file)
   agent_worker_ami_publication_sha256=$(state_get agent_aws_control.worker_ami_publication_sha256)
@@ -587,6 +594,8 @@ _run_phase_lightsail() {
         --agent-worker-ami-publication-file "$agent_worker_ami_publication_snapshot_file"
         --agent-worker-ami-publication-sha256 "$agent_worker_ami_publication_sha256"
       )
+      [ -z "$agent_worker_control_endpoint_service_name" ] \
+        || agent_render_args+=(--agent-worker-control-endpoint-service-name "$agent_worker_control_endpoint_service_name")
     fi
   fi
   scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}

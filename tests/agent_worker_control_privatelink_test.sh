@@ -25,13 +25,15 @@ res_set sg_id sg-agent
 state_set_raw agent_release '{"enabled":true}'
 state_set_raw agent_aws_control '{"enabled":true,"managed_preparation_aws":false}'
 export AWS_DEFAULT_REGION=ap-northeast-1
-export AGENT_WORKER_CONTROL_FOUNDATION_ROLE_ARN='arn:aws:iam::123456789012:role/dirextalk-foundation-control'
 export AGENT_WORKER_CONTROL_ROUTE53_ZONE_ID=Z0123456789ABCDEF
 calls="$tmp/aws.calls"; : > "$calls"
 mutations="$tmp/aws.mutations"; : > "$mutations"
 grpc_calls="$tmp/grpc.calls"; : > "$grpc_calls"
 principal_added="$tmp/principal-added"
+service_configured="$tmp/service-configured"
+acceptance_disabled="$tmp/acceptance-disabled"
 ingress_added="$tmp/ingress-added"
+runtime_reconciled="$tmp/runtime-reconciled"
 service_absent="$tmp/service-absent"
 listener_absent="$tmp/listener-absent"
 target_group_absent="$tmp/target-group-absent"
@@ -44,6 +46,11 @@ export FAKE_PRIVATE_DNS_STATE=verified
 export FAKE_LISTENER_DELETE_NOT_FOUND=
 export FAKE_DESTROY_ABSENT=
 export FAKE_GRPC_HEALTH=healthy
+export FAKE_INSTANCE_STATE=running
+export FAKE_INSTANCE_GROUPS=sg-agent
+export FAKE_SG_MODE=exact
+export FAKE_HEALTH_PROTOCOL=TCP
+export FAKE_HEALTH_PORT=9443
 
 aws() {
   printf '%s\n' "$*" >> "$calls"
@@ -53,8 +60,8 @@ aws() {
       case " $* " in *' --query Account '*) printf '123456789012\n' ;; *) printf 'arn:aws:iam::123456789012:role/operator\n' ;; esac ;;
     'ec2 describe-instances')
       case " $* " in
-        *'Reservations[0].Instances[0].PrivateIpAddress'*) printf '10.0.2.15\n' ;;
-        *) printf '10.0.2.15\tvpc-0123456789abcdef0\tap-northeast-3a\n' ;;
+        *'SecurityGroups[].GroupId'*) printf '%s\n' "$FAKE_INSTANCE_GROUPS" ;;
+        *) printf '10.0.2.15\tvpc-0123456789abcdef0\tap-northeast-3a\t%s\n' "$FAKE_INSTANCE_STATE" ;;
       esac ;;
     'ec2 describe-vpcs') printf '10.0.0.0/16\n' ;;
     'route53 get-hosted-zone') printf 'y1.dirextalk.ai.\tfalse\n' ;;
@@ -75,7 +82,14 @@ aws() {
       if [ -n "$FAKE_DESTROY_ABSENT" ] || [ -e "$sg_absent" ]; then printf 'None\n'
       else
         case " $* " in
-          *'IpPermissions'*) [ ! -e "$ingress_added" ] || printf 'sg-nlb\n' ;;
+          *'IpPermissions'*)
+            if [ ! -e "$ingress_added" ]; then printf '[]\n'
+            else
+              case "$FAKE_SG_MODE" in
+                exact) printf '[{"IpProtocol":"tcp","FromPort":9443,"ToPort":9443,"IpRanges":[],"Ipv6Ranges":[],"PrefixListIds":[],"UserIdGroupPairs":[{"GroupId":"sg-nlb"}]}]\n' ;;
+                broad) printf '[{"IpProtocol":"tcp","FromPort":9000,"ToPort":9500,"IpRanges":[{"CidrIp":"0.0.0.0/0"}],"Ipv6Ranges":[],"PrefixListIds":[],"UserIdGroupPairs":[]},{"IpProtocol":"tcp","FromPort":9443,"ToPort":9443,"IpRanges":[],"Ipv6Ranges":[],"PrefixListIds":[],"UserIdGroupPairs":[{"GroupId":"sg-nlb"}]}]\n' ;;
+              esac
+            fi ;;
           *'SecurityGroups[0].VpcId'*) printf 'vpc-0123456789abcdef0\n' ;;
           *) printf 'sg-nlb\n' ;;
         esac
@@ -95,7 +109,7 @@ aws() {
     'elbv2 describe-load-balancer-attributes') printf 'off\n' ;;
     'elbv2 describe-tags') printf 'dirextalk-deployer\n' ;;
     'elbv2 create-target-group') printf 'arn:aws:elasticloadbalancing:ap-northeast-3:123456789012:targetgroup/worker/abc\n' ;;
-    'elbv2 describe-target-groups') [ -z "$FAKE_DESTROY_ABSENT" ] && [ ! -e "$target_group_absent" ] && printf 'TLS\t9443\tip\tvpc-0123456789abcdef0\tTLS\n' || printf 'None\n' ;;
+    'elbv2 describe-target-groups') [ -z "$FAKE_DESTROY_ABSENT" ] && [ ! -e "$target_group_absent" ] && printf 'TLS\t9443\tip\tvpc-0123456789abcdef0\t%s\t%s\n' "$FAKE_HEALTH_PROTOCOL" "$FAKE_HEALTH_PORT" || printf 'None\n' ;;
     'elbv2 create-listener') printf 'arn:aws:elasticloadbalancing:ap-northeast-3:123456789012:listener/net/worker/abc\n' ;;
     'elbv2 describe-listeners')
       if [ -n "$FAKE_DESTROY_ABSENT" ] || [ -e "$listener_absent" ]; then printf 'None\n'
@@ -108,8 +122,11 @@ aws() {
       fi ;;
     'elbv2 describe-listener-certificates') printf 'arn:aws:acm:ap-northeast-3:123456789012:certificate/cert-1\n' ;;
     'elbv2 describe-target-health') printf '10.0.2.15\t9443\thealthy\n' ;;
-    'ec2 create-vpc-endpoint-service-configuration') printf 'vpce-svc-0123456789abcdef0\n' ;;
+    'ec2 create-vpc-endpoint-service-configuration') printf 'vpce-svc-0123456789abcdef0\tcom.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef0\n' ;;
     'ec2 modify-vpc-endpoint-service-permissions') : > "$principal_added" ;;
+    'ec2 modify-vpc-endpoint-service-configuration')
+      case " $* " in *' --no-acceptance-required '*) : > "$acceptance_disabled" ;; *) : > "$service_configured" ;; esac ;;
+    'iam get-role') printf '%s\n' "$AGENT_WORKER_CONTROL_FOUNDATION_ROLE_ARN" ;;
     'ec2 describe-vpc-endpoint-service-configurations')
       if [ -n "$FAKE_DESTROY_ABSENT" ] || [ -e "$service_absent" ]; then printf 'None\n'
       else
@@ -119,7 +136,13 @@ aws() {
           *'PrivateDnsNameConfiguration.Value'*) printf 'vpce:worker-control\n' ;;
           *'ServiceConfigurations[0].ServiceId'*) printf 'vpce-svc-0123456789abcdef0\n' ;;
           *'NetworkLoadBalancerArns'*) printf 'arn:aws:elasticloadbalancing:ap-northeast-3:123456789012:loadbalancer/net/worker/abc\n' ;;
-          *) printf 'worker-control.y1.dirextalk.ai\tfalse\tAvailable\n' ;;
+          *)
+            acceptance=true
+            [ ! -e "$acceptance_disabled" ] || acceptance=false
+            private_dns=None
+            [ ! -e "$service_configured" ] || private_dns=worker-control.y1.dirextalk.ai
+            printf '%s\t%s\tAvailable\tcom.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef0\n' "$private_dns" "$acceptance"
+            ;;
         esac
       fi ;;
     'ec2 describe-vpc-endpoint-service-permissions')
@@ -149,6 +172,10 @@ ssh() {
   printf '%s\n' "$FAKE_GRPC_HEALTH"
 }
 
+agent_worker_control_reconcile_runtime() {
+  printf '%s\n' "$1" >> "$runtime_reconciled"
+}
+
 if agent_worker_control_enable >/dev/null 2>&1; then
   echo 'worker-control accepted a Region other than ap-northeast-3' >&2
   exit 1
@@ -162,23 +189,37 @@ res_set public_ip 203.0.113.10
 printf '203.0.113.10 ssh-ed25519 test\n' > "$tmp/known-hosts"
 printf 'test-key\n' > "$tmp/key.pem"
 
+# Stopped or detached instances fail before the first producer mutation.
+FAKE_INSTANCE_STATE=stopped
+if agent_worker_control_enable >/dev/null 2>&1; then
+  echo 'worker-control accepted a stopped Agent instance' >&2; exit 1
+fi
+[ ! -s "$mutations" ]
+FAKE_INSTANCE_STATE=running
+FAKE_INSTANCE_GROUPS=sg-other
+if agent_worker_control_enable >/dev/null 2>&1; then
+  echo 'worker-control accepted an instance without the recorded Agent security group' >&2; exit 1
+fi
+[ ! -s "$mutations" ]
+FAKE_INSTANCE_GROUPS=sg-agent
+
 agent_worker_control_enable
-json_test=$(node -e "const s=require(process.argv[1]); process.exit(s.agent_worker_control.status==='ready' && s.agent_worker_control.target_private_ip==='10.0.2.15' && s.agent_worker_control.subnet_ids==='subnet-a,subnet-b' ? 0 : 1)" "$STATE_JSON")
+json_test=$(node -e "const s=require(process.argv[1]); process.exit(s.agent_worker_control.status==='provisioned' && s.agent_worker_control.foundation_role_arn==='' && s.agent_worker_control.endpoint_service_name==='com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef0' && s.agent_aws_control.worker_control_endpoint_service_name===s.agent_worker_control.endpoint_service_name && s.agent_worker_control.target_private_ip==='10.0.2.15' && s.agent_worker_control.subnet_ids==='subnet-a,subnet-b' ? 0 : 1)" "$STATE_JSON")
 [ -z "$json_test" ]
 grep -Fq 'create-listener' "$calls"
 grep -Fq -- '--alpn-policy HTTP2Only' "$calls"
-grep -Fq -- '--health-check-protocol TLS' "$calls"
-! grep -Fq -- '--health-check-protocol HTTPS' "$calls"
+grep -Fq -- '--health-check-protocol TCP --health-check-port 9443' "$calls"
 grep -Fq 'set-security-groups' "$calls"
 grep -Fq -- '--enforce-security-group-inbound-rules-on-private-link-traffic off' "$calls"
 grep -Fq -- '--subnets subnet-a subnet-b' "$calls"
 ! grep -Fq -- '--subnets subnet-z' "$calls"
 [ "$(wc -l < "$grpc_calls")" -eq 1 ]
+[ "$(wc -l < "$runtime_reconciled")" -eq 1 ]
 grep -Fq 'StrictHostKeyChecking=yes' "$grpc_calls"
 ! grep -Eiq 'token|service.?key|password|authorization' "$grpc_calls"
-allow_line=$(grep -n 'modify-vpc-endpoint-service-permissions' "$calls" | head -n1 | cut -d: -f1)
-accept_line=$(grep -n -- '--no-acceptance-required' "$calls" | head -n1 | cut -d: -f1)
-[ "$allow_line" -lt "$accept_line" ]
+! grep -Fq 'modify-vpc-endpoint-service-permissions' "$calls"
+! grep -Fq -- '--no-acceptance-required' "$calls"
+grep -Fq -- '--acceptance-required --private-dns-name worker-control.y1.dirextalk.ai' "$calls"
 if grep -Eq 'route53 change-resource-record-sets.*"Type":"(A|AAAA)"' "$calls"; then
   echo 'worker-control wrote a public record' >&2; exit 1
 fi
@@ -194,6 +235,22 @@ if agent_worker_control_enable >/dev/null 2>&1; then
 fi
 [ "$(wc -l < "$mutations")" -eq "$before" ]
 FAKE_GRPC_HEALTH=healthy
+
+# AWS rejecting the required TCP health contract and any broad/public rule
+# covering 9443 both fail closed without producer mutation.
+FAKE_HEALTH_PROTOCOL=TLS
+before=$(wc -l < "$mutations")
+if agent_worker_control_enable >/dev/null 2>&1; then
+  echo 'worker-control accepted TLS target health checks' >&2; exit 1
+fi
+[ "$(wc -l < "$mutations")" -eq "$before" ]
+FAKE_HEALTH_PROTOCOL=TCP
+FAKE_SG_MODE=broad
+if agent_worker_control_enable >/dev/null 2>&1; then
+  echo 'worker-control accepted broad/public ingress coexisting with its exact rule' >&2; exit 1
+fi
+[ "$(wc -l < "$mutations")" -eq "$before" ]
+FAKE_SG_MODE=exact
 
 # A persisted target from a different private address is an unsafe recovery,
 # so no load balancer mutation may occur on retry.
@@ -216,8 +273,24 @@ fi
 [ "$(wc -l < "$mutations")" -eq "$before" ]
 FAKE_NLB_SCHEME=internal
 
+# Authorization is the separate exact-role transition and is retry-idempotent.
+export AGENT_WORKER_CONTROL_FOUNDATION_ROLE_ARN='arn:aws:iam::123456789012:role/dirextalk-foundation-control'
+agent_worker_control_authorize
+[ "$(state_get agent_worker_control.status)" = ready ]
+grep -Fq 'modify-vpc-endpoint-service-permissions' "$calls"
+grep -Fq -- '--no-acceptance-required' "$calls"
+state_set agent_worker_control.status provisioned
+rm -f "$acceptance_disabled"
+permission_mutations=$(grep -c 'modify-vpc-endpoint-service-permissions' "$mutations")
+agent_worker_control_authorize
+[ "$(state_get agent_worker_control.status)" = ready ]
+[ "$(grep -c 'modify-vpc-endpoint-service-permissions' "$mutations")" = "$permission_mutations" ]
+before=$(wc -l < "$mutations")
+agent_worker_control_authorize
+[ "$(wc -l < "$mutations")" -eq "$before" ]
+
 # Authorization remains an exact singleton set; stale/additional principals
-# cannot be hidden by re-adding the expected role.
+# are refused on readback.
 FAKE_EXTRA_PRINCIPAL=1
 before=$(wc -l < "$mutations")
 if agent_worker_control_authorize >/dev/null 2>&1; then

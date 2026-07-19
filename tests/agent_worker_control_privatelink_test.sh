@@ -40,9 +40,17 @@ target_group_absent="$tmp/target-group-absent"
 nlb_absent="$tmp/nlb-absent"
 sg_absent="$tmp/sg-absent"
 certificate_absent="$tmp/certificate-absent"
+acm_record="$tmp/acm-record"
+private_dns_record="$tmp/private-dns-record"
+: > "$acm_record"
 export FAKE_NLB_SCHEME=internal
 export FAKE_EXTRA_PRINCIPAL=
-export FAKE_PRIVATE_DNS_STATE=verified
+export FAKE_PRIVATE_DNS_STATE=pending
+export FAKE_ROUTE53_ZONE_NAME=y1.dirextalk.ai.
+export FAKE_ROUTE53_PRIVATE_ZONE=false
+export FAKE_ACM_RECORD_MODE=exact
+export FAKE_PRIVATE_RECORD_MODE=exact
+export FAKE_PUBLIC_RECORD_MODE=none
 export FAKE_LISTENER_DELETE_NOT_FOUND=
 export FAKE_DESTROY_ABSENT=
 export FAKE_GRPC_HEALTH=healthy
@@ -52,6 +60,40 @@ export FAKE_SG_MODE=exact
 export FAKE_HEALTH_PROTOCOL=TCP
 export FAKE_HEALTH_PORT=9443
 export FAKE_TARGET_HEALTH=healthy
+
+fake_route53_records() {
+  local -a records=()
+  if [ -e "$acm_record" ]; then
+    case "$FAKE_ACM_RECORD_MODE" in
+      exact) records+=('{"Name":"_acm.worker-control.y1.dirextalk.ai.","Type":"CNAME","TTL":60,"ResourceRecords":[{"Value":"_value.acm-validations.aws."}]}') ;;
+      missing) ;;
+      wrong_name) records+=('{"Name":"_other.worker-control.y1.dirextalk.ai.","Type":"CNAME","TTL":60,"ResourceRecords":[{"Value":"_value.acm-validations.aws."}]}') ;;
+      wrong_type) records+=('{"Name":"_acm.worker-control.y1.dirextalk.ai.","Type":"TXT","TTL":60,"ResourceRecords":[{"Value":"\"_value.acm-validations.aws.\""}]}') ;;
+      wrong_value) records+=('{"Name":"_acm.worker-control.y1.dirextalk.ai.","Type":"CNAME","TTL":60,"ResourceRecords":[{"Value":"_wrong.acm-validations.aws."}]}') ;;
+      extra_value) records+=('{"Name":"_acm.worker-control.y1.dirextalk.ai.","Type":"CNAME","TTL":60,"ResourceRecords":[{"Value":"_value.acm-validations.aws."},{"Value":"_wrong.acm-validations.aws."}]}') ;;
+      *) return 1 ;;
+    esac
+  fi
+  if [ -e "$private_dns_record" ]; then
+    case "$FAKE_PRIVATE_RECORD_MODE" in
+      exact) records+=('{"Name":"_privatelink.worker-control.y1.dirextalk.ai.","Type":"TXT","TTL":60,"ResourceRecords":[{"Value":"\"vpce:worker-control\""}]}') ;;
+      missing) ;;
+      wrong_name) records+=('{"Name":"_other.worker-control.y1.dirextalk.ai.","Type":"TXT","TTL":60,"ResourceRecords":[{"Value":"\"vpce:worker-control\""}]}') ;;
+      wrong_type) records+=('{"Name":"_privatelink.worker-control.y1.dirextalk.ai.","Type":"CNAME","TTL":60,"ResourceRecords":[{"Value":"worker-control.y1.dirextalk.ai."}]}') ;;
+      wrong_value) records+=('{"Name":"_privatelink.worker-control.y1.dirextalk.ai.","Type":"TXT","TTL":60,"ResourceRecords":[{"Value":"\"vpce:wrong\""}]}') ;;
+      extra_value) records+=('{"Name":"_privatelink.worker-control.y1.dirextalk.ai.","Type":"TXT","TTL":60,"ResourceRecords":[{"Value":"\"vpce:worker-control\""},{"Value":"\"vpce:wrong\""}]}') ;;
+      *) return 1 ;;
+    esac
+  fi
+  case "$FAKE_PUBLIC_RECORD_MODE" in
+    none) ;;
+    a) records+=('{"Name":"worker-control.y1.dirextalk.ai.","Type":"A","TTL":60,"ResourceRecords":[{"Value":"203.0.113.20"}]}') ;;
+    aaaa) records+=('{"Name":"worker-control.y1.dirextalk.ai.","Type":"AAAA","TTL":60,"ResourceRecords":[{"Value":"2001:db8::20"}]}') ;;
+    *) return 1 ;;
+  esac
+  local IFS=,
+  printf '[%s]\n' "${records[*]}"
+}
 
 aws() {
   printf '%s\n' "$*" >> "$calls"
@@ -65,7 +107,20 @@ aws() {
         *) printf '10.0.2.15\tvpc-0123456789abcdef0\tap-northeast-3a\t%s\n' "$FAKE_INSTANCE_STATE" ;;
       esac ;;
     'ec2 describe-vpcs') printf '10.0.0.0/16\n' ;;
-    'route53 get-hosted-zone') printf 'y1.dirextalk.ai.\tfalse\n' ;;
+    'route53 get-hosted-zone') printf '%s\t%s\n' "$FAKE_ROUTE53_ZONE_NAME" "$FAKE_ROUTE53_PRIVATE_ZONE" ;;
+    'route53 change-resource-record-sets')
+      batch=
+      for arg in "$@"; do
+        case "$arg" in file://*) batch=${arg#file://} ;; esac
+      done
+      [ -n "$batch" ] && [ -f "$batch" ] || return 1
+      if grep -Fq '"Type":"CNAME"' "$batch"; then
+        if grep -Fq '"Action":"DELETE"' "$batch"; then rm -f "$acm_record"; else : > "$acm_record"; fi
+      fi
+      if grep -Fq '"Type":"TXT"' "$batch"; then
+        if grep -Fq '"Action":"DELETE"' "$batch"; then rm -f "$private_dns_record"; else : > "$private_dns_record"; fi
+      fi
+      ;;
     'acm request-certificate') printf 'arn:aws:acm:ap-northeast-3:123456789012:certificate/cert-1\n' ;;
     'acm list-tags-for-certificate') printf 'dirextalk-deployer\n' ;;
     'acm describe-certificate')
@@ -151,7 +206,7 @@ aws() {
       [ -z "$FAKE_EXTRA_PRINCIPAL" ] || printf 'arn:aws:iam::123456789012:role/stale\n' ;;
     'ec2 describe-tags') printf 'dirextalk-deployer\n' ;;
     'ec2 describe-vpc-endpoint-connections') [ -z "${FAKE_ACTIVE_WORKER:-}" ] || printf 'vpce-worker-live\n' ;;
-    'route53 list-resource-record-sets') printf 'None\n' ;;
+    'route53 list-resource-record-sets') fake_route53_records ;;
     'ec2 delete-vpc-endpoint-service-configurations')
       [ -n "${FAKE_HOLD_SERVICE_PRESENT:-}" ] || : > "$service_absent" ;;
     'elbv2 delete-listener')
@@ -204,6 +259,15 @@ fi
 [ ! -s "$mutations" ]
 FAKE_INSTANCE_GROUPS=sg-agent
 
+if agent_worker_control_enable >/dev/null 2>&1; then
+  echo 'worker-control skipped pending PrivateLink DNS ownership validation' >&2
+  exit 1
+else
+  pending_status=$?
+fi
+[ "$pending_status" -eq 2 ]
+[ "$(state_get agent_worker_control.status)" = dns_pending ]
+export FAKE_PRIVATE_DNS_STATE=verified
 agent_worker_control_enable
 json_test=$(node -e "const s=require(process.argv[1]); process.exit(s.agent_worker_control.status==='provisioned' && s.agent_worker_control.foundation_role_arn==='' && s.agent_worker_control.endpoint_service_name==='com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef0' && s.agent_aws_control.worker_control_endpoint_service_name===s.agent_worker_control.endpoint_service_name && s.agent_worker_control.target_private_ip==='10.0.2.15' && s.agent_worker_control.subnet_ids==='subnet-a,subnet-b' ? 0 : 1)" "$STATE_JSON")
 [ -z "$json_test" ]
@@ -215,7 +279,7 @@ grep -Fq -- '--enforce-security-group-inbound-rules-on-private-link-traffic off'
 grep -Fq -- '--subnets subnet-a subnet-b' "$calls"
 ! grep -Fq -- '--subnets subnet-z' "$calls"
 [ "$(wc -l < "$grpc_calls")" -eq 1 ]
-[ "$(wc -l < "$runtime_reconciled")" -eq 1 ]
+[ "$(wc -l < "$runtime_reconciled")" -eq 2 ]
 grep -Fq 'StrictHostKeyChecking=yes' "$grpc_calls"
 ! grep -Eiq 'token|service.?key|password|authorization' "$grpc_calls"
 ! grep -Fq 'modify-vpc-endpoint-service-permissions' "$calls"
@@ -302,6 +366,38 @@ if agent_worker_control_authorize >/dev/null 2>&1; then
 fi
 [ "$(wc -l < "$mutations")" -eq "$before" ]
 FAKE_GRPC_HEALTH=healthy
+
+# Every persisted DNS ownership proof is part of the pre-mutation
+# authorization fence. AWS's trailing dots and quoted TXT are accepted, but
+# any missing, wrong, conflicting, or public answer fails closed.
+assert_dns_authorize_fails_without_mutation() {
+  local label=$1 before
+  before=$(wc -l < "$mutations")
+  if agent_worker_control_authorize >/dev/null 2>&1; then
+    echo "worker-control authorized after $label" >&2
+    exit 1
+  fi
+  [ "$(wc -l < "$mutations")" -eq "$before" ]
+}
+
+for FAKE_ACM_RECORD_MODE in missing wrong_name wrong_type wrong_value extra_value; do
+  export FAKE_ACM_RECORD_MODE
+  assert_dns_authorize_fails_without_mutation "$FAKE_ACM_RECORD_MODE ACM CNAME drift"
+done
+export FAKE_ACM_RECORD_MODE=exact
+for FAKE_PRIVATE_RECORD_MODE in missing wrong_name wrong_type wrong_value extra_value; do
+  export FAKE_PRIVATE_RECORD_MODE
+  assert_dns_authorize_fails_without_mutation "$FAKE_PRIVATE_RECORD_MODE PrivateLink TXT drift"
+done
+export FAKE_PRIVATE_RECORD_MODE=exact
+export FAKE_ROUTE53_ZONE_NAME=wrong.test.
+assert_dns_authorize_fails_without_mutation 'persisted Route 53 zone drift'
+export FAKE_ROUTE53_ZONE_NAME=y1.dirextalk.ai.
+export FAKE_PUBLIC_RECORD_MODE=a
+assert_dns_authorize_fails_without_mutation 'public A publication'
+export FAKE_PUBLIC_RECORD_MODE=aaaa
+assert_dns_authorize_fails_without_mutation 'public AAAA publication'
+export FAKE_PUBLIC_RECORD_MODE=none
 
 # Authorization is the separate exact-role transition and is retry-idempotent.
 agent_worker_control_authorize

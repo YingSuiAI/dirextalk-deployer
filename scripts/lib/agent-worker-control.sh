@@ -70,16 +70,11 @@ agent_worker_control_read_identity() {
 }
 
 agent_worker_control_require_inputs() {
-  local account=$1 zone existing zone_output zone_name private_zone
+  local account=$1 zone existing
   zone=${AGENT_WORKER_CONTROL_ROUTE53_ZONE_ID:-}
   agent_worker_control_id_is_safe "$zone" || { warn 'AGENT_WORKER_CONTROL_ROUTE53_ZONE_ID is required and unsafe values are refused.'; return 1; }
-  zone_output=$(aws route53 get-hosted-zone --id "$zone" --query 'HostedZone.[Name,Config.PrivateZone]' --output text) || return 1
-  IFS=$'\t' read -r zone_name private_zone <<EOF
-$zone_output
-EOF
-  zone_name=${zone_name%.}
-  case "$AGENT_WORKER_CONTROL_HOSTNAME" in "$zone_name"|*."$zone_name") ;; *) warn 'worker-control Route 53 zone does not own the fixed hostname.'; return 1 ;; esac
-  [ "$private_zone" = false ] || [ "$private_zone" = False ] || { warn 'worker-control ACM/PrivateLink ownership records require the public hosted zone.'; return 1; }
+  agent_worker_control_route53_zone_readback "$zone" \
+    || { warn 'worker-control requires the public Route 53 zone that owns the fixed hostname.'; return 1; }
   existing=$(agent_worker_control_existing account_id)
   [ -z "$existing" ] || [ "$existing" = "$account" ] || { warn 'worker-control state belongs to another AWS account.'; return 1; }
   existing=$(agent_worker_control_existing region)
@@ -109,6 +104,31 @@ agent_worker_control_exact_single() {
   [ "$value" = "$expected" ]
 }
 
+agent_worker_control_dns_name_normalize() {
+  local value=${1:-}
+  agent_worker_control_dns_name_is_safe "$value" || return 1
+  printf '%s\n' "${value%.}"
+}
+
+agent_worker_control_route53_zone_readback() {
+  local zone=$1 output zone_name private_zone normalized_zone
+  agent_worker_control_id_is_safe "$zone" || return 1
+  output=$(aws route53 get-hosted-zone --id "$zone" --query 'HostedZone.[Name,Config.PrivateZone]' --output text) || return 1
+  IFS=$'\t' read -r zone_name private_zone <<EOF
+$output
+EOF
+  normalized_zone=$(agent_worker_control_dns_name_normalize "$zone_name") || return 1
+  [ "$private_zone" = false ] || [ "$private_zone" = False ] || return 1
+  case "$AGENT_WORKER_CONTROL_HOSTNAME" in "$normalized_zone"|*."$normalized_zone") return 0 ;; *) return 1 ;; esac
+}
+
+agent_worker_control_route53_records_json() {
+  local zone=$1
+  agent_worker_control_id_is_safe "$zone" || return 1
+  aws route53 list-resource-record-sets --hosted-zone-id "$zone" \
+    --query 'ResourceRecordSets' --output json
+}
+
 agent_worker_control_route53_change() {
   local zone=$1 action=$2 name=$3 type=$4 value=$5 batch batch_native
   agent_worker_control_dns_name_is_safe "$name" || return 1
@@ -129,14 +149,66 @@ agent_worker_control_route53_change() {
   rm -f "$batch"
 }
 
+agent_worker_control_route53_record_readback() {
+  local zone=$1 name=$2 type=$3 mode=$4 expected=${5:-} records
+  records=$(agent_worker_control_route53_records_json "$zone") || return 2
+  printf '%s\n' "$records" | node -e '
+    let raw=""; process.stdin.on("data", c => raw += c).on("end", () => {
+      let records; try { records=JSON.parse(raw); } catch { process.exit(2); }
+      if (!Array.isArray(records)) process.exit(2);
+      const [name, type, mode, expected]=process.argv.slice(1);
+      const normalizeName=v => typeof v === "string" && /^[A-Za-z0-9_.-]+\.?$/.test(v) ? v.replace(/\.$/, "") : null;
+      const sameName=records.filter(r => r && normalizeName(r.Name) === name);
+      if (mode === "absent") {
+        process.exit(sameName.some(r => r.Type === type) ? 1 : 0);
+      }
+      if (sameName.length === 0) process.exit(1);
+      if (sameName.length !== 1 || sameName[0].Type !== type) process.exit(3);
+      const values=sameName[0].ResourceRecords;
+      if (!Array.isArray(values) || values.length !== 1 || !values[0] || typeof values[0].Value !== "string") process.exit(3);
+      let actual=values[0].Value;
+      if (type === "CNAME") actual=normalizeName(actual);
+      else if (/^"[A-Za-z0-9_.:-]+"$/.test(actual)) actual=actual.slice(1, -1);
+      else if (!/^[A-Za-z0-9_.:-]+$/.test(actual)) process.exit(3);
+      process.exit(actual === expected ? 0 : 3);
+    });' "$name" "$type" "$mode" "$expected"
+}
+
 agent_worker_control_route53_record_present() {
-  local zone=$1 name=$2 type=$3 expected=$4 actual
-  actual=$(aws route53 list-resource-record-sets --hosted-zone-id "$zone" \
-    --query "ResourceRecordSets[?Name=='$name' && Type=='$type'].ResourceRecords[].Value" --output text) || return 2
-  actual=${actual#\"}; actual=${actual%\"}
-  agent_worker_control_none "$actual" && return 1
-  [ "$actual" = "$expected" ] && return 0
-  return 3
+  local zone=$1 name=$2 type=$3 expected=$4 normalized_name normalized_expected
+  normalized_name=$(agent_worker_control_dns_name_normalize "$name") || return 3
+  case "$type" in
+    CNAME) normalized_expected=$(agent_worker_control_dns_name_normalize "$expected") || return 3 ;;
+    TXT)
+      printf '%s\n' "$expected" | grep -Eq '^[A-Za-z0-9_.:-]+$' || return 3
+      normalized_expected=$expected
+      ;;
+    *) return 3 ;;
+  esac
+  agent_worker_control_route53_record_readback "$zone" "$normalized_name" "$type" exact "$normalized_expected"
+}
+
+agent_worker_control_route53_record_absent() {
+  local zone=$1 name=$2 type=$3 normalized_name
+  normalized_name=$(agent_worker_control_dns_name_normalize "$name") || return 1
+  case "$type" in A|AAAA) ;; *) return 1 ;; esac
+  agent_worker_control_route53_record_readback "$zone" "$normalized_name" "$type" absent "" >/dev/null 2>&1
+}
+
+agent_worker_control_dns_ownership_readback() {
+  local zone acm_name acm_value private_name private_value
+  zone=$(agent_worker_control_existing route53_zone_id)
+  acm_name=$(agent_worker_control_existing acm_validation_name)
+  acm_value=$(agent_worker_control_existing acm_validation_value)
+  private_name=$(agent_worker_control_existing private_dns_validation_name)
+  private_value=$(agent_worker_control_existing private_dns_validation_value)
+  [ -n "$zone" ] && [ -n "$acm_name" ] && [ -n "$acm_value" ] \
+    && [ -n "$private_name" ] && [ -n "$private_value" ] \
+    && agent_worker_control_route53_zone_readback "$zone" \
+    && agent_worker_control_route53_record_present "$zone" "$acm_name" CNAME "$acm_value" \
+    && agent_worker_control_route53_record_present "$zone" "$private_name" TXT "$private_value" \
+    && agent_worker_control_route53_record_absent "$zone" "$AGENT_WORKER_CONTROL_HOSTNAME" A \
+    && agent_worker_control_route53_record_absent "$zone" "$AGENT_WORKER_CONTROL_HOSTNAME" AAAA
 }
 
 agent_worker_control_route53_ensure() {
@@ -441,6 +513,7 @@ agent_worker_control_complete_readback() {
     && agent_worker_control_instance_readback "$instance" "$vpc" "$target" "$region" "$agent_sg" >/dev/null \
     && agent_worker_control_agent_ingress_exact "$agent_sg" "$nlb_sg" \
     && agent_worker_control_service_readback "$service" "$nlb" "$service_name" "$role" "$mode" \
+    && agent_worker_control_dns_ownership_readback \
     || return 1
   dns_state=$(aws ec2 describe-vpc-endpoint-service-configurations --service-ids "$service" \
     --query 'ServiceConfigurations[0].PrivateDnsNameConfiguration.State' --output text) || return 1

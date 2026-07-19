@@ -43,16 +43,23 @@ AGENT_INSTANCE_ID='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' \
 AGENT_MODEL_PROFILES_FILE='/absolute/path/model-profiles.json' \
 AGENT_ENABLE_AWS_CONTROL=true \
 AGENT_AWS_REAPER_IMAGE_URI='<registry>/<repository>:<immutable-tag>@sha256:<64-lowercase-hex>' \
-AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.__DOMAIN__:443' \
+AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.y1.dirextalk.ai:443' \
 AGENT_ENABLE_MANAGED_PREPARATION_AWS=false \
 bash scripts/orchestrate.sh
 ```
 
-This phase renders the reaper image and credential-free Worker endpoint, with
-`AGENT_ENABLE_MANAGED_PREPARATION_AWS=false`. It neither publishes nor mounts a
-Worker-AMI record. The resulting Agent can complete Foundation/device approval
-and build the Worker AMI while the original Agent release, instance identity,
-model-profile catalog, reaper digest, and Worker endpoint remain frozen.
+This phase renders the reaper image and literal credential-free Worker
+endpoint with `AGENT_ENABLE_MANAGED_PREPARATION_AWS=false`, no endpoint service
+name, and no Worker-AMI record. It is identity-preview only: capture and review
+the Foundation/device identity, but do not create the Foundation role or Worker
+AMI yet.
+
+Next run `agent-worker-control-enable` with the owning public Route 53 zone.
+Enable creates the producer, persists the exact endpoint service name, and
+atomically reconciles only the Agent container. The user may then complete the
+Foundation/signature workflow, creating the exact control role, and run
+`agent-worker-control-authorize`. Only after authorization may the Agent create
+the Worker AMI and publication for phase 2.
 
 After the Agent has produced one reviewed publication, explicitly advance the
 same EC2 deployment with the exact original runtime inputs:
@@ -65,15 +72,15 @@ AGENT_INSTANCE_ID='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' \
 AGENT_MODEL_PROFILES_FILE='/absolute/path/same-model-profiles.json' \
 AGENT_ENABLE_AWS_CONTROL=true \
 AGENT_AWS_REAPER_IMAGE_URI='<same-reaper-reference>@sha256:<same-digest>' \
-AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.__DOMAIN__:443' \
+AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.y1.dirextalk.ai:443' \
 AGENT_ENABLE_MANAGED_PREPARATION_AWS=true \
 AGENT_WORKER_AMI_PUBLICATION_FILE='/absolute/path/worker-ami-publication.json' \
 bash scripts/orchestrate.sh agent-aws-import
 ```
 
 `AGENT_ENABLE_MANAGED_PREPARATION_AWS` must be exactly `true` or `false`. The
-worker-control endpoint must be the exact configured
-`grpcs://worker-control.__DOMAIN__:443` value. The reaper image must be
+worker-control endpoint must be the literal
+`grpcs://worker-control.y1.dirextalk.ai:443` value. The reaper image must be
 digest-pinned. The
 publication source must be one non-empty regular non-symlink file of at most
 1 MiB containing exactly the Agent
@@ -120,8 +127,8 @@ unchanged, and a normal deployment resume cannot bypass the explicit
 ## Retained Worker-control PrivateLink producer
 
 The deployer owns the retained producer for the fixed private DNS name
-`worker-control.__DOMAIN__`; the Agent import consumes the opaque
-`grpcs://worker-control.__DOMAIN__:443` endpoint and must not create
+`worker-control.y1.dirextalk.ai`; the Agent import consumes the opaque
+`grpcs://worker-control.y1.dirextalk.ai:443` endpoint and must not create
 network or DNS resources. First provide only the Route 53 zone that owns the
 fixed name:
 

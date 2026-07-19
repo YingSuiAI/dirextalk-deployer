@@ -191,7 +191,7 @@ agent_worker_control_endpoint_is_safe() {
 }
 
 agent_worker_control_endpoint_service_name_is_safe() {
-  printf '%s\n' "${1:-}" | grep -Eq '^com\.amazonaws\.vpce\.ap-northeast-3\.vpce-svc-[0-9a-f]+$'
+  printf '%s\n' "${1:-}" | grep -Eq '^com\.amazonaws\.vpce\.ap-northeast-3\.vpce-svc-[0-9a-f]{17}$'
 }
 
 agent_managed_preparation_aws_is_safe() { case "${1:-}" in true|false) return 0 ;; *) return 1 ;; esac; }

@@ -105,7 +105,7 @@ valid_sha256 "$foundation_compose_sha256" && valid_sha256 "$producer_compose_sha
   exit 1
 }
 printf '%s\n' "$expected_endpoint_service_name" \
-  | grep -Eq '^com\.amazonaws\.vpce\.ap-northeast-3\.vpce-svc-[0-9a-f]+$' || {
+  | grep -Eq '^com\.amazonaws\.vpce\.ap-northeast-3\.vpce-svc-[0-9a-f]{17}$' || {
   echo "Agent worker-control endpoint service name is invalid" >&2
   exit 1
 }

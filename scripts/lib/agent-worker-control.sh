@@ -23,6 +23,11 @@ agent_worker_control_arn_is_exact() {
   local service=$1 region=$2 account=$3 arn=$4
   case "$arn" in "arn:aws:$service:$region:$account:"*) return 0 ;; *) return 1 ;; esac
 }
+agent_worker_control_service_name_matches_id() {
+  local service=$1 service_name=$2
+  printf '%s\n' "$service" | grep -Eq '^vpce-svc-[0-9a-f]{17}$' \
+    && [ "$service_name" = "com.amazonaws.vpce.$AGENT_WORKER_CONTROL_REGION.$service" ]
+}
 
 agent_worker_control_state() { state_get agent_worker_control.status; }
 agent_worker_control_existing() { state_get "agent_worker_control.$1"; }
@@ -348,7 +353,9 @@ EOF
   nlb_arns=$(aws ec2 describe-vpc-endpoint-service-configurations --service-ids "$service" \
     --query 'ServiceConfigurations[0].NetworkLoadBalancerArns' --output text) || return 1
   agent_worker_control_exact_single "$nlb" "$nlb_arns" && agent_worker_control_service_owned "$service" || return 1
-  [ "$actual_service_name" = "$service_name" ] && agent_worker_control_endpoint_service_name_is_safe "$actual_service_name" || return 1
+  [ "$actual_service_name" = "$service_name" ] \
+    && agent_worker_control_endpoint_service_name_is_safe "$actual_service_name" \
+    && agent_worker_control_service_name_matches_id "$service" "$actual_service_name" || return 1
   case "$service_state" in Available|Pending) ;; *) return 1 ;; esac
   case "$private_dns" in ''|None|"$AGENT_WORKER_CONTROL_HOSTNAME") ;; *) return 1 ;; esac
   case "$acceptance" in true|false|True|False) ;; *) return 1 ;; esac
@@ -410,6 +417,34 @@ agent_worker_control_grpc_health() {
     -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=yes \
     -o "UserKnownHostsFile=$known_hosts" -o ConnectTimeout=5 ubuntu@"$public_ip" "$remote" 2>/dev/null) || return 1
   [ "$output" = healthy ]
+}
+
+agent_worker_control_complete_readback() {
+  local account=$1 region=$2 mode=$3 role=${4:-}
+  local certificate nlb nlb_sg tg listener service service_name vpc instance target agent_sg subnets dns_state
+  [ "$account" = "$(agent_worker_control_existing account_id)" ] \
+    && [ "$region" = "$(agent_worker_control_existing region)" ] || return 1
+  certificate=$(agent_worker_control_existing certificate_arn)
+  nlb=$(agent_worker_control_existing nlb_arn); nlb_sg=$(agent_worker_control_existing nlb_security_group_id)
+  tg=$(agent_worker_control_existing target_group_arn); listener=$(agent_worker_control_existing listener_arn)
+  service=$(agent_worker_control_existing endpoint_service_id); service_name=$(agent_worker_control_existing endpoint_service_name)
+  vpc=$(agent_worker_control_existing vpc_id); instance=$(agent_worker_control_existing target_instance_id)
+  target=$(agent_worker_control_existing target_private_ip); subnets=$(agent_worker_control_existing subnet_ids)
+  agent_sg=$(res_get sg_id)
+  agent_worker_control_endpoint_service_name_is_safe "$service_name" \
+    && agent_worker_control_service_name_matches_id "$service" "$service_name" \
+    && agent_worker_control_certificate_readback "$certificate" \
+    && agent_worker_control_nlb_readback "$nlb" "$vpc" "$nlb_sg" "$subnets" \
+    && agent_worker_control_target_group_readback "$tg" "$vpc" \
+    && agent_worker_control_listener_readback "$listener" "$certificate" "$tg" \
+    && agent_worker_control_target_readback "$tg" "$target" \
+    && agent_worker_control_instance_readback "$instance" "$vpc" "$target" "$region" "$agent_sg" >/dev/null \
+    && agent_worker_control_agent_ingress_exact "$agent_sg" "$nlb_sg" \
+    && agent_worker_control_service_readback "$service" "$nlb" "$service_name" "$role" "$mode" \
+    || return 1
+  dns_state=$(aws ec2 describe-vpc-endpoint-service-configurations --service-ids "$service" \
+    --query 'ServiceConfigurations[0].PrivateDnsNameConfiguration.State' --output text) || return 1
+  [ "$dns_state" = verified ] && agent_worker_control_grpc_health
 }
 
 agent_worker_control_record_agent_service_name() {
@@ -535,15 +570,7 @@ agent_worker_control_enable() {
     || { warn 'worker-control endpoint service drifted.'; return 1; }
   if [ "$(agent_worker_control_state)" = ready ]; then
     [ "$status" -eq 0 ] && [ "$target_status" -eq 0 ] \
-      && agent_worker_control_nlb_readback "$nlb" "$vpc" "$nlb_sg" "$subnet_csv" \
-      && agent_worker_control_target_group_readback "$tg" "$vpc" \
-      && agent_worker_control_agent_ingress_exact "$(res_get sg_id)" "$nlb_sg" \
-      && agent_worker_control_listener_readback "$listener" "$certificate" "$tg" \
-      && agent_worker_control_service_readback "$service" "$nlb" "$service_name" "$role" ready \
-      && [ "$(aws ec2 describe-vpc-endpoint-service-configurations --service-ids "$service" \
-        --query 'ServiceConfigurations[0].PrivateDnsNameConfiguration.State' --output text)" = verified ] \
-      && agent_worker_control_grpc_health \
-      && agent_worker_control_instance_readback "$instance" "$vpc" "$target" "$region" "$agent_sg" >/dev/null \
+      && agent_worker_control_complete_readback "$account" "$region" ready "$role" \
       || { warn 'worker-control ready-state reconciliation failed closed.'; return 1; }
     if [ -z "$(agent_worker_control_existing subnet_ids)" ]; then
       agent_worker_control_record ready "$account" "$region" "$role" "$vpc" "$instance" "$target" \
@@ -552,12 +579,8 @@ agent_worker_control_enable() {
     return 0
   fi
   if [ "$(agent_worker_control_state)" = provisioned ]; then
-    agent_worker_control_service_readback "$service" "$nlb" "$service_name" "" staged \
-      && agent_worker_control_private_dns_verified "$service" "$zone" \
-      && agent_worker_control_reconcile_runtime "$service_name" \
-      && agent_worker_control_grpc_health \
-      && agent_worker_control_target_readback "$tg" "$target" \
-      && agent_worker_control_instance_readback "$instance" "$vpc" "$target" "$region" "$agent_sg" >/dev/null \
+    agent_worker_control_reconcile_runtime "$service_name" \
+      && agent_worker_control_complete_readback "$account" "$region" staged "" \
       || { warn 'worker-control staged-state reconciliation failed closed.'; return 1; }
     return 0
   fi
@@ -626,8 +649,8 @@ agent_worker_control_enable() {
     IFS=$'\t' read -r service service_name <<EOF
 $service_output
 EOF
-    printf '%s\n' "$service" | grep -Eq '^vpce-svc-[0-9a-f]+$' || return 1
-    agent_worker_control_endpoint_service_name_is_safe "$service_name" || return 1
+    agent_worker_control_endpoint_service_name_is_safe "$service_name" \
+      && agent_worker_control_service_name_matches_id "$service" "$service_name" || return 1
     agent_worker_control_record provisioning "$account" "$region" "$role" "$vpc" "$instance" "$target" \
       "$certificate" "$nlb" "$nlb_sg" "$tg" "$listener" "$service" "$zone" "$subnet_csv" "$service_name" || return 1
   fi
@@ -646,49 +669,40 @@ EOF
     [ "$status" -eq 2 ] && warn 'worker-control endpoint-service private DNS verification is pending; retry after the ownership TXT is visible.'
     return "$status"
   fi
-  agent_worker_control_service_readback "$service" "$nlb" "$service_name" "" staged || { warn 'worker-control endpoint-service staged readback failed.'; return 1; }
-  agent_worker_control_certificate_readback "$certificate" || return 1
-  agent_worker_control_nlb_readback "$nlb" "$vpc" "$nlb_sg" "$subnet_csv" || return 1
-  agent_worker_control_target_group_readback "$tg" "$vpc" || return 1
-  agent_worker_control_agent_ingress_exact "$(res_get sg_id)" "$nlb_sg" || return 1
-  agent_worker_control_listener_readback "$listener" "$certificate" "$tg" || return 1
-  agent_worker_control_target_readback "$tg" "$target" || return 1
-  agent_worker_control_instance_readback "$instance" "$vpc" "$target" "$region" "$agent_sg" >/dev/null || return 1
-  agent_worker_control_grpc_health || { warn 'worker-control authenticated host gRPC health gate failed.'; return 1; }
+  agent_worker_control_complete_readback "$account" "$region" staged "" \
+    || { warn 'worker-control complete staged producer readback failed.'; return 1; }
   agent_worker_control_record provisioned "$account" "$region" "" "$vpc" "$instance" "$target" \
     "$certificate" "$nlb" "$nlb_sg" "$tg" "$listener" "$service" "$zone" "$subnet_csv" "$service_name"
 }
 
 agent_worker_control_authorize() {
-  local identity account role service service_name nlb status principals instance vpc target agent_sg
+  local identity account region role service service_name nlb status principals instance vpc target
   [ -f "$STATE_JSON" ] || return 1
   aws_env_prep
   identity=$(agent_worker_control_read_identity) || return 1
-  account=${identity%%$'\t'*}; role=$(agent_worker_control_require_authorize_input "$account") || return 1
+  account=${identity%%$'\t'*}; region=${identity#*$'\t'}
+  role=$(agent_worker_control_require_authorize_input "$account") || return 1
   service=$(agent_worker_control_existing endpoint_service_id); service_name=$(agent_worker_control_existing endpoint_service_name)
   nlb=$(agent_worker_control_existing nlb_arn); status=$(agent_worker_control_state)
   instance=$(agent_worker_control_existing target_instance_id); vpc=$(agent_worker_control_existing vpc_id)
-  target=$(agent_worker_control_existing target_private_ip); agent_sg=$(res_get sg_id)
+  target=$(agent_worker_control_existing target_private_ip)
   case "$status" in provisioned|ready) ;; *) warn 'worker-control is not a staged producer.'; return 1 ;; esac
   agent_worker_control_id_is_safe "$service" && agent_worker_control_endpoint_service_name_is_safe "$service_name" || return 1
-  agent_worker_control_instance_readback "$instance" "$vpc" "$target" "$(agent_worker_control_existing region)" "$agent_sg" >/dev/null \
-    || { warn 'worker-control authorization requires the exact running Agent target and security-group attachment.'; return 1; }
   if [ "$status" = ready ]; then
     [ "$(agent_worker_control_existing foundation_role_arn)" = "$role" ] \
-      && agent_worker_control_service_readback "$service" "$nlb" "$service_name" "$role" ready \
-      && [ "$(aws ec2 describe-vpc-endpoint-service-configurations --service-ids "$service" \
-        --query 'ServiceConfigurations[0].PrivateDnsNameConfiguration.State' --output text)" = verified ]
+      && agent_worker_control_complete_readback "$account" "$region" ready "$role"
     return $?
   fi
-  if agent_worker_control_service_readback "$service" "$nlb" "$service_name" "$role" ready; then
-    agent_worker_control_record ready "$account" "$(agent_worker_control_existing region)" "$role" \
+  if agent_worker_control_complete_readback "$account" "$region" ready "$role"; then
+    agent_worker_control_record ready "$account" "$region" "$role" \
       "$vpc" "$instance" "$target" "$(agent_worker_control_existing certificate_arn)" \
       "$nlb" "$(agent_worker_control_existing nlb_security_group_id)" "$(agent_worker_control_existing target_group_arn)" \
       "$(agent_worker_control_existing listener_arn)" "$service" "$(agent_worker_control_existing route53_zone_id)" \
       "$(agent_worker_control_existing subnet_ids)" "$service_name"
     return $?
   fi
-  agent_worker_control_service_readback "$service" "$nlb" "$service_name" "$role" authorizing || return 1
+  agent_worker_control_complete_readback "$account" "$region" authorizing "$role" \
+    || { warn 'worker-control authorization pre-mutation producer readback failed closed.'; return 1; }
   principals=$(aws ec2 describe-vpc-endpoint-service-permissions --service-id "$service" \
     --query 'AllowedPrincipals[].Principal' --output text) || return 1
   if agent_worker_control_none "$principals"; then
@@ -698,14 +712,13 @@ agent_worker_control_authorize() {
     return 1
   fi
   agent_worker_control_principals_exact "$service" "$role" || return 1
+  agent_worker_control_complete_readback "$account" "$region" authorizing "$role" \
+    || { warn 'worker-control producer drifted before acceptance mutation.'; return 1; }
   aws ec2 modify-vpc-endpoint-service-configuration --service-id "$service" \
     --no-acceptance-required --private-dns-name "$AGENT_WORKER_CONTROL_HOSTNAME" >/dev/null || return 1
-  agent_worker_control_service_readback "$service" "$nlb" "$service_name" "$role" ready \
-    && [ "$(aws ec2 describe-vpc-endpoint-service-configurations --service-ids "$service" \
-      --query 'ServiceConfigurations[0].PrivateDnsNameConfiguration.State' --output text)" = verified ] \
-    && agent_worker_control_instance_readback "$instance" "$vpc" "$target" "$(agent_worker_control_existing region)" "$agent_sg" >/dev/null \
-    || return 1
-  agent_worker_control_record ready "$account" "$(agent_worker_control_existing region)" "$role" \
+  agent_worker_control_complete_readback "$account" "$region" ready "$role" \
+    || { warn 'worker-control authorization final producer readback failed closed.'; return 1; }
+  agent_worker_control_record ready "$account" "$region" "$role" \
     "$(agent_worker_control_existing vpc_id)" "$(agent_worker_control_existing target_instance_id)" \
     "$(agent_worker_control_existing target_private_ip)" "$(agent_worker_control_existing certificate_arn)" \
     "$nlb" "$(agent_worker_control_existing nlb_security_group_id)" "$(agent_worker_control_existing target_group_arn)" \

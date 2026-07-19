@@ -84,13 +84,28 @@ export PATH="$tmp/bin:$PATH"
 foundation_sha=$(sha256sum "$foundation" | awk '{print $1}')
 producer_sha=$(sha256sum "$producer" | awk '{print $1}')
 profiles_sha=$(sha256sum "$runtime_source/agent-model-profiles.json" | awk '{print $1}')
-reconcile() {
+reconcile_with_service() {
+  local candidate=${1:-$service_name}
   DIREXTALK_AGENT_AWS_CONTROL_ROOT="$state_root" \
     bash "$ROOT/scripts/updater/reconcile-agent-worker-control.sh" \
       "$source_dir" "$base" "$foundation_sha" "$producer_sha" \
       "$message_image" "$agent_image" "$instance_id" "$profiles_sha" \
-      "$reaper_image" "$endpoint" "$service_name"
+      "$reaper_image" "$endpoint" "$candidate"
 }
+reconcile() { reconcile_with_service "$service_name"; }
+
+before_calls=$(wc -l < "$FAKE_DOCKER_CALLS")
+for unsafe_service_name in \
+  'com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef' \
+  'com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef01' \
+  'com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdeF0' \
+  'com.amazonaws.vpce.ap-northeast-1.vpce-svc-0123456789abcdef0'; do
+  if reconcile_with_service "$unsafe_service_name" > "$tmp/unsafe-service.out" 2>&1; then
+    echo "worker-control reconcile accepted unsafe service name: $unsafe_service_name" >&2
+    exit 1
+  fi
+done
+[ "$(wc -l < "$FAKE_DOCKER_CALLS")" = "$before_calls" ]
 
 reconcile > "$tmp/first.out"
 grep -Fq $'applied\t'"$producer_sha"$'\trestarted' "$tmp/first.out"

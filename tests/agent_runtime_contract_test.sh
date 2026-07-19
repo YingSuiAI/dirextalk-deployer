@@ -257,6 +257,17 @@ fi
 reaper_image='registry.example/dirextalk-aws-reaper:v0.1.0-alpha.1-abcdef1@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 worker_endpoint='grpcs://worker-control.y1.dirextalk.ai:443'
 endpoint_service_name='com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef0'
+agent_worker_control_endpoint_service_name_is_safe "$endpoint_service_name"
+for unsafe_service_name in \
+  'com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef' \
+  'com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef01' \
+  'com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdeF0' \
+  'com.amazonaws.vpce.ap-northeast-1.vpce-svc-0123456789abcdef0'; do
+  if agent_worker_control_endpoint_service_name_is_safe "$unsafe_service_name"; then
+    echo "accepted unsafe endpoint service name: $unsafe_service_name" >&2
+    exit 1
+  fi
+done
 test_aws_source= test_aws_enabled= test_aws_reaper_image_uri= test_worker_control_endpoint= test_managed_preparation_aws=
 test_worker_publication_snapshot_file= test_worker_publication_sha256=
 AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=false agent_aws_control_prepare_state

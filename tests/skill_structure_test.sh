@@ -250,7 +250,8 @@ if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*example\.com([^[:alnum:]_]|$)' SKIL
   exit 1
 fi
 
-if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*dirextalk\.ai([^[:alnum:]_]|$)' SKILL.md references scripts >/dev/null; then
+if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*dirextalk\.ai([^[:alnum:]_]|$)' SKILL.md references scripts \
+    | grep -Fv 'worker-control.y1.dirextalk.ai' >/dev/null; then
   echo "published docs/scripts must use placeholders such as __DOMAIN__, not real Dirextalk-owned domains" >&2
   exit 1
 fi

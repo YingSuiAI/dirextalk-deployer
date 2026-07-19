@@ -421,14 +421,18 @@ digest, a separate Agent database/role, no public gRPC port, and an actual
 Message Server remote gRPC acceptance in S5. The generated Matrix platform
 options bind `approval_owner_id` to the same `@owner:<domain>` as `admin_from`.
 Agent AWS control is a separate explicit opt-in requiring
-`AGENT_ENABLE_AWS_CONTROL=true`, a digest-pinned reaper image, the exact
-configured `grpcs://worker-control.__DOMAIN__:443` endpoint, and the EC2/private-ECR
-path. Initial
-deployment must use `AGENT_ENABLE_MANAGED_PREPARATION_AWS=false` with no
-Worker-AMI publication, allowing Foundation/device approval and AMI creation
-without mounting publication bytes. Afterward, run the explicit
-`bash scripts/orchestrate.sh agent-aws-import` command with the exact frozen
-core inputs, `AGENT_ENABLE_MANAGED_PREPARATION_AWS=true`, and one strict Agent
+`AGENT_ENABLE_AWS_CONTROL=true`, a digest-pinned reaper image, the literal
+`grpcs://worker-control.y1.dirextalk.ai:443` endpoint, and the EC2/private-ECR
+path. Initial deployment must use
+`AGENT_ENABLE_MANAGED_PREPARATION_AWS=false` with no endpoint service name and
+no Worker-AMI publication. This first runtime is identity-preview only. Next,
+`agent-worker-control-enable` creates the producer, persists its exact endpoint
+service name, and reconciles only the Agent container. Only then may the user
+complete the Foundation/signature workflow that creates the control role;
+`agent-worker-control-authorize` proves and authorizes that exact role. Finally,
+after the Worker AMI exists, run
+`bash scripts/orchestrate.sh agent-aws-import` with the exact frozen core
+inputs, `AGENT_ENABLE_MANAGED_PREPARATION_AWS=true`, and one strict Agent
 Worker-AMI publication file. The deployer durably freezes and validates exactly
 one regular non-symlink snapshot before pinned-SSH reconciliation; it advances
 state only after exact image/environment/mount/profile runtime readback,
@@ -442,7 +446,7 @@ Agent remains its final cryptographic `image_digest` verifier. Lightsail
 continues to reject AWS control; see `references/agent-runtime.md` for the exact
 two-phase, schema, input, private-ECR, and retry contract.
 For the retained PrivateLink producer, provide the Route 53 zone for
-`worker-control.__DOMAIN__` and run
+`worker-control.y1.dirextalk.ai` and run
 `bash scripts/orchestrate.sh agent-worker-control-enable` before the Foundation
 role exists. The deployer records the resumable producer lifecycle in
 `ap-northeast-3`, creates only

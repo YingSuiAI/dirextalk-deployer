@@ -331,6 +331,17 @@ if AGENT_WORKER_CONTROL_ENDPOINT='grpcs://drift.example.test:443' agent_aws_cont
 fi
 [ "$(wc -l < "$CALLS")" = "$before_import_calls" ]
 
+unsafe_service_name='com.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef'
+state_set agent_aws_control.worker_control_endpoint_service_name "$unsafe_service_name"
+state_set agent_worker_control.endpoint_service_name "$unsafe_service_name"
+if agent_aws_control_import_ec2 > "$tmp/agent-aws-import-service-name-drift.out" 2>&1; then
+  echo "Agent AWS-control import accepted an unsafe endpoint service name" >&2
+  exit 1
+fi
+[ "$(wc -l < "$CALLS")" = "$before_import_calls" ]
+state_set agent_aws_control.worker_control_endpoint_service_name "$endpoint_service_name"
+state_set agent_worker_control.endpoint_service_name "$endpoint_service_name"
+
 aws_calls_before_import=$(grep -c '^aws ' "$CALLS")
 touch "$AGENT_AWS_IMPORT_FAIL_ONCE_FILE"
 if DIREXTALK_AGENT_AWS_IMPORT_ATTEMPTS=1 DIREXTALK_AGENT_AWS_IMPORT_DELAY_SECONDS=0 \

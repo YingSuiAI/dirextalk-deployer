@@ -156,6 +156,19 @@ reconcile() {
       "$reaper_image" "$worker_endpoint" "$endpoint_service_name"
 }
 
+before_calls=$(wc -l < "$FAKE_DOCKER_CALLS")
+if DIREXTALK_AGENT_AWS_CONTROL_ROOT="$state_root" \
+    bash "$ROOT/scripts/updater/reconcile-agent-aws-control.sh" \
+      "$source_dir" "$base" "$foundation_sha" "$managed_sha" "$publication_sha" \
+      "$message_image" "$agent_image" "$agent_instance_id" "$profiles_sha" \
+      "$reaper_image" "$worker_endpoint" \
+      'com.amazonaws.vpce.ap-northeast-1.vpce-svc-0123456789abcdef0' \
+      > "$tmp/unsafe-service.out" 2>&1; then
+  echo 'managed reconcile accepted a non-Osaka endpoint service name' >&2
+  exit 1
+fi
+[ "$(wc -l < "$FAKE_DOCKER_CALLS")" = "$before_calls" ]
+
 # First application installs exact bytes and restarts the Agent once.
 reconcile > "$tmp/success.out"
 grep -F -q $'applied\t'"$managed_sha"$'\t'"$publication_sha"$'\trestarted' "$tmp/success.out"

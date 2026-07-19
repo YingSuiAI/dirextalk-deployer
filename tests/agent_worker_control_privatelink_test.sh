@@ -51,6 +51,7 @@ export FAKE_INSTANCE_GROUPS=sg-agent
 export FAKE_SG_MODE=exact
 export FAKE_HEALTH_PROTOCOL=TCP
 export FAKE_HEALTH_PORT=9443
+export FAKE_TARGET_HEALTH=healthy
 
 aws() {
   printf '%s\n' "$*" >> "$calls"
@@ -121,7 +122,7 @@ aws() {
         esac
       fi ;;
     'elbv2 describe-listener-certificates') printf 'arn:aws:acm:ap-northeast-3:123456789012:certificate/cert-1\n' ;;
-    'elbv2 describe-target-health') printf '10.0.2.15\t9443\thealthy\n' ;;
+    'elbv2 describe-target-health') printf '10.0.2.15\t9443\t%s\n' "$FAKE_TARGET_HEALTH" ;;
     'ec2 create-vpc-endpoint-service-configuration') printf 'vpce-svc-0123456789abcdef0\tcom.amazonaws.vpce.ap-northeast-3.vpce-svc-0123456789abcdef0\n' ;;
     'ec2 modify-vpc-endpoint-service-permissions') : > "$principal_added" ;;
     'ec2 modify-vpc-endpoint-service-configuration')
@@ -273,8 +274,36 @@ fi
 [ "$(wc -l < "$mutations")" -eq "$before" ]
 FAKE_NLB_SCHEME=internal
 
-# Authorization is the separate exact-role transition and is retry-idempotent.
+# Authorization runs the complete producer readback immediately before every
+# mutation, so post-enable infrastructure or Agent drift cannot open access.
 export AGENT_WORKER_CONTROL_FOUNDATION_ROLE_ARN='arn:aws:iam::123456789012:role/dirextalk-foundation-control'
+before=$(wc -l < "$mutations")
+FAKE_NLB_SCHEME=internet-facing
+if agent_worker_control_authorize >/dev/null 2>&1; then
+  echo 'worker-control authorized after post-enable NLB drift' >&2; exit 1
+fi
+[ "$(wc -l < "$mutations")" -eq "$before" ]
+FAKE_NLB_SCHEME=internal
+FAKE_TARGET_HEALTH=unhealthy
+if agent_worker_control_authorize >/dev/null 2>&1; then
+  echo 'worker-control authorized after post-enable target drift' >&2; exit 1
+fi
+[ "$(wc -l < "$mutations")" -eq "$before" ]
+FAKE_TARGET_HEALTH=healthy
+FAKE_SG_MODE=broad
+if agent_worker_control_authorize >/dev/null 2>&1; then
+  echo 'worker-control authorized after post-enable Agent ingress drift' >&2; exit 1
+fi
+[ "$(wc -l < "$mutations")" -eq "$before" ]
+FAKE_SG_MODE=exact
+FAKE_GRPC_HEALTH=unhealthy
+if agent_worker_control_authorize >/dev/null 2>&1; then
+  echo 'worker-control authorized after post-enable Agent gRPC drift' >&2; exit 1
+fi
+[ "$(wc -l < "$mutations")" -eq "$before" ]
+FAKE_GRPC_HEALTH=healthy
+
+# Authorization is the separate exact-role transition and is retry-idempotent.
 agent_worker_control_authorize
 [ "$(state_get agent_worker_control.status)" = ready ]
 grep -Fq 'modify-vpc-endpoint-service-permissions' "$calls"

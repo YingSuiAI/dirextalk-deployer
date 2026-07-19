@@ -1,8 +1,21 @@
 # Dirextalk Deployer
 
-[简体中文](README_zh.md)
+`dirextalk-deployer` deploys a production Dirextalk message server and wires the local agent room through Dirextalk's Matrix bridge. The supported local bridge is `dirextalk-connect`, installed per service from the npm package `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`. MCP capability is declared separately from bridge-agent support; S6 writes the canonical remote HTTP MCP description and never assumes that every bridge agent can consume it.
 
-`dirextalk-deployer` deploys a production Dirextalk message server and wires the local agent room through Dirextalk's Matrix bridge. The supported local bridge is `dirextalk-connect`, installed per service from the npm package `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`. S6 also writes service-scoped MCP snippets for MCP-capable supported runtimes.
+## Optional Single-Tenant Agent
+
+The deployer can render the reusable Agent as an optional private Compose
+component only from an immutable prerelease `AGENT_IMAGE` digest, canonical
+`AGENT_INSTANCE_ID`, and secret-free `AGENT_MODEL_PROFILES_FILE`. It creates a
+separate database/role, keeps gRPC off public ports, and binds the Message Server
+to TLS 1.3 plus a mounted service key. See
+[the Agent runtime contract](references/agent-runtime.md) before enabling it,
+especially the private ECR/nonce-pinned EC2 prerequisite and the explicit
+non-YOLO approval-card setting for S6.
+
+## Platform Architecture
+
+![Dirextalk platform architecture](https://raw.githubusercontent.com/YingSuiAI/dirextalk-deployer/main/assets/dirextalk-platform.png)
 
 ## Contents
 
@@ -10,16 +23,40 @@
 - `scripts/`: State machine, AWS Lightsail/EC2/DNS/user-data/verification/destroy scripts.
 - `references/`: Tooling, deployment resume flow, dirextalk-connect wiring, state machine, architecture, troubleshooting, and recovery notes.
 - `agents/`: Runtime metadata and recognition notes for agent hosts.
+- `assets/`: README diagrams and other published documentation assets.
+
+## Web Deployment Console
+
+The [Dirextalk web deployment console](https://deployer.dirextalk.ai/) provides a browser workflow for backend-only AWS deployment. It provisions, resumes, verifies, and destroys the cloud message-server resources, but it does **not** install or configure `dirextalk-connect` or link any agent on your local machine.
+
+For local agent-room wiring, use this npm-installed [dirextalk-deployer skill](https://github.com/YingSuiAI/dirextalk-deployer) instead. Visit [dirextalk.ai](https://dirextalk.ai/) for the product website.
 
 ## Before Deployment
 
-- Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain.
+- Prepare an AWS account, an AWS access key CSV or profile, and a real long-lived domain or subdomain. The deployer automatically uses Route53 when the current AWS account has a matching public hosted zone; otherwise it asks for an external A record only after allocating the fixed public IP.
 - AWS resources created by this deployer can bill until they are destroyed. New deployments prefer the Lightsail $12/month Linux bundle by default. Users who have not used Lightsail generally receive three months of free Lightsail usage. New AWS customer accounts generally receive 100-200 USD in free credits. AWS official real-time policy prevails. If no region is configured, the deployer recommends a default AWS region from the local timezone and uses it in non-interactive runs; set `AWS_DEFAULT_REGION`, `AWS_REGION`, AWS profile region, or `DIREXTALK_DEFAULT_REGION` to override. S1 checks Lightsail bundle and availability-zone availability before confirmation; for manual zone checks, use `aws lightsail get-regions --include-availability-zones --output json` because plain `get-regions` can omit zone details. If Lightsail has no usable resource in the selected region, S1 does not automatically switch to EC2; it records an EC2 estimate and waits for the operator to choose another Lightsail-capable region/zone or explicitly set `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 uses a 50 GiB gp3 root EBS volume by default.
 - Use `SKILL.md` as the agent-facing runbook. It contains the detailed deployment rules, confirmation gates, runtime wiring behavior, and recovery procedures.
 
 ## Skill Installation And Updates
 
 Install the deployer skill from npm, then place it into the current agent runtime's skill directory. The default install is global for the selected agent runtime. Use a project-local install only when you explicitly want the skill copied into a specific repository or workspace.
+
+On Windows, open Git Bash before installing or refreshing the skill and run this
+preflight before npm writes anything:
+
+```bash
+case "$(uname -s)" in
+  MINGW*) git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##'); command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  Linux*|Darwin*) true ;;
+  *) false ;;
+esac
+```
+
+If it fails, install Git for Windows from <https://git-scm.com/download/win>,
+reopen Git Bash, and stop. This Windows-only gate deliberately rejects
+PowerShell, MSYS2, and Cygwin; native WSL is treated as Linux and uses its own
+Bash and POSIX paths. The skill CLI performs the same platform check before it
+can copy a skill.
 
 The GitHub repository keeps tests for maintainers and CI, but the published npm package and installed skill copy exclude `tests/` to keep user installs small.
 
@@ -35,16 +72,10 @@ After reading this instruction, the agent should run the npm install commands be
 
 If Codex already lists `dirextalk-deployer` in its available skills, ask it to use that installed skill directly. If it does not, install or refresh it first:
 
-POSIX shells:
+All supported hosts use Bash. On native Windows, install Git for Windows, open
+Git Bash, and run the same commands. Native WSL runs them directly as Linux:
 
 ```bash
-npm install -g dirextalk-deployer@latest
-dirextalk-deployer skill install --agent codex
-```
-
-Windows PowerShell:
-
-```powershell
 npm install -g dirextalk-deployer@latest
 dirextalk-deployer skill install --agent codex
 ```
@@ -69,9 +100,14 @@ npm install -g dirextalk-deployer@latest
 dirextalk-deployer skill update --agent codex
 ```
 
-The CLI is implemented in Node and uses native paths for the host it runs on. On Windows it writes Windows-compatible paths; on Linux, macOS, Git Bash, or WSL it writes paths for that runtime.
+The CLI is implemented in Node and uses native paths for the host it runs on. On Windows, run it from Git Bash; it writes Windows-compatible `C:/...` paths for Windows-native consumers. Linux, macOS, and native WSL use their own Bash and POSIX paths.
 
 ## Minimal Command
+
+Before importing credentials, answer:
+
+- **Do you already have an AWS account?** If not, register at AWS, complete email/phone verification, add a billing card, choose the Basic support plan, wait for activation, then create an AWS Budget or billing alert.
+- **Do you already have a domain or subdomain you control?** If not, register or prepare one first. Do not ask where its DNS is managed: the deployer checks the current AWS account for a matching public Route53 hosted zone. When none exists, it continues with external DNS and prints the required A record after the fixed public IP is allocated.
 
 Import and verify an AWS deployment profile from an AWS CSV. Root access keys
 are the fastest first-deploy path but are highly privileged; save the CSV
@@ -90,30 +126,51 @@ Run from the repository root:
 bash scripts/pricing-estimate.sh \
   --region us-east-1 \
   --cloud-provider lightsail \
-  --domain-mode user
+  --domain-mode route53
 ```
 
 ```bash
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
-DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 bash scripts/orchestrate.sh
 ```
 
-`DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
+Legacy/no-Agent deployment uses `dirextalk/message-server:latest` directly and
+records that selection in `state.json`; it does not query Message Server GitHub
+Releases before provisioning. An Agent-enabled deployment instead requires
+`DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE` as the exact public stable
+`dirextalk/message-server:vX.Y.Z@sha256:<digest>` reference. It cannot use
+`latest` or the separate debug-only `MESSAGE_SERVER_IMAGE` override. The host updater is a separate
+[`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release:
+the supported Ubuntu 22.04 or 24.04 x86_64 host downloads the deployer-pinned updater asset and
+verifies the deployer-pinned SHA-256 before atomic installation. The local
+machine does not need Go, and S3 never copies an updater binary over SSH.
+The updater remains independently pinned and checksum-verified. New direct
+version upgrades do not install a daily GitHub discovery timer; an update is
+created only when an authorized client requests the current central target.
 
-On Windows, use the PowerShell entrypoint so the deployer selects Git Bash for the cloud phases while writing Windows-compatible local `dirextalk-connect` paths:
+One pre-updater node can be adopted only through the explicit, fixed d1
+contract. Run `scripts/adopt-legacy-node.sh --dry-run <state.json>` with
+`DIREXTALK_LEGACY_ADOPT_SOURCE_DIR=/root/dirextalk/dirextalk-message-server`
+and `DIREXTALK_LEGACY_ADOPT_SSH_USER=root`. After reviewing the read-only
+v0.15.2 image/digest, health, Compose, and host-Caddy evidence, set the exact
+confirmation printed by the command and rerun without `--dry-run`. It never
+pulls or starts a different image: it creates the updater-owned immutable
+Compose view, copies live P2P state, installs the pinned updater, and adds only
+the public updater jobs route to validated host Caddy. Other legacy topologies
+and existing formal release state are rejected.
 
-```powershell
-$env:AWS_DEFAULT_REGION = "us-east-1"
-$env:DOMAIN = "__DOMAIN__"
-$env:DOMAIN_MODE = "user"
-$env:CONFIRM_DOMAIN_BINDING = "1"
-$env:DIREXTALK_CLOUD_PROVIDER = "lightsail"
-$env:MESSAGE_SERVER_IMAGE = "dirextalk/message-server:latest"
-.\scripts\orchestrate.ps1
+`DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. EC2 receives only a 64-hex nonce in user-data; after the Elastic IP is attached, S3 verifies that nonce, pins the SSH host key, and streams the frozen full bootstrap through strict SSH. When Agent is enabled, its image must be the immutable digest in the same-account/same-region private ECR repository named exactly `dirextalk-agent`; S3 uses a one-hour least-privilege STS session locally, streams only the Docker password on SSH stdin, and proves `/run/dirextalk-ecr-auth` absent after the pull. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
+
+On native Windows, install Git for Windows, open **Git Bash**, and use the same commands as Linux/macOS. Run the Git Bash preflight in **Skill Installation And Updates** before any lifecycle command; if it fails, install Git from `https://git-scm.com/download/win` and reopen Git Bash. Native WSL is supported as Linux, but a service directory must stay owned by one environment: do not switch a Git-Bash-owned service directory into WSL or a WSL-owned directory into Windows tooling.
+
+```bash
+export AWS_DEFAULT_REGION=us-east-1
+export DOMAIN=__DOMAIN__
+export CONFIRM_DOMAIN_BINDING=1
+export DIREXTALK_CLOUD_PROVIDER=lightsail
+bash scripts/orchestrate.sh
 ```
 
 Recommendation-only local bridge and MCP wiring:
@@ -132,9 +189,9 @@ bash scripts/orchestrate.sh
 ```
 
 Supported install modes: `recommended` and `dirextalk-connect`.
-If `DIREXTALK_AGENT_PLATFORM=auto` cannot identify a single supported runtime, set `DIREXTALK_CONNECT_AGENT` explicitly. S6 writes `mode = "yolo"` by default for generated agent options; an explicit `mode` in `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` or `DIREXTALK_CURSOR_MODE` still overrides it. On Windows, Cursor wiring uses Cursor Agent CLI at `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If `agent.cmd status` is not logged in, run `agent.cmd login` once, then rerun the deployer to refresh config and restart the daemon. For OpenClaw or Hermes defaults, force the host runtime with `DIREXTALK_AGENT_PLATFORM=openclaw` or `DIREXTALK_AGENT_PLATFORM=hermes`; setting only `DIREXTALK_CONNECT_AGENT=acp` selects generic ACP and requires manual options. OpenClaw Gateway ACP defaults to `["acp", "--session", "agent:main:main"]` and lets `openclaw acp` auto-detect the Gateway from `~/.openclaw/openclaw.json`. To force explicit Gateway settings, set all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION` from the current OpenClaw runtime after pairing. Use `DIREXTALK_OPENCLAW_ACP_ARGS_TOML` only when you need to provide the complete OpenClaw ACP args array yourself. Use `DIREXTALK_HERMES_ACP_ARGS_TOML` for the child Hermes args; S6 prefixes the `hermes-acp-adapter -- <hermes-command>` wrapper automatically.
+If `DIREXTALK_AGENT_PLATFORM=auto` cannot identify a single supported runtime, set `DIREXTALK_CONNECT_AGENT` explicitly. S6 writes `mode = "yolo"` by default for generated agent options; an explicit `mode` in `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` or `DIREXTALK_CURSOR_MODE` still overrides it. On Windows, Cursor wiring uses Cursor Agent CLI at `%LOCALAPPDATA%\cursor-agent\agent.cmd`; OpenCode wiring searches `opencode` on PATH and the global `opencode-ai` npm package, or accepts `DIREXTALK_OPENCODE_COMMAND`. If `agent.cmd status` is not logged in, run `agent.cmd login` once, then rerun the deployer. An active OpenClaw or Hermes host owns MCP even when it launches Codex or another child; only explicit `DIREXTALK_AGENT_PLATFORM=<child>` bypasses host auto-detection. OpenClaw Gateway ACP defaults to `["acp", "--session", "agent:main:main"]` and auto-detects its Gateway. Explicit settings require all of `DIREXTALK_OPENCLAW_ACP_URL`, `DIREXTALK_OPENCLAW_ACP_TOKEN_FILE`, and `DIREXTALK_OPENCLAW_ACP_SESSION`. Fully replaceable OpenClaw args and generic host command overrides are rejected. `DIREXTALK_HERMES_ACP_ARGS_TOML` may add child Hermes args while S6 preserves the required adapter/profile prefix.
 
-Check status:
+Check status from the same Bash session:
 
 ```bash
 bash scripts/orchestrate.sh status
@@ -147,13 +204,6 @@ Destroy recorded resources:
 DOMAIN=<domain> bash scripts/destroy.sh
 ```
 
-On Windows, use the PowerShell destroy entrypoint:
-
-```powershell
-$env:DOMAIN = "<domain>"
-.\scripts\destroy.ps1
-```
-
 Destroy stops and uninstalls the local `dirextalk-connect` daemon only when its reported `WorkDir`
 matches the current service's `~/.dirextalk/nodes/<service_id>/dirextalk-connect`
 directory, then removes that service directory.
@@ -161,11 +211,15 @@ directory, then removes that service directory.
 Update an existing node without deleting data:
 
 ```bash
-DOMAIN=<domain> MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest bash scripts/update.sh
+DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
+DOMAIN=<domain> MESSAGE_SERVER_IMAGE=dirextalk/message-server:<debug-tag> bash scripts/update.sh
 ```
 
-Image refresh restarts the remote service only. It leaves local credentials,
-`dirextalk-connect`, MCP artifacts, user confirmations, and runtime checks intact.
+This is an explicit debug/legacy override, not the normal production upgrade
+path. Image refresh restarts the remote service only. It leaves local credentials,
+`dirextalk-connect`, MCP artifacts, and runtime checks intact.
+For private Agent ECR state, `update.sh` fails before SSH until it owns the same
+short-lived pinned-host auth refresh; resume the reviewed orchestrator instead.
 
 Reset application data while preserving EC2, DNS, fixed IP, and Caddy TLS:
 
@@ -176,8 +230,11 @@ DIREXTALK_EXISTING_STATE_ACTION=continue DOMAIN=<domain> bash scripts/orchestrat
 
 Application data reset clears server-side app volumes, so the follow-up
 orchestrate run regenerates local credentials/MCP artifacts and automatically
-reinstalls/restarts `dirextalk-connect` plus `dirextalk-mcp` unless explicitly
-overridden with `DIREXTALK_AGENT_INSTALL=recommend` or `skip`.
+reinstalls/restarts `dirextalk-connect` unless explicitly overridden with
+`DIREXTALK_AGENT_INSTALL=recommend` or `skip`. MCP uses the server HTTP endpoint
+and does not install a local MCP CLI.
+`reset-app-data.sh` likewise fails before remote mutation for private Agent ECR
+state until that lifecycle has an equivalent safe registry-auth refresh.
 
 ## Local Bridge
 
@@ -185,18 +242,15 @@ S6 writes these service-scoped files under `~/.dirextalk/nodes/<service_id>/`:
 
 ```text
 credentials.json
-env
 dirextalk-connect/config.toml
 dirextalk-connect/data/
 dirextalk-connect/matrix-session.json
-mcp/codex.toml
+mcp/README.md
 mcp/openclaw.md
-mcp/openclaw-server.json
-mcp/hermes.mcp.json
-mcp/mcp-servers.json
+mcp/hermes.md
 ```
 
-Manual install:
+Linux/macOS/WSL Bash manual install:
 
 ```bash
 npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk-connect@latest
@@ -205,33 +259,56 @@ npm install --prefix ~/.dirextalk/nodes/<service_id>/dirextalk-connect dirextalk
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/dirextalk-connect daemon logs --service-name <service_id> -n 120
 ```
 
+Windows Git Bash manual install:
+
+```bash
+service_dir=$(cygpath -m "$HOME/.dirextalk/nodes/<service_id>")
+runtime_dir="$service_dir/dirextalk-connect"
+connect="$runtime_dir/dirextalk-connect.cmd"
+npm install --prefix "$runtime_dir" dirextalk-connect@latest
+"$connect" daemon install --config "$runtime_dir/config.toml" --service-name <service_id> --force
+"$connect" daemon status --service-name <service_id>
+"$connect" daemon logs --service-name <service_id> -n 120
+```
+
 With the default `DIREXTALK_AGENT_INSTALL=auto`, S6 waits for daemon status
 `Running` and a recent `dirextalk-connect is running` log before marking local
 wiring done. Agent startup errors in the logs, such as a missing Cursor Agent
 CLI, login/auth/trust failures, ACP startup failure, or agent offline state,
 fail S6 instead of reporting deployment success.
 
-MCP is installed into the current service directory during S6 when
-`DIREXTALK_AGENT_INSTALL=auto`. Generated MCP client snippets launch that
-service-scoped `dirextalk-mcp` binary directly over stdio. MCP does not require a
-local daemon, HTTP proxy, or listening port; the MCP client starts the command
-when it needs tools.
-Manual recovery command:
+MCP is not installed as a local CLI during S6. The canonical config connects to
+`https://<domain>/mcp` using the service agent token. No local MCP CLI, daemon,
+proxy, or listening port is required. S6 records one of `session`, `project`,
+`host-managed`, `conditional`, or `unsupported`; an undeclared runtime fails closed.
 
-```bash
-npm install --prefix ~/.dirextalk/nodes/<service_id>/mcp dirextalk-mcp@latest
-DIREXTALK_CREDENTIALS_FILE=~/.dirextalk/nodes/<service_id>/credentials.json ~/.dirextalk/nodes/<service_id>/mcp/dirextalk-mcp doctor --json
-```
+The capability registry matches dirextalk-connect and follows the effective
+connect agent, while the detected host runtime selects reviewable artifacts.
+ACP, Claude Code, Codex, Copilot, Gemini, Kimi, OpenCode, and Qoder are
+`session`; Antigravity, Cursor, and iFlow are `host-managed`; Devin, Pi,
+Reasonix, and tmux are `unsupported`. Detected OpenClaw and Hermes hosts are
+always `host-managed` and require the ACP bridge; a non-ACP connect override is
+rejected. Their native registries own MCP while connect bridges conversation.
+Unsupported and unknown selections fail closed. The vocabulary retains `project` and `conditional`, but
+no current backend uses them. S6 never generates a generic JSON fallback.
 
-S6 writes only the MCP snippet for the detected runtime: `mcp/codex.toml` for Codex, `mcp/cursor.mcp.json` for Cursor, `mcp/openclaw.md` plus `mcp/openclaw-server.json` for OpenClaw, `mcp/hermes.mcp.json` for Hermes, or `mcp/mcp-servers.json` for other MCP-capable supported runtimes. Generated MCP client snippets run the service-scoped `dirextalk-mcp` over stdio with `DIREXTALK_CREDENTIALS_FILE` set to the service credentials, so clients can start the MCP tool process without a daemon. Cursor can read MCP servers from `.cursor/mcp.json` or `~/.cursor/mcp.json`, but S6 does not write those files by default because they contain machine-local credential paths; after adding the snippet, restart Cursor or reload/enable the server in Cursor MCP settings. For OpenClaw, read `mcp/openclaw.md` and run the generated `openclaw mcp set` command against `mcp/openclaw-server.json`; do not paste MCP JSON into `~/.openclaw/openclaw.json`.
+Host-managed selection retains its guidance artifact but omits the canonical
+MCP URL/token fields from `dirextalk-connect/config.toml`. In `auto` mode,
+OpenClaw is registered through `openclaw config patch --stdin` and must pass
+`openclaw mcp probe <server-name> --json` before the bridge starts. An inherited
+`OPENCLAW_CONFIG_PATH` and optional `DIREXTALK_OPENCLAW_PROFILE` select the
+native registry/profile; destroy removes the managed entry and service token.
+Hermes clones the current configured native profile into a marked per-service
+profile (or uses an explicit `DIREXTALK_HERMES_PROFILE`), registers the endpoint
+through Hermes' native API, and requires a live tool probe before bridge startup.
+This preserves the source profile's model/provider authentication; destroy
+removes only a deployer-owned profile, or only the managed MCP entry from an
+explicit external profile. Other host-managed backends without a safe native
+adapter remain operator-confirmed and require later runtime verification.
+S6 never runs `mcp set`, generates a bearer-token server JSON, or places the
+token in process arguments.
 
 Voice input is supported when an STT provider key is available. Set `DIREXTALK_SPEECH_API_KEY` or provider-specific variables such as `DIREXTALK_SPEECH_QWEN_API_KEY`; S6 will then write `[speech] enabled = true` into `dirextalk-connect/config.toml`.
-
-Homebrew documentation should use:
-
-```bash
-brew install dirextalk-connect
-```
 
 Source builds use:
 
@@ -244,11 +321,24 @@ make build AGENTS=<dirextalk-connect-agent> PLATFORMS_INCLUDE=matrix
 ## Validation
 
 ```bash
-bash tests/skill_structure_test.sh
-bash tests/default_paths_test.sh
-bash tests/s6_wire_local_test.sh
-bash tests/destroy_local_bridge_test.sh
-bash tests/render_userdata_remote_nodes_test.sh
-find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+# Default development check: changed files plus declared neighboring contracts.
+npm test
+# Normal pre-publish check: affected tests plus package/skill structure.
+npm run test:release
+# Explicit broader lanes; do not run routinely.
+npm run test:quick
+npm run test:stage
+npm run test:full
 git diff --check
 ```
+
+The affected selector reads uncommitted files and commits ahead of
+`origin/main`. Override the comparison only when needed with
+`DIREXTALK_TEST_BASE=<ref>` or `DIREXTALK_TEST_CHANGED_FILES=<paths>`. The full
+EC2, legacy, updater, DNS, S6, and runtime matrices are retained for explicit
+manual validation, not every development stage or release.
+
+On Windows these `npm` test commands may be launched directly from PowerShell,
+Command Prompt, or Git Bash. The test launcher finds Git for Windows Bash and
+runs the Bash-only suite there; lifecycle deployment commands themselves still
+run from Git Bash.

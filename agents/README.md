@@ -6,7 +6,7 @@ This skill is runtime-neutral. Claude, Codex/OpenAI, Gemini, Cursor, Copilot, Op
 SKILL.md
 ```
 
-When an agent runtime supports skill metadata, point it at `SKILL.md` and use `scripts/orchestrate.sh` as the deployment command. Read `references/agent-targets.md` before installing this skill or wiring the local `dirextalk-connect` bridge and `dirextalk-mcp` snippets for a runtime. S6 writes current Dirextalk bridge/MCP variables and records the detected runtime plus target paths. After deployment, ask the user before mutating the runtime-specific local bridge or MCP configuration.
+When an agent runtime supports skill metadata, point it at `SKILL.md`. Every supported host uses `bash scripts/orchestrate.sh`; native Windows hosts must install Git for Windows and run it from Git Bash, while native WSL runs as Linux. Read `references/agent-targets.md` before installing this skill or wiring the local `dirextalk-connect` bridge. Read `references/agent-runtime.md` before enabling the optional cloud Agent: its image must be a published prerelease digest, it has no public gRPC port, and fresh Lightsail registry access is a preflight requirement. S6 normally records capability from the effective connect agent and never falls back to generic MCP JSON. Antigravity/Cursor/iFlow and every detected OpenClaw/Hermes host are host-managed; Devin/Pi/Reasonix/tmux are unsupported and fail closed. OpenClaw and Hermes require native secret-free probes before bridge startup.
 
 Recognition keywords:
 
@@ -21,6 +21,6 @@ Recognition keywords:
 Required capabilities:
 
 - Read local files.
-- Run POSIX shell commands.
-- Use `aws`, `ssh`, `scp`, `curl`, and Node.js for `scripts/json.mjs` after the user approves any missing installs.
+- Run Bash commands on Linux/macOS/WSL, or Git Bash on native Windows. Before a native Windows lifecycle or skill-install action, use the matching-install-root `MINGW*`/`cygpath`/`.windows.` Git preflight in `references/agent-targets.md`; if it fails, tell the user to install Git for Windows and stop.
+- Use `aws`, `ssh`, `curl`, and Node.js for `scripts/json.mjs` after the user approves any missing installs. Go and SCP are not deployment prerequisites; the Ubuntu host downloads the pinned independent updater Release itself; it does not install a daily release-discovery timer.
 - Preserve secrets outside the repository.

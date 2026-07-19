@@ -1,5 +1,10 @@
 # MCP Daemon Implementation Plan
 
+> [!WARNING]
+> **Superseded on 2026-07-10** by
+> [Remote MCP Connect Contract Implementation Plan](2026-07-10-remote-mcp-connect-contract.md).
+> Do not execute this historical local-daemon plan for current Dirextalk wiring.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Keep the Dirextalk MCP tool surface available for generated MCP host snippets after client or machine restarts.

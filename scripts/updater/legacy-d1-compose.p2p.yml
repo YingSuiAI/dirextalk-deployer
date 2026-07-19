@@ -1,0 +1,103 @@
+name: dirextalk-p2p
+
+x-message-server-local: &message-server-local
+  image: dirextalk/message-server:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dirextalk_message_server
+      POSTGRES_PASSWORD: dirextalk_message_server
+      POSTGRES_DB: dirextalk_message_server
+    ports:
+      - "15432:5432"
+    volumes:
+      - p2p_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dirextalk_message_server -d dirextalk_message_server"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  message-server-init:
+    <<: *message-server-local
+    environment:
+      MESSAGE_SERVER_NAME: ${MESSAGE_SERVER_NAME:-localhost}
+      MESSAGE_CLIENT_BASE_URL: ${MESSAGE_CLIENT_BASE_URL:-http://localhost:8008}
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mkdir -p /etc/dirextalk-message-server /var/dirextalk-message-server
+        if [ ! -f /etc/dirextalk-message-server/matrix_key.pem ]; then
+          /usr/bin/generate-keys -private-key /etc/dirextalk-message-server/matrix_key.pem
+        fi
+        if [ ! -f /etc/dirextalk-message-server/server.crt ] || [ ! -f /etc/dirextalk-message-server/server.key ]; then
+          /usr/bin/generate-keys \
+            -tls-cert /etc/dirextalk-message-server/server.crt \
+            -tls-key /etc/dirextalk-message-server/server.key \
+            -server "${MESSAGE_SERVER_NAME:-localhost}"
+        fi
+        if [ ! -f /etc/dirextalk-message-server/message-server.yaml ]; then
+          /usr/bin/generate-config \
+            -dir /var/dirextalk-message-server \
+            -db postgres://dirextalk_message_server:dirextalk_message_server@postgres/dirextalk_message_server?sslmode=disable \
+            -server "${MESSAGE_SERVER_NAME:-localhost}" \
+            > /etc/dirextalk-message-server/message-server.yaml
+        fi
+        sed -i 's|well_known_client_name: .*|well_known_client_name: "'"${MESSAGE_CLIENT_BASE_URL:-http://localhost:8008}"'"|' /etc/dirextalk-message-server/message-server.yaml
+    volumes:
+      - p2p_message_server_config:/etc/dirextalk-message-server
+      - p2p_message_server_data:/var/dirextalk-message-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  message-server:
+    <<: *message-server-local
+    restart: unless-stopped
+    environment:
+      P2P_PORTAL_CREDENTIALS_FILE: /var/dirextalk-message-server/p2p/bootstrap.json
+      P2P_PLUGIN_DOCKER_ENABLED: "true"
+      P2P_PLUGIN_DOCKER_NETWORK: dirextalk-p2p_default
+      P2P_PLUGIN_BACKEND_BASE_URL: http://message-server:8008
+      P2P_NATIVE_AGENT_DATA_DIR: /var/dirextalk-message-server/agent
+    command:
+      - --config
+      - /etc/dirextalk-message-server/message-server.yaml
+      - --http-bind-address
+      - :8008
+      - --https-bind-address
+      - :8448
+    ports:
+      - "8008:8008"
+      - "8448:8448"
+    volumes:
+      - p2p_message_server_config:/etc/dirextalk-message-server
+      - p2p_message_server_data:/var/dirextalk-message-server
+      - ${P2P_PLUGIN_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - p2p_plugins_data:/var/dirextalk-message-server/plugins
+      - p2p_agent_data:/var/dirextalk-message-server/agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+      message-server-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8008/_p2p/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  p2p_postgres_data:
+  p2p_message_server_config:
+  p2p_message_server_data:
+  p2p_plugins_data:
+  p2p_agent_data:

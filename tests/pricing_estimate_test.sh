@@ -8,6 +8,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 mkdir -p "$HOME"
 
 fakebin="$tmp/bin"
@@ -26,7 +27,7 @@ fi
 
 case "${1:-} ${2:-}" in
   "lightsail get-bundles")
-    printf '{"bundles":[{"bundleId":"nano_3_1","price":5,"ramSizeInGb":0.5,"diskSizeInGb":20,"transferPerMonthInGb":1024,"cpuCount":2,"supportedPlatforms":["LINUX_UNIX"]},{"bundleId":"small_3_1","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"transferPerMonthInGb":3072,"cpuCount":2,"supportedPlatforms":["LINUX_UNIX"]}]}\n'
+    printf '{"bundles":[{"bundleId":"nano_3_1","price":5,"ramSizeInGb":0.5,"diskSizeInGb":20,"transferPerMonthInGb":1024,"cpuCount":2,"supportedPlatforms":["LINUX_UNIX"],"isActive":true},{"bundleId":"small_2_0","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"transferPerMonthInGb":3072,"cpuCount":1,"supportedPlatforms":["LINUX_UNIX"],"isActive":false},{"bundleId":"small_3_0","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"transferPerMonthInGb":3072,"cpuCount":2,"supportedPlatforms":["LINUX_UNIX"],"isActive":true}]}\n'
     exit 0
     ;;
   "sts get-caller-identity")
@@ -101,7 +102,7 @@ json_test_check "$state" "data.cost_estimate.pricing_status === 'queried' && dat
 
 lightsail=$(bash "$ROOT/scripts/pricing-estimate.sh" --region ap-northeast-1 --cloud-provider lightsail --domain-mode user)
 printf '%s\n' "$lightsail" > "$tmp/lightsail.json"
-json_test_check "$tmp/lightsail.json" "data.provider === 'lightsail' && data.pricing_status === 'bundle_price_recorded' && data.components.lightsail_bundle.bundle_id === 'small_3_1' && data.components.lightsail_bundle.monthly_usd === 12 && data.components.lightsail_bundle.ram_gb === 2 && data.components.lightsail_bundle.disk_gb === 60 && data.total_monthly_usd === 12"
+json_test_check "$tmp/lightsail.json" "data.provider === 'lightsail' && data.pricing_status === 'bundle_price_recorded' && data.components.lightsail_bundle.bundle_id === 'small_3_0' && data.components.lightsail_bundle.monthly_usd === 12 && data.components.lightsail_bundle.ram_gb === 2 && data.components.lightsail_bundle.disk_gb === 60 && data.total_monthly_usd === 12"
 
 auto_workdir="$HOME/.dirextalk/nodes/auto-pricing.example.test"
 set +e

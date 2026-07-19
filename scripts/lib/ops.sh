@@ -3,14 +3,36 @@
 
 OPS_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
-source "$OPS_LIB_DIR/json.sh"
+source "$OPS_LIB_DIR/paths.sh"
 # shellcheck disable=SC1090
-source "$OPS_LIB_DIR/local-paths.sh"
+source "$OPS_LIB_DIR/json.sh"
+
+ops_desired_state_helper_payload() {
+  base64 < "$OPS_LIB_DIR/../updater/set-desired-state.sh" | tr -d '\r\n'
+}
+
+ops_desired_state_helper_prelude() {
+  local payload template
+  payload=$(ops_desired_state_helper_payload)
+  template=$(cat <<'EOF'
+set -eu
+desired_helper_tmp=$(mktemp /tmp/dirextalk-updater-desired-state.XXXXXX)
+cleanup_desired_helper() { rm -f "$desired_helper_tmp"; }
+trap cleanup_desired_helper EXIT
+printf '%s' '__DIREXTALK_DESIRED_HELPER__' | base64 --decode > "$desired_helper_tmp"
+sudo install -d -m 0755 /var/dirextalk-message-server/updater
+sudo install -m 0755 "$desired_helper_tmp" /var/dirextalk-message-server/updater/set-desired-state.sh
+rm -f "$desired_helper_tmp"
+trap - EXIT
+EOF
+)
+  printf '%s\n' "${template/__DIREXTALK_DESIRED_HELPER__/$payload}"
+}
 
 ops_state_path() {
   local explicit=${1:-}
   if [ -n "$explicit" ]; then
-    printf '%s\n' "$explicit"
+    dirextalk_execution_path "$explicit"
     return 0
   fi
   printf '%s/state.json\n' "$(dirextalk_default_workdir)"
@@ -22,6 +44,15 @@ ops_require_state() {
     echo "state.json not found: $state" >&2
     return 1
   }
+}
+
+ops_require_safe_registry_refresh() {
+  local state=$1 operation=${2:-operation} registry_source
+  registry_source=$(ops_state_get "$state" '.agent_registry.source')
+  if [ "$registry_source" = private_ecr ]; then
+    echo "$operation is refused for a private Agent ECR deployment because this lifecycle command has no pinned-SSH short-lived registry-auth refresh path. Resume the reviewed deployment workflow instead." >&2
+    return 1
+  fi
 }
 
 ops_state_get() {
@@ -122,9 +153,9 @@ ops_stop_scoped_daemon() {
 
 ops_update_remote_command() {
   local image=${1:-} image_q remote_script
-  remote_script=$(cat <<'EOF'
-set -eu
+  remote_script="$(ops_desired_state_helper_prelude)"$'\n'$(cat <<'EOF'
 cd /var/dirextalk-message-server
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh maintenance
 if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
   IMAGE=$MESSAGE_SERVER_IMAGE
   escaped_image=$(printf '%s\n' "$IMAGE" | sed 's/[\/&]/\\&/g')
@@ -150,6 +181,7 @@ if bootstrap_ready; then
 else
   DOMAIN="$DOMAIN" bash /var/dirextalk-message-server/init-tokens.sh
 fi
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh running
 EOF
 )
   if [ -n "$image" ]; then
@@ -161,9 +193,10 @@ EOF
 }
 
 ops_reset_remote_command() {
-  cat <<'EOF'
-set -eu
+  local remote_script
+  remote_script="$(ops_desired_state_helper_prelude)"$'\n'$(cat <<'EOF'
 cd /var/dirextalk-message-server
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh maintenance
 sudo docker compose --env-file .env down
 project=$(basename "$PWD")
 for volume in postgres-data message-config message-data; do
@@ -180,7 +213,10 @@ printf 'P2P_PORTAL_PASSWORD=%s\n' "$new_code" | sudo tee -a .env >/dev/null
 sudo docker compose --env-file .env up -d
 DOMAIN=$(grep '^DOMAIN=' .env | cut -d= -f2)
 sudo DOMAIN="$DOMAIN" bash /var/dirextalk-message-server/init-tokens.sh
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh running
 EOF
+)
+  printf 'sudo sh -lc %s\n' "$(ops_sh_quote "$remote_script")"
 }
 
 ops_mark_refresh_pending() {

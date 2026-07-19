@@ -56,11 +56,11 @@ EC2_STD_QUOTA_CODE="L-1216C47A"
 # EC2-VPC Elastic IP addresses per region.
 EC2_VPC_EIP_QUOTA_CODE="L-0263D0A3"
 
-# Dynamically resolve the latest Ubuntu 22.04 amd64 AMI; never hard-code AMI IDs.
+# Dynamically resolve the latest Ubuntu 24.04 amd64 AMI; never hard-code AMI IDs.
 aws_lookup_ubuntu_ami() {
   local ami
   ami=$(aws ssm get-parameters \
-    --names /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id \
+    --names /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id \
     --query 'Parameters[0].Value' --output text 2>/dev/null || true)
   if [ -n "$ami" ] && [ "$ami" != "None" ]; then
     echo "$ami"
@@ -68,11 +68,11 @@ aws_lookup_ubuntu_ami() {
   fi
 
   # Some AWS CLI environments return an empty SSM public parameter result.
-  # Fall back to Canonical's official owner and select the newest Jammy image.
+  # Fall back to Canonical's official owner and select the newest Noble image.
   aws ec2 describe-images \
     --owners 099720109477 \
     --filters \
-      'Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*' \
+      'Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*' \
       'Name=architecture,Values=x86_64' \
       'Name=virtualization-type,Values=hvm' \
       'Name=root-device-type,Values=ebs' \

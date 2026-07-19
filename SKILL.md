@@ -13,14 +13,31 @@ Entrypoints:
 
 ```text
 scripts/orchestrate.sh
-scripts/orchestrate.ps1
 scripts/destroy.sh
-scripts/destroy.ps1
 scripts/update.sh
 scripts/reset-app-data.sh
 ```
 
 ## Freshness Gate
+
+On Windows, this check comes first, including before skill installation or
+refresh. Run it from Git Bash:
+
+```bash
+case "$(uname -s)" in
+  MINGW*) git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##'); command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  Linux*|Darwin*) true ;;
+  *) false ;;
+esac
+```
+
+Continue only when that command succeeds. Native Linux, macOS, and WSL sessions
+use their own Bash environment directly. On native Windows, it verifies that
+the current shell's `EXEPATH` is under the same Git for Windows installation as
+`git`, and rejects PowerShell, MSYS2, and Cygwin. Otherwise tell the Windows
+user to install Git for Windows from `https://git-scm.com/download/win`, reopen
+Git Bash, and stop. The skill CLI repeats and strengthens the Windows gate
+before `install`, `update`, or `refresh` can write a target.
 
 Before deployment, repair, verification, teardown, runtime wiring, or skill
 installation, make one freshness attempt:
@@ -45,7 +62,7 @@ install rule. Use a Git clone only for deployer development or local patching.
 ## Platform Law
 
 Classify every path by consumer before writing it to `state.json`,
-`credentials.json`, `env`, `dirextalk-connect/config.toml`, docs, or printed commands:
+`credentials.json`, `dirextalk-connect/config.toml`, docs, or printed commands:
 
 - Remote server paths are Linux paths consumed on EC2, such as `/var/dirextalk-message-server`.
 - Deployer execution paths may be POSIX paths inside Bash phases.
@@ -54,16 +71,148 @@ Classify every path by consumer before writing it to `state.json`,
 - Documentation paths must be portable examples using `$HOME`, `%USERPROFILE%`,
   `$env:USERPROFILE`, `<service_id>`, or `<domain>`.
 
-Windows users run `.\scripts\orchestrate.ps1` and `.\scripts\destroy.ps1` from
-Windows PowerShell. These wrappers may use Git Bash internally, but must set
-`DIREXTALK_LOCAL_PATH_STYLE=windows`. POSIX users run `bash scripts/orchestrate.sh`
-and `bash scripts/destroy.sh`. Do not tell Windows users to use WSL unless they
-explicitly choose WSL as the host runtime.
+Windows, Linux, macOS, and WSL users run the same Bash entrypoints. A process
+running inside WSL is a Linux deployment host and uses its distribution's
+Node.js, AWS CLI, paths, and Bash directly. On native Windows,
+Git for Windows is required: use the exact preflight above before any deployment
+action. If it fails, tell the user to install Git for Windows from
+`https://git-scm.com/download/win`, open **Git Bash**, and rerun; do not
+substitute PowerShell or launch WSL as a command runner for a Windows-owned
+deployment. Git Bash automatically writes native `C:/...`
+paths for Windows-native Node.js, `dirextalk-connect`, and agent processes. Run
+every lifecycle action from that same Git Bash session:
+
+```bash
+DOMAIN=<domain> bash scripts/orchestrate.sh
+```
+
+The deployer explicitly normalizes file paths passed to native Node.js, AWS CLI,
+curl, and local agent tools. It does not depend on implicit MSYS argument
+conversion, so a parent runtime that sets `MSYS_NO_PATHCONV=1` cannot turn a
+Git Bash `/c/...` or `/tmp/...` path into an unrelated `C:\c\...` or `C:\tmp\...`
+lookup.
+
+Keep each local service in one environment: either native WSL/Linux paths or
+native Windows Git Bash paths. Do not switch the same service directory between
+PowerShell, WSL, and Git Bash.
 
 ## Prerequisites And Confirmation
 
 Do not deploy until the user has an active AWS account, a real long-lived
 domain, AWS credentials, DNS authority, and billing acknowledgement.
+
+For first-time users, guide them step by step. Do not front-load the whole
+cloud setup checklist. Ask only the next blocking question, wait for the user's
+answer or completion, then continue to the next step.
+
+Default tone for new users:
+
+- Use product language such as account, domain, access key file, DNS provider,
+  server, fixed IP, and monthly AWS cost.
+- Avoid technical labels such as EC2, EIP, IAM policy, security group, EBS,
+  Matrix `server_name`, Route53 hosted zone, federation identity, or TURN unless
+  the user asks what they mean or the term appears in an AWS screen they must
+  operate.
+- When a technical term is unavoidable, explain it in one short sentence before
+  asking the user to act.
+- Never give a long architecture explanation during onboarding unless the user
+  explicitly asks why the step is needed.
+
+Step-by-step onboarding flow:
+
+1. **AWS account.**
+   - Shortcut: if the user already provided valid AWS credentials, such as a
+     configured profile or a CSV that passed `aws sts get-caller-identity`, skip
+     browser sign-in and email questions. The agent already has AWS access.
+   - Ask: "Do you already have an AWS account you can log into?"
+   - If yes, continue to the access key step.
+   - If no, ask the user to open
+     `https://signin.aws.amazon.com/signup?request_type=register`, register in
+     their browser, complete payment/phone verification and Basic support
+     selection if AWS asks, then stop until they say the account is ready.
+   - Never ask for, collect, paste, log, or store payment card details, root
+     password, MFA code, email verification code, or phone verification code.
+
+2. **AWS access key or profile.**
+   - Ask: "Do you already have an AWS access key CSV file or AWS profile for
+     deployment?"
+   - If yes, ask only for the local CSV path or profile name, then verify it.
+   - If no, offer two credential paths and ask the user to choose:
+     1. **Root access key (default fastest path):** simpler to create for a
+        first deployment because it uses the account owner identity directly.
+        Explain that it is highly privileged, must be saved securely, must never
+        be pasted into chat or committed, and should be rotated or deleted after
+        deployment.
+     2. **Dedicated IAM deployment user:** safer because it avoids root keys,
+        but requires more AWS console steps. Explain in one sentence: "This
+        temporary user lets the deployment tool create and later destroy this
+        Dirextalk node; delete or disable it after deployment."
+   - Root access keys are allowed when the operator explicitly chooses them.
+     Do not block deployment only because STS returns a root ARN; report
+     `root=true`, repeat the security warning once, and continue if the user
+     accepts that risk.
+   - Prefer the repository helper for CSV import and redacted verification:
+     ```bash
+     bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv dirextalk-deployer <region>
+     export AWS_PROFILE=dirextalk-deployer
+     bash scripts/aws-credentials.sh verify dirextalk-deployer
+     ```
+   - The agent may read the local CSV path, but must never print the Access Key
+     ID together with the Secret Access Key, and must never write secrets into
+     the repository, skill files, logs, or chat output.
+
+3. **Domain.**
+   - Ask: "Do you already own a long-lived domain or subdomain you want to use
+     for this Dirextalk node?"
+   - If yes, ask for the domain.
+   - If no, first check whether the AWS account already has Route53 registered
+     domains when AWS CLI access is available:
+     ```bash
+     aws route53domains list-domains --profile <profile>
+     ```
+     If domains exist, present only the domain names and ask whether to use one.
+     If none exist, ask the user to buy or prepare a domain, then stop until
+     they have it.
+   - Do not ask where DNS is managed. After AWS credentials are available, the
+     deployer checks for the longest matching public Route53 hosted zone in the
+     current AWS account. If one exists it manages the A record automatically;
+     otherwise it continues with external DNS and asks for the A record only
+     after the fixed public IP exists.
+   - Explain only this much by default: "Use a real long-term domain because
+     changing it later means creating a new chat server identity."
+   - Do not use localhost, raw IP addresses, wildcard domains, disposable
+     domains, temporary `sslip.io`, or other throwaway names for production.
+
+4. **DNS control.**
+   - Let S2 query public Route53 hosted zones before asking any DNS-management
+     question. A matching zone selects `DOMAIN_MODE=route53`; no matching zone
+     selects `DOMAIN_MODE=user` without blocking infrastructure creation.
+   - If Route53 listing fails, stop with an AWS credential/IAM error. Never
+     misclassify an API failure as externally managed DNS.
+   - For external DNS, wait until the script emits the fixed IP, then ask the
+     user to create exactly:
+     ```text
+     <DOMAIN>  A  <PUBLIC_IP>
+     ```
+   - If the user prefers Route53 while the domain is registered elsewhere, the
+     hosted zone and NS delegation must be prepared explicitly first. The user
+     or a provider-specific DNS connector must delegate those NS records at the
+     current registrar before authoritative DNS can resolve.
+
+5. **Billing confirmation.**
+   - Give a short billing warning before the first mutating AWS command: "This
+     will create paid AWS resources for the server. They keep billing until
+     destroyed."
+   - Provide an upfront monthly estimate for the selected region and cloud
+     provider before asking for final approval. Use the pricing helper output;
+     do not invent a fixed quote from memory.
+   - Tell the operator that new AWS customer accounts generally receive
+     `100-200 USD` in free credits, and that users who have not used Lightsail
+     generally receive three months of free Lightsail usage. Coverage is
+     account-specific; recommend an AWS Budget and AWS Billing Console review,
+     and say AWS official real-time policy prevails.
+   - Check EC2-VPC Elastic IP quota before mutating AWS resources. For explicit
+     EC2, also check default VPC, EC2 vCPU quota, and AMI availability.
 
 Credential choices for first-time users:
 
@@ -87,28 +236,102 @@ Before final deployment confirmation:
 
 ```bash
 aws lightsail get-regions --include-availability-zones --output json
-bash scripts/pricing-estimate.sh --region <aws-region> --cloud-provider lightsail --domain-mode <user|route53>
+bash scripts/pricing-estimate.sh --region <aws-region> --cloud-provider lightsail --domain-mode route53
 bash scripts/pricing-estimate.sh --state ~/.dirextalk/nodes/<service_id>/state.json --write-state
 ```
 
 Record and report `cost_estimate` and billing reminders. Tell the operator that new AWS customer accounts generally receive `100-200 USD` in free credits, and that users who have not used Lightsail generally receive three months of free Lightsail usage. Coverage is account-specific; recommend an AWS Budget, AWS Billing Console review, and say AWS official real-time policy prevails. Check EC2-VPC Elastic IP quota before mutating AWS resources.
 
+Required first-time deployment confirmation. Fill in the concrete domain,
+profile, region, and cloud provider. Include the AWS credit/Lightsail trial
+sentence immediately before asking for approval. Accept a natural-language
+confirmation in their own words; do not require them to copy a fixed sentence
+or a command token.
+Accept the confirmation only when it clearly covers all of the following:
+
+- the intended Dirextalk deployment and final domain;
+- the AWS profile or account authority and selected region/provider; and
+- acknowledgement that billable resources can remain billed until destroyed.
+
+Short replies such as "confirm", "deploy", or "go ahead" are sufficient only
+when the immediately preceding deployment summary already states those facts
+and the user has not changed the plan. Otherwise ask one concise follow-up that
+identifies the missing fact. Record the semantic user decision in the operation
+report, then set any required machine-only environment flags yourself.
+
+```text
+Please confirm before I deploy. New AWS customer accounts generally receive 100-200 USD in free credits, and users who have not used Lightsail generally receive three months of free Lightsail usage. Credits and trials are account-specific, actual coverage must be verified in AWS Billing Console, and AWS official real-time policy prevails.
+
+For example: "I confirm deployment of <domain> in <region>; I authorize this AWS profile and understand the ongoing AWS charges."
+```
+
+If any prerequisite is missing, stop deployment and guide the user through that
+specific step before running `scripts/orchestrate.sh`.
+
 Required deployment env:
 
 ```bash
 DOMAIN=<final-domain>
-DOMAIN_MODE=user
 CONFIRM_DOMAIN_BINDING=1
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
 DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
-Use `DOMAIN_MODE=route53` only when the user authorizes AWS to manage the A
-record. If an existing A record points elsewhere, require
-`DIREXTALK_CONFIRM_DNS_OVERWRITE=1`. If Route53 delegation is needed, wait for
-authoritative DNS before continuing.
+Legacy/no-Agent server selection uses `dirextalk/message-server:latest`
+directly and does not query message-server GitHub Releases before
+provisioning. An Agent-enabled production deployment instead requires
+`DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE` to be an exact public stable
+`dirextalk/message-server:vX.Y.Z@sha256:<64-lowercase-hex>` reference; `latest`
+and prerelease/debug references fail closed.
+`MESSAGE_SERVER_IMAGE` is disabled unless
+`DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1` explicitly marks a
+debug/legacy deployment and remains separate from the production release
+selector. The independent `YingSuiAI/dirextalk-updater`
+host binary is downloaded only on a verified Ubuntu 22.04 or 24.04 x86_64 server from
+the deployer-pinned Release URL and must match the deployer-pinned SHA-256.
+The local deployer host does not need Go and does not SCP updater artifacts.
+The updater pin and checksum contract remains independent from the default
+message-server image selection.
+
+The updater does not install or run a daily GitHub release-discovery timer.
+After the direct-version migration, an authorized client/server release action
+creates the target-version job instead.
+
+The only legacy host adoption path is `scripts/adopt-legacy-node.sh`. It first
+requires a dry-run proof of the fixed d1 v0.15.2 Compose project, approved image
+digest, live health, binary version, and systemd Caddy identity. Mutation then
+requires an explicit semantic user confirmation of the reviewed adoption. The
+script's printed confirmation token is machine-only: the agent supplies it
+after that approval and never asks the user to copy it. It creates the updater-owned
+`/var/dirextalk-message-server` view without pulling or recreating the running
+container, installs the pinned updater with `caddy_mode=systemd`, and
+transactionally adds only `/_dirextalk/updater/v1/jobs/*` to Caddy. Never use
+this command to guess or normalize another legacy topology.
+
+Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
+`route53` only when the current AWS account contains a matching public hosted
+zone; otherwise it chooses `user` and gives manual A-record guidance after IP
+allocation. Explicit `DOMAIN_MODE=user|route53` remains an advanced automation
+override. If an existing Route53 A record points elsewhere, require
+an explicit semantic user confirmation that identifies the domain and the
+replacement target. Then set `DIREXTALK_CONFIRM_DNS_OVERWRITE=1` internally.
+If Route53 delegation is needed, wait for authoritative DNS before continuing.
 
 Default cloud provider is Lightsail. If no AWS region is configured in state, `AWS_DEFAULT_REGION`/`AWS_REGION`, or the AWS profile, the deployer recommends a default region from the local timezone and uses it in non-interactive runs; `DIREXTALK_DEFAULT_REGION` is the explicit deployer override. S1 queries Lightsail bundle availability and Lightsail availability zones before provisioning, but it does not query AWS Free Tier or credit usage. For manual Lightsail zone checks, use `aws lightsail get-regions --include-availability-zones --output json`; plain `aws lightsail get-regions` can omit availability-zone details. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone in the same region. If Lightsail has no usable bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; ask the operator to choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2` after reviewing the estimate. EC2 remains supported explicitly with `DIREXTALK_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
+
+EC2 user-data contains only a one-time 64-hex host-identity nonce. S3 freezes
+the complete bootstrap and stable EC2 client token locally before creating AWS
+resources, attaches the Elastic IP, verifies the remote nonce, pins the SSH
+host key, and performs all root actions over strict pinned SSH. For Agent on
+EC2, `AGENT_IMAGE` must be an
+immutable prerelease `tag@sha256` in the same-account, same-region private ECR
+repository named exactly `dirextalk-agent`. The caller must be root/IAM-user
+credentials eligible for a one-hour least-privilege federation session, or an
+assumed-role caller must explicitly set a same-account
+`DIREXTALK_ECR_PULL_ROLE_ARN`. Only the ECR Docker password crosses SSH stdin;
+the remote login uses `/run/dirextalk-ecr-auth`, then logs out, removes it, and
+proves it absent on success, failure, resume, and destroy. AWS/STS credentials
+and registry passwords must never enter user-data, `.env`, Compose, state,
+arguments, logs, reports, or the repository.
 
 ## Local Runtime Wiring
 
@@ -122,13 +345,12 @@ acp antigravity claudecode codex copilot cursor devin gemini iflow kimi opencode
 The supported local bridge is `dirextalk-connect`, installed from
 `dirextalk-connect@latest` by default or built from
 `https://github.com/YingSuiAI/dirextalk-connect.git`. The MCP tool surface is
-`dirextalk-mcp@latest`.
+served by the deployed message server's HTTP MCP endpoint.
 
 S6 writes service-scoped files under `~/.dirextalk/nodes/<service_id>/`:
 
 ```text
 credentials.json
-env
 dirextalk-connect/config.toml
 mcp/
 ```
@@ -136,7 +358,7 @@ mcp/
 The dirextalk-connect config must use a direct Matrix config, create the Matrix session
 through `agent.matrix_session.create` with `agent_token`, require `@agent:<server>`,
 and restrict sync/replies to the real `agent_room_id`. It must not use
-`DIREXTALK_CREDENTIALS_FILE`; MCP owns that variable.
+MCP credential-file environment variables.
 
 Key selectors:
 
@@ -147,51 +369,145 @@ DIREXTALK_AGENT_INSTALL=auto
 DIREXTALK_AGENT_INSTALL_MODE=recommended
 ```
 
-`DIREXTALK_AGENT_INSTALL=auto` installs `dirextalk-connect@latest` and
-`dirextalk-mcp@latest` into the current service directory, not into the npm
-global prefix, unless explicit binary/command overrides are set. S6 writes only
-the MCP snippet selected for the detected runtime: Codex, Cursor, OpenClaw, and
-Hermes have dedicated snippets; other MCP-capable supported runtimes use the
-generic `mcp-servers.json`. Generated MCP snippets launch the current service's
-`dirextalk-mcp` directly over stdio with the service credential file; MCP does not
-need a local daemon, HTTP proxy, or listening port. S6 installs the
+`DIREXTALK_AGENT_INSTALL=auto` installs `dirextalk-connect@latest` into the
+current service directory, not into the npm global prefix, unless explicit
+binary/command overrides are set. MCP capability is declared independently from
+bridge-agent support and follows the effective connect agent: session (`acp`,
+Claude Code, Codex, Copilot, Gemini, Kimi, OpenCode, and Qoder), host-managed
+(Antigravity, Cursor, and iFlow), and unsupported (Devin, Pi, Reasonix, and
+tmux). Detected OpenClaw and Hermes hosts are always host-managed because their
+native registries own MCP. They require the ACP bridge; a non-ACP
+`DIREXTALK_CONNECT_AGENT` override fails closed. To bridge directly to Codex,
+select `DIREXTALK_AGENT_PLATFORM=codex` instead.
+Unsupported and unknown effective agents fail closed. The protocol vocabulary
+retains `project` and `conditional`, but no current connect backend uses them.
+S6 never generates a generic fallback artifact. Dedicated manual artifacts are
+limited to registry entries that name one; no unconsumed MCP env artifact is
+generated. MCP does not need a local CLI, daemon, proxy, or listening
+port. When refreshing an existing service-scoped package, S6 keeps the current
+daemon running during the npm operation and lets the final `daemon install
+--force` perform the short handoff; an npm failure must not stop the working
+daemon. S6 installs the
 service-scoped `dirextalk-connect` daemon and records it as installed only after
 `daemon status` reports Running and recent logs show `dirextalk-connect is
 running`; logs that show agent CLI missing, login/trust failures, ACP startup
 failures, or agent offline state fail S6 so deploy does not report success
 prematurely. `recommend` writes files and prints commands only; `skip` writes
-credentials/env and configs only. OpenClaw
-and Hermes map to the generic ACP backend by default. Generated agent options
-write `mode = "yolo"` by default unless an explicit `mode` is supplied.
+credentials and configs only. S6 no longer writes the retired service-level
+`env` file. Host-runtime artifacts remain reviewable even when the effective
+connect agent differs. For host-managed MCP, S6 omits all canonical MCP fields
+from connect agent options. With `DIREXTALK_AGENT_INSTALL=auto`, OpenClaw is
+registered through `openclaw config patch --stdin`, then must pass
+`openclaw mcp probe <server-name> --json` before bridge startup. Its service
+token never appears in argv; inherited `OPENCLAW_CONFIG_PATH` and optional
+`DIREXTALK_OPENCLAW_PROFILE=<profile>` select the native scope. Hermes clones
+the current configured native profile into a marked service profile (or uses an
+explicit `DIREXTALK_HERMES_PROFILE`). An inherited `HERMES_HOME` that points
+back into the current node is replaced by the native Hermes home (`%LOCALAPPDATA%/hermes`
+on Windows, `$HOME/.hermes` elsewhere); use
+`DIREXTALK_HERMES_MCP_HOME` for a deliberate override. S6 stores the token through Hermes' native
+API, and requires a native live-tool probe. Both paths continue automatically
+only after their probe passes; no readiness flag is needed. Destroy removes the
+managed OpenClaw entry/token and any deployer-owned Hermes profile. Other
+host-managed backends without a safe native adapter record
+`operator_confirmed_host_managed`; only they use explicit
+`DIREXTALK_MCP_HOST_READY=1` confirmation. `recommend` and `skip` only write
+artifacts/guidance and retain `host_action_required` without running a host
+probe. Generated agent options
+write `mode = "yolo"` by default unless an explicit `mode` is supplied. When
+the optional private Agent runtime is enabled, read
+`references/agent-runtime.md` before S3: it requires an immutable prerelease
+digest, a separate Agent database/role, no public gRPC port, and an actual
+Message Server remote gRPC acceptance in S5. The generated Matrix platform
+options bind `approval_owner_id` to the same `@owner:<domain>` as `admin_from`.
+Agent AWS control is a separate explicit opt-in requiring
+`AGENT_ENABLE_AWS_CONTROL=true`, a digest-pinned reaper image, the literal
+`grpcs://worker-control.y1.dirextalk.ai:443` endpoint, and the EC2/private-ECR
+path. Initial deployment must use
+`AGENT_ENABLE_MANAGED_PREPARATION_AWS=false` with no endpoint service name and
+no Worker-AMI publication. This first runtime is identity-preview only. Next,
+`agent-worker-control-enable` creates the producer, persists its exact endpoint
+service name, and reconciles only the Agent container. Only then may the user
+complete the Foundation/signature workflow that creates the control role;
+`agent-worker-control-authorize` proves and authorizes that exact role. Finally,
+after the Worker AMI exists, run
+`bash scripts/orchestrate.sh agent-aws-import` with the exact frozen core
+inputs, `AGENT_ENABLE_MANAGED_PREPARATION_AWS=true`, and one strict Agent
+Worker-AMI publication file. The deployer durably freezes and validates exactly
+one regular non-symlink snapshot before pinned-SSH reconciliation; it advances
+state only after exact image/environment/mount/profile runtime readback,
+serializes both the local service and remote host transition, reconciles the
+Agent with no dependencies, restores the usable foundation on a failed restart,
+and recovers an ambiguous success by readback instead of blind replay. Unknown
+publication fields (including standard AWS credential fields),
+malformed/arbitrary content, symlinks, missing input, core drift, replacement,
+disable, or revert fail closed. The publication is mounted read-only and the
+Agent remains its final cryptographic `image_digest` verifier. Lightsail
+continues to reject AWS control; see `references/agent-runtime.md` for the exact
+two-phase, schema, input, private-ECR, and retry contract.
+For the retained PrivateLink producer, provide the Route 53 zone for
+`worker-control.y1.dirextalk.ai` and run
+`bash scripts/orchestrate.sh agent-worker-control-enable` before the Foundation
+role exists. The deployer records the resumable producer lifecycle in
+`ap-northeast-3`, creates only
+ACM/PrivateLink validation CNAME/TXT records (never a public A/AAAA), and
+requires a TCP-healthy private Agent TLS target plus the existing pinned-host
+Agent gRPC health contract before it marks the internal TLS/HTTP2 NLB endpoint
+service provisioned with acceptance on and no principals. Enable persists the
+exact endpoint service name and safely recreates only the Agent container with
+that environment; it does not transfer runtime secrets. After Foundation
+creates the exact same-account
+`arn:aws:iam::<account>:role/dirextalk-foundation-control` role, run
+`bash scripts/orchestrate.sh agent-worker-control-authorize`. That separate
+idempotent transition proves the singleton role before setting endpoint
+acceptance off and marking the producer ready. `agent-aws-import` requires this
+ready producer and renders its exact service name. Parent destroy blocks
+while Worker endpoint consumers remain and retains cleanup state until all
+owned resources and validation records are absent; see
+`references/agent-runtime.md`.
+Real approval-card validation must explicitly select a reviewed non-YOLO mode,
+for example `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"'`.
+For real provider-model acceptance on a nonce-verified Lightsail or EC2 host,
+an operator may supply one newly rotated local token file through
+`AGENT_MOUNTED_SECRET_NAME` and `AGENT_MOUNTED_SECRET_FILE` when the reviewed
+catalog has the matching `mounted:<name>` reference. The source must remain
+outside the repository and service work directory; it is streamed only on the
+nonce-verified, pinned SSH connection into the private Agent volume as UID
+65532 with mode 0400 and never enters state, user-data, arguments, or logs. Do
+not use a provider key exposed in chat.
 On Windows, Cursor wiring uses `%LOCALAPPDATA%\cursor-agent\agent.cmd`. If
 Cursor Agent CLI is not logged in, the operator must run `agent.cmd login`
 once; rerunning the deployer refreshes config and restarts the service-scoped
 daemon. Explicit `DIREXTALK_CURSOR_COMMAND`, `DIREXTALK_CURSOR_AGENT_COMMAND`,
-`DIREXTALK_CONNECT_AGENT_CMD`, `DIREXTALK_CURSOR_MODE`, and
-`DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides still win.
+`DIREXTALK_OPENCODE_COMMAND`, `DIREXTALK_CONNECT_AGENT_CMD`,
+`DIREXTALK_CURSOR_MODE`, and `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML` overrides
+still win except where a host-owned OpenClaw/Hermes scope would be bypassed.
+Hermes writes `mcp/hermes.md` but stores its managed profile under the native
+Hermes home, so ACP and native registration share exactly one profile. The
+default service profile is cloned from the active configured profile, preserving
+model/provider authentication; an explicit `DIREXTALK_HERMES_PROFILE` remains
+user-owned and only its managed server entry is removed on destroy. S6 never
+writes a generic Hermes JSON file.
 
-State/report fields include `mcp_config_dir`, `mcp_selected_config_type`,
-`mcp_selected_config`, selected runtime-specific fields such as
-`mcp_codex_config`, `mcp_cursor_config`, `mcp_openclaw_config`,
-`mcp_hermes_config`, or `mcp_json_config`, `mcp_command`, `mcp_package_dir`,
+State/report fields include `mcp_capability`, `mcp_config_dir`, `mcp_selected_config_type`,
+`mcp_selected_config`, token-free host-guidance fields such as
+`mcp_openclaw_config` and `mcp_hermes_config`, `mcp_transport`, `mcp_endpoint_url`,
 `credentials.status`, and `mcp.status`.
-Cursor MCP artifacts are generated as JSON for `.cursor/mcp.json` or
-`~/.cursor/mcp.json`, but the deployer does not write those locations by
-default because they contain machine-local credential paths. Cursor may require
-a full restart or MCP settings reload/enable after the operator adds the
-generated snippet.
+Codex and Cursor do not receive standalone token-bearing MCP artifacts. Session
+injection is owned by dirextalk-connect; Cursor remains host-managed.
 
-## Product Gates
+## Deployment Completion
 
-S7 green is not the final product-complete state. A new deployment is complete
-only after:
+A new deployment is complete when S0-S7 are green, the App domain and
+eight-digit app initialization code are ready for delivery, dirextalk-connect
+is wired to the real `agent_room_id`, and the automated runtime/MCP checks pass.
+The runtime checks cover the service-scoped connect daemon, HTTP MCP
+initialization, tool discovery, and a read-only tool call. Agent/MCP validation
+is non-polluting and does not auto-send a normal chat message.
 
-1. The user receives the App domain and eight-digit app initialization code.
-2. The user confirms App initialization.
-3. dirextalk-connect is wired to the real `agent_room_id`.
-4. MCP snippets exist and `dirextalk-mcp doctor --json` succeeds.
-5. Agent/MCP validation is non-polluting; prefer read-only checks and do not
-   auto-send a normal chat message.
+App initialization and a user's first real chat are subsequent product usage,
+not deployer gates. Do not ask the user to return and confirm them, and do not
+run a separate `confirm` command after deployment.
 
 Runtime verification commands:
 
@@ -203,17 +519,10 @@ DOMAIN=<DOMAIN> bash scripts/orchestrate.sh verify mcp_tools
 DOMAIN=<DOMAIN> bash scripts/orchestrate.sh verify runtime
 ```
 
-Manual confirmation commands:
-
-```bash
-DIREXTALK_CONFIRM_EVIDENCE="user completed app initialization" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm app_initialization
-DIREXTALK_CONFIRM_RUNTIME_PROBE=1 DIREXTALK_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" DOMAIN=<DOMAIN> bash scripts/orchestrate.sh confirm agent_mcp_runtime
-```
-
-Every `confirm` command requires `DIREXTALK_CONFIRM_EVIDENCE`; evidence must be
-concrete and at least 12 characters. For `agent_mcp_runtime`, first require
-`runtime_checks.summary.status=passed`, then set `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`
-only after a real runtime/channel probe sees the service-scoped MCP tools.
+Final delivery runs `verify runtime` automatically and requires
+`runtime_checks.summary.status=passed`. If a check fails, repair it and resume
+the same deployment; successful delivery needs no post-deployment action in the
+deployer.
 
 ## Status, Reports, And Delivery
 
@@ -230,17 +539,15 @@ service and reflect the Recovery summary:
 Operation reports are written as redacted `operation-report.json` artifacts.
 `scripts/orchestrate.sh report new_deploy` can regenerate a new deployment
 report. Reports must not include AWS secrets, access tokens, agent tokens,
-Matrix session tokens, or the eight-digit app initialization code. Because user
-evidence can contain secrets, confirmation evidence is redacted, including
-eight-or-more digit numeric strings.
+Matrix session tokens, or the eight-digit app initialization code.
 
-Reports include `user_confirmation_details`, `destroy.evidence`,
+Reports include automated phase and runtime-check evidence, `destroy.evidence`,
 `credentials.status`, `mcp.status`, `possible_remaining_billable_resources`,
 AWS resource IDs, EBS root volume evidence, the default 50 GiB gp3 root EBS
 volume size, billing reminders, and `cost_estimate`.
 
-Delivery must include App domain, eight-digit app initialization code, product
-gate status, `agent_room_id`, service directory, dirextalk-connect config, MCP config
+Delivery must include App domain, eight-digit app initialization code, deployment
+completion status, `agent_room_id`, service directory, dirextalk-connect config, MCP config
 paths, Matrix bridge user/device, AWS region, cloud provider, cloud instance/public IP, SSH path,
 state path, report path, AWS credit/Lightsail trial reminder, AWS official policy reminder,
 AWS Billing Console verification reminder, stop-billing reminder, and security reminder to delete
@@ -248,19 +555,31 @@ or disable temporary credentials and rotate/remove root access keys if used.
 
 ## Update, Reset, And Destroy
 
-Use `scripts/update.sh` for image-only refresh. It preserves infrastructure,
-TLS storage, local credentials, confirmations, runtime checks, dirextalk-connect daemon
+Use `bash scripts/update.sh` for image-only refresh. It preserves infrastructure,
+TLS storage, local credentials, runtime checks, dirextalk-connect daemon
 state, and MCP artifacts unless verification proves credentials were regenerated.
+It fails closed before SSH when state contains a private ECR Agent image because
+the update path does not acquire fresh short-lived registry authentication.
 
-Use `scripts/reset-app-data.sh` only with `DIREXTALK_RESET_APP_DATA_CONFIRM=1`.
+Use `bash scripts/reset-app-data.sh` only after an explicit semantic user
+confirmation that application data will be cleared. Set
+`DIREXTALK_RESET_APP_DATA_CONFIRM=1` internally; never make the user copy it.
+It fails closed before SSH when state contains a private ECR Agent image because
+the reset path does not acquire fresh short-lived registry authentication.
 It preserves the cloud instance, fixed public IP/static IP or Elastic IP, DNS, and Caddy TLS storage, clears
-application data, clears old user-confirmation/runtime-check evidence, sets
+application data, clears stale credential/runtime-check evidence, sets
 `connect_install_status=refresh_pending`, marks local refresh pending, and stops only the matching service-scoped dirextalk-connect daemon. The follow-up
 orchestrate run regenerates credentials and MCP snippets.
 
-Destroy uses `scripts/destroy.sh` on POSIX and `.\scripts\destroy.ps1` on
-Windows PowerShell. Destroy uses the same AWS identity boundary as deployment.
+Destroy uses `bash scripts/destroy.sh` on every supported local host. Require a
+clear natural-language user instruction to destroy or cancel the named service;
+do not require a copied confirmation string. Destroy uses the same AWS identity boundary as deployment.
 Root AWS access-key identity is allowed when the operator explicitly chose it.
+Before deleting an Agent-enabled EC2 instance, destroy best-effort uses the
+pinned host key to log out of the private registry, remove
+`/run/dirextalk-ecr-auth`, prove it absent, and remove any mounted Agent secret;
+the de-secreted result is written to `destroy.evidence`. Instance deletion
+remains the final wipe when pinned cleanup cannot run.
 Destroy stops and uninstalls only the service-scoped daemon whose WorkDir
 matches `~/.dirextalk/nodes/<service_id>/dirextalk-connect`, then removes recorded AWS
 resources and writes `destroy.evidence`. If `possible_remaining_billable_resources`

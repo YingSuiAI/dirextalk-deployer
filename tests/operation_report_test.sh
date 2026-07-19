@@ -6,8 +6,10 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 source "$ROOT/tests/lib/json_test.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+export MSYS_NO_PATHCONV=1
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 mkdir -p "$HOME"
 
 assert_file_exists() {
@@ -41,21 +43,30 @@ json_build object \
   agent_token=AGENT_SECRET \
   'agent_room_id=!room:report.example.test' \
   agent_node_id=node-report \
+  agent_runtime=openclaw \
   agent_service_id=report.example.test \
   "agent_service_dir=$service_dir" \
   "agent_credentials_file=$service_dir/credentials.json" \
   "connect_config=$service_dir/dirextalk-connect/config.toml" \
   connect_agent=acp \
   connect_npm_package=dirextalk-connect@latest \
-  mcp_npm_package=dirextalk-mcp@latest \
+  'server_release={"source":"default_latest","version":"latest","image":"dirextalk/message-server:latest","digest":"","image_ref":"dirextalk/message-server:latest","manifest_digest":""}' \
+  'updater_release={"version":"v1.0.8","commit":"1efa90fd776d355d4cd898bcdb4922267b03d180","sha256":"04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b","asset":"dirextalk-updater-linux-amd64","os":"linux","arch":"amd64","ubuntu_version":"24.04"}' \
+  mcp_transport=http \
+  mcp_capability=host-managed \
+  mcp_install_status=host_probe_passed \
+  mcp_host_probe_status=passed \
+  mcp_endpoint_url=https://report.example.test/mcp \
   mcp_server_name=dirextalk-report-example-test \
   "mcp_config_dir=$service_dir/mcp" \
-  "mcp_codex_config=$service_dir/mcp/codex.toml" \
   "mcp_openclaw_config=$service_dir/mcp/openclaw.md" \
-  "mcp_hermes_config=$service_dir/mcp/hermes.mcp.json" \
-  'mcp_doctor_command=DIREXTALK_CREDENTIALS_FILE=<redacted> dirextalk-mcp doctor --json' \
+  mcp_selected_config_type=openclaw \
+  "mcp_selected_config=$service_dir/mcp/openclaw.md" \
+  "mcp_hermes_config=$service_dir/mcp/hermes.md" \
+  'mcp_doctor_command=DOMAIN=report.example.test bash scripts/orchestrate.sh verify mcp_doctor' \
   phase=S7_VERIFY_E2E \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
+  'runtime_checks={"summary":{"status":"passed"},"connect_daemon":{"status":"passed"},"mcp_doctor":{"status":"passed"},"mcp_tools":{"status":"passed"},"mcp_smoke":{"status":"passed"}}' \
   'user_confirmations={"app_initialization":{"status":"confirmed","ts":"2026-06-28T01:02:03Z","evidence":"user completed app initialization with code 12345678; old screenshot showed code 87654321"},"real_chat":{"status":"confirmed","ts":"2026-06-28T01:03:04Z","evidence":"user saw the agent reply; token ACCESS_SECRET stayed local"},"agent_mcp_runtime":{"status":"confirmed","ts":"2026-06-28T01:04:05Z","evidence":"runtime channel probe confirmed with agent token AGENT_SECRET","runtime_summary_status":"passed","runtime_probe_confirmed":true}}' \
   'resources={"instance_id":"i-report","root_volume_id":"vol-report-root","public_ip":"203.0.113.42","eip_id":"eipalloc-report","route53_zone_id":"ZREPORT","route53_zone_name":"report.example.test","route53_zone_created_by_deployer":"true","route53_existing_a_value":"198.51.100.20","route53_pending_a_value":"203.0.113.42","route53_overwrite_confirmed":"true","sg_id":"sg-report","key_name":"dirextalk-report"}' > "$state"
 
@@ -64,7 +75,7 @@ report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p
 assert_file_exists "$report_path"
 assert_not_contains_secret "$report_path"
 
-json_test_check "$report_path" "data.operation_type === 'new_deploy' && data.status === 'automated_gates_complete_user_confirmation_pending' && data.domain === 'report.example.test' && data.delivery.app_domain === 'report.example.test' && !('service_url' in data.delivery) && data.delivery.init_code_status === 'available_in_state_password_field_redacted' && data.delivery.init_code_secret_redacted === true && data.delivery.product_completion_status === 'automated_gates_complete_user_confirmation_pending' && data.agent.node_id === 'node-report' && data.agent.room_id === '!room:report.example.test' && data.agent.runtime === 'unknown' && data.gates.automated.S7_VERIFY_E2E === 'done' && data.gates.user_confirmation.app_initialization === 'confirmed' && data.gates.user_confirmation.real_chat === 'confirmed' && data.gates.user_confirmation.agent_mcp_runtime === 'confirmed' && data.gates.user_confirmation_details.app_initialization.status === 'confirmed' && data.gates.user_confirmation_details.app_initialization.ts === '2026-06-28T01:02:03Z' && data.gates.user_confirmation_details.app_initialization.evidence === 'user completed app initialization with code <redacted>; old screenshot showed code <redacted>' && data.gates.user_confirmation_details.real_chat.evidence === 'user saw the agent reply; token <redacted> stayed local' && data.gates.user_confirmation_details.agent_mcp_runtime.evidence === 'runtime channel probe confirmed with agent token <redacted>' && data.gates.user_confirmation_details.agent_mcp_runtime.runtime_summary_status === 'passed' && data.gates.user_confirmation_details.agent_mcp_runtime.runtime_probe_confirmed === true && data.credentials.values_redacted === true && data.security.secrets_included === false && data.mcp.package === 'dirextalk-mcp@latest' && data.resources.route53_zone_id === 'ZREPORT' && data.resources.route53_zone_name === 'report.example.test' && data.resources.route53_existing_a_value === '198.51.100.20' && data.resources.route53_pending_a_value === '203.0.113.42' && data.resources.route53_overwrite_confirmed === 'true' && data.resources.root_volume_id === 'vol-report-root' && data.billing.recorded_billable_resources.includes('EC2 i-report') && data.billing.recorded_billable_resources.includes('EBS root volume vol-report-root') && data.billing.recorded_billable_resources.includes('public IPv4 203.0.113.42') && data.billing.recorded_billable_resources.includes('Route53 hosted zone ZREPORT') && data.security.root_access_key_allowed === true && data.security.temporary_iam_cleanup_required === true && data.security.temporary_iam_cleanup_action.includes('delete or disable')"
+json_test_check "$report_path" "data.operation_type === 'new_deploy' && data.status === 'deployment_complete' && data.domain === 'report.example.test' && data.delivery.app_domain === 'report.example.test' && !('service_url' in data.delivery) && data.delivery.init_code_status === 'available_in_state_password_field_redacted' && data.delivery.init_code_secret_redacted === true && data.delivery.product_completion_status === 'deployment_complete' && data.agent.node_id === 'node-report' && data.agent.room_id === '!room:report.example.test' && data.agent.runtime === 'openclaw' && data.release.source === 'default_latest' && data.release.version === 'latest' && data.release.digest === '' && data.release.image_ref === 'dirextalk/message-server:latest' && data.release.manifest_digest === '' && data.updater_release.version === 'v1.0.8' && data.updater_release.commit === '1efa90fd776d355d4cd898bcdb4922267b03d180' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b' && data.updater_release.os === 'linux' && data.updater_release.arch === 'amd64' && data.updater_release.ubuntu_version === '24.04' && data.gates.automated.S7_VERIFY_E2E === 'done' && !('user_confirmation' in data.gates) && !('user_confirmation_details' in data.gates) && data.credentials.values_redacted === true && data.security.secrets_included === false && data.mcp.transport === 'http' && data.mcp.capability === 'host-managed' && data.mcp.install_status === 'host_probe_passed' && data.mcp.host_probe_status === 'passed' && data.mcp.selected_config_type === 'openclaw' && data.mcp.selected_config.endsWith('/mcp/openclaw.md') && data.mcp.endpoint_url === 'https://report.example.test/mcp' && data.resources.route53_zone_id === 'ZREPORT' && data.resources.route53_zone_name === 'report.example.test' && data.resources.route53_existing_a_value === '198.51.100.20' && data.resources.route53_pending_a_value === '203.0.113.42' && data.resources.route53_overwrite_confirmed === 'true' && data.resources.root_volume_id === 'vol-report-root' && data.billing.recorded_billable_resources.includes('EC2 i-report') && data.billing.recorded_billable_resources.includes('EBS root volume vol-report-root') && data.billing.recorded_billable_resources.includes('public IPv4 203.0.113.42') && data.billing.recorded_billable_resources.includes('Route53 hosted zone ZREPORT') && data.security.root_access_key_allowed === true && data.security.temporary_iam_cleanup_required === true && data.security.temporary_iam_cleanup_action.includes('delete or disable')"
 json_test_check "$report_path" "data.mcp && !('daemon_install_status' in data.mcp) && !('daemon_url' in data.mcp) && !('daemon_status' in data.mcp) && !('daemon_proxy' in data.mcp)"
 
 fakebin="$tmp/bin"
@@ -72,6 +83,9 @@ mkdir -p "$fakebin"
 cat > "$fakebin/aws" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+printf 'aws' >> "$AWS_CALLS"
+printf ' %q' "$@" >> "$AWS_CALLS"
+printf '\n' >> "$AWS_CALLS"
 case "${1:-} ${2:-}" in
   "sts get-caller-identity")
     case "$*" in
@@ -115,12 +129,21 @@ EOF
 chmod 700 "$fakebin/dirextalk-connect"
 
 mkdir -p "$service_dir/dirextalk-connect"
+export AWS_CALLS="$tmp/destroy-aws.calls"
+: > "$AWS_CALLS"
 PATH="$fakebin:$PATH" STATUS_WORK_DIR="$service_dir/dirextalk-connect" bash "$ROOT/scripts/destroy.sh" "$state" >/dev/null
 destroy_report="$HOME/.dirextalk/reports/report.example.test/operation-report.json"
 assert_file_exists "$destroy_report"
 assert_not_contains_secret "$destroy_report"
 
 json_test_check "$destroy_report" "data.operation_type === 'destroy' && data.status === 'destroy_processed' && data.domain === 'report.example.test' && data.resources.instance_id === 'i-report' && data.resources.root_volume_id === 'vol-report-root' && data.resources.eip_id === 'eipalloc-report' && data.security.secrets_included === false && data.destroy.user_managed_dns_not_removed === true && data.destroy.purchased_domain_not_removed === true && data.destroy.evidence.ec2_instance.status === 'terminated' && data.destroy.evidence.ebs_root_volume.status === 'deleted' && data.destroy.evidence.elastic_ip.status === 'released' && data.destroy.evidence.security_group.status === 'deleted' && data.destroy.evidence.key_pair.status === 'deleted' && data.destroy.evidence.route53_a_record.status === 'deleted' && data.destroy.evidence.route53_hosted_zone.status === 'deleted' && data.billing.destroy_cleanup_status === 'no_recorded_billable_resource_residue' && data.billing.possible_remaining_billable_resources.length === 0"
+grep -q '^aws route53 change-resource-record-sets --hosted-zone-id ZREPORT' "$AWS_CALLS"
+grep -q '^aws route53 delete-hosted-zone --id ZREPORT$' "$AWS_CALLS"
+case "$(uname -s 2>/dev/null || printf unknown)" in
+  *MINGW*|*MSYS*|*CYGWIN*)
+    grep -Eq -- '--change-batch file://[A-Za-z]:/' "$AWS_CALLS"
+    ;;
+esac
 
 residual_dir="$HOME/.dirextalk/nodes/residual.example.test"
 mkdir -p "$residual_dir"

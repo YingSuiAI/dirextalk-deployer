@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cross-platform:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run fast deployer tests
+        shell: bash
+        run: npm run test:quick
+
+      - name: Check Bash syntax
+        shell: bash
+        run: find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+  ubuntu-release:
+    name: Ubuntu release integration
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run stage deployer tests
+        shell: bash
+        run: npm run test:stage
+
+      - name: Run exhaustive full tests on explicit request
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: npm run test:full
+
+      - name: Check Bash syntax
+        shell: bash
+        run: find scripts tests -name '*.sh' -print0 | xargs -0 -n1 bash -n

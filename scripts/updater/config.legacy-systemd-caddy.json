@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "state_dir": "/var/lib/dirextalk-updater",
+  "socket_path": "/run/dirextalk-updater/http.sock",
+  "control_token_file": "/etc/dirextalk-updater/control-token",
+  "caddy_mode": "systemd"
+}

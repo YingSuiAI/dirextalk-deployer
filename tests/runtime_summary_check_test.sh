@@ -8,33 +8,21 @@ tmp=$(mktemp -d "$ROOT/.tmp-runtime-summary.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 mkdir -p "$HOME"
 
 fakebin="$tmp/bin"
 mkdir -p "$fakebin"
 
-windows_path() {
-  local path=$1 drive rest
-  case "$path" in
-    /mnt/[A-Za-z]/*)
-      drive=${path#/mnt/}
-      drive=${drive%%/*}
-      rest=${path#/mnt/$drive/}
-      printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-      ;;
-    /[A-Za-z]/*)
-      drive=${path#/}
-      drive=${drive%%/*}
-      rest=${path#/$drive/}
-      printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-      ;;
-    *) printf '%s\n' "$path" ;;
-  esac
-}
-
 cat > "$fakebin/dirextalk-connect" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "logs" ]; then
+  [ "${3:-}" = "--service-name" ]
+  [ "${4:-}" = "runtime-summary.example.test" ]
+  printf '%s\n' "${CONNECT_LOG_OUTPUT:-}"
+  exit 0
+fi
 [ "${1:-}" = "daemon" ]
 [ "${2:-}" = "status" ]
 [ "${3:-}" = "--service-name" ]
@@ -49,86 +37,69 @@ STATUS
 EOF
 chmod 700 "$fakebin/dirextalk-connect"
 
-cat > "$fakebin/dirextalk-mcp" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-if [ "${DIREXTALK_CREDENTIALS_FILE:-}" != "${EXPECTED_CREDENTIALS_FILE:-}" ]; then
-  echo "wrong DIREXTALK_CREDENTIALS_FILE" >&2
-  exit 1
-fi
-
-if [ "${1:-}" = "doctor" ] && [ "${2:-}" = "--json" ]; then
-  printf '{"ok":true,"domain":"runtime-summary.example.test","agent_room_id":"!agent:runtime-summary.example.test","token":"redacted"}\n'
-  exit 0
-fi
-
-echo "fake dirextalk-mcp executable should only be run directly for doctor" >&2
-exit 1
-EOF
-chmod 700 "$fakebin/dirextalk-mcp"
-
-fake_pkg="$fakebin/node_modules/dirextalk-mcp"
-mkdir -p "$fake_pkg/dist" "$fake_pkg/node_modules/@modelcontextprotocol/sdk/dist/esm/client"
-cat > "$fake_pkg/package.json" <<'EOF'
-{"name":"dirextalk-mcp","version":"0.0.0","type":"module"}
-EOF
-cat > "$fake_pkg/dist/index.js" <<'EOF'
-#!/usr/bin/env node
-throw new Error("fake MCP server entry should be launched by the SDK transport only");
-EOF
-cat > "$fake_pkg/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js" <<'EOF'
-export class StdioClientTransport {
-  constructor(options) {
-    this.options = options;
-  }
-}
-EOF
-cat > "$fake_pkg/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js" <<'EOF'
-export class Client {
-  async connect(transport) {
-    const serverEntry = String(transport?.options?.args?.[0] || "").replace(/\\/g, "/");
-    if (!serverEntry.endsWith("dist/index.js")) {
-      throw new Error("SDK transport did not receive dirextalk-mcp dist/index.js");
-    }
-    if (transport.options.env.DIREXTALK_CREDENTIALS_FILE !== process.env.EXPECTED_CREDENTIALS_FILE) {
-      throw new Error("wrong DIREXTALK_CREDENTIALS_FILE");
-    }
-  }
-  async listTools() {
-    return {
-      tools: [
-        { name: "search_rooms" },
-        { name: "send_message" },
-        { name: "list_messages" }
-      ]
-    };
-  }
-  async close() {}
-}
-EOF
-
-mcp_command=dirextalk-mcp
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) use_windows_mcp=1 ;;
-  *) use_windows_mcp=0 ;;
-esac
-if [ "$use_windows_mcp" = "1" ] || ! command -v node >/dev/null 2>&1; then
-  mcp_command="$fakebin/dirextalk-mcp"
-fi
-
 cat > "$fakebin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+
 body_path=""
 write_code=0
+args="$*"
+secret_headers=""
+direct_headers=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) body_path=$2; shift 2 ;;
     -w) write_code=1; shift 2 ;;
+    -H)
+      case "${2:-}" in
+        @*) secret_headers=$(cat "${2#@}") ;;
+        *) direct_headers+="${2:-}"$'\n' ;;
+      esac
+      shift 2
+      ;;
     *) shift ;;
   esac
 done
-payload='{"room_id":"!agent:runtime-summary.example.test","messages":[]}'
+
+case "$args" in
+  *"https://runtime-summary.example.test/mcp"*)
+    case "$secret_headers" in
+      *"Authorization: Bearer AGENT_TOKEN_RUNTIME"*) ;;
+      *)
+        echo "missing or wrong Authorization header: $args" >&2
+        exit 1
+        ;;
+    esac
+    case "$direct_headers" in
+      *"MCP-Protocol-Version: 2025-06-18"*) ;;
+      *)
+        echo "missing MCP protocol version header" >&2
+        exit 1
+        ;;
+    esac
+    case "$args" in *AGENT_TOKEN_RUNTIME*) echo "token leaked into curl argv" >&2; exit 1 ;; esac
+    case "$args" in
+      *'"method":"initialize"'*)
+        payload='{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"dirextalk-message-server","version":"test"},"capabilities":{"tools":{}}}}'
+        ;;
+      *'"method":"tools/list"'*)
+        payload='{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"search_rooms"},{"name":"send_message"},{"name":"list_messages"}]}}'
+        ;;
+      *'"method":"tools/call"'*'"name":"dirextalk_messages_list"'*'"room_id":"!agent:runtime-summary.example.test"'*)
+        payload='{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"[]"}],"isError":false}}'
+        ;;
+      *)
+        echo "unexpected MCP body: $args" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  *)
+    echo "unexpected curl URL: $args" >&2
+    exit 1
+    ;;
+esac
+
 if [ -n "$body_path" ]; then
   printf '%s\n' "$payload" > "$body_path"
 else
@@ -144,10 +115,6 @@ credentials="$service_dir/credentials.json"
 config="$service_dir/dirextalk-connect/config.toml"
 : > "$credentials"
 : > "$config"
-expected_credentials="$credentials"
-if command -v cygpath >/dev/null 2>&1; then
-  expected_credentials=$(cygpath -m "$expected_credentials")
-fi
 state="$service_dir/state.json"
 json_build object \
   run_id=runtime-summary-test \
@@ -159,8 +126,9 @@ json_build object \
   "agent_service_dir=$service_dir" \
   "agent_credentials_file=$credentials" \
   "mcp_credentials_file=$credentials" \
-  "mcp_command=$mcp_command" \
+  mcp_endpoint_url=https://runtime-summary.example.test/mcp \
   agent_token=AGENT_TOKEN_RUNTIME \
+  agent_node_id=runtime-node \
   'agent_room_id=!agent:runtime-summary.example.test' \
   "connect_config=$config" \
   connect_binary=dirextalk-connect \
@@ -168,17 +136,28 @@ json_build object \
   'phases={"S0_PREREQ_AWS":{"status":"done"},"S1_PREFLIGHT":{"status":"done"},"S2_DOMAIN":{"status":"done"},"S3_PROVISION":{"status":"done"},"S4_BOOTSTRAP_STACK":{"status":"done"},"S5_INIT_TOKENS":{"status":"done"},"S6_WIRE_LOCAL":{"status":"done"},"S7_VERIFY_E2E":{"status":"done"}}' \
   'resources={}' > "$state"
 
-verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
+verify_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
 printf '%s\n' "$verify_output" | grep -q 'verified runtime checks: passed'
 
-json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'passed' && data.runtime_checks.summary.checks.mcp_doctor === 'passed' && data.runtime_checks.summary.checks.mcp_tools === 'passed' && data.runtime_checks.summary.checks.mcp_smoke === 'passed' && !data.user_confirmations?.agent_mcp_runtime"
+json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'passed' && data.runtime_checks.summary.checks.mcp_doctor === 'passed' && data.runtime_checks.summary.checks.mcp_tools === 'passed' && data.runtime_checks.summary.checks.mcp_smoke === 'passed'"
+json_test_check "$state" "data.runtime_checks.mcp_doctor.protocol_version === '2025-06-18' && data.runtime_checks.mcp_doctor.server_name === 'dirextalk-message-server' && data.runtime_checks.mcp_doctor.tools_capable === true && data.runtime_checks.mcp_smoke.action === 'tools/call' && data.runtime_checks.mcp_smoke.room_id === '!agent:runtime-summary.example.test' && data.runtime_checks.mcp_smoke.response_content_type === 'array'"
 
 report_output=$(DIREXTALK_WORKDIR="$service_dir" bash "$ROOT/scripts/orchestrate.sh" report new_deploy)
 report_path=$(printf '%s\n' "$report_output" | sed -nE 's/^operation report: //p' | tail -n 1)
 json_test_check "$report_path" "data.runtime_checks.summary.status === 'passed'"
 
 set +e
-DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime > "$tmp/runtime-fail.out" 2>&1
+DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" CONNECT_LOG_OUTPUT='ACP error (ACP_SESSION_INIT_FAILED): session metadata is missing.' bash "$ROOT/scripts/orchestrate.sh" verify connect_daemon > "$tmp/runtime-agent-error.out" 2>&1
+agent_error_rc=$?
+set -e
+[ "$agent_error_rc" -ne 0 ] || {
+  echo "connect daemon verification must fail when daemon logs report an ACP agent error" >&2
+  exit 1
+}
+json_test_check "$state" "data.runtime_checks.connect_daemon.status === 'failed' && data.runtime_checks.connect_daemon.agent_error.includes('ACP_SESSION_INIT_FAILED')"
+
+set +e
+DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime > "$tmp/runtime-fail.out" 2>&1
 fail_rc=$?
 set -e
 [ "$fail_rc" -ne 0 ] || {
@@ -189,7 +168,7 @@ json_test_check "$state" "data.runtime_checks.summary.status === 'failed' && dat
 
 json_mutate "$state" set-string connect_install_policy recommend
 json_mutate "$state" set-string connect_install_status recommend
-verify_recommend_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" EXPECTED_CREDENTIALS_FILE="$expected_credentials" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
+verify_recommend_output=$(DIREXTALK_WORKDIR="$service_dir" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$HOME/.dirextalk/nodes/other.example.test/dirextalk-connect" bash "$ROOT/scripts/orchestrate.sh" verify runtime)
 printf '%s\n' "$verify_recommend_output" | grep -q 'verified runtime checks: passed'
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.summary.failed_count === 0 && data.runtime_checks.summary.checks.connect_daemon === 'manual_pending' && data.runtime_checks.connect_daemon.status === 'manual_pending' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"
 

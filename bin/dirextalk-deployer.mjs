@@ -9,12 +9,10 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const packageJson = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8"));
 const packageName = packageJson.name || "dirextalk-deployer";
 const packageVersion = packageJson.version || "0.0.0";
-
 const skillFiles = [
   "AGENTS.md",
   "LICENSE",
   "README.md",
-  "README_zh.md",
   "SKILL.md",
   "agents",
   "bin",
@@ -75,6 +73,8 @@ const aliases = {
   "agy": "antigravity"
 };
 
+const gitForWindowsRequiredMessage = "Dirextalk skill installation on Windows uses Git Bash only. Install Git for Windows from https://git-scm.com/download/win, open Git Bash, and rerun this command.";
+
 main();
 
 function main() {
@@ -87,9 +87,62 @@ function main() {
   if (area !== "skill") usage(1);
   if (!["install", "update", "refresh"].includes(command)) usage(1);
 
+  requireGitBashForWindowsSkillCommand();
   const options = parseArgs(rawArgs);
   const result = runSkillCommand(command, options);
   console.log(JSON.stringify(result, null, 2));
+}
+
+function requireGitBashForWindowsSkillCommand() {
+  if (process.platform !== "win32") return;
+
+  if (!/^MINGW/i.test(process.env.MSYSTEM || "")) {
+    throwUserError(gitForWindowsRequiredMessage);
+  }
+  const git = spawnSync("git", ["--version"], { encoding: "utf8" });
+  const gitExecPath = spawnSync("git", ["--exec-path"], { encoding: "utf8" });
+  const cygpath = spawnSync("cygpath", ["-m", "/"], { encoding: "utf8" });
+  const gitVersion = `${git.stdout || ""}${git.stderr || ""}`;
+  const gitRoot = gitForWindowsRoot(gitExecPath.stdout);
+  const toolPaths = [
+    process.env.EXEPATH,
+    firstWindowsPathOnPath("bash"),
+    firstWindowsPathOnPath("git"),
+    firstWindowsPathOnPath("cygpath")
+  ];
+  if (
+    git.status !== 0 ||
+    gitExecPath.status !== 0 ||
+    cygpath.status !== 0 ||
+    !/\.windows\./i.test(gitVersion) ||
+    !gitRoot ||
+    normalizeWindowsPath(process.env.EXEPATH) !== `${gitRoot}/bin` ||
+    toolPaths.some((toolPath) => !isPathInsideWindowsRoot(toolPath, gitRoot))
+  ) {
+    throwUserError(gitForWindowsRequiredMessage);
+  }
+}
+
+function gitForWindowsRoot(gitExecPath) {
+  const normalized = normalizeWindowsPath(gitExecPath);
+  const suffix = "/mingw64/libexec/git-core";
+  return normalized.endsWith(suffix) ? normalized.slice(0, -suffix.length) : null;
+}
+
+function firstWindowsPathOnPath(command) {
+  const result = spawnSync("where.exe", [command], { encoding: "utf8" });
+  if (result.status !== 0) return null;
+  return result.stdout.split(/\r?\n/).find((candidate) => candidate.trim()) || null;
+}
+
+function normalizeWindowsPath(value) {
+  if (!value) return "";
+  return String(value).trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+function isPathInsideWindowsRoot(candidate, root) {
+  const normalized = normalizeWindowsPath(candidate);
+  return normalized.startsWith(`${root}/`);
 }
 
 function usage(exitCode) {
@@ -218,7 +271,7 @@ function resolveTarget({ agent, scope, project, home }) {
 }
 
 function installSkill({ agent, scope, target, dryRun, force }) {
-  if (dryRun) return { action: "would-install", fileCount: skillFiles.length };
+  if (dryRun) return { action: "would-install", fileCount: skillFiles.length, runtimeDependencyCount: 0 };
 
   let action = "installed";
   if (existsSync(target)) {
@@ -236,7 +289,6 @@ function installSkill({ agent, scope, target, dryRun, force }) {
     if (!existsSync(source)) continue;
     copyRecursive(source, path.join(target, relative));
   }
-
   const manifest = {
     package: packageName,
     version: packageVersion,

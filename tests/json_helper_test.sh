@@ -12,6 +12,75 @@ JSON="$NODE_BIN scripts/json.mjs"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+# Git Bash normally rewrites /c and /tmp arguments for Windows executables.
+# The deployer must not depend on that implicit rewrite because Hermes and
+# other parent runtimes may export MSYS_NO_PATHCONV=1.
+MSYS_NO_PATHCONV=1 json_build object path_boundary=explicit > "$tmp/no-path-conversion.json"
+[ "$(MSYS_NO_PATHCONV=1 NODE=/missing/node json_get "$tmp/no-path-conversion.json" path_boundary)" = "explicit" ]
+[ -n "${DIREXTALK_JSON_WORKER_PORT:-}" ]
+(
+  json_worker_disconnect
+  exec 10>"$tmp/reserved-worker-fd-10"
+  exec 11>"$tmp/reserved-worker-fd-11"
+  json_worker_connect
+  [ "$DIREXTALK_JSON_WORKER_SOCKET" -gt 11 ]
+  [ "$(NODE=/missing/node json_get "$tmp/no-path-conversion.json" path_boundary)" = "explicit" ]
+  json_worker_disconnect
+  : >&10
+  : >&11
+)
+parallel_dir="$tmp/parallel-worker"
+mkdir -p "$parallel_dir"
+parallel_pids=
+parallel_index=1
+while [ "$parallel_index" -le 20 ]; do
+  printf '{"value":"%s"}\n' "$parallel_index" > "$parallel_dir/$parallel_index.json"
+  (
+    json_get "$parallel_dir/$parallel_index.json" value > "$parallel_dir/$parallel_index.out"
+  ) &
+  parallel_pids="$parallel_pids $!"
+  parallel_index=$((parallel_index + 1))
+done
+parallel_status=0
+for parallel_pid in $parallel_pids; do
+  wait "$parallel_pid" || parallel_status=1
+done
+[ "$parallel_status" -eq 0 ]
+parallel_index=1
+while [ "$parallel_index" -le 20 ]; do
+  [ "$(cat "$parallel_dir/$parallel_index.out")" = "$parallel_index" ]
+  parallel_index=$((parallel_index + 1))
+done
+(
+  cd "$tmp"
+  [ "$(NODE=/missing/node json_get no-path-conversion.json path_boundary)" = "explicit" ]
+)
+(
+  unset DIREXTALK_JSON_WORKER_SOCKET
+  DIREXTALK_JSON_WORKER_TOKEN=invalid-test-token
+  if json_get "$tmp/no-path-conversion.json" path_boundary >/dev/null 2>&1; then
+    echo "JSON worker must reject an invalid loopback token" >&2
+    exit 1
+  fi
+)
+
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/node-no-secret-argv" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\${NODE_ARGV_LOG:?}"
+exec "$NODE_BIN" "\$@"
+EOF
+chmod 700 "$tmp/bin/node-no-secret-argv"
+(
+  unset DIREXTALK_JSON_WORKER_PORT DIREXTALK_JSON_WORKER_TOKEN DIREXTALK_JSON_WORKER_SOCKET
+  NODE_ARGV_LOG="$tmp/node-argv.log" NODE="$tmp/bin/node-no-secret-argv" json_build object agent_token=SECRET_ARGV_SENTINEL > "$tmp/argv-safe.json"
+)
+if grep -q 'SECRET_ARGV_SENTINEL' "$tmp/node-argv.log"; then
+  echo "JSON secret values must be delivered over stdin, not Node argv" >&2
+  exit 1
+fi
+json_check "$tmp/argv-safe.json" "data.agent_token === 'SECRET_ARGV_SENTINEL'"
+
 cat > "$tmp/input.json" <<'JSON'
 {
   "domain": "im.test",
@@ -46,5 +115,54 @@ $JSON mutate "$tmp/state.json" set-string resources.public_ip 203.0.113.10
 
 $JSON mutate "$tmp/state.json" set-json runtime_checks.summary '{"status":"failed","checks":{"mcp":"failed"}}'
 [ "$($JSON get "$tmp/state.json" runtime_checks.summary.status)" = "failed" ]
+
+cat > "$tmp/lightsail-bundles.json" <<'JSON'
+{
+  "bundles": [
+    {
+      "bundleId": "nano_3_1",
+      "price": 5,
+      "ramSizeInGb": 0.5,
+      "diskSizeInGb": 20,
+      "transferPerMonthInGb": 1024,
+      "cpuCount": 2,
+      "supportedPlatforms": ["LINUX_UNIX"],
+      "isActive": true
+    },
+    {
+      "bundleId": "small_2_0",
+      "price": 12,
+      "ramSizeInGb": 2,
+      "diskSizeInGb": 60,
+      "transferPerMonthInGb": 3072,
+      "cpuCount": 1,
+      "supportedPlatforms": ["LINUX_UNIX"],
+      "isActive": false
+    },
+    {
+      "bundleId": "small_3_0",
+      "price": 12,
+      "ramSizeInGb": 2,
+      "diskSizeInGb": 60,
+      "transferPerMonthInGb": 3072,
+      "cpuCount": 2,
+      "supportedPlatforms": ["LINUX_UNIX"],
+      "isActive": true
+    }
+  ]
+}
+JSON
+[ "$($JSON lightsail-bundle-select "$tmp/lightsail-bundles.json" 12 2 60)" = $'small_3_0\t12\t2\t60\t3072\t2' ]
+[ "$($JSON lightsail-bundle-select "$tmp/lightsail-bundles.json" 12 2 60 nano_3_1)" = $'nano_3_1\t5\t0.5\t20\t1024\t2' ]
+[ "$($JSON lightsail-bundle-select "$tmp/lightsail-bundles.json" 12 2 60 small_2_0)" = $'small_3_0\t12\t2\t60\t3072\t2' ]
+
+if $JSON build mcp-messages-list '!room:im.test' > "$tmp/legacy-mcp-action.json" 2>/dev/null; then
+  echo "retired mcp-messages-list body action must not be generated" >&2
+  exit 1
+fi
+if $JSON build mcp-http-json-config server https://service.example.test/mcp token > "$tmp/legacy-mcp-config.json" 2>/dev/null; then
+  echo "retired token-bearing standalone MCP config action must not be generated" >&2
+  exit 1
+fi
 
 echo "json helper ok"

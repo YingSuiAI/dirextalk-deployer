@@ -1,5 +1,17 @@
 # Deployment Workflow
 
+## Conversation Confirmation Policy
+
+For every user-facing confirmation in this workflow, accept a clear
+natural-language confirmation in the user's own words. Do not require the user
+to copy a fixed sentence, an environment variable, or a machine-generated
+token. A short confirmation such as "confirm" or "go ahead" is sufficient when
+the immediately preceding summary names the affected resource and its
+consequences; otherwise ask one concise question for the missing fact.
+
+The environment flags shown below remain machine-only safeguards. The agent
+sets them only after the semantic user confirmation has been established.
+
 ## Preflight
 
 1. Confirm `DOMAIN`, `DOMAIN_MODE`, and `CONFIRM_DOMAIN_BINDING=1`.
@@ -35,9 +47,10 @@ aws ec2 describe-addresses --query 'length(Addresses[?Domain==`vpc`])' --output 
    confirmation and ask the user to release an unused Elastic IP, request a
    higher EC2-VPC Elastic IP quota, or choose another region.
 4. Check dependencies with the OS-specific commands in `tooling.md`.
-5. Check current DNS provider. Prefer `DOMAIN_MODE=route53` when the user
-   confirms AWS may manage the hosted zone and A record. Use `DOMAIN_MODE=user`
-   only as a fallback when no DNS provider automation is available.
+5. Do not ask for the DNS provider. S2 checks the current AWS account for the
+   longest matching public Route53 hosted zone. It selects Route53 automation
+   when found; otherwise it continues with external DNS and requests the A
+   record only after the fixed public IP exists.
 6. Check state:
 
 ```bash
@@ -75,7 +88,7 @@ region and cloud provider:
 bash scripts/pricing-estimate.sh \
   --region <region> \
   --cloud-provider lightsail \
-  --domain-mode user
+  --domain-mode route53
 ```
 
 When `state.json` already exists, refresh and persist the same estimate:
@@ -108,13 +121,9 @@ From the repository root:
 DOMAIN=__DOMAIN__ bash scripts/destroy.sh
 ```
 
-On Windows, run destroy from PowerShell so local service paths stay in Windows
-form and the wrapper selects Git for Windows Bash instead of WSL:
-
-```powershell
-$env:DOMAIN = "__DOMAIN__"
-.\scripts\destroy.ps1
-```
+On Windows, install Git for Windows and run the same command from Git Bash.
+The deployer automatically records Windows-native local paths for Node.js and
+local agent processes.
 
 Destroy stops and uninstalls the local `dirextalk-connect` daemon only when `dirextalk-connect daemon status --service-name <service_id>` reports a `WorkDir` matching the current service directory, `~/.dirextalk/nodes/<service_id>/dirextalk-connect`. It then removes resources based on `cloud_provider`: Lightsail destroy releases the recorded static IP, deletes the Lightsail instance and key pair; EC2 destroy terminates the recorded EC2 instance, verifies the recorded EBS root volume, releases the Elastic IP, deletes the security group and key pair. Both paths remove Route53 records/zones created by the deployer, record AWS read-back results under `destroy.evidence`, and remove the corresponding local service directory under `~/.dirextalk/nodes/<service_id>`.
 
@@ -122,7 +131,7 @@ Destroy allows root AWS access-key identity when the operator explicitly chose
 root credentials. Use the same deployment profile for teardown that was used
 for provisioning.
 
-Use `DIREXTALK_KEEP_WORKDIR=1 DOMAIN=__DOMAIN__ bash scripts/destroy.sh` on POSIX, or set `$env:DIREXTALK_KEEP_WORKDIR = "1"` before `.\scripts\destroy.ps1` on Windows, only when preserving local state files for debugging; if used, report that the service directory still exists.
+Use `DIREXTALK_KEEP_WORKDIR=1 DOMAIN=__DOMAIN__ bash scripts/destroy.sh` only when preserving local state files for debugging; if used, report that the service directory still exists. This Bash command is the same on Windows Git Bash, Linux, and macOS.
 
 ## Run
 
@@ -132,12 +141,60 @@ From the repository root:
 AWS_PROFILE=dirextalk-deployer \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \
-DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
 DIREXTALK_CLOUD_PROVIDER=lightsail \
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 bash scripts/orchestrate.sh
 ```
+
+For legacy/no-Agent deployments S3 selects
+`dirextalk/message-server:latest` without querying message-server GitHub
+Releases and persists `server_release.source=default_latest`, `version=latest`,
+and the image reference before provisioning. Agent-enabled production instead
+requires `DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE` as an exact public stable
+`dirextalk/message-server:vX.Y.Z@sha256:<64-lowercase-hex>` reference and freezes
+it in state before AWS mutation; `latest`, prerelease, and the separate
+debug-only `MESSAGE_SERVER_IMAGE` override are rejected. S3 also records the
+deployer-owned independent updater version, commit, and SHA-256 pin.
+
+Both EC2 and Lightsail launch data contain only a one-time 64-hex host-identity
+nonce. After the stable IP is attached, the deployer verifies that nonce over
+first-contact SSH, pins the host key, and streams the complete locally frozen
+bootstrap through strict SSH. EC2 also freezes a stable client token before the
+first AWS mutation so a lost `run-instances` response cannot change the payload
+or create a second instance. The verified Ubuntu 22.04 or 24.04 x86_64 host
+downloads the fixed updater Release asset, verifies the deployer pin, and
+atomically installs it. No local Go toolchain or updater SCP step is required.
+The updater's fixed Release download and checksum contract is unchanged.
+
+For Agent on EC2, `AGENT_IMAGE` must be the immutable prerelease `tag@sha256`
+in the same-account, same-region private ECR repository named exactly
+`dirextalk-agent`. S3 obtains a fresh one-hour least-privilege STS session on
+each attempt. A root/IAM-user caller uses `GetFederationToken`; an assumed-role
+caller fails unless `DIREXTALK_ECR_PULL_ROLE_ARN` explicitly names a
+same-account pull role. Only the ECR Docker password crosses SSH stdin into the
+root-only `/run/dirextalk-ecr-auth` directory. The remote sequence pre-cleans,
+logs in, pulls and starts, logs out, removes the directory, and proves it absent.
+AWS/STS credentials and registry passwords never enter launch data, `.env`,
+Compose, state, process arguments, logs, reports, or repository files.
+
+An existing EC2 or Lightsail instance from state created before the
+nonce-and-frozen-artifact flow is deliberately not migrated in place: it lacks
+the identity evidence required to stream replacement root code safely. Preserve
+that state for cleanup and destroy/rebuild the temporary node rather than
+resetting it or bypassing the refusal.
+
+### Fixed legacy d1 adoption
+
+`scripts/adopt-legacy-node.sh` is a separate explicit operation, not normal
+resume. Its dry run accepts only the recorded d1 source directory, Compose
+project `dirextalk-p2p`, runtime v0.15.2, the approved legacy digest, minimal
+healthy response, exact source Compose revision, and root-managed systemd Caddy
+running as user/group `caddy`. A confirmed run copies an updater-owned Compose
+definition and P2P state without pulling or recreating a container, records
+`server_release.source=legacy_adopted`, then enters the existing pinned updater
+bootstrap in systemd-Caddy mode. The Caddy edit exposes only public job URLs;
+validation or reload failure restores the original file and removes the partial
+updater layout.
 
 For EC2, replace `DIREXTALK_CLOUD_PROVIDER=lightsail` with `DIREXTALK_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
 
@@ -168,32 +225,28 @@ service directory is removed:
 ~/.dirextalk/reports/<service_id>/operation-report.json
 ```
 
-Reports include operation type, S0-S7 gate status, user-confirmation gates,
+Reports include operation type, S0-S7 gate status, automated runtime checks,
 credential/config paths, dirextalk-connect/MCP metadata, AWS resource IDs, billing
 reminders, `billing.cost_estimate`, destroy read-back evidence under
 `destroy.evidence` when applicable, AWS credit/Lightsail trial reminder,
 AWS official policy reminder, AWS Billing Console verification reminder, and
 redaction evidence. They must not
 contain the initialization code, AWS secrets, access tokens, agent tokens, or
-Matrix session tokens. User/runtime evidence is also scrubbed for
-eight-or-more digit numeric strings because users may paste initialization
-codes into confirmation notes. After reset/redeploy, the report must show
+Matrix session tokens. After reset/redeploy, the report must show
 `credentials.status=refresh_pending`, `connect.install_status=refresh_pending`,
 and `mcp.status=refresh_pending` until S5/S6/S7 and runtime checks refresh
-local evidence. Image-only update does not clear local credentials,
-confirmations, runtime checks, dirextalk-connect state, or MCP artifacts.
+local evidence. Image-only update does not clear local credentials, runtime
+checks, dirextalk-connect state, or MCP artifacts.
 
-When the user or runtime evidence confirms a manual product gate, write it back
-to state before regenerating the report. Connect daemon status is a
-service-scoped local bridge check, MCP doctor is a non-polluting runtime check,
-MCP tools is stdio `tools/list` discovery, and MCP smoke is a read-only backend
-call. In the `DIREXTALK_AGENT_INSTALL=recommend` path, `verify runtime` records
+Connect daemon status is a service-scoped local bridge check, MCP doctor is a non-polluting HTTP MCP
+initialize check, MCP tools is HTTP MCP `tools/list` discovery, and MCP smoke is
+a read-only HTTP MCP `tools/call` against `dirextalk_messages_list`. In the `DIREXTALK_AGENT_INSTALL=recommend` path, `verify runtime` records
 `connect_daemon=manual_pending` instead of failing the aggregate, because
 daemon installation is an explicit operator action. The default
-`DIREXTALK_AGENT_INSTALL=auto` path expects dirextalk-connect and dirextalk-mcp to be
-installed automatically during S6. S6 waits for `dirextalk-connect is running`
+`DIREXTALK_AGENT_INSTALL=auto` path expects dirextalk-connect to be installed
+automatically during S6, while MCP uses the server HTTP endpoint directly. S6 waits for `dirextalk-connect is running`
 in daemon logs and fails on local Agent startup errors before moving on. These
-checks are not the full runtime product gate:
+checks form the automated runtime boundary for deployment completion:
 
 ```bash
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify runtime
@@ -203,28 +256,12 @@ DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_doctor
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_tools
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_smoke
 
-DIREXTALK_CONFIRM_EVIDENCE="user completed app initialization" \
-DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh confirm app_initialization
-
-DIREXTALK_CONFIRM_EVIDENCE="user sent a message and saw the agent reply" \
-DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh confirm real_chat
-
-DIREXTALK_CONFIRM_RUNTIME_PROBE=1 \
-DIREXTALK_CONFIRM_EVIDENCE="MCP doctor/tool discovery and runtime probe confirmed" \
-DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh confirm agent_mcp_runtime
-
 DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh report new_deploy
 ```
 
-`confirm agent_mcp_runtime` refuses to write the gate until
-`runtime_checks.summary.status=passed` and `DIREXTALK_CONFIRM_RUNTIME_PROBE=1`
-are both present. Use the flag only after the selected runtime/channel probe has
-actually loaded the service-scoped MCP tools; `verify runtime` alone is an
-internal non-polluting check, not the full product gate.
-All `confirm` commands require `DIREXTALK_CONFIRM_EVIDENCE` with a concrete
-user/runtime evidence note; do not write user-confirmation gates with generic
-default evidence. The evidence note must be at least 12 characters; avoid
-placeholders such as `ok`, `yes`, or `done`.
+Final delivery runs `verify runtime` itself and reports `deployment_complete`
+only after the automated boundary passes. App initialization and the first real
+chat happen after deployment and require no deployer confirmation command.
 
 ## Existing Node Update
 
@@ -232,7 +269,7 @@ Update the running service image without recreating infrastructure or deleting
 data:
 
 ```bash
-DOMAIN=__DOMAIN__ MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest bash scripts/update.sh
+DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 DOMAIN=__DOMAIN__ MESSAGE_SERVER_IMAGE=dirextalk/message-server:<debug-tag> bash scripts/update.sh
 DIREXTALK_EXISTING_STATE_ACTION=continue DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
 ```
 
@@ -241,7 +278,9 @@ reruns `/var/dirextalk-message-server/init-tokens.sh`, clears stale local secret
 the matching service-scoped dirextalk-connect daemon when its `WorkDir` matches
 this service, and marks S4-S7 pending so health, credential sync, local
 MCP/agent wiring, and final verification run again. It does not remove Docker
-volumes.
+volumes. If state contains a private ECR Agent image, `update.sh` fails closed
+before SSH because this lifecycle does not refresh short-lived registry auth;
+resume the normal S3 flow instead.
 
 ## Existing Node App Data Reset
 
@@ -259,7 +298,9 @@ volumes can trigger certificate reissuance and Let's Encrypt rate limits. It
 stops only the matching service-scoped dirextalk-connect daemon when its `WorkDir`
 matches this service. After reset, treat old app users, rooms, messages,
 initialization code, access token, agent token, and agent room as stale until
-S5-S7 complete again.
+S5-S7 complete again. If state contains a private ECR Agent image,
+`reset-app-data.sh` fails closed before SSH because this lifecycle does not
+refresh short-lived registry auth; use a supported S3 resume/rebuild path.
 
 ## S4 Bootstrap Timeout / Certificate Rate Limit Recovery
 
@@ -302,7 +343,7 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
    ```bash
    bash scripts/destroy.sh
    ```
-   On Windows, use `.\scripts\destroy.ps1` from PowerShell.
+   On Windows, run the same command from Git Bash.
    Then start again with a fresh domain.
 
 3. **Force Caddy staging CA** (development only) — Set the environment
@@ -312,9 +353,10 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
 
 ## Route53 DNS Mode
 
-With `DOMAIN_MODE=route53`, S3 reuses a matching hosted zone or creates one,
-records the zone id and nameservers in `state.json`, upserts the A record, and
-waits for DNS to resolve.
+With automatically detected or explicitly selected `DOMAIN_MODE=route53`, S3
+requires and reuses a matching public hosted zone, records the zone id in
+`state.json`, upserts the A record, and waits for DNS to resolve. It does not
+create a hosted zone or change registrar NS delegation.
 
 If the current Route53 A record already points to a different IP, S3 stops
 before changing DNS and records `route53_existing_a_value` plus
@@ -330,8 +372,9 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-If the domain is registered outside Route53, delegate the recorded nameservers
-at the current registrar or through a provider API:
+If an existing Route53 hosted zone is not yet authoritative because the domain
+is registered elsewhere, delegate that zone's nameservers at the registrar or
+through a provider API:
 
 ```bash
 node scripts/json.mjs get ~/.dirextalk/nodes/<service_id>/state.json resources
@@ -347,14 +390,16 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-Destroy deletes deployer-created hosted zones when state records
+Destroy retains backward-compatible cleanup for older state and deletes a
+deployer-created hosted zone when state records
 `route53_zone_created_by_deployer=true`; pre-existing or user-owned zones are
 left in place.
 
 ## Manual DNS Mode
 
-Use manual DNS mode only when no DNS provider automation is available. When S3
-emits the fixed public IP, ask the user to set:
+Use manual DNS mode only when an external DNS provider must keep managing the
+domain and no DNS provider automation is available. When S3 emits the fixed
+public IP, ask the user to set:
 
 ```text
 <DOMAIN>  A  <PUBLIC_IP>
@@ -372,7 +417,6 @@ DOMAIN=__DOMAIN__ \
 DOMAIN_MODE=user \
 CONFIRM_DOMAIN_BINDING=1 \
 DIREXTALK_CLOUD_PROVIDER=lightsail \
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest \
 DIREXTALK_EXISTING_STATE_ACTION=continue \
 bash scripts/orchestrate.sh
 ```

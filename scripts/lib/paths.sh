@@ -1,8 +1,23 @@
 #!/usr/bin/env bash
 # lib/paths.sh - local Dirextalk service directory helpers.
 
+PATHS_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# Git Bash launches Windows-native Node and AWS binaries. Keep paths handed to
+# those consumers in native C:/ form, while Bash itself can still use them.
+# shellcheck disable=SC1090
+source "$PATHS_LIB_DIR/local-paths.sh"
+
+dirextalk_execution_path() {
+  local path=${1:-}
+  if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+    dirextalk_to_windows_local_path "$path"
+    return 0
+  fi
+  printf '%s\n' "$path"
+}
+
 dirextalk_home() {
-  printf '%s\n' "${DIREXTALK_HOME:-$HOME/.dirextalk}"
+  dirextalk_execution_path "${DIREXTALK_HOME:-$HOME/.dirextalk}"
 }
 
 dirextalk_service_id() {
@@ -24,7 +39,7 @@ dirextalk_service_dir() {
 
 dirextalk_default_workdir() {
   if [ -n "${DIREXTALK_WORKDIR:-}" ]; then
-    printf '%s\n' "$DIREXTALK_WORKDIR"
+    dirextalk_execution_path "$DIREXTALK_WORKDIR"
   elif [ -n "${DOMAIN:-}" ]; then
     dirextalk_service_dir "$DOMAIN"
   else

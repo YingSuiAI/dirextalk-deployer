@@ -4,7 +4,11 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1090
+source "$HERE/lib/git-bash.sh"
+# shellcheck disable=SC1090
 source "$HERE/lib/json.sh"
+
+dirextalk_require_git_bash_on_windows || exit 1
 
 usage() {
   cat >&2 <<'EOF'
@@ -185,36 +189,18 @@ build_lightsail_estimate() {
 }
 
 lookup_lightsail_bundle() {
-  local wanted_id=$1 bundles
-  bundles=$(aws lightsail get-bundles --include-inactive --output json 2>/dev/null) || return 1
-  printf '%s\n' "$bundles" | "$(json_node)" -e '
-let input = "";
-process.stdin.on("data", (chunk) => input += chunk);
-process.stdin.on("end", () => {
-  const wantedId = process.argv[1] || "";
-  const wantedRam = Number(process.argv[2] || "2");
-  const wantedDisk = Number(process.argv[3] || "60");
-  const data = JSON.parse(input || "{}");
-  const bundles = Array.isArray(data.bundles) ? data.bundles : [];
-  const linux = bundles.filter((bundle) =>
-    Array.isArray(bundle.supportedPlatforms) && bundle.supportedPlatforms.includes("LINUX_UNIX")
-  );
-  const selected = linux.find((bundle) => wantedId && bundle.bundleId === wantedId) ||
-    linux.find((bundle) => Number(bundle.ramSizeInGb) === wantedRam && Number(bundle.diskSizeInGb) === wantedDisk) ||
-    linux.find((bundle) => Number(bundle.price) === 12) ||
-    linux[0];
-  if (!selected) process.exit(1);
-  const fields = [
-    selected.bundleId,
-    selected.price,
-    selected.ramSizeInGb,
-    selected.diskSizeInGb,
-    selected.transferPerMonthInGb || 0,
-    selected.cpuCount || 0
-  ];
-  process.stdout.write(`${fields.join("\t")}\n`);
-});
-' "$wanted_id" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB"
+  local wanted_id=$1 bundle_file selection
+  bundle_file=$(mktemp) || return 1
+  aws lightsail get-bundles --include-inactive --output json > "$bundle_file" 2>/dev/null || {
+    rm -f "$bundle_file"
+    return 1
+  }
+  selection=$(json_lightsail_bundle_select "$bundle_file" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB" "$wanted_id") || {
+    rm -f "$bundle_file"
+    return 1
+  }
+  rm -f "$bundle_file"
+  printf '%s\n' "$selection"
 }
 
 state=""
@@ -254,7 +240,7 @@ if [ -n "$state" ]; then
   region=${region:-$(json_get "$state" region)}
   cloud_provider=${cloud_provider:-$(json_get "$state" cloud_provider)}
   instance_type=${instance_type:-$(json_get "$state" instance_type)}
-  domain_mode=${domain_mode:-$(json_get "$state" domain_mode user)}
+  domain_mode=${domain_mode:-$(json_get "$state" domain_mode route53)}
   disk_gb=${disk_gb:-$(json_get "$state" resources.root_volume_gb)}
   disk_gb=${disk_gb:-$(json_get "$state" root_volume_gb 50)}
   lightsail_bundle_id=${lightsail_bundle_id:-$(json_get "$state" resources.lightsail_bundle_id)}
@@ -270,7 +256,7 @@ cloud_provider=${cloud_provider:-${DIREXTALK_CLOUD_PROVIDER:-${DEPLOY_MODE:-${DI
 cloud_provider=$(printf '%s' "$cloud_provider" | tr '[:upper:]' '[:lower:]')
 instance_type=${instance_type:-t3.small}
 disk_gb=${disk_gb:-50}
-domain_mode=${domain_mode:-user}
+domain_mode=${domain_mode:-route53}
 lightsail_bundle_id=${lightsail_bundle_id:-${DIREXTALK_LIGHTSAIL_BUNDLE_ID:-$DEFAULT_LIGHTSAIL_BUNDLE_ID}}
 lightsail_price=${lightsail_price:-$DEFAULT_LIGHTSAIL_MONTHLY_USD}
 lightsail_ram=${lightsail_ram:-$DEFAULT_LIGHTSAIL_RAM_GB}

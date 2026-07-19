@@ -1,0 +1,27 @@
+[Unit]
+Description=Dirextalk host updater
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/dirextalk-updater --config /etc/dirextalk-updater/config.json serve
+Restart=on-failure
+RestartSec=5s
+RuntimeDirectory=dirextalk-updater
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+StateDirectory=dirextalk-updater
+StateDirectoryMode=0700
+ConfigurationDirectory=dirextalk-updater
+ConfigurationDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/dirextalk-updater /run/dirextalk-updater /var/dirextalk-message-server
+
+[Install]
+WantedBy=multi-user.target

@@ -8,6 +8,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 mkdir -p "$HOME"
 
 fakebin="$tmp/bin"
@@ -38,8 +39,21 @@ esac
 EOF
 chmod 700 "$fakebin/aws"
 
+cat > "$fakebin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'ssh' >> "$CALLS"
+printf ' %q' "$@" >> "$CALLS"
+printf '\n' >> "$CALLS"
+EOF
+chmod 700 "$fakebin/ssh"
+
 service_dir="$HOME/.dirextalk/nodes/root-destroy.example.test"
 mkdir -p "$service_dir"
+key_file="$tmp/root-destroy.pem"
+touch "$key_file"
+known_hosts="$tmp/root-destroy-known-hosts"
+printf '203.0.113.77 ssh-ed25519 test-host-key\n' > "$known_hosts"
 state="$service_dir/state.json"
 json_build object \
   region=us-east-1 \
@@ -47,7 +61,9 @@ json_build object \
   domain=root-destroy.example.test \
   "agent_service_dir=$service_dir" \
   agent_service_id=root-destroy.example.test \
-  'resources={"instance_id":"i-root-destroy","eip_id":"eipalloc-root-destroy","sg_id":"sg-root-destroy","key_name":"dirextalk-root-destroy"}' > "$state"
+  'agent_release={"enabled":true}' \
+  'agent_registry={"source":"private_ecr","registry":"123456789012.dkr.ecr.us-east-1.amazonaws.com"}' \
+  "resources={\"instance_id\":\"i-root-destroy\",\"eip_id\":\"eipalloc-root-destroy\",\"sg_id\":\"sg-root-destroy\",\"key_name\":\"dirextalk-root-destroy\",\"key_file\":\"$key_file\",\"public_ip\":\"203.0.113.77\",\"ec2_ssh_known_hosts\":\"$known_hosts\"}" > "$state"
 
 calls="$tmp/aws.calls"
 : > "$calls"
@@ -66,6 +82,27 @@ grep -q 'source = ' "$tmp/destroy.out"
 for expected in 'ec2 terminate-instances' 'ec2 release-address' 'ec2 delete-security-group' 'ec2 delete-key-pair'; do
   if ! grep -F "$expected" "$calls" >/dev/null; then
     echo "destroy should process recorded AWS resource with root identity: $expected" >&2
+    cat "$calls" >&2
+    exit 1
+  fi
+done
+
+if ! grep -q 'StrictHostKeyChecking=yes.*UserKnownHostsFile=' "$calls"; then
+  echo "private Agent EC2 destroy must use only the pinned SSH host key" >&2
+  cat "$calls" >&2
+  exit 1
+fi
+for expected in '/run/dirextalk-ecr-auth' 'docker.*logout.*123456789012\.dkr\.ecr\.us-east-1\.amazonaws\.com' 'mounted-secrets'; do
+  if ! grep -E "$expected" "$calls" >/dev/null; then
+    echo "private Agent EC2 destroy missed de-secreted cleanup: $expected" >&2
+    cat "$calls" >&2
+    exit 1
+  fi
+done
+
+for expected in 'base64.*--decode' 'install.*set-desired-state' 'set-desired-state\.sh.*deprovisioned'; do
+  if ! grep -E "$expected" "$calls" >/dev/null; then
+    echo "destroy should suppress the remote watchdog before cloud termination: $expected" >&2
     cat "$calls" >&2
     exit 1
   fi

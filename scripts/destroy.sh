@@ -15,12 +15,24 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1090
 source "$HERE/lib/paths.sh"
 # shellcheck disable=SC1090
+source "$HERE/lib/git-bash.sh"
+# shellcheck disable=SC1090
 source "$HERE/lib/aws.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/operation_report.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/local-paths.sh"
+# shellcheck disable=SC1090
+source "$HERE/lib/agent-secret-delivery.sh"
+# shellcheck disable=SC1090
+source "$HERE/lib/agent-ecr-pull.sh"
+source "$HERE/lib/agent-worker-control.sh"
+# shellcheck disable=SC1090
+source "$HERE/lib/connect-agent-adapters.sh"
+# shellcheck disable=SC1090
+source "$HERE/lib/mcp-client-adapters.sh"
 DIREXTALK_WORKDIR=$(dirextalk_default_workdir)
+dirextalk_require_git_bash_on_windows || exit 1
 
 log() { echo -e "\033[33m[destroy]\033[0m $*"; }
 
@@ -216,8 +228,9 @@ if [ -z "$SRC" ]; then
   else echo "state.json not found; set DOMAIN=<service domain> or DIREXTALK_WORKDIR=<service dir> to destroy a specific deployment."; exit 1
   fi
 fi
+SRC=$(dirextalk_execution_path "$SRC")
 [ -f "$SRC" ] || { echo "$SRC not found."; exit 1; }
-DIREXTALK_ROOT=$(cd "${DIREXTALK_HOME:-$HOME/.dirextalk}" 2>/dev/null && pwd -P || printf '%s' "${DIREXTALK_HOME:-$HOME/.dirextalk}")
+DIREXTALK_ROOT=$(cd "$(dirextalk_home)" 2>/dev/null && pwd -P || dirextalk_home)
 
 REGION=$(json_get "$SRC" region)
 CLOUD_PROVIDER=$(json_get "$SRC" cloud_provider)
@@ -231,6 +244,11 @@ EIP_ID=$(json_get "$SRC" resources.eip_id)
 SG_ID=$(json_get "$SRC" resources.sg_id)
 KEY_NAME=$(json_get "$SRC" resources.key_name)
 KEY_FILE=$(json_get "$SRC" resources.key_file)
+LIGHTSAIL_SSH_KNOWN_HOSTS=$(json_get "$SRC" resources.lightsail_ssh_known_hosts)
+EC2_SSH_KNOWN_HOSTS=$(json_get "$SRC" resources.ec2_ssh_known_hosts)
+AGENT_RUNTIME_ENABLED=$(json_get "$SRC" agent_release.enabled)
+AGENT_REGISTRY_SOURCE=$(json_get "$SRC" agent_registry.source)
+AGENT_REGISTRY_HOST=$(json_get "$SRC" agent_registry.registry)
 DOMAIN_MODE=$(json_get "$SRC" domain_mode)
 DOMAIN=$(json_get "$SRC" domain)
 AS_URL=$(json_get "$SRC" as_url)
@@ -243,6 +261,14 @@ CONNECT_BINARY=$(json_get "$SRC" connect_binary)
 CONNECT_RUNTIME_DIR=$(json_get "$SRC" connect_runtime_dir)
 AGENT_SERVICE_DIR=$(json_get "$SRC" agent_service_dir)
 AGENT_SERVICE_ID=$(json_get "$SRC" agent_service_id)
+MCP_HOST_REGISTRY_OWNER=$(json_get "$SRC" mcp_host_registry_owner)
+MCP_HOST_REGISTRY_SERVER=$(json_get "$SRC" mcp_host_registry_server)
+MCP_HOST_TOKEN_ENV_KEY=$(json_get "$SRC" mcp_host_token_env_key)
+MCP_OPENCLAW_PROFILE=$(json_get "$SRC" mcp_openclaw_profile)
+MCP_OPENCLAW_CONFIG_PATH=$(json_get "$SRC" mcp_openclaw_config_path)
+MCP_HERMES_HOME=$(json_get "$SRC" mcp_hermes_home)
+MCP_HERMES_PROFILE=$(json_get "$SRC" mcp_hermes_profile)
+MCP_HERMES_PROFILE_OWNED=$(json_get "$SRC" mcp_hermes_profile_owned)
 
 export NO_PROXY="*"; export no_proxy="*"
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy 2>/dev/null || true
@@ -259,6 +285,26 @@ if [ -z "$AWS_IDENTITY_ARN" ] || [ "$AWS_IDENTITY_ARN" = "None" ]; then
   echo "AWS credentials are required before destroy can remove cloud resources or local state."
   exit 1
 fi
+
+# destroy.sh deliberately does not load the orchestrator state library. Adapt
+# its already-open source file to the same narrow state seam used by the
+# retained producer, so cleanup writes remain atomic and local to this state.
+state_get() { json_get "$SRC" "$1"; }
+state_set_raw() { json_mutate "$SRC" set-json "$1" "$2"; }
+state_set_object() {
+  local path=$1 object_json
+  shift
+  object_json=$(json_build object "$@") || return 1
+  state_set_raw "$path" "$object_json"
+}
+res_get() { json_get "$SRC" "resources.$1"; }
+
+# The retained producer is independent of the parent host. Never terminate the
+# host while active Worker endpoint consumers would make cleanup unsafe.
+agent_worker_control_destroy || {
+  echo "worker-control PrivateLink cleanup is incomplete or has active Workers; parent destroy is blocked."
+  exit 1
+}
 
 find_route53_zone() {
   local domain=$1 best_id="" best_name="" best_len=0 id name clean len
@@ -314,10 +360,8 @@ delete_route53_record() {
   ]
 }
 EOF
-  local change_file_aws="$change_file"
-  if command -v cygpath >/dev/null 2>&1; then
-    change_file_aws=$(cygpath -w "$change_file")
-  fi
+  local change_file_aws
+  change_file_aws=$(dirextalk_native_tool_path "$change_file") || { rm -f "$change_file"; return 1; }
   change_json=$(aws route53 change-resource-record-sets \
     --hosted-zone-id "$zone_id" \
     --change-batch "file://$change_file_aws" \
@@ -480,6 +524,95 @@ stop_current_connect_daemon() {
   fi
 }
 
+mark_remote_deprovisioned() {
+  local key_file=$1 public_ip=$2 known_hosts=${3:-} helper_payload remote remote_q
+  [ -n "$key_file" ] && [ -f "$key_file" ] && [ -n "$public_ip" ] || return 0
+  helper_payload=$(base64 < "$HERE/updater/set-desired-state.sh" | tr -d '\r\n')
+  remote=$(cat <<'EOF'
+set -eu
+desired_helper_tmp=$(mktemp /tmp/dirextalk-updater-desired-state.XXXXXX)
+cleanup_desired_helper() { rm -f "$desired_helper_tmp"; }
+trap cleanup_desired_helper EXIT
+printf '%s' '__DIREXTALK_DESIRED_HELPER__' | base64 --decode > "$desired_helper_tmp"
+sudo install -d -m 0755 /var/dirextalk-message-server/updater
+sudo install -m 0755 "$desired_helper_tmp" /var/dirextalk-message-server/updater/set-desired-state.sh
+rm -f "$desired_helper_tmp"
+trap - EXIT
+sudo /var/dirextalk-message-server/updater/set-desired-state.sh deprovisioned
+EOF
+)
+  remote=${remote/__DIREXTALK_DESIRED_HELPER__/$helper_payload}
+  printf -v remote_q '%q' "$remote"
+  local -a host_key_args=(-o StrictHostKeyChecking=accept-new)
+  if [ -s "$known_hosts" ]; then
+    host_key_args=(-o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts")
+  elif [ "$AGENT_RUNTIME_ENABLED" = true ]; then
+    log "pinned SSH host data is unavailable; skipping remote root desired-state mutation"
+    return 0
+  fi
+  if ssh -T -i "$key_file" \
+      -o BatchMode=yes \
+      -o IdentitiesOnly=yes \
+      -o PreferredAuthentications=publickey \
+      -o PasswordAuthentication=no \
+      -o KbdInteractiveAuthentication=no \
+      "${host_key_args[@]}" -o ConnectTimeout=5 \
+      ubuntu@"$public_ip" "sudo bash -lc $remote_q" >/dev/null 2>&1; then
+    log "remote updater desired-state reconciliation completed before termination"
+  else
+    log "remote updater was unreachable or rejected deprovisioned state; cloud termination will continue"
+  fi
+}
+
+cleanup_remote_agent_mounted_secrets() {
+  local cleanup_rc known_hosts
+  if [ "$AGENT_RUNTIME_ENABLED" != true ]; then
+    destroy_evidence_set agent_mounted_secrets skipped "optional Agent runtime is not enabled"
+    return 0
+  fi
+  case "$CLOUD_PROVIDER" in
+    lightsail) known_hosts=$LIGHTSAIL_SSH_KNOWN_HOSTS ;;
+    ec2) known_hosts=$EC2_SSH_KNOWN_HOSTS ;;
+    *) known_hosts= ;;
+  esac
+  agent_mounted_secret_cleanup_pinned "$PUBLIC_IP" "$KEY_FILE" "$known_hosts"
+  cleanup_rc=$?
+  case "$cleanup_rc" in
+    0)
+      log "cleared private mounted Agent secrets through the pinned SSH host"
+      destroy_evidence_set agent_mounted_secrets cleared "private mounted Agent secrets cleared before cloud deletion"
+      ;;
+    2)
+      log "pinned SSH host data is unavailable; skipping remote mounted-secret cleanup before cloud deletion"
+      destroy_evidence_set agent_mounted_secrets skipped "pinned SSH host data unavailable; instance deletion remains the final wipe"
+      ;;
+    *)
+      log "private mounted Agent secret cleanup failed; cloud deletion will still wipe the volume"
+      destroy_evidence_set agent_mounted_secrets cleanup_failed "remote cleanup failed; instance deletion remains the final wipe"
+      ;;
+  esac
+}
+
+cleanup_remote_agent_registry_auth() {
+  local cleanup_rc known_hosts
+  if [ "$AGENT_REGISTRY_SOURCE" != private_ecr ]; then
+    destroy_evidence_set agent_registry_auth skipped "private Agent registry auth was not configured"
+    return 0
+  fi
+  case "$CLOUD_PROVIDER" in
+    lightsail) known_hosts=$LIGHTSAIL_SSH_KNOWN_HOSTS ;;
+    ec2) known_hosts=$EC2_SSH_KNOWN_HOSTS ;;
+    *) known_hosts= ;;
+  esac
+  agent_ecr_auth_cleanup_pinned "$PUBLIC_IP" "$KEY_FILE" "$known_hosts" "$AGENT_REGISTRY_HOST"
+  cleanup_rc=$?
+  case "$cleanup_rc" in
+    0) destroy_evidence_set agent_registry_auth cleared "temporary Docker registry auth directory proved absent before cloud deletion" ;;
+    2) destroy_evidence_set agent_registry_auth skipped "pinned SSH host data unavailable; instance deletion remains the final wipe" ;;
+    *) destroy_evidence_set agent_registry_auth cleanup_failed "registry auth cleanup failed; instance deletion remains the final wipe" ;;
+  esac
+}
+
 cleanup_local_service_dir() {
   local service_dir=$1 root=$2 nodes_root src_real nodes_real src_norm nodes_norm name
 
@@ -520,9 +653,54 @@ cleanup_local_service_dir() {
   rm -rf -- "$src_real"
 }
 
+cleanup_host_mcp_registry() {
+  local owner=${MCP_HOST_REGISTRY_OWNER:-} server=${MCP_HOST_REGISTRY_SERVER:-} token_env=${MCP_HOST_TOKEN_ENV_KEY:-}
+  local command
+  case "$owner" in
+    openclaw)
+      if _openclaw_mcp_remove "$server" "$token_env" "${MCP_OPENCLAW_PROFILE:-}" "${MCP_OPENCLAW_CONFIG_PATH:-}"; then
+        log "removed managed OpenClaw MCP server entry"
+        destroy_evidence_set host_mcp_registry removed "managed OpenClaw MCP entry removed"
+      else
+        log "managed OpenClaw MCP entry could not be removed; inspect the selected OpenClaw config"
+        destroy_evidence_set host_mcp_registry cleanup_failed "managed OpenClaw MCP entry needs review"
+      fi
+      ;;
+    hermes)
+      if [ "${MCP_HERMES_PROFILE_OWNED:-false}" = "true" ]; then
+        command=$(_hermes_command 2>/dev/null || true)
+        if [ -n "$command" ] && [ -n "${MCP_HERMES_HOME:-}" ] && [ -n "${MCP_HERMES_PROFILE:-}" ] &&
+          HERMES_HOME="$MCP_HERMES_HOME" "$command" profile delete -y "$MCP_HERMES_PROFILE" >/dev/null 2>&1; then
+          log "removed managed Hermes service profile"
+          destroy_evidence_set host_mcp_registry removed "managed Hermes service profile removed"
+        else
+          log "managed Hermes service profile could not be removed; inspect the recorded native Hermes home"
+          destroy_evidence_set host_mcp_registry cleanup_failed "managed Hermes service profile needs review"
+        fi
+      elif _hermes_mcp_remove "$MCP_HERMES_HOME" "$MCP_HERMES_PROFILE" "$server" "$token_env"; then
+        log "removed managed Hermes MCP server entry"
+        destroy_evidence_set host_mcp_registry removed "managed Hermes MCP entry removed"
+      else
+        log "managed Hermes MCP entry could not be removed; inspect the selected Hermes profile"
+        destroy_evidence_set host_mcp_registry cleanup_failed "managed Hermes MCP entry needs review"
+      fi
+      ;;
+    *)
+      ;;
+  esac
+}
+
 # 0. Remove DNS record if ops created it through Route53 mode.
 CURRENT_SERVICE_DIR=$(current_service_dir "$AGENT_SERVICE_DIR" "$AS_URL" "$DOMAIN" "$CONNECT_CONFIG")
 CURRENT_SERVICE_NAME=$(connect_service_name "$AGENT_SERVICE_ID" "$CURRENT_SERVICE_DIR" "$AS_URL" "$DOMAIN")
+cleanup_remote_agent_registry_auth
+cleanup_remote_agent_mounted_secrets
+case "$CLOUD_PROVIDER" in
+  lightsail) HOST_SSH_KNOWN_HOSTS=$LIGHTSAIL_SSH_KNOWN_HOSTS ;;
+  ec2) HOST_SSH_KNOWN_HOSTS=$EC2_SSH_KNOWN_HOSTS ;;
+  *) HOST_SSH_KNOWN_HOSTS= ;;
+esac
+mark_remote_deprovisioned "$KEY_FILE" "$PUBLIC_IP" "$HOST_SSH_KNOWN_HOSTS"
 stop_current_connect_daemon "$CONNECT_CONFIG" "$CONNECT_BINARY" "$CONNECT_RUNTIME_DIR" "$CURRENT_SERVICE_DIR" "$CURRENT_SERVICE_NAME"
 
 if [ "${DOMAIN_MODE:-}" = "route53" ]; then
@@ -604,6 +782,7 @@ else
   fi
 fi
 
+cleanup_host_mcp_registry
 log "Done. Processed resources recorded in $SRC."
 log "User-managed DNS and domain purchases are outside automatic destroy scope; handle them manually if needed."
 if REPORT_PATH=$(operation_report_write destroy destroy_processed "$SRC" 2>/dev/null); then

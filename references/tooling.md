@@ -1,44 +1,42 @@
 # Tooling By OS
 
-Prepare `bash`, `node`, `aws`, `ssh`, `scp`, `curl`, and at least one DNS lookup
+Prepare Git, `bash`, `node`, `aws`, `ssh`, `curl`, and at least one DNS lookup
 tool. Always inspect first, then ask before installing or downloading.
 
 ## Detect
 
 ```bash
-command -v bash node aws ssh scp curl
+git --version
+bash --version
+command -v node aws ssh curl
 command -v dig nslookup getent
 node --version
 aws --version
 ```
 
-On Windows PowerShell:
-
-```powershell
-Get-Command "C:\Program Files\Git\bin\bash.exe","C:\Program Files\Git\usr\bin\bash.exe",node,aws,ssh,scp,curl,nslookup,Resolve-DnsName -ErrorAction SilentlyContinue
-```
-
 ## Windows
 
-Preferred shell: Git Bash, MSYS2, Cygwin, or a working WSL distro. Do not use `C:\Windows\System32\bash.exe` unless `bash -lc 'echo ok'` succeeds.
+Git Bash from Git for Windows is the only supported lifecycle shell on native
+Windows. Before a native Windows lifecycle action, run the Git Bash preflight from
+`references/agent-targets.md`. It must find `cygpath`, a `.windows.` Git
+version, a `MINGW*` shell, and one shared Git for Windows installation root;
+otherwise tell the user to install Git for Windows from
+<https://git-scm.com/download/win>, reopen Git Bash, and stop. Do not substitute
+PowerShell, MSYS2, or Cygwin. Native WSL is supported as a Linux host: run Bash
+and install prerequisites inside the distribution, and do not reuse a
+Git-Bash-owned service directory.
 
-Standard Git Bash usually does not include `dig`. Use Windows `Resolve-DnsName`
-or `nslookup` for DNS checks instead of blocking deployment on `dig`.
+Standard Git Bash usually does not include `dig`. Use `nslookup` for DNS checks
+instead of blocking deployment on `dig`.
 
-Common system installs:
+Install Git for Windows, Node.js LTS, and AWS CLI with their official Windows
+installers. Reopen Git Bash after installation and rerun the detection block.
+For a workspace-local AWS CLI fallback when package managers are unavailable:
 
-```powershell
-winget install --id Git.Git --exact
-winget install --id OpenJS.NodeJS.LTS --exact
-winget install --id Amazon.AWSCLI --exact
-```
-
-Workspace-local fallback when package managers are unavailable:
-
-```powershell
-New-Item -ItemType Directory -Force -Path .tools\bin | Out-Null
-python -m venv .tools\awscli-venv
-.\.tools\awscli-venv\Scripts\python.exe -m pip install --upgrade pip awscli
+```bash
+mkdir -p .tools/bin
+python -m venv .tools/awscli-venv
+.tools/awscli-venv/Scripts/python.exe -m pip install --upgrade pip awscli
 ```
 
 Create `.tools/bin/aws` for Git Bash:
@@ -49,10 +47,10 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 exec "$SCRIPT_DIR/../awscli-venv/Scripts/python.exe" -m awscli "$@"
 ```
 
-Run ops from Git Bash:
+Run all lifecycle operations from Git Bash:
 
-```powershell
-& "C:\Program Files\Git\bin\bash.exe" -lc 'PATH="$PWD/.tools/bin:$PATH"; bash scripts/orchestrate.sh'
+```bash
+PATH="$PWD/.tools/bin:$PATH" bash scripts/orchestrate.sh
 ```
 
 ## macOS
@@ -64,7 +62,7 @@ brew install node awscli
 ```
 
 If Homebrew is unavailable, ask before using the official AWS CLI pkg installer.
-macOS already includes `ssh`, `scp`, `curl`, and `dig`.
+macOS already includes `ssh`, `curl`, and `dig`.
 
 ## Linux
 

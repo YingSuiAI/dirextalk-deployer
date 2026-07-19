@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-
 bash "$ROOT/scripts/render/render-userdata.sh" \
   --domain service.example.test \
   --acme ops@example.test \
@@ -17,29 +16,47 @@ bash "$ROOT/scripts/render/render-userdata.sh" \
   --acme ops@example.test \
   --message-server-image dirextalk/message-server:test \
   > "$tmp/user-data.sh"
+bash -n "$tmp/user-data.sh"
 
 grep -q '^#cloud-config' "$tmp/user-data.yaml"
-grep -q '^#!/usr/bin/env bash' "$tmp/user-data.sh"
+grep -q '^#!/bin/bash' "$tmp/user-data.sh"
 grep -q '^package_update: false' "$tmp/user-data.yaml"
 if grep -q '^package_update: true' "$tmp/user-data.yaml"; then
   echo "cloud-init user-data must not run a redundant package update before Docker's installer" >&2
   exit 1
 fi
 grep -q 'if ! command -v docker >/dev/null 2>&1' "$tmp/user-data.yaml"
-grep -q 'if ! command -v docker >/dev/null 2>&1' "$tmp/user-data.sh"
-grep -q 'docker compose --env-file .env pull' "$tmp/user-data.yaml"
-grep -q 'docker compose --env-file .env pull' "$tmp/user-data.sh"
+grep -q 'type docker>&/dev/null||curl -fsSL https://get.docker.com|sh' "$tmp/user-data.sh"
+grep -q 'bash /var/dirextalk-message-server/updater/bootstrap-host.sh' "$tmp/user-data.yaml"
+grep -q 'd=/var/dirextalk-message-server;mkdir -p "$d";cd "$d"' "$tmp/user-data.sh"
+grep -F -q 'flock 8' "$tmp/user-data.sh"
+grep -F -q 'if [ ! -f .env ]; then' "$tmp/user-data.sh"
+grep -F -q 'updater/bootstrap-host.sh "${1:-}"' "$tmp/user-data.sh"
 if grep -q '^#cloud-config' "$tmp/user-data.sh"; then
   echo "Lightsail shell user-data must not be rendered as cloud-config" >&2
   exit 1
 fi
-grep -q 'base64 --decode > /var/dirextalk-message-server/bundle.tar.gz' "$tmp/user-data.sh"
-grep -q 'docker compose --env-file .env up -d' "$tmp/user-data.sh"
+grep -q 'base64 -d>bundle.tar.gz<<B' "$tmp/user-data.sh"
+
+if bash "$ROOT/scripts/render/render-userdata.sh" --format shell --domain service.example.test --acme $'ops@example.test\nINJECTED=true' --message-server-image dirextalk/message-server:test > /dev/null 2>&1; then
+  echo "renderer accepted a multiline ACME email" >&2
+  exit 1
+fi
+if bash "$ROOT/scripts/render/render-userdata.sh" --format shell --domain service.example.test --acme ops@example.test --message-server-image $'dirextalk/message-server:test\nINJECTED=true' > /dev/null 2>&1; then
+  echo "renderer accepted a multiline Message Server image" >&2
+  exit 1
+fi
 
 awk '/encoding: b64/ { getline; sub(/^    content: /, ""); print; exit }' "$tmp/user-data.yaml" \
   | base64 -d > "$tmp/bundle.tar.gz"
 mkdir "$tmp/bundle"
 tar -xzf "$tmp/bundle.tar.gz" -C "$tmp/bundle"
+for executable in init-tokens.sh p2p-http-request.sh updater/install.sh updater/bootstrap-host.sh; do
+  [ -x "$tmp/bundle/$executable" ] || {
+    echo "bundle must preserve executable mode for $executable" >&2
+    exit 1
+  }
+done
 
 if grep -q 'P2P_REMOTE_NODE_' "$tmp/user-data.yaml"; then
   echo "rendered user-data must not configure fixed remote P2P nodes" >&2
@@ -47,7 +64,9 @@ if grep -q 'P2P_REMOTE_NODE_' "$tmp/user-data.yaml"; then
 fi
 
 grep -q '/var/dirextalk-message-server/bundle.tar.gz' "$tmp/user-data.yaml"
-grep -q 'cd /var/dirextalk-message-server' "$tmp/user-data.yaml"
+grep -q 'docker compose --env-file .env pull' "$tmp/bundle/updater/bootstrap-host.sh"
+grep -q 'docker compose --env-file .env up -d' "$tmp/bundle/updater/bootstrap-host.sh"
+grep -q 'cd "$base"' "$tmp/bundle/updater/bootstrap-host.sh"
 grep -q '/etc/dirextalk-message-server/message-server.yaml' "$tmp/bundle/docker-compose.yml"
 grep -q '/var/dirextalk-message-server/p2p/bootstrap.json' "$tmp/bundle/docker-compose.yml"
 grep -q 'P2P_PORTAL_CREDENTIALS_FILE: /var/dirextalk-message-server/p2p/bootstrap.json' "$tmp/bundle/docker-compose.yml"
@@ -67,7 +86,12 @@ if grep -R -q "$deprecated_wellknown_dir\\|$deprecated_caddy_mount\\|$deprecated
   echo "portal well-known must be served by message-server, not static mounted files" >&2
   exit 1
 fi
-grep -q '^    grep -q .*P2P_PORTAL_PASSWORD=' "$tmp/user-data.yaml"
+grep -q 'first_nonempty_env_value TURN_SECRET' "$tmp/bundle/updater/bootstrap-host.sh"
+grep -q 'first_nonempty_env_value P2P_PORTAL_PASSWORD' "$tmp/bundle/updater/bootstrap-host.sh"
+if grep -q '^    grep -q .*\(TURN_SECRET\|P2P_PORTAL_PASSWORD\)=' "$tmp/user-data.yaml"; then
+  echo "service secrets must be normalized by the locked bootstrap, not a separate cloud-init command" >&2
+  exit 1
+fi
 grep -q '/var/dirextalk-message-server/p2p/bootstrap.json' "$tmp/bundle/init-tokens.sh"
 grep -q 'BOOTSTRAP_FILE=${BOOTSTRAP_FILE:-/var/dirextalk-message-server/p2p/bootstrap.json}' "$tmp/bundle/init-tokens.sh"
 grep -q 'if \[ -s "$BOOTSTRAP_FILE" \]' "$tmp/bundle/init-tokens.sh"
@@ -92,6 +116,10 @@ grep -q 'portal.bootstrap' "$tmp/bundle/init-tokens.sh"
 grep -q 'agent.matrix_session.create' "$tmp/bundle/init-tokens.sh"
 grep -q 'agent_auth_token=$(json_string agent_token "$BOOTSTRAP_FILE")' "$tmp/bundle/init-tokens.sh"
 grep -q 'agent.matrix_session.create.*"$agent_auth_token"' "$tmp/bundle/init-tokens.sh"
+if grep -q -- '--header="Authorization: Bearer' "$tmp/bundle/init-tokens.sh"; then
+  echo "bootstrap bearer tokens must not be passed in wget argv" >&2
+  exit 1
+fi
 grep -q '/_matrix/client/v3/createRoom' "$tmp/bundle/init-tokens.sh"
 grep -q '/_matrix/client/v3/rooms/${room_path}/join' "$tmp/bundle/init-tokens.sh"
 

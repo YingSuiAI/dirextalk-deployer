@@ -9,10 +9,10 @@
 #
 # Usage:
 #   export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-east-1
-#   export MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
+#   # Normal server selection uses dirextalk/message-server:latest directly.
 #   # First run asks for region, production domain, instance size, and existing-state handling.
 #   # Non-interactive:
-#   #   DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=t3.small
+#   #   DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=t3.small
 #   bash orchestrate.sh                 # run or resume until completion
 #   DOMAIN=__DOMAIN__ bash orchestrate.sh status   # show current service state only
 #   bash orchestrate.sh reset           # archive state.json; destroy will no longer know the resources
@@ -20,7 +20,7 @@
 # Exit codes: 0=DONE / 1=phase failed / 2=waiting for user action.
 set -uo pipefail
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 DIREXTALK_INSTALL_SCRIPTS_DIR="$HERE"
 
 # Prefer workspace-local tools when present.
@@ -33,12 +33,17 @@ fi
 DIREXTALK_WORKDIR_WAS_SET=${DIREXTALK_WORKDIR+x}
 
 source "$HERE/lib/state.sh"
+source "$HERE/lib/git-bash.sh"
 source "$HERE/lib/aws.sh"
 source "$HERE/lib/domain.sh"
 source "$HERE/lib/operation_report.sh"
 source "$HERE/lib/local-paths.sh"
 source "$HERE/lib/connect-daemon-logs.sh"
 source "$HERE/lib/region.sh"
+source "$HERE/lib/http-secrets.sh"
+source "$HERE/lib/server-release.sh"
+source "$HERE/lib/agent-release.sh"
+source "$HERE/lib/agent-worker-control.sh"
 
 # Phase -> script mapping. Use case instead of declare -A for macOS bash 3.2.
 phase_file() {
@@ -58,7 +63,7 @@ phase_file() {
 # Dependency check.
 check_deps() {
   local b missing=""
-  for b in aws ssh scp curl; do
+  for b in aws ssh curl; do
     command -v "$b" >/dev/null 2>&1 || missing="$missing $b"
   done
   [ -z "$missing" ] && return 0
@@ -74,7 +79,7 @@ check_deps() {
       warn "See references/user-journey.md for the AWS CLI setup guide."
       ;;
   esac
-  warn "On Windows, use a working POSIX Bash environment such as Git Bash, MSYS2, Cygwin, or WSL. Do not assume C:\\Windows\\System32\\bash.exe is usable; verify with: bash -lc 'echo ok'."
+  warn "On native Windows, install Git for Windows, open Git Bash, and rerun. Native WSL is supported as Linux, but do not mix WSL and Git Bash paths for one service."
   fail "Install the missing dependencies and rerun."
 }
 
@@ -91,7 +96,7 @@ run_one_phase() {
 # Print current state summary.
 cmd_status_inventory() {
   local nodes state found=0 domain phase current instance service_dir
-  nodes="${DIREXTALK_HOME:-$HOME/.dirextalk}/nodes"
+  nodes="$(dirextalk_home)/nodes"
   if [ ! -d "$nodes" ]; then
     warn "No local service directory found: $nodes"
     warn "Set DOMAIN=<service domain> when running or inspecting a specific deployment."
@@ -209,7 +214,7 @@ local_refresh_pending() {
 
 status_local_refresh() {
   if local_refresh_pending; then
-    echo "reset/redeploy cleared old credentials, user confirmations, runtime checks, bridge install proof, and MCP install proof"
+    echo "reset/redeploy cleared old credentials, runtime checks, bridge install proof, and MCP install proof"
   fi
 }
 
@@ -238,18 +243,15 @@ status_next_action() {
 }
 
 status_stop_loss() {
-  local domain billable
+  local domain billable command
   domain=$(state_get domain)
   billable=$(recorded_billable_resources)
   if [ -z "$billable" ]; then
     echo "no recorded cloud resources need destroy from this state"
   else
     echo "ask the agent to run destroy, or run:"
-    if [ "${DIREXTALK_LOCAL_PATH_STYLE:-}" = "windows" ] || [ -n "${DIREXTALK_WINDOWS_HOME:-}" ]; then
-      echo "  \$env:DOMAIN = \"${domain:-__DOMAIN__}\"; .\\scripts\\destroy.ps1"
-    else
-      echo "  DOMAIN=${domain:-__DOMAIN__} bash $HERE/destroy.sh"
-    fi
+    command=$(dirextalk_render_env_command DOMAIN "${domain:-__DOMAIN__}" bash "$HERE/destroy.sh") || return 1
+    echo "  $command"
     echo "  Purchased domains, third-party DNS records, and retained hosted zones are not automatically removed."
   fi
 }
@@ -299,17 +301,58 @@ cmd_status() {
 }
 
 # Delivery summary.
+delivery_runtime_checks_strictly_passed() {
+  local summary connect doctor tools smoke
+  summary=$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")
+  connect=$(json_get "$STATE_JSON" runtime_checks.connect_daemon.status "not_run")
+  doctor=$(json_get "$STATE_JSON" runtime_checks.mcp_doctor.status "not_run")
+  tools=$(json_get "$STATE_JSON" runtime_checks.mcp_tools.status "not_run")
+  smoke=$(json_get "$STATE_JSON" runtime_checks.mcp_smoke.status "not_run")
+
+  [ "$summary" = "passed" ] &&
+    [ "$connect" = "passed" ] &&
+    [ "$doctor" = "passed" ] &&
+    [ "$tools" = "passed" ] &&
+    [ "$smoke" = "passed" ]
+}
+
+delivery_runtime_checks_summary() {
+  printf 'summary=%s connect_daemon=%s mcp_doctor=%s mcp_tools=%s mcp_smoke=%s\n' \
+    "$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")" \
+    "$(json_get "$STATE_JSON" runtime_checks.connect_daemon.status "not_run")" \
+    "$(json_get "$STATE_JSON" runtime_checks.mcp_doctor.status "not_run")" \
+    "$(json_get "$STATE_JSON" runtime_checks.mcp_tools.status "not_run")" \
+    "$(json_get "$STATE_JSON" runtime_checks.mcp_smoke.status "not_run")"
+}
+
+ensure_delivery_runtime_checks() {
+  local verify_rc=0 retry_command
+  warn "Final delivery requires live runtime checks; running: verify runtime"
+  cmd_verify_runtime || verify_rc=$?
+
+  if [ "$verify_rc" -eq 0 ] && delivery_runtime_checks_strictly_passed; then
+    return 0
+  fi
+
+  warn "Final delivery blocked because runtime checks did not all pass: $(delivery_runtime_checks_summary)"
+  retry_command=$(dirextalk_render_env_command DOMAIN "$(state_get domain)" bash "$0" verify runtime) || return 1
+  warn "Fix the failed check, then rerun: $retry_command"
+  return 1
+}
+
 print_delivery() {
-  local domain password keyfile pubip iid region statejson envfile agent_room_id runtime install_policy install_mode install_status install_command
+  local domain password keyfile pubip iid region statejson agent_room_id runtime install_policy install_mode install_status install_command
   local cloud_provider cloud_label
   local agent_node_id agent_service_id agent_service_dir agent_cred cc_config cc_binary cc_agent cc_user cc_pkg
-  local report_path runtime_summary app_gate real_chat_gate agent_runtime_gate
+  local mcp_endpoint
+  local report_path runtime_summary daemon_command ssh_command report_command
   domain=$(state_get domain)
   password=$(state_get password)
   if ! printf '%s' "$password" | grep -Eq '^[0-9]{8}$'; then
     warn "state password field is not an exact eight-digit initialization code; rerun S5_INIT_TOKENS before reporting it."
     return 1
   fi
+  ensure_delivery_runtime_checks || return $?
   keyfile=$(res_get key_file); pubip=$(res_get public_ip)
   iid=$(res_get instance_id); region=$(state_get region); statejson="$STATE_JSON"
   cloud_provider=$(state_get cloud_provider)
@@ -318,7 +361,6 @@ print_delivery() {
   else
     cloud_label="EC2"
   fi
-  envfile=$(state_get agent_env_file)
   agent_node_id=$(state_get agent_node_id)
   agent_service_id=$(state_get agent_service_id)
   agent_service_dir=$(state_get agent_service_dir)
@@ -330,20 +372,17 @@ print_delivery() {
   cc_agent=$(state_get connect_agent)
   cc_user=$(state_get connect_matrix_user)
   cc_pkg=$(state_get connect_npm_package)
+  mcp_endpoint=$(state_get mcp_endpoint_url)
   install_policy=$(state_get connect_install_policy)
   install_mode=$(state_get connect_install_mode)
   install_status=$(state_get connect_install_status)
   install_command=$(state_get connect_install_command)
   runtime_summary=$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")
-  app_gate=$(json_get "$STATE_JSON" user_confirmations.app_initialization.status "pending_user_confirmation")
-  real_chat_gate=$(json_get "$STATE_JSON" user_confirmations.real_chat.status "pending_user_confirmation")
-  agent_runtime_gate=$(json_get "$STATE_JSON" user_confirmations.agent_mcp_runtime.status "pending_runtime_confirmation")
   echo
-  echo -e "\033[32m========== Automated Deployment Gates Passed ==========\033[0m"
+  echo -e "\033[32m========== Deployment Complete ==========\033[0m"
   echo "  App domain   : $domain"
   echo "  init code    : $password   <- enter in the App initialization flow"
-  echo "  status       : server automation is green; product completion waits for user/runtime confirmation"
-  echo "  user gates   : app_initialization=$app_gate real_chat=$real_chat_gate agent_mcp_runtime=$agent_runtime_gate"
+  echo "  status       : deployment and automated runtime/MCP verification completed"
   echo "  runtime check: ${runtime_summary:-not_run}"
   echo "  agent node   : ${agent_node_id:-default}"
   echo "  service id   : ${agent_service_id:-not recorded}"
@@ -351,25 +390,28 @@ print_delivery() {
   echo "  credentials  : init code/password field, access_token, and agent_token written to ${agent_cred:-~/.dirextalk/nodes/<service_id>/credentials.json}"
   echo "  agent room   : ${agent_room_id:-written to credentials.json}"
   echo "  dirextalk-connect   : package=${cc_pkg:-dirextalk-connect@latest} config=${cc_config:-not recorded} command=${cc_binary:-dirextalk-connect}"
+  echo "  MCP          : transport=http endpoint=${mcp_endpoint:-https://$domain/mcp}"
   echo "  matrix user  : ${cc_user:-created during S6}"
   echo "  agent runtime: ${runtime:-unknown}"
   echo "  install mode : policy=${install_policy:-recommend} mode=${install_mode:-dirextalk-connect} agent=${cc_agent:-codex} status=${install_status:-recommend}"
   [ -n "$install_command" ] && echo "  install cmd  : $install_command"
-  echo "  daemon       : ${cc_binary:-dirextalk-connect} daemon status --service-name ${agent_service_id:-dirextalk-connect}"
-  echo "  env vars     : DIREXTALK_DOMAIN, DIREXTALK_AGENT_TOKEN, DIREXTALK_AGENT_ROOM_ID persisted${envfile:+ via $envfile}"
+  daemon_command=$(dirextalk_render_local_command "$(dirextalk_normalize_local_path "${cc_binary:-dirextalk-connect}")" daemon status --service-name "${agent_service_id:-dirextalk-connect}") || return 1
+  echo "  daemon       : $daemon_command"
   echo "  AWS region   : $region"
   echo "  cloud        : ${cloud_provider:-ec2}"
   echo "  $cloud_label          : $iid ($pubip)"
-  echo "  SSH          : ssh -i $keyfile ubuntu@$pubip"
+  ssh_command=$(dirextalk_render_local_command ssh -i "$(dirextalk_normalize_local_path "$keyfile")" "ubuntu@$pubip") || return 1
+  echo "  SSH          : $ssh_command"
   echo "  state.json   : $statejson"
   echo "  stop billing : ask the agent to destroy this node when finished"
   echo "  Note         : cloud instances, public IPv4/static IPs, storage, and Route53 resources can keep billing until destroy is run."
   echo "  security     : delete/disable temporary IAM keys after deployment; rotate/remove root keys if used."
-  echo "  Product gate : S7 is green; final product completion still needs App initialization and agent/MCP runtime confirmation."
-  if report_path=$(operation_report_write new_deploy automated_gates_complete_user_confirmation_pending "$STATE_JSON" 2>/dev/null); then
+  echo "  next use     : initialize the App with the domain and code above; no deployer confirmation command is required."
+  if report_path=$(operation_report_write new_deploy deployment_complete "$STATE_JSON" 2>/dev/null); then
     echo "  report       : $report_path"
   else
-    echo "  report       : not written; run bash $0 report new_deploy"
+    report_command=$(dirextalk_render_local_command bash "$0" report new_deploy) || return 1
+    echo "  report       : not written; run $report_command"
   fi
 }
 
@@ -384,7 +426,7 @@ record_region_recommendation() {
 }
 
 ensure_region_selected() {
-  local region source timezone offset reason row selected
+  local region source timezone= offset= reason= row selected
   region=$(state_get region)
   if [ -z "$region" ]; then
     region=${AWS_DEFAULT_REGION:-${AWS_REGION:-}}
@@ -482,24 +524,26 @@ precheck_new_deploy_domain_env() {
   [ -f "$STATE_JSON" ] && return 0
   if [ "${DOMAIN_MODE:-}" = "ec2" ]; then
     warn "Deployment blocked: DOMAIN_MODE=ec2 temporary-domain mode has been removed."
-    warn "Prepare a production domain and use DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1."
+    warn "Prepare a production domain and use DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1."
     return 2
   fi
   if [ -z "$domain" ]; then
     warn "Deployment blocked: DOMAIN is missing. Dirextalk requires a confirmed production Matrix server_name."
     warn "Use this skill to prepare domain/DNS, then rerun:"
-    warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
+    print_domain_onboarding_guide
+    warn "  DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   if ! domain_is_formal_name "$domain"; then
     warn "Deployment blocked: DOMAIN=$domain is not a valid production domain."
     warn "Use a long-lived domain you own and can manage in DNS, such as __DOMAIN__. IPs, localhost, wildcards, and temporary resolver domains are not accepted."
+    print_domain_onboarding_guide
     return 2
   fi
   if [ "${CONFIRM_DOMAIN_BINDING:-0}" != "1" ]; then
     warn "Deployment blocked: Matrix server_name domain binding has not been confirmed."
     warn "Rerun after confirmation:"
-    warn "  DOMAIN=$domain DOMAIN_MODE=${DOMAIN_MODE:-user} CONFIRM_DOMAIN_BINDING=1 bash $0"
+    warn "  DOMAIN=$domain DOMAIN_MODE=${DOMAIN_MODE:-route53} CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   return 0
@@ -529,28 +573,38 @@ ensure_production_domain_selected() {
 
   if [ "$mode" = "ec2" ]; then
     warn "Deployment blocked: DOMAIN_MODE=ec2 temporary-domain mode has been removed."
-    warn "Prepare a production domain and use DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1."
+    warn "Prepare a production domain and use DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1."
     return 2
   fi
   if [ -z "$domain" ]; then
     warn "Deployment blocked: DOMAIN is missing. Dirextalk requires a confirmed production Matrix server_name."
     warn "Use this skill to prepare domain/DNS, then rerun:"
-    warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
+    print_domain_onboarding_guide
+    warn "  DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   if ! domain_is_formal_name "$domain"; then
     warn "Deployment blocked: DOMAIN=$domain is not a valid production domain."
     warn "Use a long-lived domain you own and can manage in DNS, such as __DOMAIN__. IPs, localhost, wildcards, and temporary resolver domains are not accepted."
+    print_domain_onboarding_guide
     return 2
   fi
   if [ "$confirmed" != "true" ] && [ "${CONFIRM_DOMAIN_BINDING:-0}" != "1" ]; then
     warn "Deployment blocked: Matrix server_name domain binding has not been confirmed."
     warn "After $domain becomes server_name, changing the domain is effectively a new homeserver identity."
     warn "Rerun after confirmation:"
-    warn "  DOMAIN=$domain DOMAIN_MODE=${mode:-user} CONFIRM_DOMAIN_BINDING=1 bash $0"
+    warn "  DOMAIN=$domain DOMAIN_MODE=${mode:-route53} CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   return 0
+}
+
+print_domain_onboarding_guide() {
+  warn "Provide the long-lived domain or subdomain to use as the Matrix server_name."
+  warn "  The deployer automatically checks the current AWS account for a matching public Route53 hosted zone."
+  warn "  When found, it creates the A record automatically. Otherwise it prints the fixed public IP later and asks you to add the A record at the external DNS provider."
+  warn "  DOMAIN_MODE=user or DOMAIN_MODE=route53 remains available as an explicit automation override."
+  warn "  The Matrix server_name is bound to DOMAIN. Changing it later is effectively a new homeserver, so choose the final domain before provisioning."
 }
 
 guard_existing_state() {
@@ -562,7 +616,7 @@ guard_existing_state() {
     warn "Found legacy temporary-domain deployment state (domain_mode=ec2). Production deployment no longer supports resuming this mode."
     warn "Destroy and rebuild, or use a new service directory:"
     warn "  DIREXTALK_EXISTING_STATE_ACTION=destroy bash $0"
-    warn "  DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
+    warn "  DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 bash $0"
     return 2
   fi
   confirmed=$(json_get "$STATE_JSON" existing_state_confirmed false)
@@ -591,7 +645,7 @@ guard_existing_state() {
       warn "Existing service state must be handled explicitly to avoid accidental reuse or duplicate EC2 creation."
       warn "Resume:  DIREXTALK_EXISTING_STATE_ACTION=continue bash $0"
       warn "Rebuild: DIREXTALK_EXISTING_STATE_ACTION=destroy bash $0"
-      warn "New service: DOMAIN=__DOMAIN__ DOMAIN_MODE=user CONFIRM_DOMAIN_BINDING=1 bash $0"
+      warn "New service: DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 bash $0"
       return 2 ;;
     *)
       warn "Unknown DIREXTALK_EXISTING_STATE_ACTION=$action (expected continue|destroy|abort)."
@@ -614,7 +668,7 @@ cmd_run() {
     local cur; cur=$(first_unfinished_phase)
     if [ "$cur" = "DONE" ]; then
       ok "All phases completed."
-      print_delivery
+      print_delivery || return $?
       return 0
     fi
     log "Entering phase $cur (current status=$(phase_status "$cur"))"
@@ -637,7 +691,13 @@ cmd_report() {
     return 1
   }
   case "$operation" in
-    new_deploy) status=automated_gates_complete_user_confirmation_pending ;;
+    new_deploy)
+      if [ "$(phase_status S7_VERIFY_E2E)" = "done" ] && delivery_runtime_checks_strictly_passed; then
+        status=deployment_complete
+      else
+        status=deployment_incomplete
+      fi
+      ;;
     repair_or_verify) status=verification_report ;;
     update) status=update_report ;;
     reset_app_data) status=reset_app_data_report ;;
@@ -651,106 +711,52 @@ cmd_report() {
   echo "operation report: $report_path"
 }
 
-cmd_confirm() {
-  local gate=${1:-} evidence=${DIREXTALK_CONFIRM_EVIDENCE:-}
-  local runtime_summary_status runtime_probe_confirmed
-  [ -f "$STATE_JSON" ] || {
-    warn "state.json not found: $STATE_JSON"
-    return 1
-  }
-  case "$gate" in
-    app_initialization|real_chat|agent_mcp_runtime) ;;
-    *)
-      echo "Usage: $0 confirm [app_initialization|real_chat|agent_mcp_runtime]" >&2
-      return 1
-      ;;
-  esac
-  if [ -z "$evidence" ]; then
-    warn "confirm $gate requires DIREXTALK_CONFIRM_EVIDENCE with a concrete user/runtime evidence note."
-    return 1
-  fi
-  if [ "${#evidence}" -lt 12 ]; then
-    warn "DIREXTALK_CONFIRM_EVIDENCE is too short; provide a concrete user/runtime evidence note."
-    return 1
-  fi
-  runtime_summary_status=$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")
-  runtime_probe_confirmed=false
-  if [ "$gate" = "agent_mcp_runtime" ]; then
-    if [ "$runtime_summary_status" != "passed" ]; then
-      warn "agent_mcp_runtime confirmation requires runtime_checks.summary.status=passed. Run: DOMAIN=<DOMAIN> bash $0 verify runtime"
-      return 1
-    fi
-    if [ "${DIREXTALK_CONFIRM_RUNTIME_PROBE:-0}" != "1" ]; then
-      warn "agent_mcp_runtime confirmation requires DIREXTALK_CONFIRM_RUNTIME_PROBE=1 after the selected runtime/channel probe is actually confirmed."
-      return 1
-    fi
-    runtime_probe_confirmed=true
-  fi
-  if [ "$gate" = "agent_mcp_runtime" ]; then
-    state_set_object "user_confirmations.$gate" \
-      status=confirmed \
-      "ts=$(_now)" \
-      "evidence=$evidence" \
-      "runtime_summary_status=$runtime_summary_status" \
-      "runtime_probe_confirmed=$runtime_probe_confirmed"
-  else
-    state_set_object "user_confirmations.$gate" \
-      status=confirmed \
-      "ts=$(_now)" \
-      "evidence=$evidence"
-  fi
-  echo "confirmed gate: $gate"
-}
-
 cmd_verify_mcp_doctor() {
   [ -f "$STATE_JSON" ] || {
     warn "state.json not found: $STATE_JSON"
     return 1
   }
 
-  local credentials mcp_cmd node_id out err report token_status report_domain report_room
-  credentials=$(json_get "$STATE_JSON" agent_credentials_file)
-  [ -n "$credentials" ] || credentials=$(json_get "$STATE_JSON" mcp_credentials_file)
-  mcp_cmd=$(json_get "$STATE_JSON" mcp_command "dirextalk-mcp")
+  local endpoint token node_id out out_curl code payload protocol_version server_name tools_type tools_capable headers headers_arg
+  endpoint=$(_mcp_http_endpoint_from_state)
+  token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
-  [ -n "$credentials" ] || {
-    warn "mcp doctor check requires agent_credentials_file or mcp_credentials_file in state.json"
+  if [ -z "$endpoint" ] || [ -z "$token" ]; then
+    warn "mcp doctor check requires mcp_endpoint_url/as_url/domain and agent_token in state.json"
     return 1
-  }
-  [ -n "$mcp_cmd" ] || mcp_cmd=dirextalk-mcp
+  fi
 
-  out=$(mktemp)
-  err=$(mktemp)
-  if ! DIREXTALK_CREDENTIALS_FILE="$credentials" DIREXTALK_AGENT_NODE_ID="$node_id" bash -c "$mcp_cmd doctor --json" > "$out" 2> "$err"; then
-    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "evidence=dirextalk-mcp doctor failed"
-    cat "$err" >&2
-    rm -f "$out" "$err"
+  out=$(mktemp "$DIREXTALK_WORKDIR/.mcp-doctor.XXXXXX")
+  headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
+  out_curl=$(dirextalk_native_tool_path "$out") || { rm -f "$headers" "$out"; return 1; }
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$out"; return 1; }
+  payload=$(json_build mcp-jsonrpc-initialize)
+  code=$(curl -sk -o "$out_curl" -w '%{http_code}' \
+    -X POST "$endpoint" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2025-06-18' \
+    -H "$headers_arg" \
+    -d "$payload" 2>/dev/null)
+  rm -f "$headers"
+  if [ "$code" != "200" ] || ! json_valid "$out" >/dev/null 2>&1; then
+    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "endpoint=$endpoint" "evidence=HTTP MCP initialize returned HTTP $code or non-json output"
+    rm -f "$out"
     return 1
   fi
-  if ! json_valid "$out" >/dev/null 2>&1; then
-    state_set_object runtime_checks.mcp_doctor status=failed "ts=$(_now)" "evidence=dirextalk-mcp doctor returned non-json output"
-    rm -f "$out" "$err"
-    return 1
-  fi
-  report=$(cat "$out")
-  token_status=$(printf '%s\n' "$report" | json_stdin_get token)
-  if [ "$token_status" = "redacted" ]; then
-    token_status=redacted
-  elif [ -n "$token_status" ]; then
-    token_status=present_redacted
-  else
-    token_status=missing
-  fi
-  report_domain=$(json_get "$out" domain)
-  report_room=$(json_get "$out" agent_room_id)
+  protocol_version=$(json_get "$out" result.protocolVersion)
+  server_name=$(json_get "$out" result.serverInfo.name)
+  tools_type=$(json_type "$out" result.capabilities.tools 2>/dev/null || true)
+  [ "$tools_type" = "object" ] && tools_capable=true || tools_capable=false
   state_set_object runtime_checks.mcp_doctor \
     status=passed \
     "ts=$(_now)" \
-    "evidence=dirextalk-mcp doctor --json succeeded" \
-    "domain=$report_domain" \
-    "agent_room_id=$report_room" \
-    "token=$token_status"
-  rm -f "$out" "$err"
+    "endpoint=$endpoint" \
+    "protocol_version=$protocol_version" \
+    "server_name=$server_name" \
+    "tools_capable=$tools_capable" \
+    "evidence=HTTP MCP initialize succeeded"
+  rm -f "$out"
   echo "verified runtime check: mcp_doctor"
 }
 
@@ -760,48 +766,52 @@ cmd_verify_mcp_smoke() {
     return 1
   }
 
-  local service_url token room_id body code payload url response_room_id response_messages_type
-  service_url=$(json_get "$STATE_JSON" as_url)
-  if [ -z "$service_url" ]; then
-    local domain
-    domain=$(json_get "$STATE_JSON" domain)
-    [ -n "$domain" ] && service_url="https://$domain"
-  fi
+  local endpoint token room_id body body_curl code payload response_content_type is_error headers headers_arg node_id
+  endpoint=$(_mcp_http_endpoint_from_state)
   token=$(json_get "$STATE_JSON" agent_token)
   room_id=$(json_get "$STATE_JSON" agent_room_id)
-  if [ -z "$service_url" ] || [ -z "$token" ] || [ -z "$room_id" ]; then
-    warn "mcp smoke check requires as_url/domain, agent_token, and agent_room_id in state.json"
+  if [ -z "$endpoint" ] || [ -z "$token" ] || [ -z "$room_id" ]; then
+    warn "mcp smoke check requires mcp_endpoint_url/as_url/domain, agent_token, and agent_room_id in state.json"
     return 1
   fi
 
-  body=$(mktemp)
-  payload=$(json_build mcp-messages-list "$room_id")
-  url="${service_url%/}/_p2p/query"
-  code=$(curl -sk -o "$body" -w '%{http_code}' \
-    -X POST "$url" \
+  body=$(mktemp "$DIREXTALK_WORKDIR/.mcp-smoke.XXXXXX")
+  node_id=$(json_get "$STATE_JSON" agent_node_id)
+  headers=$(dirextalk_curl_secret_headers "$(dirname "$body")" "$token" "$node_id") || return 1
+  body_curl=$(dirextalk_native_tool_path "$body") || { rm -f "$headers" "$body"; return 1; }
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$body"; return 1; }
+  payload=$(json_build mcp-jsonrpc-messages-list-call "$room_id")
+  code=$(curl -sk -o "$body_curl" -w '%{http_code}' \
+    -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer $token" \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2025-06-18' \
+    -H "$headers_arg" \
     -d "$payload" 2>/dev/null)
-  if [ "$code" != "200" ] || ! json_assert "$body" messages-response >/dev/null 2>&1; then
+  rm -f "$headers"
+  response_content_type=$(json_type "$body" result.content 2>/dev/null || true)
+  is_error=$(json_get "$body" result.isError false)
+  if [ "$code" != "200" ] || [ "$response_content_type" != "array" ] || [ "$is_error" = "true" ]; then
     state_set_object runtime_checks.mcp_smoke \
       status=failed \
       "ts=$(_now)" \
-      action=mcp.messages.list \
-      "evidence=mcp.messages.list returned HTTP $code or invalid response"
+      action=tools/call \
+      tool_name=dirextalk_messages_list \
+      "endpoint=$endpoint" \
+      "evidence=dirextalk_messages_list returned HTTP $code, isError=$is_error, or invalid response"
     rm -f "$body"
     return 1
   fi
 
-  response_room_id=$(json_get "$body" room_id)
-  response_messages_type=$(json_type "$body" messages)
   state_set_object runtime_checks.mcp_smoke \
     status=passed \
     "ts=$(_now)" \
-    action=mcp.messages.list \
+    action=tools/call \
+    tool_name=dirextalk_messages_list \
     "room_id=$room_id" \
-    "response_room_id=$response_room_id" \
-    "response_messages_type=$response_messages_type" \
-    "evidence=read-only backend smoke check succeeded"
+    "endpoint=$endpoint" \
+    "response_content_type=$response_content_type" \
+    "evidence=read-only HTTP MCP tool call succeeded"
   rm -f "$body"
   echo "verified runtime check: mcp_smoke"
 }
@@ -812,45 +822,59 @@ cmd_verify_mcp_tools() {
     return 1
   }
 
-  local credentials mcp_cmd node_id node_cmd node_script out err report
-  credentials=$(json_get "$STATE_JSON" agent_credentials_file)
-  [ -n "$credentials" ] || credentials=$(json_get "$STATE_JSON" mcp_credentials_file)
-  mcp_cmd=$(json_get "$STATE_JSON" mcp_command "dirextalk-mcp")
+  local endpoint token node_id out out_curl code payload tools_type headers headers_arg
+  endpoint=$(_mcp_http_endpoint_from_state)
+  token=$(json_get "$STATE_JSON" agent_token)
   node_id=$(json_get "$STATE_JSON" agent_node_id)
-  [ -n "$credentials" ] || {
-    warn "mcp tools check requires agent_credentials_file or mcp_credentials_file in state.json"
+  if [ -z "$endpoint" ] || [ -z "$token" ]; then
+    warn "mcp tools check requires mcp_endpoint_url/as_url/domain and agent_token in state.json"
     return 1
-  }
-  [ -n "$mcp_cmd" ] || mcp_cmd=dirextalk-mcp
-  node_cmd=$(_node_command)
-  [ -n "$node_cmd" ] || {
-    warn "mcp tools check requires node or node.exe to run scripts/mcp-tools-list.mjs"
-    return 1
-  }
-  node_script=$(_node_script_path "$node_cmd" "$HERE/mcp-tools-list.mjs")
+  fi
 
-  out=$(mktemp)
-  err=$(mktemp)
-  if ! DIREXTALK_CREDENTIALS_FILE="$credentials" DIREXTALK_AGENT_NODE_ID="$node_id" "$node_cmd" "$node_script" "$mcp_cmd" > "$out" 2> "$err"; then
-    state_set_object runtime_checks.mcp_tools status=failed "ts=$(_now)" "evidence=MCP tools/list failed"
-    cat "$err" >&2
-    rm -f "$out" "$err"
+  out=$(mktemp "$DIREXTALK_WORKDIR/.mcp-tools.XXXXXX")
+  headers=$(dirextalk_curl_secret_headers "$(dirname "$out")" "$token" "$node_id") || return 1
+  out_curl=$(dirextalk_native_tool_path "$out") || { rm -f "$headers" "$out"; return 1; }
+  headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers" "$out"; return 1; }
+  payload=$(json_build mcp-jsonrpc-tools-list)
+  code=$(curl -sk -o "$out_curl" -w '%{http_code}' \
+    -X POST "$endpoint" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2025-06-18' \
+    -H "$headers_arg" \
+    -d "$payload" 2>/dev/null)
+  rm -f "$headers"
+  tools_type=$(json_type "$out" result.tools 2>/dev/null || true)
+  if [ "$code" != "200" ] || [ "$tools_type" != "array" ]; then
+    state_set_object runtime_checks.mcp_tools status=failed "ts=$(_now)" "endpoint=$endpoint" "evidence=HTTP MCP tools/list returned HTTP $code or invalid output"
+    rm -f "$out"
     return 1
   fi
-  if ! json_assert "$out" tools-list >/dev/null 2>&1; then
-    state_set_object runtime_checks.mcp_tools status=failed "ts=$(_now)" "evidence=MCP tools/list returned invalid output"
-    rm -f "$out" "$err"
-    return 1
-  fi
-  report=$(cat "$out")
   state_set_object runtime_checks.mcp_tools \
     status=passed \
     "ts=$(_now)" \
-    "evidence=MCP tools/list succeeded" \
-    "tool_count=$(json_get "$out" tool_count 0)" \
-    "tools=$(json_get "$out" tools "[]")"
-  rm -f "$out" "$err"
+    "endpoint=$endpoint" \
+    "evidence=HTTP MCP tools/list succeeded" \
+    "tool_count=$(json_length "$out" result.tools 0)" \
+    "tools=$(json_get "$out" result.tools "[]")"
+  rm -f "$out"
   echo "verified runtime check: mcp_tools"
+}
+
+_mcp_http_endpoint_from_state() {
+  local endpoint service_url domain
+  endpoint=$(json_get "$STATE_JSON" mcp_endpoint_url)
+  if [ -n "$endpoint" ]; then
+    printf '%s\n' "$endpoint"
+    return 0
+  fi
+  service_url=$(json_get "$STATE_JSON" as_url)
+  if [ -z "$service_url" ]; then
+    domain=$(json_get "$STATE_JSON" domain)
+    [ -n "$domain" ] && service_url="https://$domain"
+  fi
+  [ -n "$service_url" ] || return 1
+  printf '%s/mcp\n' "${service_url%/}"
 }
 
 _node_command() {
@@ -858,34 +882,8 @@ _node_command() {
 }
 
 _node_script_path() {
-  local node_cmd=$1 script=$2
-  case "$node_cmd" in
-    *.exe|*.EXE)
-      if command -v cygpath >/dev/null 2>&1; then
-        cygpath -w "$script"
-        return 0
-      fi
-      case "$script" in
-        /mnt/[A-Za-z]/*)
-          local drive rest
-          drive=${script#/mnt/}
-          drive=${drive%%/*}
-          rest=${script#/mnt/$drive/}
-          printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-          return 0
-          ;;
-        /[A-Za-z]/*)
-          local drive rest
-          drive=${script#/}
-          drive=${drive%%/*}
-          rest=${script#/$drive/}
-          printf '%s:\\%s\n' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's#/#\\#g')"
-          return 0
-          ;;
-      esac
-      ;;
-  esac
-  printf '%s\n' "$script"
+  local _node_cmd=$1 script=$2
+  dirextalk_native_tool_path "$script"
 }
 
 path_dirname() {
@@ -1083,15 +1081,92 @@ cmd_verify() {
   esac
 }
 
+agent_aws_import_local_lock_acquire() {
+  local lock_file="$DIREXTALK_WORKDIR/.agent-aws-import.lock"
+  local lock_file_native node_bin lock_helper suffix status_file status attempt message
+  node_bin=$(json_node) || return 1
+  lock_helper=$(dirextalk_native_tool_path "$HERE/lib/agent-aws-import-lock.mjs") || return 1
+  lock_file_native=$(dirextalk_native_tool_path "$lock_file") || return 1
+  suffix="${BASHPID:-$$}.${RANDOM:-0}.${RANDOM:-0}"
+  status_file="$lock_file.holder-status.$suffix"
+
+  exec 9> >("$node_bin" "$lock_helper" hold "$lock_file_native" "$suffix")
+  AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID=$!
+  AGENT_AWS_IMPORT_LOCAL_LOCK_STATUS_FILE=$status_file
+  attempt=1
+  while [ "$attempt" -le 50 ] && [ ! -f "$status_file" ]; do
+    kill -0 "$AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID" 2>/dev/null || break
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  if [ ! -f "$status_file" ]; then
+    exec 9>&-
+    wait "$AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID" 2>/dev/null || true
+    warn "Agent AWS-control import lock holder did not publish readiness."
+    return 1
+  fi
+  status=$(json_get "$status_file" status)
+  message=$(json_get "$status_file" message)
+  rm -f "$status_file"
+  if [ "$status" != acquired ]; then
+    exec 9>&-
+    wait "$AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID" 2>/dev/null || true
+    warn "${message:-Agent AWS-control import service lock was not acquired.}"
+    return 1
+  fi
+}
+
+agent_aws_import_local_lock_release() {
+  exec 9>&-
+  if [ -n "${AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID:-}" ]; then
+    wait "$AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID" 2>/dev/null || true
+  fi
+  if [ -n "${AGENT_AWS_IMPORT_LOCAL_LOCK_STATUS_FILE:-}" ]; then
+    rm -f "$AGENT_AWS_IMPORT_LOCAL_LOCK_STATUS_FILE"
+  fi
+}
+
+cmd_agent_aws_import() (
+  agent_aws_import_local_lock_acquire || return 1
+  trap 'agent_aws_import_local_lock_release' EXIT
+  [ -f "$STATE_JSON" ] || {
+    warn "agent-aws-import requires existing deployment state: $STATE_JSON"
+    return 1
+  }
+  command -v ssh >/dev/null 2>&1 || {
+    warn "agent-aws-import requires ssh."
+    return 1
+  }
+  unset -f run_phase 2>/dev/null || true
+  # shellcheck disable=SC1090
+  source "$HERE/phases/s3_provision.sh"
+  agent_aws_control_import_ec2
+)
+
+cmd_agent_worker_control_enable() ( agent_worker_control_enable )
+cmd_agent_worker_control_authorize() ( agent_worker_control_authorize )
+
+if [ "${DIREXTALK_ORCHESTRATE_LIB_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+dirextalk_require_git_bash_on_windows || exit 1
+
 # Entry point.
 case "${1:-run}" in
   run)    cmd_run ;;
   status) cmd_status ;;
   report) shift; cmd_report "${1:-new_deploy}" ;;
-  confirm) shift; cmd_confirm "${1:-}" ;;
   verify) shift; cmd_verify "${1:-}" ;;
+  agent-aws-import) cmd_agent_aws_import ;;
+  agent-worker-control-enable) cmd_agent_worker_control_enable ;;
+  agent-worker-control-authorize) cmd_agent_worker_control_authorize ;;
   reset)
     [ -f "$STATE_JSON" ] && { mv "$STATE_JSON" "$STATE_JSON.reset-$(date -u +%Y%m%d%H%M%S)"; warn "Archived old state.json."; }
     warn "Warning: after reset, destroy no longer has state data. Any remaining AWS resources must be removed manually." ;;
-  *) echo "Usage: $0 [run|status|report|confirm|verify|reset]"; exit 1 ;;
+  *)
+    echo "Usage: $0 [run|status|report|verify|agent-aws-import|reset]"
+    echo "Worker-control operations: agent-worker-control-enable|agent-worker-control-authorize"
+    exit 1
+    ;;
 esac

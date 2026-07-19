@@ -1,27 +1,58 @@
 # Windows Deployment Notes
 
-Tested on Windows 10+ with Git Bash / MSYS2. These notes capture quirks that differ from Linux/macOS deployments.
+Tested on Windows 10+ with Git for Windows. Git Bash is the only supported
+local lifecycle shell; these notes capture quirks that differ from Linux/macOS
+deployments.
 
 ## Entry Point
 
-Use the PowerShell wrapper from the repository root:
+From Git Bash at the repository root, verify Git before every lifecycle action:
 
-```powershell
-.\scripts\orchestrate.ps1 status
-.\scripts\orchestrate.ps1
-.\scripts\destroy.ps1
+```bash
+case "$(uname -s)" in
+  MINGW*) git_root=$(git --exec-path 2>/dev/null | sed 's#/mingw64/libexec/git-core$##'); command -v git >/dev/null && command -v cygpath >/dev/null && git --version | grep -q '\.windows\.' && [ -n "$git_root" ] && [ "$(cygpath -m "${EXEPATH:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s/bin' "$git_root" | tr '[:upper:]' '[:lower:]')" ] ;;
+  Linux*|Darwin*) true ;;
+  *) false ;;
+esac
 ```
 
-The wrappers find Git for Windows Bash and use it for the Bash state machine, but set `DIREXTALK_LOCAL_PATH_STYLE=windows` so S6 writes Windows-compatible `dirextalk-connect` config paths and daemon install commands. Use these PowerShell entrypoints on Windows instead of WSL Bash unless you intentionally deployed from WSL and want WSL-owned local paths.
+If the preflight fails, install Git for Windows from
+<https://git-scm.com/download/win>, reopen Git Bash, and stop. The preflight
+rejects PowerShell, MSYS2, and Cygwin on native Windows. Native WSL is supported
+as a Linux host and uses its distribution's Bash, tools, and POSIX paths; do not
+use it to operate a Git-Bash-owned service directory. Git Bash automatically stores
+Windows-compatible consumer paths in `C:/...` form before invoking
+Windows-native Node.js or local agent processes.
 
-Destroy can use `DOMAIN` or an explicit Windows state path:
+Path conversion at native-tool boundaries is explicit. The deployer converts
+Node script/input paths, AWS CLI `file://` paths, curl output/header paths, and
+local agent paths before invocation rather than relying on MSYS argv rewriting.
+This matters when Hermes or another parent runtime exports
+`MSYS_NO_PATHCONV=1`: Bash may redirect output into its real `/tmp` directory
+while an unnormalized Windows process would otherwise look under `C:/tmp`.
 
-```powershell
-$env:DOMAIN = "__DOMAIN__"
-.\scripts\destroy.ps1
+Use the same Bash entrypoints as Linux/macOS. Destroy can use `DOMAIN` or an
+explicit Windows-native state path:
 
-.\scripts\destroy.ps1 "$env:USERPROFILE\.dirextalk\nodes\<service_id>\state.json"
+```bash
+bash scripts/orchestrate.sh status
+DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
+DOMAIN=__DOMAIN__ bash scripts/destroy.sh
+bash scripts/destroy.sh "C:/Users/<you>/.dirextalk/nodes/<service_id>/state.json"
 ```
+
+The npm test runner also uses Git Bash only. It keeps one controller shell and
+runs selected test files sequentially; it never invokes `wsl.exe`. The isolated
+suite starts one authenticated loopback Node JSON worker so repeated Bash JSON
+calls reuse one native Node process and one connection per shell. `npm test`
+selects current and neighboring contracts, while `npm run test:release` adds
+package and skill-structure checks. `npm run test:quick` and `npm run test:stage`
+are explicit broader lanes. Exhaustive EC2, legacy, updater, and runtime
+matrices use explicit `npm run test:full` or manual Ubuntu CI dispatch. If Task
+Manager shows many WSL processes during a test, inspect their parent process:
+IntelliJ WSL toolchains and Docker Desktop commonly own those processes and
+must be managed in those applications rather than killed by the deployer test
+suite.
 
 ## Background Process Output Buffering
 
@@ -98,9 +129,9 @@ ls "$HOME/.dirextalk/nodes/<service_id>/dirextalk-connect"
 
 If an agent executable cannot be spawned from PATH, set a generic or agent-specific command before running S6:
 
-```powershell
-$env:DIREXTALK_CONNECT_AGENT = "gemini"
-$env:DIREXTALK_GEMINI_COMMAND = "C:\Tools\gemini.cmd"
+```bash
+export DIREXTALK_CONNECT_AGENT=gemini
+export DIREXTALK_GEMINI_COMMAND='C:/Tools/gemini.cmd'
 ```
 
 For Cursor on Windows, S6 uses Cursor Agent CLI, not Cursor Desktop CLI. The
@@ -109,56 +140,48 @@ Generated agent options also default to `mode = "yolo"` so headless turns do not
 stop at workspace trust prompts.
 Before auto install, S6 also verifies the CLI exists and creates a
 `versions/dist-package` junction to the latest version directory when legacy
-launchers still expect that path. If Cursor Agent CLI is missing, install it:
+launchers still expect that path. If Cursor Agent CLI is missing, install it
+with Cursor's official Windows installer. Then reopen Git Bash and log in:
 
-```powershell
-irm 'https://cursor.com/install?win32=true' | iex
-& "$env:LOCALAPPDATA\cursor-agent\agent.cmd" login
+```bash
+cursor_agent=$(cygpath -m "$LOCALAPPDATA/cursor-agent/agent.cmd")
+"$cursor_agent" login
 ```
 
 If Cursor Agent CLI is installed in a non-standard location, set:
 
-```powershell
-$env:DIREXTALK_CONNECT_AGENT = "cursor"
-$env:DIREXTALK_CURSOR_AGENT_COMMAND = "C:\Path\To\agent.cmd"
+```bash
+export DIREXTALK_CONNECT_AGENT=cursor
+export DIREXTALK_CURSOR_AGENT_COMMAND='C:/Path/To/agent.cmd'
 ```
 
 Cursor Agent authentication may still require one interactive login:
 
-```powershell
-& "$env:LOCALAPPDATA\cursor-agent\agent.cmd" status
-& "$env:LOCALAPPDATA\cursor-agent\agent.cmd" login
+```bash
+cursor_agent=$(cygpath -m "$LOCALAPPDATA/cursor-agent/agent.cmd")
+"$cursor_agent" status
+"$cursor_agent" login
 ```
 
-After login, rerun `.\scripts\orchestrate.ps1`; S6 refreshes
+After login, rerun `bash scripts/orchestrate.sh`; S6 refreshes
 `config.toml`, reinstalls the service-scoped daemon, and `verify runtime`
 checks daemon logs for missing CLI, missing login, workspace trust, and other
 agent backend failures.
 
-Cursor MCP is separate from the Cursor Agent CLI bridge. S6 writes a generated
-`mcp\cursor.mcp.json` snippet under the service directory. Cursor can read that
-schema from project-level `.cursor\mcp.json` or global `%USERPROFILE%\.cursor\mcp.json`,
-but S6 does not write those files by default because the snippet contains
-machine-local credential paths. After adding or merging the snippet, restart
-Cursor completely or reload/enable the server in Cursor MCP settings before
-expecting tools to appear. Do not merge that MCP snippet into the workspace used
-by dirextalk-connect unless you want IDE-only MCP tools; App chat uses the
-Cursor Agent CLI bridge and S6 defaults `[display]` to `compact` with
+Cursor MCP is host-managed and separate from the Cursor Agent CLI bridge. S6
+does not generate or copy a token-bearing Cursor MCP JSON file. Any future host
+enrollment must use a separately reviewed Cursor-native flow; App chat continues
+through the Cursor Agent CLI bridge, with `[display]` defaulting to `compact` and
 `tool_messages = false` so tool progress is not forwarded into the Matrix room.
 
-For Codex Desktop, the wrapper also tries to find the real bundled `codex.exe` because WindowsApps aliases cannot always be spawned by child processes:
-
-```powershell
-$codex = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin') -Filter codex.exe -Recurse |
-  Select-Object -First 1 -ExpandProperty FullName
-$env:DIREXTALK_CODEX_COMMAND = $codex
-```
-
-Use the Git Bash `$HOME` path for files generated by the deployer. If running `dirextalk-connect` from PowerShell, translate the config path to the Windows user profile path.
+For Codex Desktop, set `DIREXTALK_CODEX_COMMAND` to the real bundled
+`codex.exe` with a `C:/...` path if the WindowsApps alias cannot be spawned by a
+child process. Git Bash records `C:/Users/...` local paths for
+`dirextalk-connect`; do not substitute `/mnt/c/...` or `/c/...` consumer paths.
 
 ## EC2 SSH Key Paths
 
-SSH key files are written with Windows-compatible paths such as `C:/Users/.../.dirextalk/deploy/p2p-*.pem`. The deployer removes broad Windows ACL entries such as `Users`, `Authenticated Users`, `Everyone`, and Codex sandbox groups where possible, while keeping the current Windows user, `SYSTEM`, and `Administrators` on the file so OpenSSH does not reject the private key as too open. The SSH command printed in the delivery summary works in Git Bash. If using PowerShell or cmd, convert forward slashes to backslashes.
+SSH key files are written with Windows-compatible paths such as `C:/Users/.../.dirextalk/deploy/p2p-*.pem`. The deployer removes broad Windows ACL entries such as `Users`, `Authenticated Users`, `Everyone`, and Codex sandbox groups where possible, while keeping the current Windows user, `SYSTEM`, and `Administrators` on the file so OpenSSH does not reject the private key as too open. Forward-slash Windows paths are valid in Git Bash and Windows-native processes; no WSL conversion is required.
 
 ## Verifying Deployment
 

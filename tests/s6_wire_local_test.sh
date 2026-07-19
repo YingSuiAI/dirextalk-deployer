@@ -4,12 +4,12 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck disable=SC1090
 source "$ROOT/tests/lib/json_test.sh"
+# shellcheck disable=SC1090
+source "$ROOT/tests/lib/isolated_home.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-export HOME="$tmp/home"
-export XDG_CONFIG_HOME="$tmp/config"
-mkdir -p "$HOME"
+dirextalk_test_isolate_homes "$tmp"
 
 # shellcheck disable=SC1090
 source "$ROOT/scripts/phases/s6_wire_local.sh"
@@ -57,6 +57,7 @@ clear_speech_env() {
 
 clear_runtime_env
 clear_speech_env
+dirextalk_test_isolate_homes "$tmp"
 export DIREXTALK_AGENT_DETECT_PROCESS=0
 export DIREXTALK_LOCAL_PATH_STYLE=posix
 
@@ -65,20 +66,14 @@ unset DIREXTALK_HOME
 [ "$(DIREXTALK_HOME="$tmp/custom-dirextalk" _dirextalk_home)" = "$tmp/custom-dirextalk" ]
 [ "$(_dirextalk_service_id "https://Service.Example.test:8443/_p2p")" = "service.example.test-8443" ]
 [ "$(_dirextalk_service_dir "https://Service.Example.test:8443/_p2p")" = "$HOME/.dirextalk/nodes/service.example.test-8443" ]
+export DIREXTALK_HOME="$tmp/dirextalk"
+dirextalk_test_assert_isolated_homes "$tmp"
 
-envfile=$(_write_agent_env_file "https://service.example.test" "agent-token" "access-token" "!agents-real:service.example.test")
-
-[ "$envfile" = "$HOME/.dirextalk/env" ]
-grep -q 'DIREXTALK_DOMAIN=https://service.example.test' "$envfile"
-grep -q 'DIREXTALK_AGENT_TOKEN=agent-token' "$envfile"
-grep -q 'DIREXTALK_AGENT_ROOM_ID=\\!agents-real:service.example.test' "$envfile"
-! grep -q '^export P2P_' "$envfile"
-! grep -q 'P2P_ADMIN_ACCESS_TOKEN' "$envfile"
-! grep -q 'P2P_MATRIX_ACCESS_TOKEN' "$envfile"
-
-# shellcheck disable=SC1090
-source "$envfile"
-[ "$DIREXTALK_AGENT_ROOM_ID" = "!agents-real:service.example.test" ]
+credentials_file="$tmp/canonical-credentials.json"
+_write_credentials_file "$credentials_file" service.example.test https://service.example.test agent-token 12345678 access-token '!agents-real:service.example.test' codex-service-example
+json_test_check "$credentials_file" "data.profiles.default.agent_token === 'agent-token' && data.profiles.default.agent_node_id === 'codex-service-example' && data.profiles.default.mcp_url === 'https://service.example.test/mcp'"
+json_test_check "$credentials_file" "data.profiles.default.domain === 'service.example.test' && data.profiles.default.password === '12345678' && data.profiles.default.access_token === 'access-token' && data.profiles.default.agent_room_id === '!agents-real:service.example.test'"
+json_test_check "$credentials_file" "!('dirextalk_domain' in data.profiles.default) && !('dirextalk_agent_token' in data.profiles.default) && !('dirextalk_agent_room_id' in data.profiles.default) && !('dirextalk_agent_node_id' in data.profiles.default)"
 
 legacy_p2p_agent_pattern='P2P_MATRIX_AS_URL\|P2P_MATRIX_AGENT_TOKEN\|P2P_AGENT_RUNTIME\|p2p-agent-skill\|p2p-''matrix-agent'
 if grep -R "$legacy_p2p_agent_pattern" "$ROOT/scripts" "$ROOT/SKILL.md" "$ROOT/references/runtime-wiring.md"; then
@@ -92,6 +87,12 @@ fi
 [ "$(DIREXTALK_AGENT_PLATFORM=opencode _detect_agent_runtime)" = "opencode" ]
 [ "$(DIREXTALK_CONNECT_AGENT=qodercli _detect_agent_runtime)" = "qoder" ]
 [ "$(DIREXTALK_AGENT_PLATFORM=hermes DIREXTALK_CONNECT_AGENT=codex _detect_agent_runtime)" = "hermes" ]
+(
+  clear_runtime_env
+  export CODEX_RUNTIME_MARKER=1
+  _env_name_matches '^CODEX_'
+  ! _env_name_matches '^OPENCLAW_'
+)
 assert_active_runtime() {
   local expected=$1 signal=$2
   shift 2
@@ -126,6 +127,11 @@ assert_active_runtime pi PI_AGENT_SESSION PI_AGENT_SESSION=1
 assert_active_runtime antigravity ANTIGRAVITY_SESSION ANTIGRAVITY_SESSION=1
 assert_active_runtime openclaw OPENCLAW_SESSION OPENCLAW_SESSION=1
 assert_active_runtime hermes HERMES_SESSION HERMES_SESSION=1
+assert_active_runtime openclaw 'OpenClaw host plus Codex child' OPENCLAW_SESSION=1 CODEX_SANDBOX=1 DIREXTALK_CONNECT_AGENT=codex
+assert_active_runtime hermes 'Hermes host plus Codex child' HERMES_SESSION=1 CODEX_SANDBOX=1 DIREXTALK_CONNECT_AGENT=codex
+assert_active_runtime openclaw 'OpenClaw host plus explicit Codex child' OPENCLAW_SESSION=1 DIREXTALK_CONNECT_AGENT=codex
+assert_active_runtime hermes 'Hermes host plus explicit Codex child' HERMES_SESSION=1 DIREXTALK_CONNECT_AGENT=codex
+assert_active_runtime codex 'explicit platform bypasses host auto-detection' OPENCLAW_SESSION=1 DIREXTALK_AGENT_PLATFORM=codex
 assert_active_runtime codex .codex/tmp PATH="/tmp/.codex/tmp/codex-arg123:/usr/bin:/bin"
 (
   clear_runtime_env
@@ -165,7 +171,12 @@ auth=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) out=$2; shift 2 ;;
-    -H) [ "${2:-}" = "Authorization: Bearer agent-token" ] && auth=agent-token; shift 2 ;;
+    -H)
+      case "${2:-}" in
+        @*) grep -Fxq 'Authorization: Bearer agent-token' "${2#@}" && auth=agent-token ;;
+      esac
+      shift 2
+      ;;
     -w) shift 2 ;;
     *) shift ;;
   esac
@@ -219,7 +230,7 @@ json_test_check "$matrix_retry_dir/session.json" "data.user_id === '@agent:servi
 [ "$(_agent_global_skill_install_path claude-code)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/dirextalk-deployer' ]
 [ "$(_agent_global_skill_install_path claudecode)" = '${CLAUDE_HOME:-${CLAUDECODE_HOME:-$HOME/.claude}}/skills/dirextalk-deployer' ]
 [ "$(_agent_global_skill_install_path generic)" = '$HOME/.agent/skills/dirextalk-deployer' ]
-[ "$(_agent_workspace "$tmp/service")" = "$(pwd -P)" ]
+[ "$(_agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
 [ "$(DIREXTALK_AGENT_WORKSPACE="$tmp/custom-workspace" _agent_workspace "$tmp/service")" = "$tmp/custom-workspace" ]
 mkdir -p "$tmp/.codex/skills/dirextalk-deployer"
 [ "$(cd "$tmp/.codex/skills/dirextalk-deployer" && _agent_workspace "$tmp/service")" = "$tmp/service/workspace" ]
@@ -235,6 +246,7 @@ case "$install_command" in
     exit 1
     ;;
 esac
+[[ "$install_command" != *"daemon stop"* ]]
 custom_install_command=$(DIREXTALK_CONNECT_NPM_PACKAGE='dirextalk-connect@override-test' _connect_install_command "$connect_service_binary" "$connect_service_dir/dirextalk-connect/config.toml" "service.example.test" "$connect_service_dir")
 [[ "$custom_install_command" == *"dirextalk-connect@override-test"* ]]
 
@@ -242,16 +254,37 @@ custom_install_command=$(DIREXTALK_CONNECT_NPM_PACKAGE='dirextalk-connect@overri
 [ "$(DIREXTALK_LOCAL_PATH_STYLE=windows _local_connect_path '/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml')" = "C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" ]
 windows_connect_binary="/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd"
 windows_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _connect_install_command "$windows_connect_binary" "/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" "im" "/mnt/c/Users/alice/.dirextalk/nodes/im")
-[[ "$windows_install_command" == *"C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml"* ]]
-[[ "$windows_install_command" == *"/mnt/c/Users/alice/.dirextalk/nodes/im/dirextalk-connect"* ]]
+[[ "$windows_install_command" == *"npm install --prefix C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect dirextalk-connect@latest"* ]]
+[[ "$windows_install_command" == *"C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect.cmd daemon install --config C:/Users/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml"* ]]
 [[ "$windows_install_command" == *"--service-name im"* ]]
+[[ "$windows_install_command" != *"daemon stop"* ]]
+[[ "$windows_install_command" != *"/mnt/c/"* ]]
+[[ "$windows_install_command" != *"Test-Path -LiteralPath"* ]]
+
+posix_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=posix _connect_install_command "/home/alice/.dirextalk/nodes/im/dirextalk-connect/dirextalk-connect" "/home/alice/.dirextalk/nodes/im/dirextalk-connect/config.toml" "im" "/home/alice/.dirextalk/nodes/im")
+[[ "$posix_install_command" == *"npm install --prefix"* ]]
+[[ "$posix_install_command" != *"daemon stop"* ]]
+[[ "$posix_install_command" != *"Test-Path -LiteralPath"* ]]
+
+windows_mcp_doctor_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _mcp_doctor_command "https://service.example.test" "C:/Users/alice/.dirextalk/nodes/im/credentials.json" node-id "C:/Users/alice/.dirextalk/nodes/im")
+[[ "$windows_mcp_doctor_command" == *"DOMAIN=service.example.test bash scripts/orchestrate.sh verify mcp_doctor"* ]]
+[[ "$windows_mcp_doctor_command" != *"orchestrate.ps1"* ]]
+
+posix_mcp_doctor_command=$(DIREXTALK_LOCAL_PATH_STYLE=posix _mcp_doctor_command "https://service.example.test" "/home/alice/.dirextalk/nodes/im/credentials.json" node-id "/home/alice/.dirextalk/nodes/im")
+[[ "$posix_mcp_doctor_command" == *"DOMAIN=service.example.test bash scripts/orchestrate.sh verify mcp_doctor"* ]]
 
 [ "$(_mcp_server_name "service.example.test")" = "dirextalk-service_example_test" ]
 [ "$(_mcp_server_name "T1.Dirextalk.AI")" = "dirextalk-t1_dirextalk_ai" ]
 
 mcp_service_dir="$tmp/mcp-service"
 mcp_credentials="$mcp_service_dir/credentials.json"
-expected_mcp_command="$mcp_service_dir/mcp/dirextalk-mcp"
+expected_mcp_endpoint="https://service.example.test/mcp"
+for invalid_mcp_origin in http://service.example.test https://service.example.test/mcp 'https://service.example.test?x=1' 'https://service.example.test#fragment' 'https://user@service.example.test' 'https://bad_host.example.test' 'https://-bad.example.test' 'https://service.example.test:not-a-port' 'https://service.example.test:70000'; do
+  if _mcp_endpoint_url "$invalid_mcp_origin" >/dev/null 2>&1; then
+    echo "invalid MCP service origin must fail closed: $invalid_mcp_origin" >&2
+    exit 1
+  fi
+done
 mkdir -p "$mcp_service_dir"
 : > "$mcp_credentials"
 mkdir -p "$mcp_service_dir/mcp"
@@ -260,68 +293,312 @@ expected_mcp_credentials="$mcp_credentials"
 if command -v cygpath >/dev/null 2>&1; then
   expected_mcp_credentials=$(cygpath -m "$expected_mcp_credentials")
 fi
-_write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "$mcp_credentials" "codex-service-example" codex
-[ -s "$mcp_service_dir/mcp/codex.toml" ]
+printf 'stale bearer AGENT_TOKEN_TEST\n' > "$mcp_service_dir/mcp/codex.toml"
+printf 'stale bearer AGENT_TOKEN_TEST\n' > "$mcp_service_dir/mcp/cursor.mcp.json"
+_write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "https://service.example.test" "AGENT_TOKEN_TEST" "$mcp_credentials" "codex-service-example" codex
+[ ! -e "$mcp_service_dir/mcp/codex.toml" ]
 [ ! -e "$mcp_service_dir/mcp/cursor.mcp.json" ]
 [ ! -e "$mcp_service_dir/mcp/openclaw.md" ]
 [ ! -e "$mcp_service_dir/mcp/openclaw-server.json" ]
 [ ! -e "$mcp_service_dir/mcp/openclaw.mcp.json" ]
 [ ! -e "$mcp_service_dir/mcp/hermes.mcp.json" ]
 [ ! -e "$mcp_service_dir/mcp/mcp-servers.json" ]
-[ -s "$mcp_service_dir/mcp/env" ]
+[ ! -e "$mcp_service_dir/mcp/env" ]
 [ -s "$mcp_service_dir/mcp/README.md" ]
-grep -q '\[mcp_servers."dirextalk-service_example_test"\]' "$mcp_service_dir/mcp/codex.toml"
-grep -Fq "command = \"$expected_mcp_command\"" "$mcp_service_dir/mcp/codex.toml"
-! grep -q '^args = ' "$mcp_service_dir/mcp/codex.toml"
-grep -q 'DIREXTALK_CREDENTIALS_FILE' "$mcp_service_dir/mcp/codex.toml"
-grep -q "$(_local_connect_path "$mcp_credentials")" "$mcp_service_dir/mcp/codex.toml"
-grep -q 'DIREXTALK_AGENT_NODE_ID=codex-service-example' "$mcp_service_dir/mcp/env"
-grep -q 'Selected MCP type: codex' "$mcp_service_dir/mcp/README.md"
+grep -q 'Selected MCP type: none' "$mcp_service_dir/mcp/README.md"
 grep -q 'same MCP server name' "$mcp_service_dir/mcp/README.md"
-! grep -R '19757\|proxy --url\|"proxy"' "$mcp_service_dir/mcp"
-[ "$(_mcp_config_type_for_runtime codex)" = "codex" ]
-[ "$(_mcp_config_type_for_runtime cursor)" = "cursor" ]
+! grep -R 'MCP CLI install\|19757\|proxy --url\|"proxy"' "$mcp_service_dir/mcp"
+if grep -R -F 'AGENT_TOKEN_TEST' "$mcp_service_dir/mcp" >/dev/null; then
+  echo "standalone MCP artifacts and guidance must not contain the agent token" >&2
+  exit 1
+fi
+[ "$(_mcp_config_type_for_runtime codex)" = "none" ]
+[ "$(_mcp_config_type_for_runtime cursor)" = "none" ]
 [ "$(_mcp_config_type_for_runtime openclaw)" = "openclaw" ]
 [ "$(_mcp_config_type_for_runtime hermes)" = "hermes" ]
-[ "$(_mcp_config_type_for_runtime gemini)" = "generic" ]
-[ "$(_mcp_selected_config_path "$mcp_service_dir" gemini)" = "$mcp_service_dir/mcp/mcp-servers.json" ]
+[ "$(_mcp_config_type_for_runtime gemini)" = "none" ]
+[ -z "$(_mcp_selected_config_path "$mcp_service_dir" gemini)" ]
+[ "$(_mcp_runtime_capability codex)" = "session" ]
+[ "$(_mcp_runtime_capability openclaw)" = "host-managed" ]
+[ "$(_mcp_runtime_capability antigravity)" = "host-managed" ]
+[ "$(_mcp_runtime_capability cursor)" = "host-managed" ]
+[ "$(_mcp_runtime_capability pi)" = "unsupported" ]
+[ "$(_mcp_runtime_capability tmux)" = "unsupported" ]
+[ "$(_mcp_runtime_capability reasonix)" = "unsupported" ]
+[ "$(_mcp_runtime_capability hermes)" = "host-managed" ]
+declare -F _mcp_effective_capability >/dev/null || {
+  echo "missing effective runtime/connect-agent capability selector" >&2
+  exit 1
+}
+[ "$(_mcp_effective_capability openclaw acp)" = "host-managed" ]
+[ "$(_mcp_effective_capability openclaw codex)" = "host-managed" ]
+[ "$(_mcp_effective_capability codex iflow)" = "host-managed" ]
+[ "$(_mcp_effective_capability codex cursor)" = "host-managed" ]
+[ "$(_mcp_effective_capability codex pi)" = "unsupported" ]
+[ "$(_mcp_effective_capability codex reasonix)" = "unsupported" ]
+[ "$(_mcp_effective_capability hermes acp)" = "host-managed" ]
+[ "$(_mcp_effective_capability hermes codex)" = "host-managed" ]
+if DIREXTALK_CONNECT_AGENT=codex _connect_agent_type openclaw >/dev/null 2>&1; then
+  echo "OpenClaw host runtime must reject a non-ACP connect override" >&2
+  exit 1
+fi
+if DIREXTALK_CONNECT_AGENT=codex _connect_agent_type hermes >/dev/null 2>&1; then
+  echo "Hermes host runtime must reject a non-ACP connect override" >&2
+  exit 1
+fi
+expected_mcp_runtime_map=$(cat <<'EOF'
+acp|session|none
+antigravity|host-managed|none
+claudecode|session|none
+codex|session|none
+copilot|session|none
+cursor|host-managed|none
+devin|unsupported|none
+gemini|session|none
+iflow|host-managed|none
+kimi|session|none
+opencode|session|none
+pi|unsupported|none
+qoder|session|none
+reasonix|unsupported|none
+tmux|unsupported|none
+openclaw|host-managed|openclaw
+hermes|host-managed|hermes
+EOF
+)
+[ "$(_mcp_runtime_capability_records)" = "$expected_mcp_runtime_map" ]
+[ "$(_mcp_host_registry_records)" = $'openclaw|openclaw.mcp.servers\nhermes|hermes.mcp_servers' ]
+if _mcp_runtime_capability unknown >/dev/null 2>&1; then
+  echo "unknown runtime must not receive an implicit MCP capability" >&2
+  exit 1
+fi
+if _mcp_config_type_for_runtime unknown >/dev/null 2>&1; then
+  echo "unknown runtime must not receive a generic MCP artifact" >&2
+  exit 1
+fi
+if declare -F _mcp_json_config_path >/dev/null; then
+  echo "retired generic MCP config path helper must be removed" >&2
+  exit 1
+fi
+if grep -q 'generic).*mcp_json_config\|state_set mcp_json_config' "$ROOT/scripts/phases/s6_wire_local.sh"; then
+  echo "retired generic MCP state branch must be removed" >&2
+  exit 1
+fi
 
 generic_service_dir="$tmp/generic-mcp-service"
 generic_credentials="$generic_service_dir/credentials.json"
 mkdir -p "$generic_service_dir"
 : > "$generic_credentials"
-_write_mcp_config_artifacts "generic.example.test" "$generic_service_dir" "$generic_credentials" "gemini-generic-example" gemini
-[ -s "$generic_service_dir/mcp/mcp-servers.json" ]
+_write_mcp_config_artifacts "generic.example.test" "$generic_service_dir" "https://generic.example.test" "GENERIC_TOKEN" "$generic_credentials" "gemini-generic-example" gemini
+[ ! -e "$generic_service_dir/mcp/mcp-servers.json" ]
 [ ! -e "$generic_service_dir/mcp/codex.toml" ]
 [ ! -e "$generic_service_dir/mcp/cursor.mcp.json" ]
-json_test_check "$generic_service_dir/mcp/mcp-servers.json" "data.mcpServers['dirextalk-generic_example_test'].command === '$generic_service_dir/mcp/dirextalk-mcp'"
-json_test_check "$generic_service_dir/mcp/mcp-servers.json" "!('args' in data.mcpServers['dirextalk-generic_example_test'])"
-grep -q 'Selected MCP type: generic' "$generic_service_dir/mcp/README.md"
+[ ! -e "$generic_service_dir/mcp/env" ]
+grep -q 'Selected MCP type: none' "$generic_service_dir/mcp/README.md"
+grep -q 'MCP capability: session' "$generic_service_dir/mcp/README.md"
 
 openclaw_service_dir="$tmp/openclaw-mcp-service"
 openclaw_credentials="$openclaw_service_dir/credentials.json"
 mkdir -p "$openclaw_service_dir"
-: > "$openclaw_credentials"
-_write_mcp_config_artifacts "openclaw.example.test" "$openclaw_service_dir" "$openclaw_credentials" "openclaw-node" openclaw
+_write_credentials_file "$openclaw_credentials" openclaw.example.test https://openclaw.example.test OPENCLAW_TOKEN 12345678 owner-token '!agents-real:openclaw.example.test' openclaw-node
+_write_mcp_config_artifacts "openclaw.example.test" "$openclaw_service_dir" "https://openclaw.example.test" "OPENCLAW_TOKEN" "$openclaw_credentials" "openclaw-node" openclaw
 [ -s "$openclaw_service_dir/mcp/openclaw.md" ]
-[ -s "$openclaw_service_dir/mcp/openclaw-server.json" ]
+[ ! -e "$openclaw_service_dir/mcp/openclaw-server.json" ]
 [ ! -e "$openclaw_service_dir/mcp/mcp-servers.json" ]
-json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "data.command === '$openclaw_service_dir/mcp/dirextalk-mcp'"
-json_test_check "$openclaw_service_dir/mcp/openclaw-server.json" "!('args' in data)"
-if json_check "$openclaw_service_dir/mcp/openclaw-server.json" "'mcp' in data || 'mcpServers' in data" >/dev/null; then
-  echo "OpenClaw server object must not be a root openclaw.json or mcpServers snippet" >&2
+grep -q 'host-managed' "$openclaw_service_dir/mcp/openclaw.md"
+grep -q 'https://openclaw.example.test/mcp' "$openclaw_service_dir/mcp/openclaw.md"
+grep -Fq "$openclaw_credentials" "$openclaw_service_dir/mcp/openclaw.md"
+! grep -q 'OPENCLAW_TOKEN\|Authorization: Bearer\|openclaw mcp set' "$openclaw_service_dir/mcp/openclaw.md"
+hermes_service_dir="$tmp/hermes-mcp-service"
+hermes_credentials="$hermes_service_dir/credentials.json"
+mkdir -p "$hermes_service_dir"
+[ "$(HERMES_HOME="$hermes_service_dir/hermes" _mcp_hermes_home "$hermes_service_dir")" = "$HOME/.hermes" ]
+[ "$(HERMES_HOME="$hermes_service_dir/hermes" DIREXTALK_HERMES_MCP_HOME="$hermes_service_dir/hermes" _mcp_hermes_home "$hermes_service_dir")" = "$hermes_service_dir/hermes" ]
+[ "$(DIREXTALK_LOCAL_PATH_STYLE=windows LOCALAPPDATA='C:/Users/alice/AppData/Local' HERMES_HOME='C:/Users/alice/.dirextalk/nodes/im/hermes' _mcp_hermes_home 'C:/Users/alice/.dirextalk/nodes/im')" = 'C:/Users/alice/AppData/Local/hermes' ]
+_write_credentials_file "$hermes_credentials" hermes.example.test https://hermes.example.test HERMES_TOKEN 12345678 owner-token '!agents-real:hermes.example.test' hermes-node
+_write_mcp_config_artifacts "hermes.example.test" "$hermes_service_dir" "https://hermes.example.test" "HERMES_TOKEN" "$hermes_credentials" "hermes-node" hermes host-managed
+[ -s "$hermes_service_dir/mcp/hermes.md" ]
+[ ! -e "$hermes_service_dir/mcp/hermes.mcp.json" ]
+grep -q 'native `mcp_servers`' "$hermes_service_dir/mcp/hermes.md"
+grep -Fq "HERMES_HOME=$HERMES_HOME" "$hermes_service_dir/mcp/hermes.md"
+grep -q 'native live-tool probe automatically' "$hermes_service_dir/mcp/hermes.md"
+if grep -R -E 'HERMES_TOKEN|Authorization|Bearer' "$hermes_service_dir/mcp" >/dev/null; then
+  echo "Hermes guidance artifacts must remain token-free" >&2
   exit 1
 fi
-grep -q 'openclaw mcp set dirextalk-openclaw_example_test' "$openclaw_service_dir/mcp/openclaw.md"
-grep -q 'Do not paste' "$openclaw_service_dir/mcp/openclaw.md"
-grep -q 'openclaw.json' "$openclaw_service_dir/mcp/openclaw.md"
-mcp_install_command=$(_mcp_install_command "$mcp_service_dir")
-[[ "$mcp_install_command" == *"npm install --prefix"*"mcp-service/mcp"*"dirextalk-mcp@latest"* ]]
-custom_mcp_install_command=$(DIREXTALK_MCP_NPM_PACKAGE='dirextalk-mcp@override-test' _mcp_install_command "$mcp_service_dir")
-[[ "$custom_mcp_install_command" == *"dirextalk-mcp@override-test"* ]]
-mcp_doctor_command=$(_mcp_doctor_command "$mcp_credentials" "codex-service-example" "$mcp_service_dir")
-[[ "$mcp_doctor_command" == *"DIREXTALK_CREDENTIALS_FILE="* ]]
-[[ "$mcp_doctor_command" == *"mcp/dirextalk-mcp doctor --json"* ]]
+fake_bin="$tmp/fake-bin"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/openclaw" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$OPENCLAW_CALL_LOG"
+case "$*" in
+  *'config patch --stdin'*)
+    cat > "$OPENCLAW_PATCH_LOG"
+    exit "${OPENCLAW_REGISTER_EXIT:-0}"
+    ;;
+  *'mcp probe '*)
+    [ -s "$OPENCLAW_PATCH_LOG" ] || exit 1
+    exit "${OPENCLAW_PROBE_EXIT:-0}"
+    ;;
+esac
+EOF
+chmod +x "$fake_bin/openclaw"
+STATE_CALLS="$tmp/openclaw-confirmed-state-calls.log" \
+OPENCLAW_CALL_LOG="$tmp/openclaw-confirmed-calls.log" \
+OPENCLAW_PATCH_LOG="$tmp/openclaw-confirmed-patch.json" \
+DIREXTALK_OPENCLAW_COMMAND="$fake_bin/openclaw" \
+  _maybe_auto_install_mcp auto openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
+grep -q 'mcp_host_registration_status=registered' "$tmp/openclaw-confirmed-state-calls.log"
+grep -q 'mcp_install_status=auto_installed' "$tmp/openclaw-confirmed-state-calls.log"
+grep -qx 'config patch --stdin' "$tmp/openclaw-confirmed-calls.log"
+grep -qx 'mcp probe dirextalk-openclaw_example_test --json' "$tmp/openclaw-confirmed-calls.log"
+json_test_check "$tmp/openclaw-confirmed-patch.json" 'data.mcp.servers["dirextalk-openclaw_example_test"].transport === "streamable-http" && data.mcp.servers["dirextalk-openclaw_example_test"].headers.Authorization === "Bearer ${DIREXTALK_MCP_DIREXTALK_OPENCLAW_EXAMPLE_TEST_AGENT_TOKEN}" && data.env.vars.DIREXTALK_MCP_DIREXTALK_OPENCLAW_EXAMPLE_TEST_AGENT_TOKEN === "OPENCLAW_TOKEN"'
+! grep -q 'OPENCLAW_TOKEN\|agent-token\|Authorization\|Bearer' "$tmp/openclaw-confirmed-calls.log"
+OPENCLAW_CALL_LOG="$tmp/openclaw-profile-probe-calls.log" \
+OPENCLAW_PATCH_LOG="$tmp/openclaw-confirmed-patch.json" \
+DIREXTALK_OPENCLAW_PROFILE=service-isolated \
+DIREXTALK_OPENCLAW_COMMAND="$fake_bin/openclaw" \
+  _openclaw_mcp_probe "dirextalk-openclaw_example_test"
+grep -qx -- '--profile service-isolated mcp probe dirextalk-openclaw_example_test --json' "$tmp/openclaw-profile-probe-calls.log"
+set +e
+STATE_CALLS="$tmp/openclaw-registration-failed-state-calls.log" \
+OPENCLAW_CALL_LOG="$tmp/openclaw-registration-failed-calls.log" \
+OPENCLAW_PATCH_LOG="$tmp/openclaw-registration-failed-patch.json" \
+OPENCLAW_REGISTER_EXIT=1 \
+DIREXTALK_OPENCLAW_COMMAND="$fake_bin/openclaw" \
+  _maybe_auto_install_mcp auto openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
+openclaw_registration_failed_rc=$?
+set -e
+[ "$openclaw_registration_failed_rc" -eq 1 ]
+grep -q '^mcp_install_status=host_registration_failed$' "$tmp/openclaw-registration-failed-state-calls.log"
+if grep -q 'mcp probe' "$tmp/openclaw-registration-failed-calls.log"; then
+  echo "OpenClaw must not probe after failed registration" >&2
+  exit 1
+fi
+set +e
+STATE_CALLS="$tmp/openclaw-probe-failed-state-calls.log" \
+OPENCLAW_CALL_LOG="$tmp/openclaw-probe-failed-calls.log" \
+OPENCLAW_PATCH_LOG="$tmp/openclaw-probe-failed-patch.json" \
+OPENCLAW_PROBE_EXIT=1 \
+DIREXTALK_OPENCLAW_COMMAND="$fake_bin/openclaw" \
+  _maybe_auto_install_mcp auto openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
+openclaw_probe_failed_rc=$?
+set -e
+[ "$openclaw_probe_failed_rc" -eq 1 ]
+grep -q '^mcp_install_status=host_probe_failed$' "$tmp/openclaw-probe-failed-state-calls.log"
+cat > "$fake_bin/hermes" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'HERMES_HOME=%s\n' "${HERMES_HOME:-}" >> "$HERMES_CALL_LOG"
+printf '%s\n' "$@" >> "$HERMES_CALL_LOG"
+if [ "${1:-}" = profile ] && [ "${2:-}" = create ]; then
+  mkdir -p "$HERMES_HOME/profiles/${3:?profile}"
+  exit 0
+fi
+if [ "${1:-}" = -p ] && [ "${3:-}" = config ] && [ "${4:-}" = path ]; then
+  [ -d "$HERMES_HOME/profiles/${2:?profile}" ] || exit 1
+  printf '%s/profiles/%s/config.yaml\n' "$HERMES_HOME" "$2"
+  exit 0
+fi
+case "$*" in
+  status|*' status')
+    if [ "${HERMES_MODEL_NOT_SET:-0}" = 1 ]; then
+      printf '  Model:        (not set)\n'
+    else
+      printf '  Model:        test-model\n'
+    fi
+    ;;
+esac
+exit 0
+EOF
+chmod 700 "$fake_bin/hermes"
+cat > "$fake_bin/hermes-python" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+kind=unknown
+case "${2:-}" in
+  *'_probe_single_server'*) kind=probe ;;
+  *'save_env_value'*) kind=upsert ;;
+esac
+printf 'kind=%s HERMES_HOME=%s name=%s url=%s env_key=%s\n' \
+  "$kind" "${HERMES_HOME:-}" "${DIREXTALK_MCP_NAME:-}" "${DIREXTALK_HERMES_ENDPOINT_URL:-}" "${DIREXTALK_MCP_ENV_KEY:-}" >> "$HERMES_PYTHON_CALL_LOG"
+if [ "$kind" = upsert ]; then
+  cat > "$HERMES_TOKEN_STDIN_LOG"
+  exit "${HERMES_UPSERT_EXIT:-0}"
+fi
+if [ "$kind" = probe ]; then
+  exit "${HERMES_PROBE_EXIT:-0}"
+fi
+exit 1
+EOF
+chmod 700 "$fake_bin/hermes-python"
+rm -f "$tmp/hermes-confirmed-calls.log"
+STATE_CALLS="$tmp/hermes-confirmed-state-calls.log" \
+HERMES_CALL_LOG="$tmp/hermes-confirmed-calls.log" \
+HERMES_PYTHON_CALL_LOG="$tmp/hermes-python-calls.log" \
+HERMES_TOKEN_STDIN_LOG="$tmp/hermes-token-stdin.log" \
+DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
+DIREXTALK_HERMES_PYTHON="$fake_bin/hermes-python" \
+  _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
+grep -q '^mcp_install_status=auto_installed$' "$tmp/hermes-confirmed-state-calls.log"
+grep -q '^mcp_hermes_profile_owned=true$' "$tmp/hermes-confirmed-state-calls.log"
+grep -Fxq "HERMES_HOME=$HERMES_HOME" "$tmp/hermes-confirmed-calls.log"
+grep -Fxq 'profile' "$tmp/hermes-confirmed-calls.log"
+grep -Fxq 'create' "$tmp/hermes-confirmed-calls.log"
+grep -Fxq 'status' "$tmp/hermes-confirmed-calls.log"
+grep -Fxq 'dirextalk-hermes_example_test' "$tmp/hermes-confirmed-calls.log"
+grep -q '^kind=upsert ' "$tmp/hermes-python-calls.log"
+grep -q '^kind=probe ' "$tmp/hermes-python-calls.log"
+[ "$(cat "$tmp/hermes-token-stdin.log")" = HERMES_TOKEN ]
+! grep -q 'HERMES_TOKEN\|agent-token\|Authorization\|Bearer' "$tmp/hermes-confirmed-calls.log" "$tmp/hermes-python-calls.log"
+! grep -q 'HERMES_TOKEN\|agent-token' "$tmp/hermes-confirmed-calls.log" "$tmp/hermes-python-calls.log"
+set +e
+STATE_CALLS="$tmp/hermes-model-missing-state-calls.log" \
+HERMES_CALL_LOG="$tmp/hermes-model-missing-calls.log" \
+HERMES_MODEL_NOT_SET=1 \
+DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
+DIREXTALK_HERMES_PYTHON="$fake_bin/hermes-python" \
+  _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
+hermes_model_missing_rc=$?
+set -e
+[ "$hermes_model_missing_rc" -eq 1 ]
+grep -q '^mcp_install_status=host_registration_failed$' "$tmp/hermes-model-missing-state-calls.log"
+set +e
+STATE_CALLS="$tmp/hermes-failed-state-calls.log" \
+HERMES_CALL_LOG="$tmp/hermes-failed-calls.log" \
+HERMES_PYTHON_CALL_LOG="$tmp/hermes-failed-python-calls.log" \
+HERMES_TOKEN_STDIN_LOG="$tmp/hermes-failed-token-stdin.log" \
+HERMES_PROBE_EXIT=1 \
+DIREXTALK_HERMES_COMMAND="$fake_bin/hermes" \
+DIREXTALK_HERMES_PYTHON="$fake_bin/hermes-python" \
+  _maybe_auto_install_mcp auto hermes "dirextalk-hermes_example_test" "$hermes_credentials" "hermes-node" "$hermes_service_dir" host-managed
+hermes_probe_failure_rc=$?
+set -e
+[ "$hermes_probe_failure_rc" -eq 1 ]
+grep -q '^mcp_install_status=host_probe_failed$' "$tmp/hermes-failed-state-calls.log"
+STATE_CALLS="$tmp/openclaw-recommend-state-calls.log" \
+  _maybe_auto_install_mcp recommend openclaw "dirextalk-openclaw_example_test" "$openclaw_credentials" "openclaw-node" "$openclaw_service_dir"
+grep -q 'mcp_install_status=host_action_required' "$tmp/openclaw-recommend-state-calls.log"
+if STATE_CALLS="$tmp/pi-unsupported-state-calls.log" \
+  _maybe_auto_install_mcp skip pi "dirextalk-pi_example_test" "$openclaw_credentials" "pi-node" "$openclaw_service_dir" unsupported; then
+  echo "Pi MCP capability must fail closed as unsupported" >&2
+  exit 1
+fi
+grep -q 'mcp_install_status=unsupported' "$tmp/pi-unsupported-state-calls.log"
+if STATE_CALLS="$tmp/unsupported-state-calls.log" \
+  _maybe_auto_install_mcp skip reasonix "dirextalk-reasonix_example_test" "$openclaw_credentials" "reasonix-node" "$openclaw_service_dir" unsupported; then
+  echo "unsupported MCP capability must fail closed" >&2
+  exit 1
+fi
+grep -q 'mcp_install_status=unsupported' "$tmp/unsupported-state-calls.log"
+mcp_install_command=$(_mcp_install_command "https://service.example.test" "$mcp_service_dir")
+[[ "$mcp_install_command" == *"No local MCP CLI install is needed"* ]]
+[[ "$mcp_install_command" == *"https://service.example.test/mcp"* ]]
+mcp_doctor_command=$(_mcp_doctor_command "https://service.example.test" "$mcp_credentials" "codex-service-example" "$mcp_service_dir")
+[[ "$mcp_doctor_command" == *"scripts/orchestrate.sh verify mcp_doctor"* ]]
+[[ "$mcp_doctor_command" != *"DIREXTALK_CREDENTIALS_FILE"* ]]
+[[ "$mcp_doctor_command" != *"MCP CLI"* ]]
 
 stale_node_id=$(DIREXTALK_AGENT_NODE_ID=codex-old.example.test _agent_node_id codex new.example.test '!agents-real:new.example.test')
 [[ "$stale_node_id" == codex-new.example.test-* ]]
@@ -331,6 +608,7 @@ matching_node_id=$(DIREXTALK_AGENT_NODE_ID=codex-new.example.test-123 _agent_nod
 
 config_path="$tmp/dirextalk-connect/config.toml"
 _write_connect_config "$config_path" "$tmp/dirextalk-connect/data" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test"
+grep -q '^language = "auto"$' "$config_path"
 grep -q 'type = "matrix"' "$config_path"
 grep -q 'type = "codex"' "$config_path"
 grep -q 'admin_from = "@owner:service.example.test"' "$config_path"
@@ -340,6 +618,7 @@ grep -q 'app_server_url = "stdio"' "$config_path"
 grep -q 'mode = "yolo"' "$config_path"
 grep -q 'room_id = "!agents-real:service.example.test"' "$config_path"
 grep -q 'user_id = "@agent:service.example.test"' "$config_path"
+awk '/^\[projects\.platforms\.options\]$/{in_options=1; next} /^\[/{in_options=0} in_options && /^approval_owner_id = "@owner:service\.example\.test"$/{found=1} END{exit found ? 0 : 1}' "$config_path"
 grep -q 'share_session_in_channel = true' "$config_path"
 grep -q 'group_reply_all = true' "$config_path"
 grep -q 'auto_join = false' "$config_path"
@@ -349,6 +628,58 @@ grep -q '^\[display\]$' "$config_path"
 grep -q 'mode = "compact"' "$config_path"
 grep -q 'tool_messages = false' "$config_path"
 grep -q 'thinking_messages = false' "$config_path"
+
+approval_config_path="$tmp/dirextalk-connect/config-with-approval-mode.toml"
+approval_options=$(DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"' _connect_agent_options_toml codex codex "$tmp/workspace" dirextalk-service-example)
+[ "$approval_options" = 'mode = "default"' ]
+_write_connect_config "$approval_config_path" "$tmp/dirextalk-connect/data-approval-mode" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" "$approval_options"
+grep -q '^mode = "default"$' "$approval_config_path"
+! grep -q '^mode = "yolo"$' "$approval_config_path"
+awk '/^\[projects\.platforms\.options\]$/{in_options=1; next} /^\[/{in_options=0} in_options && /^approval_owner_id = "@owner:service\.example\.test"$/{found=1} END{exit found ? 0 : 1}' "$approval_config_path"
+
+codex_mcp_connect_config_path="$tmp/dirextalk-connect/config-with-codex-mcp.toml"
+_write_connect_config "$codex_mcp_connect_config_path" "$tmp/dirextalk-connect/data-codex-mcp" "codex-node" "codex" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" "" "https://service.example.test/mcp" "dirextalk-service_example_test" "agent-token" "codex-node" session
+grep -q 'mcp_url = "https://service.example.test/mcp"' "$codex_mcp_connect_config_path"
+grep -q 'mcp_server_name = "dirextalk-service_example_test"' "$codex_mcp_connect_config_path"
+grep -q 'mcp_agent_token = "agent-token"' "$codex_mcp_connect_config_path"
+grep -q 'mcp_node_id = "codex-node"' "$codex_mcp_connect_config_path"
+grep -q 'mcp_capability = "session"' "$codex_mcp_connect_config_path"
+
+generic_mcp_connect_config_path="$tmp/dirextalk-connect/config-with-generic-mcp.toml"
+_write_connect_config "$generic_mcp_connect_config_path" "$tmp/dirextalk-connect/data-generic-mcp" "gemini-node" "gemini" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" "" "https://service.example.test/mcp" "dirextalk-service_example_test" "agent-token" "gemini-node" session
+grep -q 'type = "gemini"' "$generic_mcp_connect_config_path"
+grep -q 'mcp_url = "https://service.example.test/mcp"' "$generic_mcp_connect_config_path"
+grep -q 'mcp_agent_token = "agent-token"' "$generic_mcp_connect_config_path"
+grep -q 'mcp_capability = "session"' "$generic_mcp_connect_config_path"
+
+openclaw_mcp_connect_config_path="$tmp/dirextalk-connect/config-with-openclaw-mcp.toml"
+_write_connect_config "$openclaw_mcp_connect_config_path" "$tmp/dirextalk-connect/data-openclaw-mcp" "openclaw-node" "acp" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "openclaw" 'mode = "yolo"
+args = ["acp", "--session", "agent:main:main"]
+display_name = "OpenClaw ACP"' "https://service.example.test/mcp" "dirextalk-service_example_test" "agent-token" "openclaw-node" host-managed
+grep -q 'cmd = "openclaw"' "$openclaw_mcp_connect_config_path"
+! grep -q '^mcp_url = ' "$openclaw_mcp_connect_config_path"
+! grep -q '^mcp_agent_token = ' "$openclaw_mcp_connect_config_path"
+! grep -q '^mcp_capability = ' "$openclaw_mcp_connect_config_path"
+! grep -q '^mcp_servers = ' "$openclaw_mcp_connect_config_path"
+printf 'preserved host config\n' > "$tmp/dirextalk-connect/host-managed-explicit-mcp.toml"
+if _write_connect_config "$tmp/dirextalk-connect/host-managed-explicit-mcp.toml" "$tmp/dirextalk-connect/data-host-managed-explicit" "openclaw-node" "acp" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "openclaw" 'mcp_url = "https://service.example.test/mcp"' "" "" "" "" host-managed; then
+  echo "host-managed explicit agent options must not re-enable canonical MCP" >&2
+  exit 1
+fi
+[ "$(cat "$tmp/dirextalk-connect/host-managed-explicit-mcp.toml")" = "preserved host config" ] || {
+  echo "rejected host-managed options must preserve the previous config" >&2
+  exit 1
+}
+
+conditional_mcp_connect_config_path="$tmp/dirextalk-connect/config-with-conditional-mcp.toml"
+_write_connect_config "$conditional_mcp_connect_config_path" "$tmp/dirextalk-connect/data-conditional-mcp" "pi-node" "pi" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" "" "https://service.example.test/mcp" "dirextalk-service_example_test" "agent-token" "pi-node" conditional
+grep -q '^mcp_url = "https://service.example.test/mcp"' "$conditional_mcp_connect_config_path"
+grep -q '^mcp_capability = "conditional"' "$conditional_mcp_connect_config_path"
+
+unsupported_mcp_connect_config_path="$tmp/dirextalk-connect/config-with-unsupported-mcp.toml"
+_write_connect_config "$unsupported_mcp_connect_config_path" "$tmp/dirextalk-connect/data-unsupported-mcp" "reasonix-node" "reasonix" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "" "" "https://service.example.test/mcp" "dirextalk-service_example_test" "agent-token" "reasonix-node" unsupported
+grep -q '^mcp_url = "https://service.example.test/mcp"' "$unsupported_mcp_connect_config_path"
+grep -q '^mcp_capability = "unsupported"' "$unsupported_mcp_connect_config_path"
 
 speech_config_path="$tmp/dirextalk-connect/config-with-speech.toml"
 DIREXTALK_SPEECH_API_KEY=speech-key \
@@ -373,16 +704,17 @@ grep -q 'model = "whisper-test"' "$speech_config_path"
 [ "$(_connect_agent_type openclaw)" = "acp" ]
 [ "$(_connect_agent_type hermes)" = "acp" ]
 [ "$(DIREXTALK_CONNECT_AGENT=gemini _connect_agent_type unknown)" = "gemini" ]
-[ "$(DIREXTALK_CONNECT_AGENT=codex _connect_agent_type hermes)" = "codex" ]
 [ "$(DIREXTALK_CODEX_COMMAND=/opt/codex/bin/codex _connect_agent_command codex)" = "/opt/codex/bin/codex" ]
 [ "$(DIREXTALK_GEMINI_COMMAND=/opt/gemini/bin/gemini _connect_agent_command gemini)" = "/opt/gemini/bin/gemini" ]
 [ "$(DIREXTALK_CLAUDE_CODE_COMMAND=/opt/claude/bin/claude _connect_agent_command claudecode)" = "/opt/claude/bin/claude" ]
 [ "$(DIREXTALK_QODERCLI_COMMAND=/opt/qoder/qodercli _connect_agent_command qoder)" = "/opt/qoder/qodercli" ]
+[ "$(DIREXTALK_OPENCODE_AI_COMMAND=/opt/opencode-ai/bin/opencode _connect_agent_command opencode)" = "/opt/opencode-ai/bin/opencode" ]
 [ "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/agent _connect_agent_command codex)" = "/custom/agent" ]
-[ "$(_connect_agent_command acp openclaw)" = "openclaw" ]
-[ "$(_connect_agent_command acp hermes)" = "dirextalk-connect" ]
+[ -z "$(_connect_agent_command acp hermes 2>/dev/null || true)" ]
+[ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp openclaw 2>/dev/null || true)" ]
+[ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp hermes 2>/dev/null || true)" ]
 [ "$(DIREXTALK_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _connect_agent_command acp openclaw)" = "/opt/openclaw/bin/openclaw" ]
-[ "$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_command acp hermes)" = "dirextalk-connect" ]
+[ "$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_command acp hermes /opt/dirextalk/bin/dirextalk-connect)" = "/opt/dirextalk/bin/dirextalk-connect" ]
 
 fake_cursor_agent="$tmp/localapp/cursor-agent"
 mkdir -p "$fake_cursor_agent"
@@ -441,14 +773,10 @@ cat > "$fakebin/npm" <<'EOF'
 [ "${NPM_FAIL:-0}" != "1" ] || exit 1
 exit 0
 EOF
-cat > "$fakebin/dirextalk-mcp" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-exit 0
-EOF
 cat > "$fakebin/dirextalk-connect" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+[ -z "${CONNECT_CALLS:-}" ] || printf '%s\n' "$*" >> "$CONNECT_CALLS"
 if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "install" ]; then
   [ "${5:-}" = "--service-name" ]
   [ "${6:-}" = "service.example.test" ]
@@ -474,10 +802,7 @@ if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "logs" ]; then
 fi
 exit 1
 EOF
-chmod 700 "$fakebin/npm" "$fakebin/dirextalk-connect" "$fakebin/dirextalk-mcp"
-mkdir -p "$(dirname "$expected_mcp_command")"
-cp "$fakebin/dirextalk-mcp" "$expected_mcp_command"
-chmod 700 "$expected_mcp_command"
+chmod 700 "$fakebin/npm" "$fakebin/dirextalk-connect"
 STATE_CALLS="$tmp/state.calls"
 : > "$STATE_CALLS"
 set +e
@@ -512,13 +837,16 @@ grep -q '^connect_install_status=installed$' "$STATE_CALLS"
 
 STATE_CALLS="$tmp/state-connect-update-fallback.calls"
 NPM_CALLS="$tmp/npm-connect-update.calls"
+CONNECT_CALLS="$tmp/connect-update-fallback.calls"
 : > "$STATE_CALLS"
 : > "$NPM_CALLS"
-PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="dirextalk-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
+: > "$CONNECT_CALLS"
+PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" CONNECT_CALLS="$CONNECT_CALLS" NPM_FAIL=1 CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T17:02:06 level=INFO msg="dirextalk-connect is running" projects=1' _maybe_auto_install_connect auto cursor cursor "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
 grep -q '^connect_install_status=installed$' "$STATE_CALLS"
 [ -s "$NPM_CALLS" ]
 grep -q -- '--prefix' "$NPM_CALLS"
 grep -q 'dirextalk-connect@latest' "$NPM_CALLS"
+! grep -q '^daemon stop ' "$CONNECT_CALLS"
 
 STATE_CALLS="$tmp/state-no-ready-log.calls"
 : > "$STATE_CALLS"
@@ -533,16 +861,14 @@ STATE_CALLS="$tmp/mcp-state.calls"
 NPM_CALLS="$tmp/npm-mcp-update.calls"
 : > "$STATE_CALLS"
 : > "$NPM_CALLS"
-PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 _maybe_auto_install_mcp auto service.example.test "$mcp_credentials" codex-service-example
-grep -q '^mcp_install_status=installed$' "$STATE_CALLS"
+PATH="$fakebin:$PATH" NPM_CALLS="$NPM_CALLS" NPM_FAIL=1 _maybe_auto_install_mcp auto codex dirextalk-service_example_test "$mcp_credentials" codex-service-example "$mcp_service_dir"
+grep -q '^mcp_install_status=not_required$' "$STATE_CALLS"
 ! grep -q '^mcp_daemon_' "$STATE_CALLS"
-[ -s "$NPM_CALLS" ]
-grep -q -- '--prefix' "$NPM_CALLS"
-grep -q 'dirextalk-mcp@latest' "$NPM_CALLS"
+[ ! -s "$NPM_CALLS" ]
 
 STATE_CALLS="$tmp/mcp-recommend-state.calls"
 : > "$STATE_CALLS"
-PATH="$fakebin:$PATH" _maybe_auto_install_mcp recommend
+PATH="$fakebin:$PATH" _maybe_auto_install_mcp recommend codex
 grep -q '^mcp_install_status=recommend$' "$STATE_CALLS"
 ! grep -q '^mcp_daemon_' "$STATE_CALLS"
 
@@ -579,8 +905,14 @@ openclaw_session_options=$(
 )
 [[ "$openclaw_session_options" == *'--session", "agent:dirextalk:main"'* ]]
 
-openclaw_url_options=$(DIREXTALK_OPENCLAW_ACP_ARGS_TOML='["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]' _connect_agent_options_toml openclaw acp)
-[[ "$openclaw_url_options" == *'args = ["acp", "--url", "wss://gateway.example.test:18789", "--session", "agent:main:main"]'* ]]
+if DIREXTALK_OPENCLAW_ACP_ARGS_TOML='["codex"]' _connect_agent_options_toml openclaw acp > "$tmp/openclaw-unsafe.out" 2> "$tmp/openclaw-unsafe.err"; then
+  echo "OpenClaw host bridge must reject a fully replaceable ACP args array" >&2
+  exit 1
+fi
+grep -q 'cannot safely replace' "$tmp/openclaw-unsafe.err"
+openclaw_profile_options=$(DIREXTALK_OPENCLAW_PROFILE=service-isolated OPENCLAW_CONFIG_PATH=/mnt/c/Users/alice/.openclaw-service/config.json DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_options_toml openclaw acp)
+[[ "$openclaw_profile_options" == *'args = ["--profile", "service-isolated", "acp", "--session", "agent:main:main"]'* ]]
+[[ "$openclaw_profile_options" == *'env = { OPENCLAW_CONFIG_PATH = "C:/Users/alice/.openclaw-service/config.json" }'* ]]
 
 openclaw_posix_token_options=$(DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXTALK_LOCAL_PATH_STYLE=posix DIREXTALK_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXTALK_OPENCLAW_ACP_SESSION=agent:main:main _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_posix_token_options" == *'args = ["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "/mnt/c/Users/alice/.openclaw/token.json", "--session", "agent:main:main"]'* ]]
@@ -588,41 +920,47 @@ openclaw_posix_token_options=$(DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 D
 openclaw_token_options=$(DIREXTALK_OPENCLAW_ACP_URL=ws://127.0.0.1:18790 DIREXTALK_LOCAL_PATH_STYLE=windows DIREXTALK_OPENCLAW_ACP_TOKEN_FILE=/mnt/c/Users/alice/.openclaw/token.json DIREXTALK_OPENCLAW_ACP_SESSION=agent:main:main _connect_agent_options_toml openclaw acp)
 [[ "$openclaw_token_options" == *'args = ["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "C:/Users/alice/.openclaw/token.json", "--session", "agent:main:main"]'* ]]
 
-hermes_options=$(_connect_agent_options_toml hermes acp)
-[[ "$hermes_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "acp"]'* ]]
+hermes_options=$(DIREXTALK_HERMES_COMMAND=hermes _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
+[[ "$hermes_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-hermes_example_test", "acp"]'* ]]
+[[ "$hermes_options" == *"env = { HERMES_HOME = \"$HERMES_HOME\" }"* ]]
 [[ "$hermes_options" == *'display_name = "Hermes ACP"'* ]]
 
-hermes_custom_command_options=$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_options_toml hermes acp)
-[[ "$hermes_custom_command_options" == *'args = ["hermes-acp-adapter", "--", "/opt/hermes/bin/hermes", "acp"]'* ]]
+hermes_custom_command_options=$(DIREXTALK_HERMES_COMMAND=/opt/hermes/bin/hermes _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
+[[ "$hermes_custom_command_options" == *'args = ["hermes-acp-adapter", "--", "/opt/hermes/bin/hermes", "-p", "dirextalk-hermes_example_test", "acp"]'* ]]
 
-hermes_custom_args_options=$(DIREXTALK_HERMES_ACP_ARGS_TOML='["acp", "--profile", "dirextalk"]' _connect_agent_options_toml hermes acp)
-[[ "$hermes_custom_args_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "acp", "--profile", "dirextalk"]'* ]]
+hermes_custom_args_options=$(DIREXTALK_HERMES_COMMAND=hermes DIREXTALK_HERMES_ACP_ARGS_TOML='["acp", "--mode", "safe"]' _connect_agent_options_toml hermes acp "$hermes_service_dir" dirextalk-hermes_example_test)
+[[ "$hermes_custom_args_options" == *'args = ["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-hermes_example_test", "acp", "--mode", "safe"]'* ]]
+hermes_windows_options=$(HERMES_HOME=/mnt/c/Users/alice/.hermes DIREXTALK_HERMES_COMMAND=hermes DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_options_toml hermes acp /mnt/c/Users/alice/.dirextalk/nodes/hermes.example.test dirextalk-hermes_example_test)
+[[ "$hermes_windows_options" == *'env = { HERMES_HOME = "C:/Users/alice/.hermes" }'* ]]
+hermes_windows_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _connect_agent_command acp hermes /mnt/c/Users/alice/.dirextalk/nodes/hermes.example.test/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect.exe)
+[[ "$hermes_windows_command" = 'C:/Users/alice/.dirextalk/nodes/hermes.example.test/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect.exe' ]]
 
 openclaw_config_path="$tmp/dirextalk-connect/config-openclaw.toml"
-_write_connect_config "$openclaw_config_path" "$tmp/dirextalk-connect/data-openclaw" "openclaw-node" "$(_connect_agent_type openclaw)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp openclaw)" "$openclaw_options"
+_write_connect_config "$openclaw_config_path" "$tmp/dirextalk-connect/data-openclaw" "openclaw-node" "$(_connect_agent_type openclaw)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(DIREXTALK_OPENCLAW_COMMAND=/opt/openclaw/bin/openclaw _connect_agent_command acp openclaw)" "$openclaw_options"
 grep -q 'type = "acp"' "$openclaw_config_path"
-grep -q 'cmd = "openclaw"' "$openclaw_config_path"
+grep -q 'cmd = "/opt/openclaw/bin/openclaw"' "$openclaw_config_path"
 grep -q 'args = \["acp", "--url", "ws://127.0.0.1:18790", "--token-file", "/mnt/c/Users/alice/.openclaw/gateway.token", "--session", "agent:main:main"\]' "$openclaw_config_path"
 grep -q 'display_name = "OpenClaw ACP"' "$openclaw_config_path"
 
 hermes_config_path="$tmp/dirextalk-connect/config-hermes.toml"
-_write_connect_config "$hermes_config_path" "$tmp/dirextalk-connect/data-hermes" "hermes-node" "$(_connect_agent_type hermes)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp hermes)" "$(_connect_agent_options_toml hermes acp)"
+hermes_adapter_binary="$hermes_service_dir/dirextalk-connect/node_modules/dirextalk-connect/bin/dirextalk-connect"
+_write_connect_config "$hermes_config_path" "$tmp/dirextalk-connect/data-hermes" "hermes-node" "$(_connect_agent_type hermes)" "$tmp/workspace" "https://service.example.test" "matrix-token" "@agent:service.example.test" "!agents-real:service.example.test" "@owner:service.example.test" "$(_connect_agent_command acp hermes "$hermes_adapter_binary")" "$hermes_options"
 grep -q 'type = "acp"' "$hermes_config_path"
-grep -q 'cmd = "dirextalk-connect"' "$hermes_config_path"
-grep -q 'args = \["hermes-acp-adapter", "--", "hermes", "acp"\]' "$hermes_config_path"
+grep -Fq "cmd = \"$hermes_adapter_binary\"" "$hermes_config_path"
+grep -q 'args = \["hermes-acp-adapter", "--", "hermes", "-p", "dirextalk-hermes_example_test", "acp"\]' "$hermes_config_path"
+grep -Fq "env = { HERMES_HOME = \"$HERMES_HOME\" }" "$hermes_config_path"
 grep -q 'display_name = "Hermes ACP"' "$hermes_config_path"
 
 guidance=$(
-  _print_connect_guidance codex https://service.example.test "$HOME/.dirextalk/nodes/service.example.test/credentials.json" "$HOME/.dirextalk/nodes/service.example.test/env" recommend dirextalk-connect "install command" codex-service "$config_path" "$HOME/.dirextalk/nodes/service.example.test/dirextalk-connect/bin/dirextalk-connect" codex "/opt/codex/bin/codex" service.example.test 2>&1 >/dev/null
+  _print_connect_guidance codex https://service.example.test "$HOME/.dirextalk/nodes/service.example.test/credentials.json" recommend dirextalk-connect "install command" codex-service "$config_path" "$HOME/.dirextalk/nodes/service.example.test/dirextalk-connect/bin/dirextalk-connect" codex "/opt/codex/bin/codex" service.example.test 2>&1 >/dev/null
 )
-[[ "$guidance" == *"DIREXTALK_DOMAIN"* ]]
-[[ "$guidance" == *"DIREXTALK_AGENT_TOKEN"* ]]
 [[ "$guidance" == *"dirextalk-connect service"* ]]
 [[ "$guidance" == *"DIREXTALK_AGENT_ROOM_ID"* ]]
-[[ "$guidance" == *"DIREXTALK_AGENT_NODE_ID"* ]]
 [[ "$guidance" == *"dirextalk-connect config"* ]]
 [[ "$guidance" == *"/opt/codex/bin/codex"* ]]
 [[ "$guidance" == *"daemon install"* ]]
+[[ "$guidance" != *"Local env file"* ]]
+[[ "$guidance" != *"Env keys:"* ]]
 [[ "$guidance" == *"dirextalk-connect@latest"* || "$install_command" == *"dirextalk-connect@latest"* ]]
 [[ "$guidance" == *"type = \"matrix\""* || "$guidance" == *"dirextalk-connect will use Matrix"* ]]
 bad_credentials_env_name="DIREXTALK_CREDENTIALS""_FILE"
@@ -633,17 +971,18 @@ fi
 
 stale_mcp_config="$tmp/stale-mcp.json"
 cat > "$stale_mcp_config" <<'EOF'
-{"mcpServers":{"dirextalk-service_example_test":{"command":"dirextalk-mcp","env":{"DIREXTALK_CREDENTIALS_FILE":"/old/credentials.json"},"args":["proxy","--url","http://127.0.0.1:19999/mcp"]}}}
+{"mcpServers":{"dirextalk-service_example_test":{"url":"https://old-service.example.test/mcp","headers":{"Authorization":"Bearer old-token"}}}}
 EOF
 mcp_guidance=$(
   DIREXTALK_MCP_CONFIG_CONFLICT_PATHS="$stale_mcp_config" \
-    _print_mcp_guidance codex service.example.test dirextalk-service_example_test "$mcp_credentials" "$mcp_service_dir/mcp" codex "$mcp_service_dir/mcp/codex.toml" "$mcp_install_command" "$mcp_doctor_command" "$mcp_service_dir" 2>&1 >/dev/null
+    _print_mcp_guidance codex service.example.test dirextalk-service_example_test "$mcp_credentials" "$mcp_service_dir/mcp" none "" "$mcp_install_command" "$mcp_doctor_command" "$mcp_service_dir" "https://service.example.test/mcp" 2>&1 >/dev/null
 )
 [[ "$mcp_guidance" == *"Existing MCP config may shadow this deployment"* ]]
 [[ "$mcp_guidance" == *"$stale_mcp_config"* ]]
 [[ "$mcp_guidance" == *"Selected MCP type:"* ]]
 [[ "$mcp_guidance" == *"Selected MCP config:"* ]]
-[[ "$mcp_guidance" == *"S6 writes only the MCP config selected for the detected runtime"* ]]
+[[ "$mcp_guidance" == *"MCP capability:"* ]]
+[[ "$mcp_guidance" == *"never receive a generic fallback"* ]]
 [[ "$mcp_guidance" != *"MCP optional daemon"* ]]
 [[ "$mcp_guidance" != *"MCP daemon URL"* ]]
 [[ "$mcp_guidance" != *"MCP proxy command"* ]]

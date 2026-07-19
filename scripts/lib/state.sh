@@ -14,6 +14,8 @@ STATE_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$STATE_LIB_DIR/paths.sh"
 # shellcheck disable=SC1090
 source "$STATE_LIB_DIR/json.sh"
+# shellcheck disable=SC1090
+source "$STATE_LIB_DIR/private-files.sh"
 
 # Phase list; order matters.
 PHASES=(
@@ -46,28 +48,7 @@ is_yes() {
   esac
 }
 
-restrict_private_file() {
-  local file=$1 uname_s win_file user user_domain
-  chmod 600 "$file" 2>/dev/null || true
-  uname_s=$(uname -s 2>/dev/null || printf unknown)
-  case "$uname_s" in
-    MINGW*|MSYS*|CYGWIN*)
-      command -v icacls >/dev/null 2>&1 || return 0
-      win_file=$file
-      if command -v cygpath >/dev/null 2>&1; then
-        win_file=$(cygpath -w "$file")
-      fi
-      user=$(_windows_current_user)
-      user_domain=${USERDOMAIN:-}
-      MSYS2_ARG_CONV_EXCL='*' icacls "$win_file" /inheritance:r >/dev/null 2>&1 || true
-      MSYS2_ARG_CONV_EXCL='*' icacls "$win_file" /remove:g \
-        "Users" "Authenticated Users" "Everyone" "CodexSandboxUsers" \
-        "${user_domain}\\CodexSandboxUsers" >/dev/null 2>&1 || true
-      MSYS2_ARG_CONV_EXCL='*' icacls "$win_file" /grant:r "NT AUTHORITY\\SYSTEM:F" "BUILTIN\\Administrators:F" >/dev/null 2>&1 || true
-      [ -n "$user" ] && MSYS2_ARG_CONV_EXCL='*' icacls "$win_file" /grant:r "$user:F" >/dev/null 2>&1 || true
-      ;;
-  esac
-}
+restrict_private_file() { dirextalk_restrict_private_file "$1"; }
 
 _windows_current_user() {
   if [ -n "${USERDOMAIN:-}" ] && [ -n "${USERNAME:-}" ]; then
@@ -88,16 +69,24 @@ _windows_current_user() {
 
 # Initialize state.json for a new deployment.
 state_init() {
+  umask 077
   mkdir -p "$DIREXTALK_WORKDIR"
+  dirextalk_restrict_private_directory "$DIREXTALK_WORKDIR" || return 1
   local run_id=${RUN_ID:-dirextalk-$(date -u +%Y%m%d-%H%M%S)}
   : > "$STATE_JSON"
-  json_mutate "$STATE_JSON" state-init "$run_id" "${AWS_DEFAULT_REGION:-${AWS_REGION:-}}" "$(_now)" "${PHASES[@]}"
+  dirextalk_restrict_private_file "$STATE_JSON" || return 1
+  json_mutate "$STATE_JSON" state-init "$run_id" "${AWS_DEFAULT_REGION:-${AWS_REGION:-}}" "$(_now)" "${PHASES[@]}" || return 1
   log "Initialized state.json -> $STATE_JSON (run_id=$run_id)"
 }
 
 # Ensure state.json exists.
 state_ensure() {
-  [ -f "$STATE_JSON" ] || state_init
+  if [ -f "$STATE_JSON" ]; then
+    dirextalk_restrict_private_directory "$DIREXTALK_WORKDIR" || return 1
+    dirextalk_restrict_private_file "$STATE_JSON" || return 1
+    return 0
+  fi
+  state_init
 }
 
 # Top-level field accessors.

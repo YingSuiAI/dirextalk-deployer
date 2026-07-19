@@ -8,6 +8,7 @@
 公网 443/80 -> Caddy
   ├─ /_matrix/*, /_dendrite/*, /_synapse/* -> message-server:8008
   ├─ /_p2p/*                              -> message-server:8008
+  ├─ /_dirextalk/updater/v1/jobs/*        -> /run/dirextalk-updater/http.sock
   ├─ /.well-known/matrix/*                -> Caddy 静态响应
   ├─ /.well-known/portal/*                -> message-server:8008
   └─ /healthz                             -> /_p2p/health
@@ -16,9 +17,11 @@ message-server -> PostgreSQL 18
 coturn         -> TURN 3478 + 49160-49200/udp
 ```
 
-- **message-server**: `dirextalk/message-server:latest`，同时承载 Matrix homeserver 和 `/_p2p/query`/`/_p2p/command`。
+- **message-server**: 无 Agent 的 legacy 部署直接使用 `dirextalk/message-server:latest`；启用 Agent 的生产部署必须冻结公开稳定 `dirextalk/message-server:vX.Y.Z@sha256:<digest>`，拒绝 latest、预发布和独立 debug override。服务同时承载 Matrix homeserver 和 `/_p2p/query`/`/_p2p/command`，只读挂 updater socket 目录和 control-token file，不挂 Docker socket。
+- **Agent (optional)**: EC2 使用同账号、同 region、固定仓库名 `dirextalk-agent` 的私有 ECR 不可变预发布 `tag@sha256`。短期 STS/ECR auth 只在本地获得，只有 Docker password 通过严格固定 SSH 的 stdin 进入 root-only `/run/dirextalk-ecr-auth`；拉取/启动后登出、删除并确认目录不存在。模型密钥按 UID 65532、0400 的独立 bind-mounted secret 传送，不进入 Compose、state 或镜像环境。
 - **PostgreSQL 18**: Matrix 与 Dirextalk 业务表共库持久化，compose 使用 `/var/lib/postgresql`。
 - **Caddy**: 唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
+- **dirextalk-updater**: 独立 GitHub 仓库/Release 的 linux/amd64 binary，支持 Ubuntu 22.04 和 24.04；deployer 固定 version/commit/SHA-256，宿主下载校验后作为 root-owned systemd service 安装。它独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token，也不安装每日 GitHub discovery timer。
 - **coturn**: WebRTC TURN relay，Dirextalk message-server 通过 shared-secret 动态签发 TURN 凭证。
 
 ## 启动顺序

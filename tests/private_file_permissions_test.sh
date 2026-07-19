@@ -6,6 +6,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
+export DIREXTALK_HOME="$HOME/.dirextalk"
 mkdir -p "$HOME" "$tmp/bin"
 
 cat > "$tmp/bin/uname" <<'EOF'
@@ -30,7 +31,8 @@ chmod 700 "$tmp/bin/cmd.exe"
 
 cat > "$tmp/bin/powershell.exe" <<'EOF'
 #!/usr/bin/env bash
-printf 'ADAM\\84960\r\n'
+printf '%s|%s|%s\n' "${DIREXTALK_PRIVATE_PATH:-}" "${DIREXTALK_PRIVATE_KIND:-}" "$*" >> "$POWERSHELL_LOG"
+[ "${POWERSHELL_FAIL:-0}" != "1" ]
 EOF
 chmod 700 "$tmp/bin/powershell.exe"
 
@@ -42,7 +44,7 @@ chmod 700 "$tmp/bin/icacls"
 
 export PATH="$tmp/bin:$PATH"
 export USERDOMAIN=ADAM
-export ICACLS_LOG="$tmp/icacls.log"
+export POWERSHELL_LOG="$tmp/powershell.log"
 
 # shellcheck disable=SC1090
 source "$ROOT/scripts/lib/state.sh"
@@ -51,10 +53,15 @@ key="$tmp/key.pem"
 printf 'PRIVATE KEY\n' > "$key"
 restrict_private_file "$key"
 
-grep -Fq '/inheritance:r' "$ICACLS_LOG"
-grep -Fq 'ADAM\CodexSandboxUsers' "$ICACLS_LOG"
-grep -Fq 'NT AUTHORITY\SYSTEM:F' "$ICACLS_LOG"
-grep -Fq 'BUILTIN\Administrators:F' "$ICACLS_LOG"
-grep -Fq 'ADAM\84960:F' "$ICACLS_LOG"
+private_dir="$tmp/private-dir"
+mkdir -p "$private_dir"
+dirextalk_restrict_private_directory "$private_dir"
+
+grep -Fq 'C:\Users\test\.dirextalk\nodes\svc\key.pem|file|' "$POWERSHELL_LOG"
+grep -Fq 'C:\Users\test\.dirextalk\nodes\svc\key.pem|dir|' "$POWERSHELL_LOG"
+if POWERSHELL_FAIL=1 restrict_private_file "$key" 2>/dev/null; then
+  echo "private file ACL failures must propagate" >&2
+  exit 1
+fi
 
 echo "private file permissions ok"

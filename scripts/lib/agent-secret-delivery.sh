@@ -127,13 +127,14 @@ EOF
   done
 }
 
+_agent_mounted_secret_shell_quote() {
+  local value=$1
+  printf "'%s'" "${value//\'/\'\"\'\"\'}"
+}
+
 _agent_mounted_secret_delivery_remote_command() {
-  local name=$1 quoted_name remote
-  printf -v quoted_name '%q' "$name"
-  remote=$(cat <<'EOF'
-set -eu
-cd /var/dirextalk-message-server
-exec sudo -n docker compose --env-file .env run --rm -T --no-deps --entrypoint /bin/sh agent-runtime-init -c '
+  local name=$1 container_script quoted_container quoted_name root_script
+  container_script=$(cat <<'EOF'
 set -eu
 name=$1
 case "$name" in
@@ -156,10 +157,18 @@ chmod 0400 "$tmp"
 mv -f "$tmp" "$dest/$name"
 trap - EXIT HUP INT TERM
 printf 'mounted-secret-ready uid=65532 mode=0400\n'
-' agent-mounted-secret-delivery __DIREXTALK_AGENT_SECRET_NAME__
 EOF
 )
-  printf '%s\n' "${remote/__DIREXTALK_AGENT_SECRET_NAME__/$quoted_name}"
+  quoted_container=$(_agent_mounted_secret_shell_quote "$container_script")
+  quoted_name=$(_agent_mounted_secret_shell_quote "$name")
+  root_script=$(printf '%s\n' \
+    'set -eu' \
+    'cd /var/dirextalk-message-server' \
+    "exec docker compose --env-file .env run --rm -T --no-deps --entrypoint /bin/sh agent-runtime-init -c $quoted_container agent-mounted-secret-delivery $quoted_name")
+  cat <<EOF
+set -eu
+exec sudo -n -- /bin/sh -c $(_agent_mounted_secret_shell_quote "$root_script")
+EOF
 }
 
 agent_mounted_secret_deliver_pinned() {
@@ -195,15 +204,22 @@ agent_mounted_secret_deliver_lightsail() {
 }
 
 _agent_mounted_secret_cleanup_remote_command() {
-  cat <<'EOF'
-set -eu
-cd /var/dirextalk-message-server
-exec sudo -n docker compose --env-file .env run --rm -T --no-deps --entrypoint /bin/sh agent-runtime-init -c '
+  local container_script quoted_container root_script
+  container_script=$(cat <<'EOF'
 set -eu
 dest=/run/dirextalk-agent/mounted-secrets
 [ -d "$dest" ]
 find "$dest" -mindepth 1 -maxdepth 1 -type f -delete
-'
+EOF
+)
+  quoted_container=$(_agent_mounted_secret_shell_quote "$container_script")
+  root_script=$(printf '%s\n' \
+    'set -eu' \
+    'cd /var/dirextalk-message-server' \
+    "exec docker compose --env-file .env run --rm -T --no-deps --entrypoint /bin/sh agent-runtime-init -c $quoted_container")
+  cat <<EOF
+set -eu
+exec sudo -n -- /bin/sh -c $(_agent_mounted_secret_shell_quote "$root_script")
 EOF
 }
 

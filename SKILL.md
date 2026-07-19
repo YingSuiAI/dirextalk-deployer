@@ -422,15 +422,24 @@ Message Server remote gRPC acceptance in S5. The generated Matrix platform
 options bind `approval_owner_id` to the same `@owner:<domain>` as `admin_from`.
 Agent AWS control is a separate explicit opt-in requiring
 `AGENT_ENABLE_AWS_CONTROL=true`, a digest-pinned reaper image, a credential-free
-`grpcs://` DNS endpoint on port 443, an exact managed-preparation boolean, and
-one strict Agent Worker-AMI publication file. The deployer freezes exactly one
-regular non-symlink snapshot and records only its local path, SHA-256, and the
-public configuration; unknown publication fields (including standard AWS
-credential fields), malformed/arbitrary content, symlinks, missing input, and
-resume drift fail before AWS access. The publication is mounted read-only and
-the Agent remains its final cryptographic `image_digest` verifier. EC2 is the
-production AWS-control expectation; see `references/agent-runtime.md` for the
-exact schema, input, private-ECR, and resume contract.
+`grpcs://` DNS endpoint on port 443, and the EC2/private-ECR path. Initial
+deployment must use `AGENT_ENABLE_MANAGED_PREPARATION_AWS=false` with no
+Worker-AMI publication, allowing Foundation/device approval and AMI creation
+without mounting publication bytes. Afterward, run the explicit
+`bash scripts/orchestrate.sh agent-aws-import` command with the exact frozen
+core inputs, `AGENT_ENABLE_MANAGED_PREPARATION_AWS=true`, and one strict Agent
+Worker-AMI publication file. The deployer durably freezes and validates exactly
+one regular non-symlink snapshot before pinned-SSH reconciliation; it advances
+state only after exact image/environment/mount/profile runtime readback,
+serializes both the local service and remote host transition, reconciles the
+Agent with no dependencies, restores the usable foundation on a failed restart,
+and recovers an ambiguous success by readback instead of blind replay. Unknown
+publication fields (including standard AWS credential fields),
+malformed/arbitrary content, symlinks, missing input, core drift, replacement,
+disable, or revert fail closed. The publication is mounted read-only and the
+Agent remains its final cryptographic `image_digest` verifier. Lightsail
+continues to reject AWS control; see `references/agent-runtime.md` for the exact
+two-phase, schema, input, private-ECR, and retry contract.
 Real approval-card validation must explicitly select a reviewed non-YOLO mode,
 for example `DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = "default"'`.
 For real provider-model acceptance on a nonce-verified Lightsail or EC2 host,

@@ -58,6 +58,11 @@ run_phase() {
   fi
   local cloud_provider
   cloud_provider=$(_resolve_cloud_provider)
+  if [ "$(state_get agent_aws_control.enabled)" = true ] && [ "$cloud_provider" != ec2 ]; then
+    phase_set S3_PROVISION failed "Agent AWS control requires EC2"
+    warn "Agent AWS control is supported only on the existing EC2/private-ECR Agent path."
+    return 1
+  fi
   aws_env_prep
   state_set cloud_provider "$cloud_provider"
   case "$cloud_provider" in
@@ -69,6 +74,144 @@ run_phase() {
       return 2
       ;;
   esac
+}
+
+_agent_aws_control_render_bundle() {
+  local output=$1 managed=$2 publication_file=${3:-} publication_sha256=${4:-}
+  local scripts_dir domain message_server_image agent_image agent_instance_id reaper_image endpoint
+  local -a args
+  scripts_dir=${DIREXTALK_INSTALL_SCRIPTS_DIR:-${HERE:-$S3_PHASE_DIR}}
+  domain=$(domain_normalize "$(state_get domain)")
+  message_server_image=$(state_get server_release.image_ref)
+  agent_image=$(state_get agent_release.image_ref)
+  agent_instance_id=$(state_get agent_release.instance_id)
+  reaper_image=$(state_get agent_aws_control.aws_reaper_image_uri)
+  endpoint=$(state_get agent_aws_control.worker_control_endpoint)
+  args=(
+    --format bundle
+    --bundle-output "$output"
+    --domain "$domain"
+    --acme "${ACME_EMAIL:-}"
+    --message-server-image "$message_server_image"
+    --agent-image "$agent_image"
+    --agent-instance-id "$agent_instance_id"
+    --agent-model-profiles-file "$AGENT_MODEL_PROFILES_FILE"
+    --agent-enable-aws-control true
+    --agent-aws-reaper-image-uri "$reaper_image"
+    --agent-worker-control-endpoint "$endpoint"
+    --agent-enable-managed-preparation-aws "$managed"
+  )
+  if [ "$managed" = true ]; then
+    args+=(--agent-worker-ami-publication-file "$publication_file" --agent-worker-ami-publication-sha256 "$publication_sha256")
+  fi
+  bash "$scripts_dir/render/render-userdata.sh" "${args[@]}"
+}
+
+agent_aws_control_import_ec2() {
+  local public_ip keyfile known_hosts publication_file publication_sha256
+  local message_server_image agent_image agent_instance_id model_profiles_sha256 reaper_image endpoint
+  local foundation_bundle managed_bundle render_dir remote_command result transition_status
+  local foundation_compose_sha256 managed_compose_sha256 diagnostic_log attempt
+  local attempts=${DIREXTALK_AGENT_AWS_IMPORT_ATTEMPTS:-3}
+  local delay=${DIREXTALK_AGENT_AWS_IMPORT_DELAY_SECONDS:-2}
+  local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
+
+  updater_release_validate_pin || return 1
+  server_release_prepare_state || return 1
+  agent_release_prepare_state || return 1
+  server_release_require_agent_compatible || return 1
+  agent_release_require_render_inputs || return 1
+  agent_aws_control_import_prepare_state || return 1
+
+  agent_ecr_state_is_enabled \
+    "$(state_get agent_registry.source)" \
+    "$(state_get agent_registry.account_id)" \
+    "$(state_get agent_registry.region)" \
+    "$(state_get agent_registry.registry)" \
+    "$(state_get agent_registry.repository)" \
+    "$(state_get agent_registry.repository_arn)" \
+    "$(state_get agent_registry.auth_mode)" \
+    "$(state_get agent_registry.pull_role_arn)" || {
+    warn "agent-aws-import requires the frozen EC2 private-ECR Agent registry state."
+    return 1
+  }
+
+  public_ip=$(res_get public_ip)
+  keyfile=$(res_get key_file)
+  known_hosts=$(res_get ec2_ssh_known_hosts)
+  _is_canonical_ipv4 "$public_ip" && [ "$ssh_user" = ubuntu ] && [ -f "$keyfile" ] && [ -s "$known_hosts" ] || {
+    warn "agent-aws-import requires the existing EC2 stable IP, SSH key, and nonce-verified pinned host key."
+    return 1
+  }
+
+  publication_file=$(state_get agent_aws_control_import.worker_ami_publication_snapshot_file)
+  publication_sha256=$(state_get agent_aws_control_import.worker_ami_publication_sha256)
+  json_worker_ami_publication_snapshot "$publication_file" "$publication_file" "$publication_sha256" >/dev/null || return 1
+
+  render_dir=$(mktemp -d "$DIREXTALK_WORKDIR/.agent-aws-control-import.XXXXXX") || return 1
+  foundation_bundle="$render_dir/foundation.tar.gz"
+  managed_bundle="$render_dir/managed.tar.gz"
+  if ! _agent_aws_control_render_bundle "$foundation_bundle" false \
+      || ! _agent_aws_control_render_bundle "$managed_bundle" true "$publication_file" "$publication_sha256"; then
+    rm -rf "$render_dir"
+    warn "Failed to render the frozen Agent AWS-control reconciliation bundles."
+    return 1
+  fi
+  foundation_compose_sha256=$(tar -xOzf "$foundation_bundle" docker-compose.yml | _s3_stream_sha256) || { rm -rf "$render_dir"; return 1; }
+  managed_compose_sha256=$(tar -xOzf "$managed_bundle" docker-compose.yml | _s3_stream_sha256) || { rm -rf "$render_dir"; return 1; }
+  [ "$foundation_compose_sha256" != "$managed_compose_sha256" ] || { rm -rf "$render_dir"; return 1; }
+  tar -xOzf "$managed_bundle" agent-worker-ami-publication.json | cmp - "$publication_file" || { rm -rf "$render_dir"; return 1; }
+
+  transition_status=prepared
+  if [ "$(state_get agent_aws_control.managed_preparation_aws)" = true ] \
+      && [ "$(state_get agent_aws_control_import.status)" = applied ]; then
+    transition_status=applied
+  fi
+  state_set_object agent_aws_control_import \
+    "status=$transition_status" \
+    target_managed_preparation_aws=true \
+    "worker_ami_publication_snapshot_file=$publication_file" \
+    "worker_ami_publication_sha256=$publication_sha256" \
+    "foundation_compose_sha256=$foundation_compose_sha256" \
+    "managed_compose_sha256=$managed_compose_sha256" || { rm -rf "$render_dir"; return 1; }
+
+  message_server_image=$(state_get server_release.image_ref)
+  agent_image=$(state_get agent_release.image_ref)
+  agent_instance_id=$(state_get agent_release.instance_id)
+  model_profiles_sha256=$(state_get agent_release.model_profiles_sha256)
+  reaper_image=$(state_get agent_aws_control.aws_reaper_image_uri)
+  endpoint=$(state_get agent_aws_control.worker_control_endpoint)
+  remote_command="stage=\$(mktemp -d /tmp/dirextalk-agent-aws-control.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo -n -- /bin/bash \"\$stage/updater/reconcile-agent-aws-control.sh\" \"\$stage\" /var/dirextalk-message-server '$foundation_compose_sha256' '$managed_compose_sha256' '$publication_sha256' '$message_server_image' '$agent_image' '$agent_instance_id' '$model_profiles_sha256' '$reaper_image' '$endpoint'"
+  diagnostic_log="$DIREXTALK_WORKDIR/agent-aws-control-import-ssh.log"
+  : > "$diagnostic_log"
+  restrict_private_file "$diagnostic_log" || { rm -rf "$render_dir"; return 1; }
+
+  attempt=1
+  while [ "$attempt" -le "$attempts" ]; do
+    if result=$(ssh -T -i "$keyfile" \
+        -o BatchMode=yes \
+        -o IdentitiesOnly=yes \
+        -o PreferredAuthentications=publickey \
+        -o PasswordAuthentication=no \
+        -o KbdInteractiveAuthentication=no \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=yes \
+        -o "UserKnownHostsFile=$known_hosts" \
+        "$ssh_user@$public_ip" \
+        "$remote_command" < "$managed_bundle" 2>>"$diagnostic_log"); then
+      if [ "$(printf '%s\n' "$result" | tail -n 1 | cut -f1-3)" = "$(printf 'applied\t%s\t%s' "$managed_compose_sha256" "$publication_sha256")" ]; then
+        rm -rf "$render_dir"
+        agent_aws_control_import_record_applied
+        return $?
+      fi
+      warn "Agent AWS-control import readback did not match the frozen target (attempt $attempt/$attempts)."
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$attempts" ] && sleep "$delay"
+  done
+  rm -rf "$render_dir"
+  warn "Agent AWS-control import was not confirmed. The phase-1 service remains usable; rerun the explicit import to recover by readback."
+  return 1
 }
 
 _run_phase_ec2() {
@@ -720,6 +863,18 @@ _s3_file_sha256() {
   printf '%s\n' "$digest"
 }
 
+_s3_stream_sha256() {
+  local output digest
+  if command -v sha256sum >/dev/null 2>&1; then
+    output=$(sha256sum) || return 1
+  else
+    output=$(shasum -a 256) || return 1
+  fi
+  digest=${output%%[[:space:]]*}
+  printf '%s\n' "$digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s\n' "$digest"
+}
+
 _bootstrap_nonce_read() {
   local path=${1:-} nonce
   [ -f "$path" ] || return 1
@@ -922,6 +1077,7 @@ _resume_host_bootstrap() {
       updater/bootstrap-host.sh \
       updater/install.sh \
       updater/reconcile-host.sh \
+      updater/reconcile-agent-aws-control.sh \
       updater/adopt-legacy-host.sh \
       updater/legacy-d1-compose.p2p.yml \
       updater/legacy-adopt-compose.yml \

@@ -44,6 +44,10 @@ test_managed_preparation_aws=
 test_worker_publication_snapshot_file=
 test_worker_publication_sha256=
 test_infrastructure_id=
+test_cloud_provider=ec2
+test_import_status=
+test_import_publication_snapshot_file=
+test_import_publication_sha256=
 
 warn() { :; }
 json_build() {
@@ -75,8 +79,26 @@ state_get() {
     agent_aws_control.managed_preparation_aws) printf '%s' "$test_managed_preparation_aws" ;;
     agent_aws_control.worker_ami_publication_snapshot_file) printf '%s' "$test_worker_publication_snapshot_file" ;;
     agent_aws_control.worker_ami_publication_sha256) printf '%s' "$test_worker_publication_sha256" ;;
+    agent_aws_control_import.status) printf '%s' "$test_import_status" ;;
+    agent_aws_control_import.worker_ami_publication_snapshot_file) printf '%s' "$test_import_publication_snapshot_file" ;;
+    agent_aws_control_import.worker_ami_publication_sha256) printf '%s' "$test_import_publication_sha256" ;;
+    cloud_provider) printf '%s' "$test_cloud_provider" ;;
     *) return 1 ;;
   esac
+}
+state_set_object() {
+  local path=$1 pair key value
+  shift
+  [ "$path" = agent_aws_control_import ] || return 1
+  for pair in "$@"; do
+    key=${pair%%=*}
+    value=${pair#*=}
+    case "$key" in
+      status) test_import_status=$value ;;
+      worker_ami_publication_snapshot_file) test_import_publication_snapshot_file=$value ;;
+      worker_ami_publication_sha256) test_import_publication_sha256=$value ;;
+    esac
+  done
 }
 state_set_raw() {
   local value=$2
@@ -228,25 +250,40 @@ reaper_image='registry.example/dirextalk-aws-reaper:v0.1.0-alpha.1-abcdef1@sha25
 worker_endpoint='grpcs://worker-control.example.test:443'
 test_aws_source= test_aws_enabled= test_aws_reaper_image_uri= test_worker_control_endpoint= test_managed_preparation_aws=
 test_worker_publication_snapshot_file= test_worker_publication_sha256=
-AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication" agent_aws_control_prepare_state
+AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=false agent_aws_control_prepare_state
 [ "$test_aws_source" = operator_configuration ]
 [ "$test_aws_enabled" = true ]
 [ "$test_aws_reaper_image_uri" = "$reaper_image" ]
 [ "$test_worker_control_endpoint" = "$worker_endpoint" ]
-[ "$test_managed_preparation_aws" = true ]
-[ "$test_worker_publication_snapshot_file" = "$DIREXTALK_WORKDIR/agent-worker-ami-publication.json" ]
-[ "${#test_worker_publication_sha256}" = 64 ]
-cmp "$worker_publication" "$test_worker_publication_snapshot_file"
-AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication" agent_aws_control_require_render_inputs
+[ "$test_managed_preparation_aws" = false ]
+[ -z "$test_worker_publication_snapshot_file$test_worker_publication_sha256" ]
+agent_aws_control_require_render_inputs
 test_infrastructure_id=i-agent-existing
-AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication" agent_aws_control_prepare_state
-if AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT='grpcs://replacement.example.test:443' AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication" agent_aws_control_prepare_state; then
+AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=false agent_aws_control_prepare_state
+if AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT='grpcs://replacement.example.test:443' AGENT_ENABLE_MANAGED_PREPARATION_AWS=false agent_aws_control_prepare_state; then
   echo "existing infrastructure must reject changed AWS control wiring" >&2
   exit 1
 fi
+if AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication" agent_aws_control_prepare_state; then
+  echo "normal resume must not bypass the explicit Worker-AMI import transition" >&2
+  exit 1
+fi
+
+AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication" agent_aws_control_import_prepare_state
+[ "$test_managed_preparation_aws" = false ]
+[ "$test_import_status" = prepared ]
+[ "$test_import_publication_snapshot_file" = "$DIREXTALK_WORKDIR/agent-worker-ami-publication.json" ]
+[ "${#test_import_publication_sha256}" = 64 ]
+cmp "$worker_publication" "$test_import_publication_snapshot_file"
+agent_aws_control_import_record_applied
+[ "$test_managed_preparation_aws" = true ]
+[ "$test_worker_publication_snapshot_file" = "$test_import_publication_snapshot_file" ]
+[ "$test_worker_publication_sha256" = "$test_import_publication_sha256" ]
+[ "$test_import_status" = applied ]
+AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication" agent_aws_control_prepare_state
 changed_worker_publication="$tmp/worker-ami-publication-changed.json"
 sed 's/"observed_at":"2026-07-16T08:01:00Z"/"observed_at":"2026-07-16T08:02:00Z"/' "$worker_publication" > "$changed_worker_publication"
-if AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$changed_worker_publication" agent_aws_control_prepare_state >/dev/null 2>&1; then
+if AGENT_ENABLE_AWS_CONTROL=true AGENT_AWS_REAPER_IMAGE_URI="$reaper_image" AGENT_WORKER_CONTROL_ENDPOINT="$worker_endpoint" AGENT_ENABLE_MANAGED_PREPARATION_AWS=true AGENT_WORKER_AMI_PUBLICATION_FILE="$changed_worker_publication" agent_aws_control_import_prepare_state >/dev/null 2>&1; then
   echo "existing infrastructure must reject changed Worker-AMI publication bytes" >&2
   exit 1
 fi
@@ -272,6 +309,32 @@ unset AGENT_IMAGE AGENT_INSTANCE_ID AGENT_MODEL_PROFILES_FILE
 agent_release_prepare_state
 [ "$test_source" = disabled ]
 [ "$test_enabled" = false ]
+
+foundation_archive="$tmp/agent-foundation-bundle.tar.gz"
+bash "$ROOT/scripts/render/render-userdata.sh" \
+  --format bundle \
+  --bundle-output "$foundation_archive" \
+  --domain service.example.test \
+  --acme ops@example.test \
+  --message-server-image dirextalk/message-server:test \
+  --agent-image "$image" \
+  --agent-instance-id "$instance_id" \
+  --agent-model-profiles-file "$profiles" \
+  --agent-enable-aws-control true \
+  --agent-aws-reaper-image-uri "$reaper_image" \
+  --agent-worker-control-endpoint "$worker_endpoint" \
+  --agent-enable-managed-preparation-aws false
+mkdir "$tmp/agent-foundation-bundle"
+tar -xzf "$foundation_archive" -C "$tmp/agent-foundation-bundle"
+grep -q 'AGENT_ENABLE_AWS_CONTROL: "true"' "$tmp/agent-foundation-bundle/docker-compose.yml"
+grep -F -q "AGENT_AWS_REAPER_IMAGE_URI: \"$reaper_image\"" "$tmp/agent-foundation-bundle/docker-compose.yml"
+grep -F -q "AGENT_WORKER_CONTROL_ENDPOINT: \"$worker_endpoint\"" "$tmp/agent-foundation-bundle/docker-compose.yml"
+grep -q 'AGENT_ENABLE_MANAGED_PREPARATION_AWS: "false"' "$tmp/agent-foundation-bundle/docker-compose.yml"
+if tar -tzf "$foundation_archive" | grep -q 'agent-worker-ami-publication.json' \
+    || grep -q 'AGENT_WORKER_AMI_PUBLICATION_FILE\|agent-worker-ami-publication.json:/run/dirextalk-agent' "$tmp/agent-foundation-bundle/docker-compose.yml"; then
+  echo "phase-1 Agent AWS-control foundation included a Worker-AMI publication or mount" >&2
+  exit 1
+fi
 
 agent_bundle="$tmp/agent-user-data.yaml"
 bash "$ROOT/scripts/render/render-userdata.sh" \
@@ -495,5 +558,78 @@ fi
 grep -q '/run/dirextalk-ecr-auth' "$ROOT/references/agent-runtime.md"
 grep -q 'DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE' "$ROOT/references/agent-runtime.md"
 grep -q "DIREXTALK_CONNECT_AGENT_OPTIONS_TOML='mode = \"default\"'" "$ROOT/references/agent-runtime.md"
+
+# The explicit import command has an atomic local ownership record backed by a
+# kernel-released loopback listener whose stdin is held by the actual command.
+# Concurrent owners fail, and SIGKILL of that command releases ownership.
+lock_service="$tmp/agent-aws-import-lock-service"
+lock_file="$lock_service/.agent-aws-import.lock"
+mkdir -p "$lock_service"
+cat > "$tmp/local-lock-owner.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT=$1
+export DIREXTALK_WORKDIR=$2
+ready=$3
+release=$4
+export DOMAIN=lock.example.test
+export DIREXTALK_ORCHESTRATE_LIB_ONLY=1
+# shellcheck disable=SC1090
+source "$ROOT/scripts/orchestrate.sh"
+unset DIREXTALK_ORCHESTRATE_LIB_ONLY
+agent_aws_import_local_lock_acquire
+: > "$ready"
+while [ ! -e "$release" ]; do sleep 0.1; done
+agent_aws_import_local_lock_release
+EOF
+chmod 0700 "$tmp/local-lock-owner.sh"
+"$tmp/local-lock-owner.sh" "$ROOT" "$lock_service" "$tmp/local-lock-ready" "$tmp/local-lock-release" &
+local_lock_holder=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ -e "$tmp/local-lock-ready" ] && break
+  sleep 0.1
+done
+[ -e "$tmp/local-lock-ready" ]
+if DIREXTALK_WORKDIR="$lock_service" DOMAIN=lock.example.test DIREXTALK_ORCHESTRATE_LIB_ONLY=1 \
+    bash -c 'source "$1/scripts/orchestrate.sh"; agent_aws_import_local_lock_acquire || exit $?; agent_aws_import_local_lock_release' \
+      bash "$ROOT" > "$tmp/concurrent-local-lock.out" 2>&1; then
+  echo "local Agent AWS-control import lock allowed a concurrent owner" >&2
+  exit 1
+fi
+: > "$tmp/local-lock-release"
+wait "$local_lock_holder"
+[ ! -e "$lock_file" ]
+
+"$tmp/local-lock-owner.sh" "$ROOT" "$lock_service" "$tmp/crashed-lock-ready" "$tmp/crashed-lock-release" &
+crashed_lock_owner=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ -e "$tmp/crashed-lock-ready" ] && break
+  sleep 0.1
+done
+[ -e "$tmp/crashed-lock-ready" ]
+kill -KILL "$crashed_lock_owner"
+wait "$crashed_lock_owner" 2>/dev/null || true
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ ! -e "$lock_file" ] && break
+  sleep 0.1
+done
+[ ! -e "$lock_file" ]
+if ! DIREXTALK_WORKDIR="$lock_service" DOMAIN=lock.example.test DIREXTALK_ORCHESTRATE_LIB_ONLY=1 \
+    bash -c 'source "$1/scripts/orchestrate.sh"; agent_aws_import_local_lock_acquire || exit $?; agent_aws_import_local_lock_release' \
+      bash "$ROOT" > "$tmp/crashed-local-lock-retry.out" 2>&1; then
+  cat "$tmp/crashed-local-lock-retry.out" >&2
+  exit 1
+fi
+[ ! -e "$lock_file" ]
+
+wrapper_work="$tmp/agent-aws-import-wrapper-service"
+mkdir -p "$wrapper_work"
+if DIREXTALK_WORKDIR="$wrapper_work" DOMAIN=wrapper.example.test \
+    bash "$ROOT/scripts/orchestrate.sh" agent-aws-import > "$tmp/local-lock-wrapper.out" 2>&1; then
+  echo "Agent AWS-control import wrapper accepted missing deployment state" >&2
+  exit 1
+fi
+grep -q 'agent-aws-import requires existing deployment state' "$tmp/local-lock-wrapper.out"
+[ ! -e "$wrapper_work/.agent-aws-import.lock" ]
 
 echo "optional Agent runtime contract ok"

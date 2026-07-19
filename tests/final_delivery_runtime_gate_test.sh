@@ -188,6 +188,6 @@ set -e
   echo "obsolete post-deployment confirm command must not remain available" >&2
   exit 1
 }
-grep -q 'Usage: .*\[run|status|report|verify|reset\]' "$tmp/confirm.out"
+grep -q 'Usage: .*\[run|status|report|verify|agent-aws-import|reset\]' "$tmp/confirm.out"
 
 echo "final delivery runtime gate ok"

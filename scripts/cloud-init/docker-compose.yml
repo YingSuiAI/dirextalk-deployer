@@ -217,13 +217,17 @@ services:
       AGENT_AWS_REAPER_IMAGE_URI: "__AGENT_AWS_REAPER_IMAGE_URI__"
       AGENT_WORKER_CONTROL_ENDPOINT: "__AGENT_WORKER_CONTROL_ENDPOINT__"
       AGENT_ENABLE_MANAGED_PREPARATION_AWS: "__AGENT_ENABLE_MANAGED_PREPARATION_AWS__"
+      # DIREXTALK_AGENT_AWS_PUBLICATION_BEGIN
       AGENT_WORKER_AMI_PUBLICATION_FILE: /run/dirextalk-agent/worker-ami-publication.json
+      # DIREXTALK_AGENT_AWS_PUBLICATION_END
       # DIREXTALK_AGENT_AWS_CONTROL_END
     volumes:
       - agent-runtime:/run/dirextalk-agent:ro
+      # DIREXTALK_AGENT_AWS_PUBLICATION_BEGIN
       # DIREXTALK_AGENT_AWS_CONTROL_BEGIN
       - ./agent-worker-ami-publication.json:/run/dirextalk-agent/worker-ami-publication.json:ro
       # DIREXTALK_AGENT_AWS_CONTROL_END
+      # DIREXTALK_AGENT_AWS_PUBLICATION_END
     restart: unless-stopped
   # DIREXTALK_AGENT_OPTIONAL_END
 

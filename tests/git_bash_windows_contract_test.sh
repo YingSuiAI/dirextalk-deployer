@@ -101,6 +101,9 @@ else
   unset EXEPATH
 fi
 
+grep -Fq 'lock_file_native=$(dirextalk_native_tool_path "$lock_file")' scripts/orchestrate.sh
+grep -Fq '"$node_bin" "$lock_helper" hold "$lock_file_native" "$suffix"' scripts/orchestrate.sh
+
 case "$(uname -s 2>/dev/null || true)" in
   *MINGW*|*MSYS*|*CYGWIN*) ;;
   *)

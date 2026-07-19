@@ -1079,6 +1079,68 @@ cmd_verify() {
   esac
 }
 
+agent_aws_import_local_lock_acquire() {
+  local lock_file="$DIREXTALK_WORKDIR/.agent-aws-import.lock"
+  local lock_file_native node_bin lock_helper suffix status_file status attempt message
+  node_bin=$(json_node) || return 1
+  lock_helper=$(dirextalk_native_tool_path "$HERE/lib/agent-aws-import-lock.mjs") || return 1
+  lock_file_native=$(dirextalk_native_tool_path "$lock_file") || return 1
+  suffix="${BASHPID:-$$}.${RANDOM:-0}.${RANDOM:-0}"
+  status_file="$lock_file.holder-status.$suffix"
+
+  exec 9> >("$node_bin" "$lock_helper" hold "$lock_file_native" "$suffix")
+  AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID=$!
+  AGENT_AWS_IMPORT_LOCAL_LOCK_STATUS_FILE=$status_file
+  attempt=1
+  while [ "$attempt" -le 50 ] && [ ! -f "$status_file" ]; do
+    kill -0 "$AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID" 2>/dev/null || break
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  if [ ! -f "$status_file" ]; then
+    exec 9>&-
+    wait "$AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID" 2>/dev/null || true
+    warn "Agent AWS-control import lock holder did not publish readiness."
+    return 1
+  fi
+  status=$(json_get "$status_file" status)
+  message=$(json_get "$status_file" message)
+  rm -f "$status_file"
+  if [ "$status" != acquired ]; then
+    exec 9>&-
+    wait "$AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID" 2>/dev/null || true
+    warn "${message:-Agent AWS-control import service lock was not acquired.}"
+    return 1
+  fi
+}
+
+agent_aws_import_local_lock_release() {
+  exec 9>&-
+  if [ -n "${AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID:-}" ]; then
+    wait "$AGENT_AWS_IMPORT_LOCAL_LOCK_HOLDER_PID" 2>/dev/null || true
+  fi
+  if [ -n "${AGENT_AWS_IMPORT_LOCAL_LOCK_STATUS_FILE:-}" ]; then
+    rm -f "$AGENT_AWS_IMPORT_LOCAL_LOCK_STATUS_FILE"
+  fi
+}
+
+cmd_agent_aws_import() (
+  agent_aws_import_local_lock_acquire || return 1
+  trap 'agent_aws_import_local_lock_release' EXIT
+  [ -f "$STATE_JSON" ] || {
+    warn "agent-aws-import requires existing deployment state: $STATE_JSON"
+    return 1
+  }
+  command -v ssh >/dev/null 2>&1 || {
+    warn "agent-aws-import requires ssh."
+    return 1
+  }
+  unset -f run_phase 2>/dev/null || true
+  # shellcheck disable=SC1090
+  source "$HERE/phases/s3_provision.sh"
+  agent_aws_control_import_ec2
+)
+
 if [ "${DIREXTALK_ORCHESTRATE_LIB_ONLY:-0}" = "1" ]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -1091,8 +1153,9 @@ case "${1:-run}" in
   status) cmd_status ;;
   report) shift; cmd_report "${1:-new_deploy}" ;;
   verify) shift; cmd_verify "${1:-}" ;;
+  agent-aws-import) cmd_agent_aws_import ;;
   reset)
     [ -f "$STATE_JSON" ] && { mv "$STATE_JSON" "$STATE_JSON.reset-$(date -u +%Y%m%d%H%M%S)"; warn "Archived old state.json."; }
     warn "Warning: after reset, destroy no longer has state data. Any remaining AWS resources must be removed manually." ;;
-  *) echo "Usage: $0 [run|status|report|verify|reset]"; exit 1 ;;
+  *) echo "Usage: $0 [run|status|report|verify|agent-aws-import|reset]"; exit 1 ;;
 esac

@@ -20,6 +20,10 @@ export REMOTE_NONCE="$tmp/remote-nonce"
 export ECR_REMOTE_SCRIPT="$tmp/ecr-remote-script"
 export ECR_PASSWORD_STDIN="$tmp/ecr-password-stdin"
 export SECRET_STDIN="$tmp/secret-stdin"
+export AGENT_AWS_IMPORT_PAYLOAD="$tmp/agent-aws-import.tar.gz"
+export AGENT_AWS_IMPORT_REMOTE_APPLIED="$tmp/agent-aws-import.remote-applied"
+export AGENT_AWS_IMPORT_FAIL_ONCE_FILE="$tmp/agent-aws-import.fail-once"
+export AGENT_AWS_IMPORT_AMBIGUOUS_ONCE_FILE="$tmp/agent-aws-import.ambiguous-once"
 export FAKE_CALLER_ACCOUNT=123456789012
 export FAKE_CALLER_ARN=arn:aws:iam::123456789012:root
 mkdir -p "$HOME" "$DIREXTALK_WORKDIR" "$tmp/bin"
@@ -122,6 +126,31 @@ elif [[ "$all" == *"reconcile-host.sh"* ]]; then
   printf 'ssh-updater-stage\n' >> "$CALLS"
   cat > "$TMPDIR/ec2-updater-integration.tar.gz"
   printf 'v1.0.8\t1efa90fd776d355d4cd898bcdb4922267b03d180\t04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b\n'
+elif [[ "$all" == *"reconcile-agent-aws-control.sh"* ]]; then
+  printf 'ssh-agent-aws-import\n' >> "$CALLS"
+  cat > "$AGENT_AWS_IMPORT_PAYLOAD"
+  if [ -e "$AGENT_AWS_IMPORT_FAIL_ONCE_FILE" ]; then
+    rm -f "$AGENT_AWS_IMPORT_FAIL_ONCE_FILE"
+    exit 86
+  fi
+  stage=$(mktemp -d)
+  trap 'rm -rf "$stage"' EXIT
+  tar -xzf "$AGENT_AWS_IMPORT_PAYLOAD" -C "$stage"
+  compose_sha=$(sha256sum "$stage/docker-compose.yml" | awk '{print $1}')
+  publication_sha=$(sha256sum "$stage/agent-worker-ami-publication.json" | awk '{print $1}')
+  if [ ! -e "$AGENT_AWS_IMPORT_REMOTE_APPLIED" ]; then
+    touch "$AGENT_AWS_IMPORT_REMOTE_APPLIED"
+    printf 'agent-aws-import-mutation\n' >> "$CALLS"
+    printf 'agent-aws-import-restart\n' >> "$CALLS"
+    if [ -e "$AGENT_AWS_IMPORT_AMBIGUOUS_ONCE_FILE" ]; then
+      rm -f "$AGENT_AWS_IMPORT_AMBIGUOUS_ONCE_FILE"
+      exit 255
+    fi
+    printf 'applied\t%s\t%s\trestarted\n' "$compose_sha" "$publication_sha"
+  else
+    printf 'agent-aws-import-readback\n' >> "$CALLS"
+    printf 'applied\t%s\t%s\treadback\n' "$compose_sha" "$publication_sha"
+  fi
 elif [[ "$all" == *"dirextalk-ecr-pull"* ]]; then
   printf 'ssh-ecr-auth\n' >> "$CALLS"
   cat > "$ECR_PASSWORD_STDIN"
@@ -160,8 +189,8 @@ export DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE="$message_image"
 export AGENT_ENABLE_AWS_CONTROL=true
 export AGENT_AWS_REAPER_IMAGE_URI='123456789012.dkr.ecr.ap-northeast-3.amazonaws.com/dirextalk-aws-reaper:v0.1.0-alpha.20260718.1-abcdef123456@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 export AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.example.test:443'
-export AGENT_ENABLE_MANAGED_PREPARATION_AWS=true
-export AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication"
+export AGENT_ENABLE_MANAGED_PREPARATION_AWS=false
+unset AGENT_WORKER_AMI_PUBLICATION_FILE
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
@@ -181,20 +210,11 @@ domain_resolves_to_ip() {
   return 0
 }
 
-# The opt-in path fails closed before even a read-only AWS call when its exact
-# publication is missing.
-if run_phase > "$tmp/s3-missing-publication.out" 2>&1; then
-  echo "EC2 provisioning accepted a missing enabled Worker-AMI publication" >&2
-  exit 1
-fi
-[ ! -s "$CALLS" ]
-
-printf '%s\n' '{"schema_version":"dirextalk.agent.worker-ami-publication/v1","image_manifest":{"schema_version":"dirextalk.agent.worker-ami/v1","agent_instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","image_id":"ami-0123456789abcdef0","image_name":"dtx-worker-ami-0123456789abcdef0123","root_snapshot_id":"snap-0123456789abcdef0","account_id":"123456789012","region":"ap-northeast-3","architecture":"amd64","base_ami_id":"ami-0abcdef0123456789","base_ami_owner_id":"099720109477","root_device_name":"/dev/sda1","release_manifest_digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","worker_rootfs_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","worker_binary_digest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","created_at":"2026-07-16T08:00:00Z"},"image_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","attestation":{"schema_version":1,"agent_instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","ami_id":"ami-0123456789abcdef0","root_snapshot_id":"snap-0123456789abcdef0","account_id":"123456789012","region":"ap-northeast-3","architecture":"amd64","release_manifest_digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","worker_rootfs_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","worker_binary_digest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","observed_at":"2026-07-16T08:01:00Z"}}' > "$worker_publication"
 run_phase > "$tmp/s3.out" 2>&1 || { cat "$tmp/s3.out" >&2; exit 1; }
-json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.resources.ec2_client_token.length === 64 && data.resources.agent_registry_auth_cleanup_verified === 'true' && data.server_release.source === 'immutable_release' && data.server_release.image_ref === '$message_image' && data.agent_release.image_ref === '$agent_image' && data.agent_registry.source === 'private_ecr' && data.agent_registry.repository === 'dirextalk-agent' && data.agent_registry.auth_mode === 'federation_token' && data.agent_aws_control.source === 'operator_configuration' && data.agent_aws_control.enabled === true && data.agent_aws_control.aws_reaper_image_uri === '$AGENT_AWS_REAPER_IMAGE_URI' && data.agent_aws_control.worker_control_endpoint === '$AGENT_WORKER_CONTROL_ENDPOINT' && data.agent_aws_control.managed_preparation_aws === true && data.agent_aws_control.worker_ami_publication_sha256.length === 64 && data.updater_release.version === 'v1.0.8'"
+json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.resources.ec2_client_token.length === 64 && data.resources.agent_registry_auth_cleanup_verified === 'true' && data.server_release.source === 'immutable_release' && data.server_release.image_ref === '$message_image' && data.agent_release.image_ref === '$agent_image' && data.agent_registry.source === 'private_ecr' && data.agent_registry.repository === 'dirextalk-agent' && data.agent_registry.auth_mode === 'federation_token' && data.agent_aws_control.source === 'operator_configuration' && data.agent_aws_control.enabled === true && data.agent_aws_control.aws_reaper_image_uri === '$AGENT_AWS_REAPER_IMAGE_URI' && data.agent_aws_control.worker_control_endpoint === '$AGENT_WORKER_CONTROL_ENDPOINT' && data.agent_aws_control.managed_preparation_aws === false && data.agent_aws_control.worker_ami_publication_snapshot_file === '' && data.agent_aws_control.worker_ami_publication_sha256 === '' && data.updater_release.version === 'v1.0.8'"
 snapshot_file=$(json_get "$STATE_JSON" agent_aws_control.worker_ami_publication_snapshot_file)
-[ "$snapshot_file" = "$DIREXTALK_WORKDIR/agent-worker-ami-publication.json" ]
-cmp "$worker_publication" "$snapshot_file"
+[ -z "$snapshot_file" ]
+[ ! -e "$DIREXTALK_WORKDIR/agent-worker-ami-publication.json" ]
 if grep -Eiq 'aws_access_key_id|aws_secret_access_key|aws_session_token|TESTSESSION(ACCESS|SECRET|TOKEN)' "$STATE_JSON"; then
   echo "EC2 Agent AWS control state persisted credential material" >&2
   exit 1
@@ -216,10 +236,14 @@ grep -q 'DIREXTALK_BOOTSTRAP_DEFER_START=1 updater/bootstrap-host.sh' "$bootstra
 awk '/^base64 -d>bundle\.tar\.gz<<B$/ { capture=1; next } capture && /^B$/ { exit } capture { print }' "$bootstrap_file" | base64 -d > "$tmp/ec2-bundle.tar.gz"
 mkdir "$tmp/ec2-bundle"
 tar -xzf "$tmp/ec2-bundle.tar.gz" -C "$tmp/ec2-bundle"
-cmp "$worker_publication" "$tmp/ec2-bundle/agent-worker-ami-publication.json"
 grep -F -q "AGENT_AWS_REAPER_IMAGE_URI: \"$AGENT_AWS_REAPER_IMAGE_URI\"" "$tmp/ec2-bundle/docker-compose.yml"
 grep -F -q "AGENT_WORKER_CONTROL_ENDPOINT: \"$AGENT_WORKER_CONTROL_ENDPOINT\"" "$tmp/ec2-bundle/docker-compose.yml"
-grep -q './agent-worker-ami-publication.json:/run/dirextalk-agent/worker-ami-publication.json:ro' "$tmp/ec2-bundle/docker-compose.yml"
+grep -q 'AGENT_ENABLE_MANAGED_PREPARATION_AWS: "false"' "$tmp/ec2-bundle/docker-compose.yml"
+if [ -e "$tmp/ec2-bundle/agent-worker-ami-publication.json" ] \
+    || grep -q 'AGENT_WORKER_AMI_PUBLICATION_FILE\|agent-worker-ami-publication.json:/run/dirextalk-agent' "$tmp/ec2-bundle/docker-compose.yml"; then
+  echo "phase-1 EC2 Agent bootstrap included a Worker-AMI publication or mount" >&2
+  exit 1
+fi
 if grep -Eq 'bundle\.tar\.gz|AGENT_IMAGE|MESSAGE_SERVER_IMAGE|docker|updater|ecr|AWS_' "$userdata_file"; then
   echo "EC2 launch user-data must contain only the identity nonce launcher" >&2
   exit 1
@@ -274,14 +298,6 @@ done
 # and EC2 client token, while pre-cleaning and obtaining fresh ECR auth.
 first_bootstrap_sha=$(_s3_file_sha256 "$bootstrap_file")
 first_client_token=$(json_get "$STATE_JSON" resources.ec2_client_token)
-sed 's/"observed_at":"2026-07-16T08:01:00Z"/"observed_at":"2026-07-16T08:02:00Z"/' "$worker_publication" > "$worker_publication_changed"
-before_drift_calls=$(wc -l < "$CALLS")
-if AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication_changed" run_phase > "$tmp/s3-publication-drift.out" 2>&1; then
-  echo "EC2 resume accepted changed Worker-AMI publication bytes" >&2
-  exit 1
-fi
-[ "$(wc -l < "$CALLS")" = "$before_drift_calls" ]
-cmp "$worker_publication" "$snapshot_file"
 res_set instance_id ""
 run_phase > "$tmp/s3-resume.out" 2>&1 || { cat "$tmp/s3-resume.out" >&2; exit 1; }
 [ "$(_s3_file_sha256 "$bootstrap_file")" = "$first_bootstrap_sha" ]
@@ -291,6 +307,96 @@ run_phase > "$tmp/s3-resume.out" 2>&1 || { cat "$tmp/s3-resume.out" >&2; exit 1;
 [ "$(grep -c '^aws sts get-federation-token' "$CALLS")" -ge 2 ]
 [ "$(grep -c '^ssh-ecr-auth$' "$CALLS")" -ge 2 ]
 grep -q '# Lost-response resume always removes any prior auth directory' "$ECR_REMOTE_SCRIPT"
+
+# The explicit phase-2 transition validates and durably prepares the frozen
+# publication before any remote call, and never makes an AWS API call.
+export AGENT_ENABLE_MANAGED_PREPARATION_AWS=true
+unset AGENT_WORKER_AMI_PUBLICATION_FILE
+before_import_calls=$(wc -l < "$CALLS")
+if agent_aws_control_import_ec2 > "$tmp/agent-aws-import-missing.out" 2>&1; then
+  echo "Agent AWS-control import accepted a missing Worker-AMI publication" >&2
+  exit 1
+fi
+[ "$(wc -l < "$CALLS")" = "$before_import_calls" ]
+
+printf '%s\n' '{"schema_version":"dirextalk.agent.worker-ami-publication/v1","image_manifest":{"schema_version":"dirextalk.agent.worker-ami/v1","agent_instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","image_id":"ami-0123456789abcdef0","image_name":"dtx-worker-ami-0123456789abcdef0123","root_snapshot_id":"snap-0123456789abcdef0","account_id":"123456789012","region":"ap-northeast-3","architecture":"amd64","base_ami_id":"ami-0abcdef0123456789","base_ami_owner_id":"099720109477","root_device_name":"/dev/sda1","release_manifest_digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","worker_rootfs_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","worker_binary_digest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","created_at":"2026-07-16T08:00:00Z"},"image_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","attestation":{"schema_version":1,"agent_instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","ami_id":"ami-0123456789abcdef0","root_snapshot_id":"snap-0123456789abcdef0","account_id":"123456789012","region":"ap-northeast-3","architecture":"amd64","release_manifest_digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","worker_rootfs_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","worker_binary_digest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","observed_at":"2026-07-16T08:01:00Z"}}' > "$worker_publication"
+export AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication"
+before_import_calls=$(wc -l < "$CALLS")
+if AGENT_WORKER_CONTROL_ENDPOINT='grpcs://drift.example.test:443' agent_aws_control_import_ec2 > "$tmp/agent-aws-import-core-drift.out" 2>&1; then
+  echo "Agent AWS-control import accepted changed core wiring" >&2
+  exit 1
+fi
+[ "$(wc -l < "$CALLS")" = "$before_import_calls" ]
+
+aws_calls_before_import=$(grep -c '^aws ' "$CALLS")
+touch "$AGENT_AWS_IMPORT_FAIL_ONCE_FILE"
+if DIREXTALK_AGENT_AWS_IMPORT_ATTEMPTS=1 DIREXTALK_AGENT_AWS_IMPORT_DELAY_SECONDS=0 \
+    agent_aws_control_import_ec2 > "$tmp/agent-aws-import-failed.out" 2>&1; then
+  echo "Agent AWS-control import unexpectedly succeeded after a remote failure" >&2
+  exit 1
+fi
+json_test_check "$STATE_JSON" "data.agent_aws_control.managed_preparation_aws === false && data.agent_aws_control.worker_ami_publication_snapshot_file === '' && data.agent_aws_control_import.status === 'prepared' && data.agent_aws_control_import.target_managed_preparation_aws === true && data.agent_aws_control_import.worker_ami_publication_sha256.length === 64"
+[ ! -e "$AGENT_AWS_IMPORT_REMOTE_APPLIED" ]
+[ "$(grep -c '^ssh-agent-aws-import$' "$CALLS")" = 1 ]
+[ "$(grep -c '^aws ' "$CALLS")" = "$aws_calls_before_import" ]
+
+# A lost success response is recovered by readback. The frozen transition is
+# mutated and restarted once even though the transport is retried.
+touch "$AGENT_AWS_IMPORT_AMBIGUOUS_ONCE_FILE"
+DIREXTALK_AGENT_AWS_IMPORT_ATTEMPTS=3 DIREXTALK_AGENT_AWS_IMPORT_DELAY_SECONDS=0 \
+  agent_aws_control_import_ec2 > "$tmp/agent-aws-import-ambiguous.out" 2>&1 \
+  || { cat "$tmp/agent-aws-import-ambiguous.out" >&2; exit 1; }
+[ "$(grep -c '^agent-aws-import-mutation$' "$CALLS")" = 1 ]
+[ "$(grep -c '^agent-aws-import-restart$' "$CALLS")" = 1 ]
+[ "$(grep -c '^agent-aws-import-readback$' "$CALLS")" -ge 1 ]
+[ "$(grep -c '^ssh-agent-aws-import$' "$CALLS")" -ge 3 ]
+[ "$(grep -c '^aws ' "$CALLS")" = "$aws_calls_before_import" ]
+json_test_check "$STATE_JSON" "data.agent_aws_control.enabled === true && data.agent_aws_control.managed_preparation_aws === true && data.agent_aws_control.worker_ami_publication_snapshot_file === '$DIREXTALK_WORKDIR/agent-worker-ami-publication.json' && data.agent_aws_control.worker_ami_publication_sha256.length === 64 && data.agent_aws_control_import.status === 'applied' && data.agent_aws_control_import.worker_ami_publication_sha256 === data.agent_aws_control.worker_ami_publication_sha256"
+snapshot_file=$(json_get "$STATE_JSON" agent_aws_control.worker_ami_publication_snapshot_file)
+cmp "$worker_publication" "$snapshot_file"
+
+mkdir "$tmp/agent-aws-import-bundle"
+tar -xzf "$AGENT_AWS_IMPORT_PAYLOAD" -C "$tmp/agent-aws-import-bundle"
+cmp "$worker_publication" "$tmp/agent-aws-import-bundle/agent-worker-ami-publication.json"
+grep -F -q "AGENT_AWS_REAPER_IMAGE_URI: \"$AGENT_AWS_REAPER_IMAGE_URI\"" "$tmp/agent-aws-import-bundle/docker-compose.yml"
+grep -F -q "AGENT_WORKER_CONTROL_ENDPOINT: \"$AGENT_WORKER_CONTROL_ENDPOINT\"" "$tmp/agent-aws-import-bundle/docker-compose.yml"
+grep -q 'AGENT_ENABLE_MANAGED_PREPARATION_AWS: "true"' "$tmp/agent-aws-import-bundle/docker-compose.yml"
+grep -q './agent-worker-ami-publication.json:/run/dirextalk-agent/worker-ami-publication.json:ro' "$tmp/agent-aws-import-bundle/docker-compose.yml"
+
+# A later transport failure cannot downgrade an already-applied journal.
+touch "$AGENT_AWS_IMPORT_FAIL_ONCE_FILE"
+if DIREXTALK_AGENT_AWS_IMPORT_ATTEMPTS=1 DIREXTALK_AGENT_AWS_IMPORT_DELAY_SECONDS=0 \
+    agent_aws_control_import_ec2 > "$tmp/agent-aws-import-applied-transport-failure.out" 2>&1; then
+  echo "Agent AWS-control retry unexpectedly succeeded through a forced transport failure" >&2
+  exit 1
+fi
+json_test_check "$STATE_JSON" "data.agent_aws_control.managed_preparation_aws === true && data.agent_aws_control_import.status === 'applied'"
+
+mutation_count=$(grep -c '^agent-aws-import-mutation$' "$CALLS")
+restart_count=$(grep -c '^agent-aws-import-restart$' "$CALLS")
+readback_count=$(grep -c '^agent-aws-import-readback$' "$CALLS")
+DIREXTALK_AGENT_AWS_IMPORT_DELAY_SECONDS=0 agent_aws_control_import_ec2 > "$tmp/agent-aws-import-retry.out" 2>&1 \
+  || { cat "$tmp/agent-aws-import-retry.out" >&2; exit 1; }
+[ "$(grep -c '^agent-aws-import-mutation$' "$CALLS")" = "$mutation_count" ]
+[ "$(grep -c '^agent-aws-import-restart$' "$CALLS")" = "$restart_count" ]
+[ "$(grep -c '^agent-aws-import-readback$' "$CALLS")" -gt "$readback_count" ]
+[ "$(grep -c '^aws ' "$CALLS")" = "$aws_calls_before_import" ]
+
+sed 's/"observed_at":"2026-07-16T08:01:00Z"/"observed_at":"2026-07-16T08:02:00Z"/' "$worker_publication" > "$worker_publication_changed"
+before_drift_calls=$(wc -l < "$CALLS")
+if AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication_changed" agent_aws_control_import_ec2 > "$tmp/agent-aws-import-publication-drift.out" 2>&1; then
+  echo "Agent AWS-control import accepted changed Worker-AMI publication bytes" >&2
+  exit 1
+fi
+[ "$(wc -l < "$CALLS")" = "$before_drift_calls" ]
+cmp "$worker_publication" "$snapshot_file"
+
+before_drift_calls=$(wc -l < "$CALLS")
+if AGENT_ENABLE_MANAGED_PREPARATION_AWS=false agent_aws_control_import_ec2 > "$tmp/agent-aws-import-revert.out" 2>&1; then
+  echo "Agent AWS-control import allowed the managed transition to be reverted" >&2
+  exit 1
+fi
+[ "$(wc -l < "$CALLS")" = "$before_drift_calls" ]
 
 # Mismatched first-contact nonce must never pin or stream root bootstrap code.
 res_set ec2_ssh_known_hosts ""

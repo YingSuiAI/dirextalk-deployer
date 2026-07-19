@@ -12,6 +12,7 @@
 # Usage:
 #   render-userdata.sh --domain <domain> --acme <email> --message-server-image <img> > user-data.yaml
 #   render-userdata.sh --format shell --domain <domain> --acme <email> --message-server-image <img> > user-data.sh
+#   render-userdata.sh --format bundle --bundle-output <archive.tar.gz> ...
 #   render-userdata.sh ... --agent-image <tag@digest> --agent-instance-id <uuid> --agent-model-profiles-file <json>
 #     [--agent-enable-aws-control true --agent-aws-reaper-image-uri <image@sha256:...>
 #      --agent-worker-control-endpoint grpcs://<dns-name>:443
@@ -25,7 +26,7 @@ source "$HERE/lib/domain.sh"
 source "$HERE/lib/json.sh"
 source "$HERE/lib/agent-release.sh"
 
-DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; FORMAT="cloud-config"; DEFER_COMPOSE_START=0
+DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; FORMAT="cloud-config"; BUNDLE_OUTPUT=""; DEFER_COMPOSE_START=0
 AGENT_IMAGE=""; AGENT_INSTANCE_ID=""; AGENT_MODEL_PROFILES_FILE=""
 AGENT_ENABLE_AWS_CONTROL=false; AGENT_AWS_REAPER_IMAGE_URI=""; AGENT_WORKER_CONTROL_ENDPOINT=""
 AGENT_ENABLE_MANAGED_PREPARATION_AWS=""; AGENT_WORKER_AMI_PUBLICATION_FILE=""
@@ -33,6 +34,7 @@ AGENT_WORKER_AMI_PUBLICATION_SHA256=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --format) FORMAT=$2; shift 2;;
+    --bundle-output) BUNDLE_OUTPUT=$2; shift 2;;
     --domain) DOMAIN=$2; shift 2;;
     --acme) ACME=$2; shift 2;;
     --message-server-image) MESSAGE_SERVER_IMAGE=$2; shift 2;;
@@ -59,11 +61,13 @@ DOMAIN=$(domain_normalize "$DOMAIN")
 [ "$DOMAIN" != "PLACEHOLDER" ] || { echo "PLACEHOLDER/sslip.io domains are not accepted in the production renderer" >&2; exit 1; }
 domain_is_formal_name "$DOMAIN" || { echo "invalid production domain: $DOMAIN" >&2; exit 1; }
 case "$FORMAT" in
-  cloud-config|shell) ;;
+  cloud-config|shell) [ -z "$BUNDLE_OUTPUT" ] || { echo "--bundle-output requires --format bundle" >&2; exit 1; } ;;
+  bundle) [ -n "$BUNDLE_OUTPUT" ] || { echo "--format bundle requires --bundle-output" >&2; exit 1; } ;;
   *) echo "invalid --format: $FORMAT" >&2; exit 1 ;;
 esac
 agent_enabled=0
 agent_aws_control_enabled=0
+agent_aws_publication_enabled=0
 if [ -n "$AGENT_IMAGE$AGENT_INSTANCE_ID$AGENT_MODEL_PROFILES_FILE" ]; then
   agent_image_is_immutable "$AGENT_IMAGE" || {
     echo "--agent-image must be a prerelease tag plus lowercase sha256 digest" >&2
@@ -84,7 +88,14 @@ if [ "$AGENT_ENABLE_AWS_CONTROL" = true ]; then
   agent_aws_reaper_image_uri_is_safe "$AGENT_AWS_REAPER_IMAGE_URI" || { echo "--agent-aws-reaper-image-uri must be an immutable credential-free image reference with a lowercase sha256 digest" >&2; exit 1; }
   agent_worker_control_endpoint_is_safe "$AGENT_WORKER_CONTROL_ENDPOINT" || { echo "--agent-worker-control-endpoint must be a credential-free grpcs:// DNS endpoint on port 443" >&2; exit 1; }
   agent_managed_preparation_aws_is_safe "$AGENT_ENABLE_MANAGED_PREPARATION_AWS" || { echo "--agent-enable-managed-preparation-aws must be true or false" >&2; exit 1; }
-  printf '%s\n' "$AGENT_WORKER_AMI_PUBLICATION_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "--agent-worker-ami-publication-sha256 must be the frozen lowercase sha256 digest" >&2; exit 1; }
+  if [ "$AGENT_ENABLE_MANAGED_PREPARATION_AWS" = true ]; then
+    [ -n "$AGENT_WORKER_AMI_PUBLICATION_FILE" ] || { echo "--agent-worker-ami-publication-file is required when managed preparation is enabled" >&2; exit 1; }
+    printf '%s\n' "$AGENT_WORKER_AMI_PUBLICATION_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "--agent-worker-ami-publication-sha256 must be the frozen lowercase sha256 digest" >&2; exit 1; }
+    agent_aws_publication_enabled=1
+  elif [ -n "$AGENT_WORKER_AMI_PUBLICATION_FILE$AGENT_WORKER_AMI_PUBLICATION_SHA256" ]; then
+    echo "Worker-AMI publication inputs require --agent-enable-managed-preparation-aws true" >&2
+    exit 1
+  fi
   agent_aws_control_enabled=1
 elif [ "$AGENT_ENABLE_AWS_CONTROL" != false ] || [ -n "$AGENT_AWS_REAPER_IMAGE_URI$AGENT_WORKER_CONTROL_ENDPOINT$AGENT_ENABLE_MANAGED_PREPARATION_AWS$AGENT_WORKER_AMI_PUBLICATION_FILE$AGENT_WORKER_AMI_PUBLICATION_SHA256" ]; then
   echo "Agent AWS control inputs require --agent-enable-aws-control true" >&2
@@ -94,13 +105,15 @@ fi
 b64() { base64 | tr -d '\n'; }
 sed_replacement_escape() { printf '%s' "$1" | sed 's/[\\&#]/\\&/g'; }
 render_optional_agent_sections() {
-  local enabled=$1 aws_control_enabled=$2
-  awk -v enabled="$enabled" -v aws_control_enabled="$aws_control_enabled" '
+  local enabled=$1 aws_control_enabled=$2 aws_publication_enabled=$3
+  awk -v enabled="$enabled" -v aws_control_enabled="$aws_control_enabled" -v aws_publication_enabled="$aws_publication_enabled" '
     /DIREXTALK_AGENT_OPTIONAL_BEGIN/ { agent_skip = (enabled != 1); next }
     /DIREXTALK_AGENT_OPTIONAL_END/ { agent_skip = 0; next }
     /DIREXTALK_AGENT_AWS_CONTROL_BEGIN/ { aws_skip = (aws_control_enabled != 1); next }
     /DIREXTALK_AGENT_AWS_CONTROL_END/ { aws_skip = 0; next }
-    !agent_skip && !aws_skip { print }
+    /DIREXTALK_AGENT_AWS_PUBLICATION_BEGIN/ { publication_skip = (aws_publication_enabled != 1); next }
+    /DIREXTALK_AGENT_AWS_PUBLICATION_END/ { publication_skip = 0; next }
+    !agent_skip && !aws_skip && !publication_skip { print }
   ' "$CI/docker-compose.yml"
 }
 
@@ -113,7 +126,7 @@ strip_bundle_comments() {
 # Build a deterministic tar.gz bundle with fixed permissions and no extra attrs.
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-render_optional_agent_sections "$agent_enabled" "$agent_aws_control_enabled" \
+render_optional_agent_sections "$agent_enabled" "$agent_aws_control_enabled" "$agent_aws_publication_enabled" \
   | sed "s#__AGENT_ENABLE_AWS_CONTROL__#$(sed_replacement_escape "$AGENT_ENABLE_AWS_CONTROL")#g; s#__AGENT_AWS_REAPER_IMAGE_URI__#$(sed_replacement_escape "$AGENT_AWS_REAPER_IMAGE_URI")#g; s#__AGENT_WORKER_CONTROL_ENDPOINT__#$(sed_replacement_escape "$AGENT_WORKER_CONTROL_ENDPOINT")#g; s#__AGENT_ENABLE_MANAGED_PREPARATION_AWS__#$(sed_replacement_escape "$AGENT_ENABLE_MANAGED_PREPARATION_AWS")#g" \
   | strip_bundle_comments > "$WORK/docker-compose.yml"
 strip_bundle_comments < "$CI/Caddyfile" > "$WORK/Caddyfile"
@@ -123,7 +136,7 @@ if [ "$agent_enabled" = 1 ]; then
   tr -d '\r' < "$CI/agent-db-init.sh" > "$WORK/agent-db-init.sh"
   tr -d '\r' < "$CI/agent-runtime-init.sh" > "$WORK/agent-runtime-init.sh"
   cp "$AGENT_MODEL_PROFILES_FILE" "$WORK/agent-model-profiles.json"
-  if [ "$agent_aws_control_enabled" = 1 ]; then
+  if [ "$agent_aws_publication_enabled" = 1 ]; then
     json_worker_ami_publication_snapshot "$AGENT_WORKER_AMI_PUBLICATION_FILE" "$WORK/agent-worker-ami-publication.json" "$AGENT_WORKER_AMI_PUBLICATION_SHA256" >/dev/null || {
       echo "--agent-worker-ami-publication-file must be the exact strict Agent Worker-AMI publication matching the frozen digest" >&2
       exit 1
@@ -134,25 +147,31 @@ mkdir -p "$WORK/updater"
 for updater_file in install.sh bootstrap-host.sh set-desired-state.sh release.env config.json config.legacy-compose-caddy.json dirextalk-updater.service; do
   tr -d '\r' < "$HERE/updater/$updater_file" > "$WORK/updater/$updater_file"
 done
+if [ "$agent_enabled" = 1 ]; then
+  tr -d '\r' < "$HERE/updater/reconcile-agent-aws-control.sh" > "$WORK/updater/reconcile-agent-aws-control.sh"
+fi
 chmod 0644 "$WORK/docker-compose.yml" "$WORK/Caddyfile"
 if [ "$agent_enabled" = 1 ]; then
   chmod 0644 "$WORK/agent-model-profiles.json"
-  [ "$agent_aws_control_enabled" = 1 ] && chmod 0644 "$WORK/agent-worker-ami-publication.json"
+  [ "$agent_aws_publication_enabled" = 1 ] && chmod 0644 "$WORK/agent-worker-ami-publication.json"
   chmod 0755 "$WORK/agent-db-init.sh" "$WORK/agent-runtime-init.sh"
 fi
 chmod 0644 "$WORK/updater/release.env" "$WORK/updater/config.json" "$WORK/updater/config.legacy-compose-caddy.json" "$WORK/updater/"*.service
 chmod 0755 "$WORK/init-tokens.sh" "$WORK/p2p-http-request.sh" "$WORK/updater/install.sh" "$WORK/updater/bootstrap-host.sh" "$WORK/updater/set-desired-state.sh"
+[ "$agent_enabled" = 1 ] && chmod 0755 "$WORK/updater/reconcile-agent-aws-control.sh"
 find "$WORK" -name '._*' -delete
 bundle_files=(docker-compose.yml Caddyfile init-tokens.sh p2p-http-request.sh updater)
 if [ "$agent_enabled" = 1 ]; then
   bundle_files+=(agent-db-init.sh agent-runtime-init.sh agent-model-profiles.json)
-  [ "$agent_aws_control_enabled" = 1 ] && bundle_files+=(agent-worker-ami-publication.json)
+  [ "$agent_aws_publication_enabled" = 1 ] && bundle_files+=(agent-worker-ami-publication.json)
 fi
 # The shell renderer is a self-contained bootstrap payload. Lightsail streams
 # it over SSH; EC2 embeds the same bundle in cloud-init below. The helper emits
 # a normalized USTAR+gzip archive (fixed order, ownership, modes, and times).
 BUNDLE_ARCHIVE="$WORK/bundle.tar.gz"
+[ "$FORMAT" = bundle ] && BUNDLE_ARCHIVE=$BUNDLE_OUTPUT
 json_deterministic_bundle "$WORK" "$BUNDLE_ARCHIVE" "${bundle_files[@]}"
+[ "$FORMAT" = bundle ] && exit 0
 BUNDLE_B64=$(b64 < "$BUNDLE_ARCHIVE")
 
 if [ "$FORMAT" = "shell" ]; then

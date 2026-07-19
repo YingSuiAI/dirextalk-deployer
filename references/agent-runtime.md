@@ -29,16 +29,46 @@ a digestless stable tag, and a noncanonical repository are rejected.
 
 ### Explicit Agent AWS-control opt-in
 
-AWS control remains off unless every input below is supplied deliberately:
+AWS control is EC2-only and advances through two explicit phases. Phase 1 is
+the only supported initial deployment shape. Supply the normal immutable Agent
+inputs above plus the exact AWS-control core, but keep managed preparation
+false and do not provide a Worker-AMI publication:
 
 ```bash
 DIREXTALK_CLOUD_PROVIDER=ec2 \
+DOMAIN='service.example.test' \
+DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE='dirextalk/message-server:v1.2.3@sha256:<64-lowercase-hex>' \
+AGENT_IMAGE='<aws-account>.dkr.ecr.<aws-region>.amazonaws.com/dirextalk-agent:v0.1.0-alpha.20260718.1-abcdef123456@sha256:<64-lowercase-hex>' \
+AGENT_INSTANCE_ID='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' \
+AGENT_MODEL_PROFILES_FILE='/absolute/path/model-profiles.json' \
 AGENT_ENABLE_AWS_CONTROL=true \
 AGENT_AWS_REAPER_IMAGE_URI='<registry>/<repository>:<immutable-tag>@sha256:<64-lowercase-hex>' \
 AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.__DOMAIN__:443' \
+AGENT_ENABLE_MANAGED_PREPARATION_AWS=false \
+bash scripts/orchestrate.sh
+```
+
+This phase renders the reaper image and credential-free Worker endpoint, with
+`AGENT_ENABLE_MANAGED_PREPARATION_AWS=false`. It neither publishes nor mounts a
+Worker-AMI record. The resulting Agent can complete Foundation/device approval
+and build the Worker AMI while the original Agent release, instance identity,
+model-profile catalog, reaper digest, and Worker endpoint remain frozen.
+
+After the Agent has produced one reviewed publication, explicitly advance the
+same EC2 deployment with the exact original runtime inputs:
+
+```bash
+DOMAIN='service.example.test' \
+DIREXTALK_MESSAGE_SERVER_RELEASE_IMAGE='dirextalk/message-server:v1.2.3@sha256:<same-digest>' \
+AGENT_IMAGE='<same-private-ecr-reference>@sha256:<same-digest>' \
+AGENT_INSTANCE_ID='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' \
+AGENT_MODEL_PROFILES_FILE='/absolute/path/same-model-profiles.json' \
+AGENT_ENABLE_AWS_CONTROL=true \
+AGENT_AWS_REAPER_IMAGE_URI='<same-reaper-reference>@sha256:<same-digest>' \
+AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.__DOMAIN__:443' \
 AGENT_ENABLE_MANAGED_PREPARATION_AWS=true \
 AGENT_WORKER_AMI_PUBLICATION_FILE='/absolute/path/worker-ami-publication.json' \
-bash scripts/orchestrate.sh
+bash scripts/orchestrate.sh agent-aws-import
 ```
 
 `AGENT_ENABLE_MANAGED_PREPARATION_AWS` must be exactly `true` or `false`. The
@@ -56,25 +86,35 @@ symlinks, and cross-field mismatches are rejected. The Agent runtime remains
 the final verifier of the publication's canonical cryptographic
 `image_digest`; the deployer does not invent a second CBOR implementation.
 
-Before any AWS command, the deployer validates and freezes the exact source
-bytes once through a private same-directory temporary file, file and directory
-durability flushes, and an atomic no-clobber publication into the mode-0600
-local snapshot. An interrupted temp is validated and recovered or safely
-recreated on retry; an existing different snapshot is never accepted or
-overwritten. State contains only the public configuration, that snapshot path,
-and its SHA-256—not publication contents or credentials. Rendering validates,
-hashes, and copies the same frozen bytes, mounting them read-only at
-`/run/dirextalk-agent/worker-ami-publication.json`. Every resume requires both
-the operator source and frozen snapshot to remain regular, present, valid, and
-byte-identical to the recorded digest. Missing, replaced, symlinked, or changed
-input fails closed before AWS access and cannot replace an already-frozen
-bootstrap.
+Before SSH or any other remote side effect, `agent-aws-import` validates the
+existing EC2/private-ECR state and every immutable core input, then freezes the
+exact publication bytes through a private same-directory temporary file, file
+and directory durability flushes, and an atomic no-clobber mode-0600 snapshot.
+It durably records a `prepared` import with the publication and both rendered
+Compose digests. State contains only public configuration, local snapshot
+paths, digests, and transition status—not publication contents or credentials.
 
-EC2 is the production expectation for AWS-control deployments, including the
-same-account/same-region private ECR Agent boundary described below. The
-Lightsail shell renderer preserves the same frozen publication contract for
-safe resume and contract testing, but it does not replace the EC2 production
-preflight and private-ECR expectations.
+The command holds one private per-service local lock, while the pinned-SSH
+helper holds a host `flock` across its complete inspect/mutate/readback or
+rollback transaction. It installs the exact publication read-only at
+`/run/dirextalk-agent/worker-ami-publication.json`, atomically changes Compose
+to managed preparation, and reconciles only the Agent container with
+`--no-deps`. Before local state advances from false to true, runtime readback
+must prove the exact Agent image and instance, AWS core environment, exact
+publication bind source and digest, and the mounted model-profile digest.
+If the restart fails, the host restores the usable phase-1 Compose and removes
+the attempted publication; rerunning the command is safe. If the response is
+lost after success, the retry reads back the exact running target and records
+success without replaying the mutation. Local prepared/applied journal writes
+flush both the state file and its directory, and exact retries never downgrade
+an applied journal. Once applied, the transition cannot be disabled, reverted,
+or moved to different publication bytes or core wiring. Every retry requires
+the source and frozen snapshot to remain regular, present, valid, and
+byte-identical.
+
+AWS control remains rejected for Lightsail. The legacy Agent-disabled path is
+unchanged, and a normal deployment resume cannot bypass the explicit
+`agent-aws-import` transition.
 
 ### One-time mounted provider secret (verified pinned SSH)
 

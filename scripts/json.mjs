@@ -1307,9 +1307,31 @@ function readJsonStdin() {
 
 function atomicWriteJson(file, data) {
   const tmp = `${file}.tmp.${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, file);
+  const directory = path.dirname(file);
+  let descriptor;
+  try {
+    descriptor = openSync(
+      tmp,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW || 0),
+      0o600,
+    );
+    writeFileSync(descriptor, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf8" });
+    chmodSync(tmp, 0o600);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    renameSync(tmp, file);
+    fsyncSnapshotDirectory(directory);
+  } catch (error) {
+    if (typeof descriptor === "number") closeSync(descriptor);
+    try {
+      if (snapshotPathEntryExists(tmp)) unlinkSync(tmp);
+    } catch {
+      // Preserve the original mutation failure. A later atomic write replaces
+      // this private per-process temp before publishing another state value.
+    }
+    throw error;
+  }
 }
 
 function getPath(data, jsonPath, fallback = "") {

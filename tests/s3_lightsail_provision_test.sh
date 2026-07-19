@@ -146,8 +146,6 @@ agent_image='registry.example/dirextalk-agent:v0.1.0-alpha.20260718.1-abcdef1234
 message_image='dirextalk/message-server:v1.2.3@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 agent_instance_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 agent_profiles="$tmp/agent-model-profiles.json"
-worker_publication="$tmp/worker-ami-publication.json"
-worker_publication_changed="$tmp/worker-ami-publication-changed.json"
 printf '%s\n' '{"schema_version":1,"profiles":[{"profile_id":"test-profile","provider":"openai_compatible","model":"test-model","base_url":"https://api.example.test/v1","secret_ref":"mounted:test-token","context_window":4096,"max_output_tokens":1024}]}' > "$agent_profiles"
 secret_source="$tmp/operator-mounted-secret"
 secret_value='test-only-mounted-secret'
@@ -262,23 +260,28 @@ rm -f "$tmp/instance.created" "$tmp/static-ip.allocated" "$tmp/static-ip.attache
 export AGENT_ENABLE_AWS_CONTROL=true
 export AGENT_AWS_REAPER_IMAGE_URI='registry.example/dirextalk-aws-reaper:v0.1.0-alpha.20260718.1-abcdef123456@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 export AGENT_WORKER_CONTROL_ENDPOINT='grpcs://worker-control.example.test:443'
-export AGENT_ENABLE_MANAGED_PREPARATION_AWS=true
-export AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication"
-if AGENT_MOUNTED_SECRET_FILE="$secret_source" AGENT_MOUNTED_SECRET_NAME=test-token run_phase > "$tmp/s3-missing-publication.out" 2>&1; then
-  echo "Lightsail provisioning accepted a missing enabled Worker-AMI publication" >&2
+export AGENT_ENABLE_MANAGED_PREPARATION_AWS=false
+unset AGENT_WORKER_AMI_PUBLICATION_FILE
+if AGENT_MOUNTED_SECRET_FILE="$secret_source" AGENT_MOUNTED_SECRET_NAME=test-token run_phase > "$tmp/s3-lightsail-aws-control.out" 2>&1; then
+  echo "Lightsail provisioning accepted Agent AWS control" >&2
   exit 1
 fi
 [ ! -s "$CALLS" ]
-printf '%s\n' '{"schema_version":"dirextalk.agent.worker-ami-publication/v1","image_manifest":{"schema_version":"dirextalk.agent.worker-ami/v1","agent_instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","image_id":"ami-0123456789abcdef0","image_name":"dtx-worker-ami-0123456789abcdef0123","root_snapshot_id":"snap-0123456789abcdef0","account_id":"123456789012","region":"us-east-1","architecture":"amd64","base_ami_id":"ami-0abcdef0123456789","base_ami_owner_id":"099720109477","root_device_name":"/dev/sda1","release_manifest_digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","worker_rootfs_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","worker_binary_digest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","created_at":"2026-07-16T08:00:00Z"},"image_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","attestation":{"schema_version":1,"agent_instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","ami_id":"ami-0123456789abcdef0","root_snapshot_id":"snap-0123456789abcdef0","account_id":"123456789012","region":"us-east-1","architecture":"amd64","release_manifest_digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","worker_rootfs_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","worker_binary_digest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","observed_at":"2026-07-16T08:01:00Z"}}' > "$worker_publication"
+
+# Reset after the rejection and keep the legacy disabled Lightsail path intact.
+state_init >/dev/null 2>&1
+state_set region us-east-1
+state_set domain lightsail.example.test
+state_set domain_mode user
+: > "$CALLS"
+rm -f "$tmp/instance.created" "$tmp/static-ip.allocated" "$tmp/static-ip.attached" "$tmp/lightsail-launch-user-data" "$tmp/lightsail-bootstrap.stdin" "$tmp/lightsail-bootstrap.nonce"
+unset AGENT_ENABLE_AWS_CONTROL AGENT_AWS_REAPER_IMAGE_URI AGENT_WORKER_CONTROL_ENDPOINT AGENT_ENABLE_MANAGED_PREPARATION_AWS AGENT_WORKER_AMI_PUBLICATION_FILE
 if ! AGENT_MOUNTED_SECRET_FILE="$secret_source" AGENT_MOUNTED_SECRET_NAME=test-token run_phase > "$tmp/s3.out" 2>&1; then
   cat "$tmp/s3.out" >&2
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'immutable_release' && data.server_release.version === 'v1.2.3' && data.server_release.image_ref === '$message_image' && data.server_release.digest === 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' && data.agent_release.source === 'operator_image' && data.agent_release.enabled === true && data.agent_release.image_ref === '$agent_image' && data.agent_release.instance_id === '$agent_instance_id' && data.agent_release.model_profiles_sha256.length === 64 && data.agent_aws_control.source === 'operator_configuration' && data.agent_aws_control.enabled === true && data.agent_aws_control.aws_reaper_image_uri === '$AGENT_AWS_REAPER_IMAGE_URI' && data.agent_aws_control.worker_control_endpoint === '$AGENT_WORKER_CONTROL_ENDPOINT' && data.agent_aws_control.managed_preparation_aws === true && data.agent_aws_control.worker_ami_publication_sha256.length === 64 && data.updater_release.version === 'v1.0.8' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b'"
-snapshot_file=$(json_get "$STATE_JSON" agent_aws_control.worker_ami_publication_snapshot_file)
-[ "$snapshot_file" = "$DIREXTALK_WORKDIR/agent-worker-ami-publication.json" ]
-cmp "$worker_publication" "$snapshot_file"
+json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'immutable_release' && data.server_release.version === 'v1.2.3' && data.server_release.image_ref === '$message_image' && data.server_release.digest === 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' && data.agent_release.source === 'operator_image' && data.agent_release.enabled === true && data.agent_release.image_ref === '$agent_image' && data.agent_release.instance_id === '$agent_instance_id' && data.agent_release.model_profiles_sha256.length === 64 && data.agent_aws_control.source === 'disabled' && data.agent_aws_control.enabled === false && data.agent_aws_control.aws_reaper_image_uri === '' && data.agent_aws_control.worker_control_endpoint === '' && data.agent_aws_control.managed_preparation_aws === '' && data.agent_aws_control.worker_ami_publication_sha256 === '' && data.updater_release.version === 'v1.0.8' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b'"
 if grep -Eiq 'aws_access_key_id|aws_secret_access_key|aws_session_token' "$STATE_JSON"; then
   echo "Lightsail Agent AWS control state persisted credential fields" >&2
   exit 1
@@ -309,10 +312,11 @@ grep -F -q 'updater/bootstrap-host.sh "${1:-}"' "$bootstrap_file"
 awk '/^base64 -d>bundle\.tar\.gz<<B$/ { capture=1; next } capture && /^B$/ { exit } capture { print }' "$bootstrap_file" | base64 -d > "$tmp/lightsail-bundle.tar.gz"
 mkdir "$tmp/lightsail-bundle"
 tar -xzf "$tmp/lightsail-bundle.tar.gz" -C "$tmp/lightsail-bundle"
-cmp "$worker_publication" "$tmp/lightsail-bundle/agent-worker-ami-publication.json"
-grep -F -q "AGENT_AWS_REAPER_IMAGE_URI: \"$AGENT_AWS_REAPER_IMAGE_URI\"" "$tmp/lightsail-bundle/docker-compose.yml"
-grep -F -q "AGENT_WORKER_CONTROL_ENDPOINT: \"$AGENT_WORKER_CONTROL_ENDPOINT\"" "$tmp/lightsail-bundle/docker-compose.yml"
-grep -q './agent-worker-ami-publication.json:/run/dirextalk-agent/worker-ami-publication.json:ro' "$tmp/lightsail-bundle/docker-compose.yml"
+if [ -e "$tmp/lightsail-bundle/agent-worker-ami-publication.json" ] \
+    || grep -q 'AGENT_AWS_REAPER_IMAGE_URI\|AGENT_WORKER_CONTROL_ENDPOINT\|worker-ami-publication' "$tmp/lightsail-bundle/docker-compose.yml"; then
+  echo "disabled Lightsail Agent bundle included AWS-control wiring" >&2
+  exit 1
+fi
 bash -n "$bootstrap_file"
 [ "$(_s3_file_sha256 "$bootstrap_file")" = "$bootstrap_sha256" ]
 [ "$(_bootstrap_nonce_read "$bootstrap_nonce_file")" != '' ]
@@ -324,14 +328,6 @@ if grep -F -q "$secret_value" "$CALLS" "$STATE_JSON" "$userdata_file" "$bootstra
   echo "mounted Agent secret must stay out of state, launch data, bootstrap, and SSH arguments" >&2
   exit 1
 fi
-sed 's/"observed_at":"2026-07-16T08:01:00Z"/"observed_at":"2026-07-16T08:02:00Z"/' "$worker_publication" > "$worker_publication_changed"
-before_drift_calls=$(wc -l < "$CALLS")
-if AGENT_WORKER_AMI_PUBLICATION_FILE="$worker_publication_changed" AGENT_MOUNTED_SECRET_FILE="$secret_source" AGENT_MOUNTED_SECRET_NAME=test-token run_phase > "$tmp/s3-publication-drift.out" 2>&1; then
-  echo "Lightsail resume accepted changed Worker-AMI publication bytes" >&2
-  exit 1
-fi
-[ "$(wc -l < "$CALLS")" = "$before_drift_calls" ]
-cmp "$worker_publication" "$snapshot_file"
 key_file=$(json_get "$STATE_JSON" resources.key_file)
 grep -q -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$key_file" || {
   echo "Lightsail private key should be written as PEM text when AWS returns PEM text" >&2

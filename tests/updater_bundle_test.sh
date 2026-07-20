@@ -146,8 +146,8 @@ grep -q 'systemctl disable --now dirextalk-updater-discovery.timer' "$tmp/bundle
 grep -q 'flock' "$tmp/bundle/updater/bootstrap-host.sh"
 grep -q 'docker compose --env-file .env up -d' "$tmp/bundle/updater/bootstrap-host.sh"
 grep -F -q '"$updater_binary" --config "$root/etc/dirextalk-updater/config.json" pin-initial-latest' "$tmp/bundle/updater/bootstrap-host.sh"
-grep -F -q 'github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.8/dirextalk-updater-linux-amd64' "$tmp/bundle/updater/release.env"
-grep -F -q '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b' "$tmp/bundle/updater/release.env"
+grep -F -q 'github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.10/dirextalk-updater-linux-amd64' "$tmp/bundle/updater/release.env"
+grep -F -q '730f3d1e4c6f604069e1b6eed60121bffb47f32d2f1d960cb3f8a0121974b6b8' "$tmp/bundle/updater/release.env"
 if grep -q 'latest/meta-data/public-ipv4\|api.ipify.org\|ifconfig.me' "$tmp/user-data.yaml"; then
   echo "cloud-init must not persist a temporary pre-EIP public address" >&2
   exit 1

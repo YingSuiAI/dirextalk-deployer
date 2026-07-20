@@ -125,7 +125,7 @@ elif [[ "$all" == *"/bin/bash -s --"* ]]; then
 elif [[ "$all" == *"reconcile-host.sh"* ]]; then
   printf 'ssh-updater-stage\n' >> "$CALLS"
   cat > "$TMPDIR/ec2-updater-integration.tar.gz"
-  printf 'v1.0.8\t1efa90fd776d355d4cd898bcdb4922267b03d180\t04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b\n'
+  printf 'v1.0.10\ta8971d7b04e8fef29b35ef889cc1b70d7ceca7a5\t730f3d1e4c6f604069e1b6eed60121bffb47f32d2f1d960cb3f8a0121974b6b8\n'
 elif [[ "$all" == *"reconcile-agent-aws-control.sh"* ]]; then
   printf 'ssh-agent-aws-import\n' >> "$CALLS"
   cat > "$AGENT_AWS_IMPORT_PAYLOAD"
@@ -157,7 +157,7 @@ elif [[ "$all" == *"dirextalk-ecr-pull"* ]]; then
   payload=$(printf '%s\n' "$all" | sed -n "s/.*printf '%s' '\([^']*\)'.*/\1/p")
   [ -n "$payload" ]
   printf '%s' "$payload" | base64 --decode > "$ECR_REMOTE_SCRIPT"
-  printf 'v1.0.8\t1efa90fd776d355d4cd898bcdb4922267b03d180\t04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b\tecr-auth-clean=true\n'
+  printf 'v1.0.10\ta8971d7b04e8fef29b35ef889cc1b70d7ceca7a5\t730f3d1e4c6f604069e1b6eed60121bffb47f32d2f1d960cb3f8a0121974b6b8\tecr-auth-clean=true\n'
 elif [[ "$all" == *"agent-mounted-secret-delivery"* ]]; then
   printf 'ssh-secret-delivery\n' >> "$CALLS"
   cat > "$SECRET_STDIN"
@@ -211,7 +211,7 @@ domain_resolves_to_ip() {
 }
 
 run_phase > "$tmp/s3.out" 2>&1 || { cat "$tmp/s3.out" >&2; exit 1; }
-json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.resources.ec2_client_token.length === 64 && data.resources.agent_registry_auth_cleanup_verified === 'true' && data.server_release.source === 'immutable_release' && data.server_release.image_ref === '$message_image' && data.agent_release.image_ref === '$agent_image' && data.agent_registry.source === 'private_ecr' && data.agent_registry.repository === 'dirextalk-agent' && data.agent_registry.auth_mode === 'federation_token' && data.agent_aws_control.source === 'operator_configuration' && data.agent_aws_control.enabled === true && data.agent_aws_control.aws_reaper_image_uri === '$AGENT_AWS_REAPER_IMAGE_URI' && data.agent_aws_control.worker_control_endpoint === '$AGENT_WORKER_CONTROL_ENDPOINT' && data.agent_aws_control.managed_preparation_aws === false && data.agent_aws_control.worker_ami_publication_snapshot_file === '' && data.agent_aws_control.worker_ami_publication_sha256 === '' && data.updater_release.version === 'v1.0.8'"
+json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.resources.ec2_client_token.length === 64 && data.resources.agent_registry_auth_cleanup_verified === 'true' && data.server_release.source === 'immutable_release' && data.server_release.image_ref === '$message_image' && data.agent_release.image_ref === '$agent_image' && data.agent_registry.source === 'private_ecr' && data.agent_registry.repository === 'dirextalk-agent' && data.agent_registry.auth_mode === 'federation_token' && data.agent_aws_control.source === 'operator_configuration' && data.agent_aws_control.enabled === true && data.agent_aws_control.aws_reaper_image_uri === '$AGENT_AWS_REAPER_IMAGE_URI' && data.agent_aws_control.worker_control_endpoint === '$AGENT_WORKER_CONTROL_ENDPOINT' && data.agent_aws_control.managed_preparation_aws === false && data.agent_aws_control.worker_ami_publication_snapshot_file === '' && data.agent_aws_control.worker_ami_publication_sha256 === '' && data.updater_release.version === 'v1.0.10'"
 snapshot_file=$(json_get "$STATE_JSON" agent_aws_control.worker_ami_publication_snapshot_file)
 [ -z "$snapshot_file" ]
 [ ! -e "$DIREXTALK_WORKDIR/agent-worker-ami-publication.json" ]

@@ -60,7 +60,7 @@ Use `scripts/lib/git-bash.sh`, `scripts/lib/local-paths.sh`, and `scripts/lib/pa
 
 ## Secrets And State
 
-- Never print, commit, or paste AWS secrets, the eight-digit app initialization code, Matrix access tokens, `agent_token`, private keys, or full credential files.
+- Never print, commit, or paste AWS secrets, Matrix access tokens, `agent_token`, private keys, or full credential files. After a completed deployment, the final user handoff must include the App domain and the eight-digit app initialization code.
 - When verifying credentials, print booleans or identities only, such as `has_access_token=true`, `user_id`, `device_id`, and `homeserver`.
 - `credentials.json`, Matrix session files, SSH keys, and generated env files must stay outside the repository and should be written with restrictive permissions when the platform supports it.
 - Write generated credentials, MCP artifacts, and connect config through a restrictive same-directory temporary file followed by atomic replacement. Propagate directory creation, rendering, permission, and replacement failures instead of reporting S6 success.

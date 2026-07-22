@@ -10,6 +10,31 @@ legacy_source=${DIREXTALK_LEGACY_ADOPT_SOURCE_DIR:-}
 stable_ip=${1:-}
 lock_dir="$root/run/lock"
 lock_file="$lock_dir/dirextalk-bootstrap.lock"
+stage_file="$base/.bootstrap-stage"
+
+# The stage marker is diagnostic-only. Keep its contents to a fixed allow-list
+# and make failures non-fatal so it cannot change bootstrap semantics.
+write_bootstrap_stage() {
+  local stage=$1 stage_tmp
+  case "$stage" in
+    prerequisites|lock|updater|compose_pull|compose_up|pin_image|init_tokens|completed) ;;
+    *) return 0 ;;
+  esac
+  if ! mkdir -p "$base" 2>/dev/null; then
+    return 0
+  fi
+  if ! stage_tmp=$(mktemp "$base/.bootstrap-stage.XXXXXX" 2>/dev/null); then
+    return 0
+  fi
+  if printf '%s\n' "$stage" > "$stage_tmp" \
+    && chmod 0600 "$stage_tmp" 2>/dev/null \
+    && mv -f "$stage_tmp" "$stage_file" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$stage_tmp" 2>/dev/null || true
+}
+
+write_bootstrap_stage prerequisites
 
 valid_public_ip() {
   local ip=$1 part
@@ -49,6 +74,7 @@ until ready; do
   sleep 5
 done
 
+write_bootstrap_stage lock
 mkdir -p "$lock_dir"
 exec 9>"$lock_file"
 flock 9
@@ -58,6 +84,7 @@ ready || { echo "deployment prerequisites disappeared while waiting for bootstra
 stable_ip=$(cat "$base/stable-public-ip")
 valid_public_ip "$stable_ip" || { echo "invalid recorded stable public IP" >&2; exit 1; }
 
+write_bootstrap_stage updater
 arch=$(uname -m)
 os_release="$root/etc/os-release"
 [ "$arch" = x86_64 ] || { echo "unsupported host architecture: v1 requires x86_64" >&2; exit 1; }
@@ -140,14 +167,20 @@ if [ "$adopt_existing" = 1 ]; then
   }
   bash "$base/updater/adopt-legacy-host.sh" probe "$legacy_source" "$base/updater" >/dev/null
   touch "$base/.deploy-done"
+  write_bootstrap_stage completed
   exit 0
 fi
 mkdir -p "$base/p2p"
 chmod 0700 "$base"
 cd "$base"
+write_bootstrap_stage compose_pull
 docker compose --env-file .env pull
+write_bootstrap_stage compose_up
 docker compose --env-file .env up -d
+write_bootstrap_stage pin_image
 "$updater_binary" --config "$root/etc/dirextalk-updater/config.json" pin-initial-latest
 domain=$(awk -F= '$1 == "DOMAIN" { print substr($0, index($0, "=") + 1); exit }' .env)
+write_bootstrap_stage init_tokens
 DOMAIN="$domain" bash init-tokens.sh
 touch .deploy-done
+write_bootstrap_stage completed

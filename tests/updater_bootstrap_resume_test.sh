@@ -7,6 +7,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 root="$tmp/root"
 calls="$tmp/calls"
+stage_file="$root/var/dirextalk-message-server/.bootstrap-stage"
 mkdir -p "$root/var/dirextalk-message-server/updater" "$root/etc" "$tmp/bin"
 : > "$calls"
 cp "$ROOT/scripts/updater/release.env" "$root/var/dirextalk-message-server/updater/release.env"
@@ -20,6 +21,7 @@ if DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRAP_TIMEOUT=0 bash "$script"
   exit 1
 fi
 grep -q 'timed out' "$tmp/timeout.out"
+[ "$(cat "$stage_file")" = prerequisites ]
 
 cat > "$root/var/dirextalk-message-server/.env" <<'EOF'
 DOMAIN=service.example.test
@@ -88,6 +90,9 @@ for key in TURN_SECRET P2P_PORTAL_PASSWORD; do
   grep -q "^${key}=." "$root/var/dirextalk-message-server/.env"
 done
 [ -f "$root/var/dirextalk-message-server/.deploy-done" ]
+[ "$(cat "$stage_file")" = completed ]
+[ "$(wc -l < "$stage_file")" -eq 1 ]
+! grep -Eq 'service\.example\.test|203\.0\.113\.20|TURN_SECRET|P2P_PORTAL_PASSWORD|token|secret' "$stage_file"
 grep -q '^install ' "$calls"
 grep -q 'docker compose --env-file .env pull' "$calls"
 grep -q 'docker compose --env-file .env up -d' "$calls"
@@ -100,5 +105,6 @@ grep -q 'flock' "$script"
 
 bash "$script" 203.0.113.20
 [ -f "$root/var/dirextalk-message-server/.deploy-done" ]
+[ "$(cat "$stage_file")" = completed ]
 
 echo "updater bootstrap resumes after timeout ok"

@@ -6,8 +6,38 @@ DIREXTALK_DIR=${DIREXTALK_DIR:-/var/dirextalk-message-server}
 COMPOSE="docker compose -f ${DIREXTALK_DIR}/docker-compose.yml --env-file ${DIREXTALK_DIR}/.env"
 DOMAIN=${DOMAIN:?DOMAIN is required (e.g. __DOMAIN__)}
 BOOTSTRAP_FILE=${BOOTSTRAP_FILE:-/var/dirextalk-message-server/p2p/bootstrap.json}
+DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT=${DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT-30}
+DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER=${DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER-5}
 
 log() { echo "[init-tokens] $*" >&2; }
+
+validate_timeout_setting() {
+  local name=$1 value=$2 maximum=$3 value_digits maximum_digits
+  value_digits=${#value}
+  maximum_digits=${#maximum}
+  if ! [[ "$value" =~ ^[1-9][0-9]*$ ]] \
+    || (( value_digits > maximum_digits )) \
+    || { (( value_digits == maximum_digits )) && [[ "$value" > "$maximum" ]]; }; then
+    log "FATAL: ${name} must be a whole number of seconds from 1 to ${maximum}"
+    return 1
+  fi
+}
+
+validate_timeout_setting DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT \
+  "$DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT" 300
+validate_timeout_setting DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER \
+  "$DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER" 60
+
+run_bounded_remote() {
+  if ! command -v timeout >/dev/null 2>&1; then
+    log "FATAL: timeout is required to bound remote init-token commands"
+    return 127
+  fi
+  timeout \
+    --kill-after="${DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER}s" \
+    "${DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT}s" \
+    "$@"
+}
 
 env_string() {
   local key=$1
@@ -36,7 +66,7 @@ container_post_json() {
     printf 'header=Content-Type: application/json\n'
     [ -z "$token" ] || printf 'header=Authorization: Bearer %s\n' "$token"
     printf 'post_data=%s\n' "$json"
-  } | $COMPOSE exec -T message-server sh -c '
+  } | run_bounded_remote $COMPOSE exec -T message-server sh -c '
     set -eu
     umask 077
     config=$(mktemp)
@@ -50,7 +80,7 @@ container_post_json() {
 wait_for_message_server() {
   log "waiting for message-server /_p2p/health ..."
   for i in $(seq 1 90); do
-    if $COMPOSE exec -T message-server wget -q -O - http://127.0.0.1:8008/_p2p/health >/dev/null 2>&1; then
+    if run_bounded_remote $COMPOSE exec -T message-server wget -q -O - http://127.0.0.1:8008/_p2p/health >/dev/null 2>&1; then
       log "message-server is healthy."
       return 0
     fi

@@ -24,8 +24,24 @@ esac
 EOF
 chmod 0755 "$fakebin/docker"
 
+cat > "$fakebin/timeout" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$TIMEOUT_CALLS"
+case "${1:-}" in
+  --kill-after=5s) ;;
+  *) echo "timeout must use the configured kill-after policy" >&2; exit 98 ;;
+esac
+shift
+[ "${1:-}" = 30s ] || { echo "timeout must use the configured command timeout" >&2; exit 99; }
+shift
+exec "$@"
+EOF
+chmod 0755 "$fakebin/timeout"
+
 export PATH="$fakebin:$PATH"
 export DOCKER_CALLS="$tmp/docker.calls"
+export TIMEOUT_CALLS="$tmp/timeout.calls"
 DOMAIN=resume.example.test \
   DIREXTALK_DIR="$base" \
   BOOTSTRAP_FILE="$base/p2p/bootstrap.json" \
@@ -33,9 +49,19 @@ DOMAIN=resume.example.test \
 
 grep -qF "$base/p2p/bootstrap.json" "$tmp/out"
 grep -q '/_p2p/health' "$DOCKER_CALLS"
+grep -q -- '--kill-after=5s 30s docker compose' "$TIMEOUT_CALLS"
 if grep -q '/_p2p/command' "$DOCKER_CALLS"; then
   echo "resume must reuse complete bootstrap credentials" >&2
   cat "$DOCKER_CALLS" >&2
+  exit 1
+fi
+
+if DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT=0 \
+  DOMAIN=resume.example.test \
+  DIREXTALK_DIR="$base" \
+  BOOTSTRAP_FILE="$base/p2p/bootstrap.json" \
+  bash "$ROOT/scripts/cloud-init/init-tokens.sh" >"$tmp/invalid.out" 2>&1; then
+  echo "invalid command timeout must fail closed" >&2
   exit 1
 fi
 

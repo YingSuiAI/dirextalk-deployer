@@ -107,9 +107,24 @@ fi
 grep -q 'flock' "$script"
 
 cp "$calls" "$tmp/calls-after-complete"
-bash "$script" 203.0.113.20
+cp "$root/var/dirextalk-message-server/stable-public-ip" "$tmp/stable-ip-after-complete"
+cp "$root/var/dirextalk-message-server/.env" "$tmp/env-after-complete"
+rm -f "$root/var/dirextalk-message-server/init-tokens.sh"
+bash "$script" 203.0.113.99
 [ -f "$root/var/dirextalk-message-server/.deploy-done" ]
+[ ! -e "$root/var/dirextalk-message-server/init-tokens.sh" ] || {
+  echo "completed bootstrap must not repair missing prerequisites" >&2
+  exit 1
+}
 [ "$(cat "$stage_file")" = completed ]
+cmp -s "$tmp/stable-ip-after-complete" "$root/var/dirextalk-message-server/stable-public-ip" || {
+  echo "completed bootstrap must not replace the recorded stable IP" >&2
+  exit 1
+}
+cmp -s "$tmp/env-after-complete" "$root/var/dirextalk-message-server/.env" || {
+  echo "completed bootstrap must not rewrite the environment" >&2
+  exit 1
+}
 cmp -s "$tmp/calls-after-complete" "$calls" || {
   echo "completed bootstrap must not rerun updater, compose, pin, or init" >&2
   exit 1

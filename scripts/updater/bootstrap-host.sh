@@ -7,7 +7,7 @@ base="$root/var/dirextalk-message-server"
 timeout=${DIREXTALK_BOOTSTRAP_TIMEOUT:-900}
 adopt_existing=${DIREXTALK_BOOTSTRAP_ADOPT_EXISTING:-0}
 legacy_source=${DIREXTALK_LEGACY_ADOPT_SOURCE_DIR:-}
-stable_ip=${1:-}
+requested_stable_ip=${1:-}
 lock_dir="$root/run/lock"
 lock_file="$lock_dir/dirextalk-bootstrap.lock"
 stage_file="$base/.bootstrap-stage"
@@ -34,8 +34,6 @@ write_bootstrap_stage() {
   rm -f "$stage_tmp" 2>/dev/null || true
 }
 
-write_bootstrap_stage prerequisites
-
 valid_public_ip() {
   local ip=$1 part
   local -a parts
@@ -47,13 +45,8 @@ valid_public_ip() {
   done
 }
 
-if [ -n "$stable_ip" ]; then
-  valid_public_ip "$stable_ip" || { echo "invalid stable public IP" >&2; exit 1; }
-  mkdir -p "$base"
-  stable_tmp=$(mktemp "$base/.stable-public-ip.XXXXXX")
-  printf '%s\n' "$stable_ip" > "$stable_tmp"
-  chmod 0600 "$stable_tmp"
-  mv -f "$stable_tmp" "$base/stable-public-ip"
+if [ -n "$requested_stable_ip" ]; then
+  valid_public_ip "$requested_stable_ip" || { echo "invalid stable public IP" >&2; exit 1; }
 fi
 
 ready() {
@@ -65,6 +58,25 @@ ready() {
     && { [ "$adopt_existing" = 1 ] || [ -x "$base/init-tokens.sh" ]; }
 }
 
+mkdir -p "$lock_dir"
+exec 9>"$lock_file"
+flock 9
+
+if [ -e "$base/.deploy-done" ]; then
+  write_bootstrap_stage completed
+  exit 0
+fi
+
+write_bootstrap_stage lock
+write_bootstrap_stage prerequisites
+if [ -n "$requested_stable_ip" ]; then
+  mkdir -p "$base"
+  stable_tmp=$(mktemp "$base/.stable-public-ip.XXXXXX")
+  printf '%s\n' "$requested_stable_ip" > "$stable_tmp"
+  chmod 0600 "$stable_tmp"
+  mv -f "$stable_tmp" "$base/stable-public-ip"
+fi
+
 deadline=$(($(date +%s) + timeout))
 until ready; do
   if [ "$(date +%s)" -ge "$deadline" ]; then
@@ -74,17 +86,6 @@ until ready; do
   sleep 5
 done
 
-write_bootstrap_stage lock
-mkdir -p "$lock_dir"
-exec 9>"$lock_file"
-flock 9
-
-# A concurrent cloud-init/S3 invocation may have completed while this process waited.
-ready || { echo "deployment prerequisites disappeared while waiting for bootstrap lock" >&2; exit 1; }
-if [ -e "$base/.deploy-done" ]; then
-  write_bootstrap_stage completed
-  exit 0
-fi
 stable_ip=$(cat "$base/stable-public-ip")
 valid_public_ip "$stable_ip" || { echo "invalid recorded stable public IP" >&2; exit 1; }
 

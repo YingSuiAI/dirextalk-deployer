@@ -64,7 +64,6 @@ run_bounded_remote() {
 
 container_wget_script='
     set -eu
-    umask 077
     wget_pid=
     watchdog_pid=
     cleanup() {
@@ -73,11 +72,10 @@ container_wget_script='
       [ -z "${wget_pid:-}" ] || kill "$wget_pid" 2>/dev/null || true
       [ -z "${watchdog_pid:-}" ] || kill "$watchdog_pid" 2>/dev/null || true
       [ -z "${watchdog_pid:-}" ] || wait "$watchdog_pid" 2>/dev/null || true
-      [ -z "${config:-}" ] || rm -f -- "$config"
       exit "$status"
     }
     trap cleanup EXIT HUP INT TERM
-    wget -q -O - "$1" &
+    wget -T "$2" -q -O - "$1" &
     wget_pid=$!
     (
       sleep "$2"
@@ -118,14 +116,8 @@ matrix_room_path() {
 container_post_json() {
   local path=$1 json=$2 token=${3:-} url
   url="http://127.0.0.1:8008${path}"
-  {
-    printf 'header=Content-Type: application/json\n'
-    [ -z "$token" ] || printf 'header=Authorization: Bearer %s\n' "$token"
-    printf 'post_data=%s\n' "$json"
-  } | run_bounded_remote $COMPOSE exec -T message-server sh -c '
+  run_bounded_remote $COMPOSE exec -T message-server sh -c '
     set -eu
-    umask 077
-    config=$(mktemp)
     wget_pid=
     watchdog_pid=
     cleanup() {
@@ -134,23 +126,29 @@ container_post_json() {
       [ -z "${wget_pid:-}" ] || kill "$wget_pid" 2>/dev/null || true
       [ -z "${watchdog_pid:-}" ] || kill "$watchdog_pid" 2>/dev/null || true
       [ -z "${watchdog_pid:-}" ] || wait "$watchdog_pid" 2>/dev/null || true
-      rm -f -- "$config"
       exit "$status"
     }
     trap cleanup EXIT HUP INT TERM
-    cat > "$config"
-    chmod 600 "$config"
-    wget -q -O - --config="$config" "$1" &
+    if [ -n "$2" ]; then
+      wget -T "$4" -q -O - \
+        --header="Content-Type: application/json" \
+        --header="Authorization: Bearer $2" \
+        --post-data="$3" "$1" &
+    else
+      wget -T "$4" -q -O - \
+        --header="Content-Type: application/json" \
+        --post-data="$3" "$1" &
+    fi
     wget_pid=$!
     (
-      sleep "$2"
+      sleep "$4"
       kill "$wget_pid" 2>/dev/null || true
-      sleep "$3"
+      sleep "$5"
       kill -9 "$wget_pid" 2>/dev/null || true
     ) &
     watchdog_pid=$!
     wait "$wget_pid"
-  ' sh "$url" "$DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT" "$DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER"
+  ' sh "$url" "$token" "$json" "$DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT" "$DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER"
 }
 
 wait_for_message_server() {

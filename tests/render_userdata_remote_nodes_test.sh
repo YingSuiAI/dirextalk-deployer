@@ -97,10 +97,13 @@ grep -q 'portal.bootstrap' "$tmp/bundle/init-tokens.sh"
 grep -q 'agent.matrix_session.create' "$tmp/bundle/init-tokens.sh"
 grep -q 'agent_auth_token=$(json_string agent_token "$BOOTSTRAP_FILE")' "$tmp/bundle/init-tokens.sh"
 grep -q 'agent.matrix_session.create.*"$agent_auth_token"' "$tmp/bundle/init-tokens.sh"
-if grep -q -- '--header="Authorization: Bearer' "$tmp/bundle/init-tokens.sh"; then
-  echo "bootstrap bearer tokens must not be passed in wget argv" >&2
+if grep -q -- '--config' "$tmp/bundle/init-tokens.sh"; then
+  echo "bootstrap wget calls must stay compatible with BusyBox wget" >&2
   exit 1
 fi
+grep -F -q 'wget -T "$2" -q -O - "$1" &' "$tmp/bundle/init-tokens.sh"
+grep -F -q -- '--header="Authorization: Bearer $2"' "$tmp/bundle/init-tokens.sh"
+grep -F -q -- '--post-data="$3" "$1" &' "$tmp/bundle/init-tokens.sh"
 grep -q '/_matrix/client/v3/createRoom' "$tmp/bundle/init-tokens.sh"
 grep -q '/_matrix/client/v3/rooms/${room_path}/join' "$tmp/bundle/init-tokens.sh"
 

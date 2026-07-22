@@ -119,12 +119,14 @@ grep -F -q "updater --config $root/etc/dirextalk-updater/config.json pin-initial
 
 before=$(grep -c '^curl' "$calls")
 chmod 0644 "$base/dirextalk-updater"
+rm -f "$base/.deploy-done"
 bash "$script" 203.0.113.20
 after=$(grep -c '^curl' "$calls")
 [ "$before" = "$after" ] || { echo "matching updater binary should be reused" >&2; exit 1; }
 assert_linux_mode 755 "$base/dirextalk-updater"
 
 printf corrupt > "$base/dirextalk-updater"
+rm -f "$base/.deploy-done"
 DOWNLOAD_MODE=bad bash "$script" 203.0.113.20 >"$tmp/bad.out" 2>&1 && {
   echo "wrong downloaded updater hash was accepted" >&2
   exit 1
@@ -133,11 +135,13 @@ DOWNLOAD_MODE=bad bash "$script" 203.0.113.20 >"$tmp/bad.out" 2>&1 && {
 
 sed -i 's/24\.04/22.04/' "$root/etc/os-release"
 : > "$calls"
+rm -f "$base/.deploy-done"
 DOWNLOAD_MODE=good bash "$script" 203.0.113.20
 grep -q 'docker compose --env-file .env up -d' "$calls"
 
 sed -i 's/22\.04/20.04/' "$root/etc/os-release"
 : > "$calls"
+rm -f "$base/.deploy-done"
 if DOWNLOAD_MODE=good bash "$script" 203.0.113.20 >"$tmp/ubuntu20.out" 2>&1; then
   echo "Ubuntu 20.04 host was accepted" >&2
   exit 1

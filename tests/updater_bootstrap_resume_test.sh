@@ -32,7 +32,7 @@ EOF
 touch "$root/var/dirextalk-message-server/docker-compose.yml"
 printf '#!/bin/sh\nprintf "init\\n" >> "$BOOTSTRAP_CALLS"\n' > "$root/var/dirextalk-message-server/init-tokens.sh"
 printf '#!/bin/sh\nprintf "install %%s\\n" "$1" >> "$BOOTSTRAP_CALLS"\n' > "$root/var/dirextalk-message-server/updater/install.sh"
-printf '#!/bin/sh\nexit 0\n' > "$root/var/dirextalk-message-server/dirextalk-updater"
+printf '#!/bin/sh\nprintf "pin %%s\\n" "$*" >> "$BOOTSTRAP_CALLS"\n' > "$root/var/dirextalk-message-server/dirextalk-updater"
 chmod 0755 "$root/var/dirextalk-message-server/init-tokens.sh" "$root/var/dirextalk-message-server/updater/install.sh" "$root/var/dirextalk-message-server/dirextalk-updater"
 cat > "$tmp/bin/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -93,18 +93,26 @@ done
 [ "$(cat "$stage_file")" = completed ]
 [ "$(wc -l < "$stage_file")" -eq 1 ]
 ! grep -Eq 'service\.example\.test|203\.0\.113\.20|TURN_SECRET|P2P_PORTAL_PASSWORD|token|secret' "$stage_file"
-grep -q '^install ' "$calls"
-grep -q 'docker compose --env-file .env pull' "$calls"
-grep -q 'docker compose --env-file .env up -d' "$calls"
-grep -q '^init$' "$calls"
+for expected in '^install ' 'docker compose --env-file .env pull' 'docker compose --env-file .env up -d' '^pin ' '^init$'; do
+  [ "$(grep -c -- "$expected" "$calls")" = 1 ] || {
+    echo "only the incomplete bootstrap owner may run: $expected" >&2
+    cat "$calls" >&2
+    exit 1
+  }
+done
 if grep -q '^invalid-secret ' "$calls"; then
   cat "$calls" >&2
   exit 1
 fi
 grep -q 'flock' "$script"
 
+cp "$calls" "$tmp/calls-after-complete"
 bash "$script" 203.0.113.20
 [ -f "$root/var/dirextalk-message-server/.deploy-done" ]
 [ "$(cat "$stage_file")" = completed ]
+cmp -s "$tmp/calls-after-complete" "$calls" || {
+  echo "completed bootstrap must not rerun updater, compose, pin, or init" >&2
+  exit 1
+}
 
 echo "updater bootstrap resumes after timeout ok"

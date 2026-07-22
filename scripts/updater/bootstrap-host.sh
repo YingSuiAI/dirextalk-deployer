@@ -81,6 +81,10 @@ flock 9
 
 # A concurrent cloud-init/S3 invocation may have completed while this process waited.
 ready || { echo "deployment prerequisites disappeared while waiting for bootstrap lock" >&2; exit 1; }
+if [ -e "$base/.deploy-done" ]; then
+  write_bootstrap_stage completed
+  exit 0
+fi
 stable_ip=$(cat "$base/stable-public-ip")
 valid_public_ip "$stable_ip" || { echo "invalid recorded stable public IP" >&2; exit 1; }
 

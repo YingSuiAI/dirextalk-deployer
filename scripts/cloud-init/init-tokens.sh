@@ -59,6 +59,8 @@ container_wget_script='
     (
       sleep "$2"
       kill "$wget_pid" 2>/dev/null || true
+      sleep "$3"
+      kill -9 "$wget_pid" 2>/dev/null || true
     ) &
     watchdog_pid=$!
     wait "$wget_pid"
@@ -67,7 +69,7 @@ container_wget_script='
 container_wget() {
   local url=$1
   run_bounded_remote $COMPOSE exec -T message-server sh -c "$container_wget_script" sh \
-    "$url" "$DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT"
+    "$url" "$DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT" "$DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER"
 }
 
 env_string() {
@@ -120,10 +122,12 @@ container_post_json() {
     (
       sleep "$2"
       kill "$wget_pid" 2>/dev/null || true
+      sleep "$3"
+      kill -9 "$wget_pid" 2>/dev/null || true
     ) &
     watchdog_pid=$!
     wait "$wget_pid"
-  ' sh "$url" "$DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT"
+  ' sh "$url" "$DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT" "$DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER"
 }
 
 wait_for_message_server() {

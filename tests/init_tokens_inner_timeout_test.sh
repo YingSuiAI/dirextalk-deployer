@@ -40,6 +40,10 @@ cat > "$fakebin/wget" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [ "${WGET_HANG:-0}" = 1 ]; then
+  if [ "${WGET_IGNORE_TERM:-0}" = 1 ]; then
+    trap ':' TERM
+    while :; do :; done
+  fi
   sleep 30
 fi
 for arg in "$@"; do
@@ -71,14 +75,17 @@ config_path=$(cat "$WGET_CONFIG_PATH")
 grep -q '^header=Content-Type: application/json$' "$WGET_CONFIG_BODY"
 grep -q '^post_data={"action":"test"}$' "$WGET_CONFIG_BODY"
 
-if WGET_HANG=1 container_post_json /_p2p/command '{"action":"hang"}' > "$tmp/hang.out" 2>&1; then
+started=$(date +%s)
+if WGET_HANG=1 WGET_IGNORE_TERM=1 container_post_json /_p2p/command '{"action":"hang"}' > "$tmp/hang.out" 2>&1; then
   echo "hung POST must be terminated inside the container" >&2
   exit 1
 fi
+elapsed=$(( $(date +%s) - started ))
+[ "$elapsed" -lt 5 ] || { echo "TERM-resistant POST must be force-killed inside the container" >&2; exit 1; }
 config_path=$(cat "$WGET_CONFIG_PATH")
 [ ! -e "$config_path" ] || { echo "POST config must be removed after watchdog termination" >&2; exit 1; }
 
-if WGET_HANG=1 container_wget http://127.0.0.1:8008/_p2p/health > "$tmp/health.out" 2>&1; then
+if WGET_HANG=1 WGET_IGNORE_TERM=1 container_wget http://127.0.0.1:8008/_p2p/health > "$tmp/health.out" 2>&1; then
   echo "hung health wget must be terminated inside the container" >&2
   exit 1
 fi

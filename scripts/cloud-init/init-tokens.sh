@@ -39,6 +39,37 @@ run_bounded_remote() {
     "$@"
 }
 
+container_wget_script='
+    set -eu
+    umask 077
+    wget_pid=
+    watchdog_pid=
+    cleanup() {
+      status=$?
+      trap - EXIT HUP INT TERM
+      [ -z "${wget_pid:-}" ] || kill "$wget_pid" 2>/dev/null || true
+      [ -z "${watchdog_pid:-}" ] || kill "$watchdog_pid" 2>/dev/null || true
+      [ -z "${watchdog_pid:-}" ] || wait "$watchdog_pid" 2>/dev/null || true
+      [ -z "${config:-}" ] || rm -f -- "$config"
+      exit "$status"
+    }
+    trap cleanup EXIT HUP INT TERM
+    wget -q -O - "$1" &
+    wget_pid=$!
+    (
+      sleep "$2"
+      kill "$wget_pid" 2>/dev/null || true
+    ) &
+    watchdog_pid=$!
+    wait "$wget_pid"
+  '
+
+container_wget() {
+  local url=$1
+  run_bounded_remote $COMPOSE exec -T message-server sh -c "$container_wget_script" sh \
+    "$url" "$DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT"
+}
+
 env_string() {
   local key=$1
   grep -E "^${key}=" "${DIREXTALK_DIR}/.env" 2>/dev/null \
@@ -70,17 +101,35 @@ container_post_json() {
     set -eu
     umask 077
     config=$(mktemp)
-    trap '\''rm -f "$config"'\'' EXIT HUP INT TERM
+    wget_pid=
+    watchdog_pid=
+    cleanup() {
+      status=$?
+      trap - EXIT HUP INT TERM
+      [ -z "${wget_pid:-}" ] || kill "$wget_pid" 2>/dev/null || true
+      [ -z "${watchdog_pid:-}" ] || kill "$watchdog_pid" 2>/dev/null || true
+      [ -z "${watchdog_pid:-}" ] || wait "$watchdog_pid" 2>/dev/null || true
+      rm -f -- "$config"
+      exit "$status"
+    }
+    trap cleanup EXIT HUP INT TERM
     cat > "$config"
     chmod 600 "$config"
-    wget -q -O - --config="$config" "$1"
-  ' sh "$url"
+    wget -q -O - --config="$config" "$1" &
+    wget_pid=$!
+    (
+      sleep "$2"
+      kill "$wget_pid" 2>/dev/null || true
+    ) &
+    watchdog_pid=$!
+    wait "$wget_pid"
+  ' sh "$url" "$DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT"
 }
 
 wait_for_message_server() {
   log "waiting for message-server /_p2p/health ..."
   for i in $(seq 1 90); do
-    if run_bounded_remote $COMPOSE exec -T message-server wget -q -O - http://127.0.0.1:8008/_p2p/health >/dev/null 2>&1; then
+    if container_wget http://127.0.0.1:8008/_p2p/health >/dev/null 2>&1; then
       log "message-server is healthy."
       return 0
     fi

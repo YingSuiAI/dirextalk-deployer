@@ -76,6 +76,7 @@ if [ -n "$requested_stable_ip" ]; then
   chmod 0600 "$stable_tmp"
   mv -f "$stable_tmp" "$base/stable-public-ip"
 fi
+flock -u 9
 
 deadline=$(($(date +%s) + timeout))
 until ready; do
@@ -85,6 +86,13 @@ until ready; do
   fi
   sleep 5
 done
+
+flock 9
+if [ -e "$base/.deploy-done" ]; then
+  write_bootstrap_stage completed
+  exit 0
+fi
+ready || { echo "deployment prerequisites disappeared while waiting for bootstrap lock" >&2; exit 1; }
 
 stable_ip=$(cat "$base/stable-public-ip")
 valid_public_ip "$stable_ip" || { echo "invalid recorded stable public IP" >&2; exit 1; }

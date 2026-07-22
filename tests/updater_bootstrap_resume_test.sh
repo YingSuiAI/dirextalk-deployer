@@ -76,13 +76,27 @@ esac
 export BOOTSTRAP_CALLS="$calls" BOOTSTRAP_ENV="$root/var/dirextalk-message-server/.env"
 source "$ROOT/scripts/updater/release.env"
 export PIN_SHA="$UPDATER_PIN_SHA256"
-export PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRAP_TIMEOUT=2
-bash "$script" 203.0.113.20 &
+export PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRAP_TIMEOUT=10
+# The no-IP owner must release phase one before waiting so the second owner can
+# persist the final missing prerequisite and let both invocations finish.
+rm -f "$stage_file" "$root/var/dirextalk-message-server/stable-public-ip"
+bash "$script" > "$tmp/no-ip.out" 2>&1 &
 first_pid=$!
-bash "$script" 203.0.113.20 &
+for _ in $(seq 1 100); do
+  if [ -f "$stage_file" ] && [ "$(cat "$stage_file")" = prerequisites ]; then
+    break
+  fi
+  sleep 0.05
+done
+[ -f "$stage_file" ] && [ "$(cat "$stage_file")" = prerequisites ] || {
+  echo "no-IP bootstrap never reached the unlocked prerequisite wait" >&2
+  cat "$tmp/no-ip.out" >&2
+  exit 1
+}
+bash "$script" 203.0.113.20 > "$tmp/with-ip.out" 2>&1 &
 second_pid=$!
-wait "$first_pid"
-wait "$second_pid"
+wait "$first_pid" || { cat "$tmp/no-ip.out" >&2; exit 1; }
+wait "$second_pid" || { cat "$tmp/with-ip.out" >&2; exit 1; }
 grep -q '^PUBLIC_IP=203\.0\.113\.20$' "$root/var/dirextalk-message-server/.env"
 [ "$(grep -c '^PUBLIC_IP=' "$root/var/dirextalk-message-server/.env")" = 1 ]
 for key in TURN_SECRET P2P_PORTAL_PASSWORD; do

@@ -7,6 +7,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 base="$tmp/server"
 fakebin="$tmp/bin"
+stage_file="$base/.bootstrap-stage"
 mkdir -p "$base/p2p" "$fakebin"
 printf 'P2P_PORTAL_PASSWORD=test-only-password\n' > "$base/.env"
 cat > "$base/p2p/bootstrap.json" <<'JSON'
@@ -50,6 +51,9 @@ DOMAIN=resume.example.test \
 grep -qF "$base/p2p/bootstrap.json" "$tmp/out"
 grep -q '/_p2p/health' "$DOCKER_CALLS"
 grep -q -- '--kill-after=5s 30s docker compose' "$TIMEOUT_CALLS"
+[ "$(cat "$stage_file")" = init_complete ]
+[ "$(wc -l < "$stage_file")" -eq 1 ]
+! grep -Eq 'resume\.example\.test|ready|agent|owner|token|secret' "$stage_file"
 if grep -q '/_p2p/command' "$DOCKER_CALLS"; then
   echo "resume must reuse complete bootstrap credentials" >&2
   cat "$DOCKER_CALLS" >&2
@@ -64,5 +68,9 @@ if DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT=0 \
   echo "invalid command timeout must fail closed" >&2
   exit 1
 fi
+
+for stage in init_health init_portal init_credentials init_agent_session init_room_create init_room_join init_complete; do
+  grep -q "write_bootstrap_stage $stage" "$ROOT/scripts/cloud-init/init-tokens.sh"
+done
 
 echo "init tokens resume ok"

@@ -6,10 +6,33 @@ DIREXTALK_DIR=${DIREXTALK_DIR:-/var/dirextalk-message-server}
 COMPOSE="docker compose -f ${DIREXTALK_DIR}/docker-compose.yml --env-file ${DIREXTALK_DIR}/.env"
 DOMAIN=${DOMAIN:?DOMAIN is required (e.g. __DOMAIN__)}
 BOOTSTRAP_FILE=${BOOTSTRAP_FILE:-/var/dirextalk-message-server/p2p/bootstrap.json}
+BOOTSTRAP_STAGE_FILE="$DIREXTALK_DIR/.bootstrap-stage"
 DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT=${DIREXTALK_INIT_TOKENS_COMMAND_TIMEOUT-30}
 DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER=${DIREXTALK_INIT_TOKENS_COMMAND_KILL_AFTER-5}
 
 log() { echo "[init-tokens] $*" >&2; }
+
+# The stage marker is diagnostic-only. Keep its contents to a fixed allow-list
+# and make failures non-fatal so it cannot change initialization semantics.
+write_bootstrap_stage() {
+  local stage=$1 stage_tmp
+  case "$stage" in
+    init_health|init_portal|init_credentials|init_agent_session|init_room_create|init_room_join|init_complete) ;;
+    *) return 0 ;;
+  esac
+  if ! mkdir -p "$DIREXTALK_DIR" 2>/dev/null; then
+    return 0
+  fi
+  if ! stage_tmp=$(mktemp "$DIREXTALK_DIR/.bootstrap-stage.XXXXXX" 2>/dev/null); then
+    return 0
+  fi
+  if printf '%s\n' "$stage" > "$stage_tmp" \
+    && chmod 0600 "$stage_tmp" 2>/dev/null \
+    && mv -f "$stage_tmp" "$BOOTSTRAP_STAGE_FILE" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$stage_tmp" 2>/dev/null || true
+}
 
 validate_timeout_setting() {
   local name=$1 value=$2 maximum=$3 value_digits maximum_digits
@@ -264,6 +287,7 @@ ensure_agent_room() {
   fi
   rm -f "$session"
 
+  write_bootstrap_stage init_room_create
   room_resp=$(mktemp)
   if ! container_post_json "/_matrix/client/v3/createRoom" "{\"preset\":\"private_chat\",\"visibility\":\"private\",\"name\":\"Dirextalk Agent\",\"invite\":[\"${agent_user}\"],\"is_direct\":false}" "$owner_token" > "$room_resp" 2>/dev/null; then
     log "FATAL: Matrix createRoom failed: $(head -c 160 "$room_resp" 2>/dev/null)"
@@ -278,6 +302,7 @@ ensure_agent_room() {
   fi
 
   room_path=$(matrix_room_path "$room_id")
+  write_bootstrap_stage init_room_join
   join_resp=$(mktemp)
   if ! container_post_json "/_matrix/client/v3/rooms/${room_path}/join" '{}' "$matrix_agent_token" > "$join_resp" 2>/dev/null; then
     log "FATAL: agent join failed for ${room_id}: $(head -c 160 "$join_resp" 2>/dev/null)"
@@ -304,9 +329,14 @@ wait_for_complete_bootstrap_file() {
 }
 
 mkdir -p "$(dirname "$BOOTSTRAP_FILE")"
+write_bootstrap_stage init_health
 wait_for_message_server
+write_bootstrap_stage init_portal
 bootstrap_portal
+write_bootstrap_stage init_credentials
 wait_for_core_bootstrap_file
+write_bootstrap_stage init_agent_session
 ensure_agent_room
+write_bootstrap_stage init_complete
 wait_for_complete_bootstrap_file
 echo "$BOOTSTRAP_FILE"

@@ -19,6 +19,17 @@ MSYS_NO_PATHCONV=1 json_build object path_boundary=explicit > "$tmp/no-path-conv
 [ "$(MSYS_NO_PATHCONV=1 NODE=/missing/node json_get "$tmp/no-path-conversion.json" path_boundary)" = "explicit" ]
 [ -n "${DIREXTALK_JSON_WORKER_PORT:-}" ]
 (
+  json_worker_disconnect
+  exec 10>"$tmp/reserved-worker-fd-10"
+  exec 11>"$tmp/reserved-worker-fd-11"
+  json_worker_connect
+  [ "$DIREXTALK_JSON_WORKER_SOCKET" -gt 11 ]
+  [ "$(NODE=/missing/node json_get "$tmp/no-path-conversion.json" path_boundary)" = "explicit" ]
+  json_worker_disconnect
+  : >&10
+  : >&11
+)
+(
   cd "$tmp"
   [ "$(NODE=/missing/node json_get no-path-conversion.json path_boundary)" = "explicit" ]
 )

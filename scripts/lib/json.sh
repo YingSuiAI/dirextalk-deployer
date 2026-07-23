@@ -73,11 +73,37 @@ json_node() {
 }
 
 json_worker_connect() {
-  [ -n "${DIREXTALK_JSON_WORKER_SOCKET:-}" ] && return 0
-  if ! exec {DIREXTALK_JSON_WORKER_SOCKET}<>"/dev/tcp/127.0.0.1/${DIREXTALK_JSON_WORKER_PORT}"; then
-    unset DIREXTALK_JSON_WORKER_SOCKET
-    return 1
+  local candidate context socket_path
+  context=${BASH_SUBSHELL:-0}
+  if [ -n "${DIREXTALK_JSON_WORKER_SOCKET:-}" ]; then
+    [ "${DIREXTALK_JSON_WORKER_SOCKET_OWNER:-}" = "$context" ] && return 0
+    json_worker_disconnect || return 1
   fi
+  socket_path="/dev/tcp/127.0.0.1/${DIREXTALK_JSON_WORKER_PORT}"
+  candidate=10
+  while [ "$candidate" -le 255 ]; do
+    if eval ": >&$candidate" 2>/dev/null || eval ": <&$candidate" 2>/dev/null; then
+      candidate=$((candidate + 1))
+      continue
+    fi
+    if eval "exec $candidate<>\"\$socket_path\""; then
+      DIREXTALK_JSON_WORKER_SOCKET=$candidate
+      DIREXTALK_JSON_WORKER_SOCKET_OWNER=$context
+      return 0
+    fi
+    break
+  done
+  unset DIREXTALK_JSON_WORKER_SOCKET
+  return 1
+}
+
+json_worker_disconnect() {
+  local socket=${DIREXTALK_JSON_WORKER_SOCKET:-}
+  unset DIREXTALK_JSON_WORKER_SOCKET DIREXTALK_JSON_WORKER_SOCKET_OWNER
+  case "$socket" in
+    ''|*[!0-9]*) return 0 ;;
+    *) eval "exec $socket>&-" ;;
+  esac
 }
 
 json_worker_cli() {
@@ -118,7 +144,9 @@ json_cli() {
     case "${1:-}" in
       stdin-*) json_worker_cli "$@" ;;
       *)
-        mapfile -d '' -t worker_args < <(json_normalize_file_arguments "$@")
+        while IFS= read -r -d '' worker_arg; do
+          worker_args+=("$worker_arg")
+        done < <(json_normalize_file_arguments "$@")
         json_worker_cli "${worker_args[@]}"
         ;;
     esac

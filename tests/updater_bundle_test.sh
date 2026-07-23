@@ -131,8 +131,9 @@ assert_linux_mode() {
   local expected=$1 path=$2
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) return 0 ;;
+    Darwin|*BSD) [ "$(stat -f '%Lp' "$path")" = "$expected" ] ;;
+    *) [ "$(stat -c '%a' "$path")" = "$expected" ] ;;
   esac
-  [ "$(stat -c '%a' "$path")" = "$expected" ]
 }
 
 assert_linux_mode 700 "$tmp/root/etc/dirextalk-updater"

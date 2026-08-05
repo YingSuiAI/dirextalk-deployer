@@ -1,6 +1,6 @@
 display_name: Dirextalk Deployer
 short_description: Deploy, resume, verify, destroy, and wire dirextalk-connect plus capability-driven remote HTTP MCP for a production Dirextalk message server on AWS.
-default_prompt: Deploy a Dirextalk message server using my production domain, following SKILL.md and the Bash entrypoint for the current host.
+default_prompt: Use $dirextalk-deployer to deploy a Dirextalk message server using my production domain.
 entrypoint: ../SKILL.md
 runtime_notes:
   - Read SKILL.md before running deployment commands.
@@ -13,3 +13,5 @@ runtime_notes:
   - OpenClaw and Hermes keep MCP in native registries and must pass service-scoped secret-free live probes before the ACP bridge starts; never mutate their real user config automatically.
   - S6 never mutates OpenClaw's global MCP config.
   - The instructions are compatible with Claude, Codex/OpenAI, Gemini, Cursor, Copilot, OpenClaw, Hermes, and other shell-capable agent runtimes.
+policy:
+  allow_implicit_invocation: false

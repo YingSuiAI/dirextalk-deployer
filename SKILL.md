@@ -1,9 +1,12 @@
 ---
 name: dirextalk-deployer
-description: Deploy, resume, verify, destroy, and locally wire a production Dirextalk message server on AWS for any local agent runtime supported by dirextalk-connect. Use when installing or updating this skill itself; install the versioned npm package `dirextalk-deployer` and use its CLI to place the skill in the runtime-specific global path from references/agent-targets.md unless the user explicitly asks for a project-local installation.
+description: Manual-only Dirextalk AWS deployment lifecycle and local agent wiring. Use only when the user explicitly invokes `$dirextalk-deployer`; never trigger from a general request to deploy, resume, verify, update, destroy, configure AWS, or install a skill.
 ---
 
 # Dirextalk Deployer
+
+Continue only when the user explicitly invoked `$dirextalk-deployer`. If this
+skill was loaded implicitly, do not run its scripts or mutate deployment state.
 
 This skill is the compact agent-facing entrypoint. Treat this repository root
 as the execution engine and read the referenced docs only when that phase needs

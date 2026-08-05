@@ -90,6 +90,10 @@ grep -q 'dirextalk/message-server:latest' SKILL.md
 grep -q 'does not query message-server GitHub Releases' SKILL.md
 grep -q 'dirextalk-deployer' package.json
 grep -q 'bin/dirextalk-deployer.mjs' package.json
+grep -Fq 'Use only when the user explicitly invokes `$dirextalk-deployer`' SKILL.md
+grep -Fq 'Use only when the user explicitly invokes `$dirextalk-deployer`' .openclaw/dirextalk-deployer/SKILL.md
+grep -Fq 'default_prompt: Use $dirextalk-deployer' agents/openai.yaml
+grep -q '^  allow_implicit_invocation: false$' agents/openai.yaml
 grep -q 'compact agent-facing entrypoint' AGENTS.md
 grep -q 'scripts/lib/local-paths.sh' AGENTS.md
 grep -q 'scripts/lib/git-bash.sh' AGENTS.md

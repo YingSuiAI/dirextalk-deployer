@@ -7,7 +7,7 @@ services:
       DOMAIN: ${DOMAIN:?set DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${DIREXTALK_CADDYFILE_PATH:?set the generated Caddyfile path}:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     networks: [message_public]

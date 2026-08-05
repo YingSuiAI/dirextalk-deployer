@@ -18,20 +18,25 @@ if [ -f "$base/.split-deploy-done" ]; then
   exit 0
 fi
 
-install -d -m 0700 "$run_dir"
 install -d -m 0755 /var/dirextalk-agent
 
-DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE="$message_image" \
-DIREXTALK_AGENT_IMAGE_IMMUTABLE="$agent_image" \
-DIREXTALK_EXTENSION_RUNNER_IMAGE_IMMUTABLE="$agent_image" \
-DIREXTALK_CORE_RUNNER_IMAGE_IMMUTABLE="$agent_image" \
-  "$base/deploy/split-agent/scripts/provision-local.sh" "$run_dir"
+if [ ! -e "$run_dir" ]; then
+  DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE="$message_image" \
+  DIREXTALK_AGENT_IMAGE_IMMUTABLE="$agent_image" \
+  DIREXTALK_EXTENSION_RUNNER_IMAGE_IMMUTABLE="$agent_image" \
+  DIREXTALK_CORE_RUNNER_IMAGE_IMMUTABLE="$agent_image" \
+    "$base/deploy/split-agent/scripts/provision-local.sh" "$run_dir"
+elif [ ! -f "$run_dir/.env" ] || [ ! -f "$run_dir/.manifest" ]; then
+  echo "split bootstrap cannot resume incomplete provisioning: $run_dir" >&2
+  exit 1
+fi
 
 env_file=$run_dir/.env
 tmp_env=$(mktemp "$run_dir/.env.XXXXXX")
 awk '$0 !~ /^(DIREXTALK_MESSAGE_SERVER_NAME|DIREXTALK_MESSAGE_CLIENT_BASE_URL)=/' "$env_file" >"$tmp_env"
 printf 'DIREXTALK_MESSAGE_SERVER_NAME=%s\n' "$domain" >>"$tmp_env"
 printf 'DIREXTALK_MESSAGE_CLIENT_BASE_URL=https://%s\n' "$domain" >>"$tmp_env"
+printf 'DIREXTALK_CADDYFILE_PATH=%s\n' "$run_dir/Caddyfile" >>"$tmp_env"
 chmod 0400 "$tmp_env"
 mv -f "$tmp_env" "$env_file"
 

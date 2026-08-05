@@ -2,7 +2,16 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd -P)
-split=$root/scripts/cloud-init/split
+cloud_split=$root/scripts/cloud-init/split
+message_root=${DIREXTALK_MESSAGE_SERVER_ROOT:-$root/../dirextalk-message-server}
+split=$message_root/deploy/split-agent
+split_scripts=(
+  provision-local.sh
+  initialize-capability-ca.sh
+  initialize-message-server.sh
+  materialize-agent-secrets.sh
+  message-server-entrypoint.sh
+)
 domain=''
 acme=''
 message=''
@@ -17,13 +26,25 @@ while [ $# -gt 0 ]; do
   esac
 done
 for value in "$domain" "$message" "$agent"; do [ -n "$value" ] || { echo "domain and both image digests are required" >&2; exit 2; }; done
+[ -f "$split/compose.yaml" ] || {
+  echo "missing canonical split deployment file: $split/compose.yaml (set DIREXTALK_MESSAGE_SERVER_ROOT)" >&2
+  exit 1
+}
+for script in "${split_scripts[@]}"; do
+  [ -f "$split/scripts/$script" ] || {
+    echo "missing canonical split deployment script: $split/scripts/$script (set DIREXTALK_MESSAGE_SERVER_ROOT)" >&2
+    exit 1
+  }
+done
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/deploy/split-agent/scripts"
 cp "$split/compose.yaml" "$work/deploy/split-agent/compose.yaml"
-cp "$split/edge-compose.yaml" "$work/deploy/split-agent/edge-compose.yaml"
-cp "$split/scripts/"*.sh "$work/deploy/split-agent/scripts/"
-cp "$split/bootstrap-split-stack.sh" "$work/bootstrap-split-stack.sh"
+cp "$cloud_split/edge-compose.yaml" "$work/deploy/split-agent/edge-compose.yaml"
+for script in "${split_scripts[@]}"; do
+  cp "$split/scripts/$script" "$work/deploy/split-agent/scripts/$script"
+done
+cp "$cloud_split/bootstrap-split-stack.sh" "$work/bootstrap-split-stack.sh"
 chmod 0755 "$work/bootstrap-split-stack.sh" "$work/deploy/split-agent/scripts/"*.sh
 bundle=$(tar -C "$work" -cf - . | gzip -n | base64 | tr -d '\n')
 cat <<EOF

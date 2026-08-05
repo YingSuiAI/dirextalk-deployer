@@ -1,0 +1,21 @@
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [message_public]
+
+networks:
+  message_public:
+    name: ${DIREXTALK_MESSAGE_PUBLIC_NETWORK:?set the message public network}
+
+volumes:
+  caddy_data:
+  caddy_config:

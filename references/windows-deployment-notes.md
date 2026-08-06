@@ -78,7 +78,7 @@ stdbuf -oL bash scripts/orchestrate.sh 2>&1
 - When local DNS cache is stale but the record is correct, pin the IP:
 
 ```bash
-curl -sk --resolve __DOMAIN__:443:__EIP__ https://__DOMAIN__/healthz
+curl --resolve __DOMAIN__:443:__EIP__ -fsS https://__DOMAIN__/_p2p/health
 ```
 
 ## AWS Proxy Bypass

@@ -21,6 +21,10 @@ required=(
   scripts/lib/atomic-write.sh
   scripts/update.sh
   scripts/reset-app-data.sh
+  scripts/cloud-init/split/release.env
+  scripts/cloud-init/split/production-ops-common.sh
+  scripts/cloud-init/split/reconcile-production.sh
+  scripts/cloud-init/split/reset-production.sh
   scripts/pricing-estimate.sh
   scripts/lib/git-bash.sh
   scripts/lib/ops.sh
@@ -86,14 +90,18 @@ if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md SKILL.md ref
   exit 1
 fi
 
-grep -q 'dirextalk/message-server:latest' SKILL.md
-grep -q 'does not query message-server GitHub Releases' SKILL.md
+grep -q 'production split release' SKILL.md
+grep -q 'immutable digest references' SKILL.md
 grep -q 'dirextalk-deployer' package.json
 grep -q 'bin/dirextalk-deployer.mjs' package.json
 grep -Fq 'Use only when the user explicitly invokes `$dirextalk-deployer`' SKILL.md
 grep -Fq 'Use only when the user explicitly invokes `$dirextalk-deployer`' .openclaw/dirextalk-deployer/SKILL.md
-grep -Fq 'default_prompt: Use $dirextalk-deployer' agents/openai.yaml
+grep -q '^interface:$' agents/openai.yaml
+grep -Fq '  display_name: "Dirextalk Deployer"' agents/openai.yaml
+grep -Fq '  short_description: "Deploy, update, recover, and verify Dirextalk on AWS."' agents/openai.yaml
+grep -Fq '  default_prompt: "Use $dirextalk-deployer' agents/openai.yaml
 grep -q '^  allow_implicit_invocation: false$' agents/openai.yaml
+! grep -Eq '^(entrypoint|runtime_notes|display_name|short_description|default_prompt):' agents/openai.yaml
 grep -q 'compact agent-facing entrypoint' AGENTS.md
 grep -q 'scripts/lib/local-paths.sh' AGENTS.md
 grep -q 'scripts/lib/git-bash.sh' AGENTS.md
@@ -159,8 +167,8 @@ do
 done
 grep -q 'scripts/json.mjs' agents/README.md
 grep -q 'dirextalk-connect' agents/README.md
-grep -q 'dirextalk-connect' agents/openai.yaml
-grep -q 'HTTP MCP' agents/openai.yaml
+grep -q 'Ubuntu 24\.04+' SKILL.md
+grep -q 'systemd >= 254' SKILL.md
 grep -q 'connect_install_status' SKILL.md
 grep -q 'connect_install_status' scripts/phases/s6_wire_local.sh
 grep -q 'connect_install_status' scripts/orchestrate.sh
@@ -169,7 +177,7 @@ grep -q 'skill refresh --agent' SKILL.md
 grep -q 'git --version' SKILL.md
 grep -q 'Git for Windows' SKILL.md
 grep -q 'dirextalk_require_git_bash_on_windows' scripts/orchestrate.sh
-for entrypoint in scripts/orchestrate.sh scripts/destroy.sh scripts/update.sh scripts/reset-app-data.sh scripts/aws-credentials.sh scripts/pricing-estimate.sh scripts/adopt-legacy-node.sh; do
+for entrypoint in scripts/orchestrate.sh scripts/destroy.sh scripts/update.sh scripts/reset-app-data.sh scripts/aws-credentials.sh scripts/pricing-estimate.sh; do
   grep -q 'dirextalk_require_git_bash_on_windows' "$entrypoint"
 done
 grep -q 'Git Bash' README.md

@@ -2,10 +2,12 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+source "$ROOT/tests/lib/split-release.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home" DIREXTALK_WORKDIR="$tmp/work" CALLS="$tmp/calls" REMOTE_COMMAND="$tmp/remote-command"
 mkdir -p "$HOME" "$DIREXTALK_WORKDIR" "$tmp/bin"
+dirextalk_test_prepare_split_release "$tmp"
 : > "$CALLS"
 printf 'key\n' > "$tmp/key.pem"
 printf '#!/bin/sh\nexit 0\n' > "$tmp/updater"
@@ -21,7 +23,7 @@ cat > "$tmp/bin/ssh" <<'EOF'
 printf 'ssh\n' >> "$CALLS"
 printf '%s\n' "${!#}" > "$REMOTE_COMMAND"
 cat >/dev/null
-printf 'v1.0.8\t1efa90fd776d355d4cd898bcdb4922267b03d180\t04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b\n'
+printf 'v1.0.11\t720a2bb824b8b7aef9275db060cfe08c6b93b1ab\t17712c2b6ff61fd014c6badd0d0e019f30d54181c168735c61de449e8ad4d790\n'
 EOF
 cat > "$tmp/bin/aws" <<'EOF'
 #!/usr/bin/env bash

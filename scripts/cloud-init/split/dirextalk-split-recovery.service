@@ -1,0 +1,14 @@
+[Unit]
+Description=Restore Dirextalk split Agent runtime after boot
+Requires=docker.service
+After=docker.service
+ConditionPathExists=/var/dirextalk-message-server/.split-deploy-done
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/var/dirextalk-message-server/production-ops/recover-production.sh
+
+[Install]
+WantedBy=multi-user.target

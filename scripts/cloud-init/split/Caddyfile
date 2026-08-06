@@ -1,43 +1,37 @@
-# Caddyfile - automatic TLS reverse proxy for the Dirextalk message server.
-#
-# Public exposure is limited to 443 and 80 for ACME redirects. The message
-# server listens only inside the compose network on port 8008.
-
-{$DOMAIN} {
+__DIREXTALK_PUBLIC_DOMAIN__ {
 	handle /.well-known/matrix/server {
 		header Content-Type application/json
-		respond `{"m.server":"{$DOMAIN}:443"}` 200
+		respond `{"m.server":"__DIREXTALK_PUBLIC_DOMAIN__:443"}` 200
 	}
+
 	handle /.well-known/matrix/client {
 		header Content-Type application/json
 		header Access-Control-Allow-Origin *
-		respond `{"m.homeserver":{"base_url":"https://{$DOMAIN}"}}` 200
+		respond `{"m.homeserver":{"base_url":"https://__DIREXTALK_PUBLIC_DOMAIN__"}}` 200
 	}
 
 	handle /.well-known/portal/* {
 		reverse_proxy message-server:8008
 	}
 
-	handle /healthz {
-		rewrite * /_p2p/health
-		reverse_proxy message-server:8008
+	handle /_dirextalk/updater/v1/jobs/* {
+		reverse_proxy unix//run/dirextalk-updater/http.sock
 	}
 
 	handle /_matrix/* {
 		reverse_proxy message-server:8008
 	}
+
 	handle /_dendrite/* {
 		reverse_proxy message-server:8008
 	}
+
 	handle /_synapse/* {
 		reverse_proxy message-server:8008
 	}
+
 	handle /_p2p/* {
 		reverse_proxy message-server:8008
-	}
-
-	handle /_dirextalk/updater/v1/jobs/* {
-		reverse_proxy unix//run/dirextalk-updater/http.sock
 	}
 
 	handle {

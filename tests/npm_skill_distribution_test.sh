@@ -87,9 +87,67 @@ if (!pkg.bin || pkg.bin["dirextalk-deployer"] !== "bin/dirextalk-deployer.mjs") 
 npm pack --dry-run --json > "$tmp/pack.json"
 "$NODE_BIN" - "$tmp/pack.json" <<'NODE'
 const fs = require("node:fs");
-const pack = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))[0];
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const normalizePackResult = (value) => {
+  let results;
+  if (Array.isArray(value)) {
+    results = value;
+  } else if (isRecord(value)) {
+    const entries = Object.entries(value);
+    if (entries.length !== 1 || !isRecord(entries[0][1]) || entries[0][1].name !== entries[0][0]) {
+      throw new Error("npm pack must return exactly one package-name-keyed result");
+    }
+    results = [entries[0][1]];
+  } else {
+    throw new Error("npm pack returned an unsupported result shape");
+  }
+  if (results.length !== 1 || !isRecord(results[0]) || typeof results[0].name !== "string" || results[0].name.length === 0 || !Array.isArray(results[0].files) || results[0].files.length === 0) {
+    throw new Error("npm pack must return exactly one valid result");
+  }
+  const result = results[0];
+  if (!result.files.every((entry) => isRecord(entry) && typeof entry.path === "string" && entry.path.length > 0)) {
+    throw new Error("npm pack result contains an invalid file entry");
+  }
+  return result;
+};
+const fixture = { name: "fixture", files: [{ path: "fixture.txt" }] };
+if (normalizePackResult([fixture]) !== fixture || normalizePackResult({ fixture }) !== fixture) {
+  throw new Error("npm pack result normalization failed");
+}
+for (const invalid of [null, [], [fixture, fixture], {}, { wrong: fixture }, { fixture, other: fixture }, fixture]) {
+  try {
+    normalizePackResult(invalid);
+    throw new Error("npm pack result normalization accepted an invalid shape");
+  } catch (error) {
+    if (error.message === "npm pack result normalization accepted an invalid shape") throw error;
+  }
+}
+const pack = normalizePackResult(payload);
 const files = pack.files.map((entry) => entry.path);
-for (const required of ["SKILL.md", "assets/dirextalk-platform.png", "bin/dirextalk-deployer.mjs", "scripts/json.mjs", "scripts/orchestrate.sh", "scripts/run-tests.mjs", "scripts/lib/test-runner.mjs", "scripts/lib/git-bash.sh", "scripts/lib/server-release.sh", "scripts/updater/release.env"]) {
+for (const required of [
+  "SKILL.md",
+  "assets/dirextalk-platform.png",
+  "bin/dirextalk-deployer.mjs",
+  "scripts/json.mjs",
+  "scripts/orchestrate.sh",
+  "scripts/run-tests.mjs",
+  "scripts/lib/test-runner.mjs",
+  "scripts/lib/git-bash.sh",
+  "scripts/lib/server-release.sh",
+  "scripts/updater/release.env",
+  "scripts/cloud-init/split/bootstrap-production.sh",
+  "scripts/cloud-init/split/production-ops-common.sh",
+  "scripts/cloud-init/split/recover-production.sh",
+  "scripts/cloud-init/split/reconcile-production.sh",
+  "scripts/cloud-init/split/reset-production.sh",
+  "scripts/cloud-init/split/dirextalk-split-recovery.service",
+  "scripts/cloud-init/split/Caddyfile",
+  "scripts/cloud-init/split/edge-compose.override.yaml",
+  "scripts/cloud-init/split/release.env",
+  "scripts/cloud-init/split/canonical-bundle.tar.gz",
+  "scripts/cloud-init/split/canonical-bundle.tar.gz.sha256",
+]) {
   if (!files.includes(required)) throw new Error(`missing package file: ${required}`);
 }
 if (files.includes("README_zh.md")) {
@@ -103,6 +161,9 @@ if (files.some((file) => file === "tests" || file.startsWith("tests/"))) {
 }
 if (files.some((file) => file.endsWith(".ps1"))) {
   throw new Error("Git-Bash-only deployer package must not include PowerShell wrappers");
+}
+for (const developmentOnly of ["references/bug-history.md", "references/deployment-optimization-audit.md"]) {
+  if (files.includes(developmentOnly)) throw new Error(`npm skill package must exclude development-only reference: ${developmentOnly}`);
 }
 if (files.some((file) => file === "updater" || file.startsWith("updater/")) || files.includes("scripts/updater/build.sh")) {
   throw new Error("deployer package must not embed updater Go source/build logic");
@@ -171,9 +232,10 @@ if [ -e "$tmp/home2/.gemini" ]; then
   exit 1
 fi
 
-assert_contains "$ROOT/agents/openai.yaml" 'Ubuntu 22.04 or 24.04 x86_64'
-assert_contains "$ROOT/agents/openai.yaml" 'pinned'
-assert_contains "$ROOT/agents/openai.yaml" 'dirextalk-updater'
+assert_contains "$ROOT/agents/openai.yaml" '^interface:$'
+assert_contains "$ROOT/agents/openai.yaml" 'display_name: "Dirextalk Deployer"'
+assert_contains "$ROOT/agents/openai.yaml" '^policy:$'
+assert_contains "$ROOT/agents/openai.yaml" 'allow_implicit_invocation: false'
 
 PI_CODING_AGENT_DIR="$tmp/pi-agent-root" "$NODE_BIN" bin/dirextalk-deployer.mjs skill install --agent pi --scope global --dry-run > "$tmp/pi-global.out"
 assert_contains "$tmp/pi-global.out" 'pi-agent-root'

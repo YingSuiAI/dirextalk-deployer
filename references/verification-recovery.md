@@ -1,5 +1,15 @@
 # Verification And Recovery
 
+## Contents
+
+- Fresh verification
+- Common waiting points
+- Production split update and reconcile
+- Reboot recovery
+- Recovery acceptance gate
+- Destroy
+- Update/reset follow-up
+
 ## Fresh Verification
 
 Run the built-in acceptance phase through the state machine:
@@ -23,7 +33,7 @@ raw phase names. It covers:
 Independent checks:
 
 ```bash
-curl -fsS https://<DOMAIN>/healthz
+curl -fsS https://<DOMAIN>/_p2p/health
 curl -fsS https://<DOMAIN>/_matrix/client/versions
 curl -fsS https://<DOMAIN>/.well-known/matrix/server
 curl -fsS https://<DOMAIN>/.well-known/portal/owner.json
@@ -32,7 +42,7 @@ curl -fsS https://<DOMAIN>/.well-known/portal/owner.json
 If local DNS lags but authoritative DNS is correct, use:
 
 ```bash
-curl --resolve <DOMAIN>:443:<PUBLIC_IP> -fsS https://<DOMAIN>/healthz
+curl --resolve <DOMAIN>:443:<PUBLIC_IP> -fsS https://<DOMAIN>/_p2p/health
 ```
 
 ## Common Waiting Points
@@ -49,6 +59,96 @@ After S3, do not reset or delete state just to silence an error. If EC2, public
 IPv4/EIP, or other AWS resources are recorded, preserve `state.json`, repair the
 blocker, and rerun with `DIREXTALK_EXISTING_STATE_ACTION=continue`; or destroy first
 if the user wants to stop billing.
+
+## Production Split Update And Reconcile
+
+Use the local lifecycle entrypoint for a normal existing-node update:
+
+```bash
+DOMAIN=<DOMAIN> bash scripts/update.sh
+```
+
+It stages the current production helpers and invokes the canonical
+receipt-bound reconcile path. Reconcile verifies and repairs the protected
+edge, calls `recover-production.sh`, and refreshes the portal bootstrap through
+the canonical exporter. It must not select a stack by mutable Compose name,
+replace an image ad hoc, or operate without the protected split and edge
+receipts.
+
+Use the installed host helper directly only while diagnosing the same verified
+node identity. Before every read, retry, or mutation, revalidate the recorded
+AWS account, region, provider, immutable instance identifier, machine-id, and
+Docker Engine ID; stop if any identity differs:
+
+```bash
+sudo /var/dirextalk-message-server/production-ops/reconcile-production.sh
+```
+
+Preserve its three result classes through every caller and wrapper:
+
+- `0`: operation and postconditions succeeded.
+- `3`: expected negative state, such as an absent completed runtime or an
+  incomplete receipt; stop for the matching operator decision.
+- Any other nonzero status: infrastructure, identity, or contract failure;
+  report the failing boundary and do not relabel it as a negative state.
+
+## Reboot Recovery
+
+Production split supports Ubuntu 24.04+ x86_64 with systemd >= 254, unified
+cgroup v2, and rootful Docker. The installed
+`dirextalk-split-recovery.service` is a root-owned systemd oneshot ordered after
+and requiring `docker.service`. Its only entrypoint is:
+
+```text
+/var/dirextalk-message-server/production-ops/recover-production.sh
+```
+
+Recovery rebinds the completed runtime from the protected receipt, runs the
+canonical `prepare-runner-cgroups.sh` for that exact stack, protects the new
+runner-preparation receipt, waits for the receipt-recorded `agent`,
+`extension-runner`, and `core-runner` containers to leave their short
+`restarting` state, and then calls the canonical `restart-agent-local.sh` for
+the same run. Do not start the three services independently or recreate them
+with a guessed Compose project.
+
+The service is enabled during provisioning, not started immediately. After a
+real reboot, inspect it with:
+
+```bash
+sudo systemctl show dirextalk-split-recovery.service \
+  -p Result -p ExecMainStatus -p ActiveState
+```
+
+Manual runtime-only recovery uses
+`sudo /var/dirextalk-message-server/production-ops/recover-production.sh` and
+the same three-state result contract. Use reconcile instead when edge or portal
+bootstrap repair is also required.
+
+## Recovery Acceptance Gate
+
+Do not accept reboot recovery from container names or a green helper alone.
+Require all of the following from the immutable node identity and the
+receipt-bound stack:
+
+- `dirextalk-split-recovery.service` reports `Result=success` and
+  `ExecMainStatus=0`.
+- The current `runner-preparation.env` still binds the receipt's exact stack
+  and host identities. Its extension and Core parent `cgroup.procs` files are
+  owned by `65531:65531` and `65530:65530`, respectively, and both delegated
+  roots' `cgroup.subtree_control` contain `cpu`, `memory`, and `pids`.
+- The exact receipt-recorded `agent`, `extension-runner`, and `core-runner`
+  containers are running and healthy; the receipt-bound message server and
+  protected edge are also healthy.
+- Trusted HTTPS health succeeds through the deployed domain, not only through
+  a container-local endpoint.
+- Previously persisted configuration and product data still read back after
+  reboot. At minimum, verify the active model profile, provider credential
+  redaction/status, and a prior conversation context; include Knowledge or
+  Memory readback when those capabilities were configured before reboot.
+
+If any gate fails, preserve the node and receipts, isolate the smallest real
+failure, and run the appropriate recovery or reconcile entrypoint. Do not fresh
+deploy merely to clear reboot evidence.
 
 ## Destroy
 

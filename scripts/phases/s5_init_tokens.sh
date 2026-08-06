@@ -21,8 +21,10 @@ run_phase() {
   if ! poll_until "read bootstrap.json" "${TOKEN_POLL_INTERVAL:-10}" "${TOKEN_POLL_MAX:-12}" \
         _read_remote_bootstrap "$keyfile" "$pubip" "$raw"; then
     phase_set S5_INIT_TOKENS failed "failed to fetch bootstrap.json"
-    warn "Could not read ${DIREXTALK_REMOTE_BOOTSTRAP_FILE}. Check whether message-server wrote credentials:"
-    warn "  ssh -i $keyfile ubuntu@$pubip 'sudo cat ${DIREXTALK_REMOTE_BOOTSTRAP_FILE} 2>/dev/null; cd /var/dirextalk-message-server; sudo docker compose logs message-server | tail -40'"
+    local split_diagnostics
+    split_diagnostics='printf "init_tokens_stage="; sudo cat /var/dirextalk-message-server/.bootstrap-stage 2>/dev/null || echo unavailable; sudo stat -c "bootstrap.json size=%s mode=%a owner=%U:%G modified=%y" /var/dirextalk-message-server/p2p/bootstrap.json 2>/dev/null || echo "bootstrap.json unavailable"; stack=$(sudo sed -n "s/^stack_name=//p" /var/dirextalk-message-server/split/.manifest); sudo docker compose --project-name "$stack" -f /var/dirextalk-message-server/deploy/split-agent/compose.yaml --env-file /var/dirextalk-message-server/split/.env ps; sudo docker compose --project-name "$stack" -f /var/dirextalk-message-server/deploy/split-agent/compose.yaml --env-file /var/dirextalk-message-server/split/.env logs --tail=40 message-server'
+    warn "Could not read ${DIREXTALK_REMOTE_BOOTSTRAP_FILE}. Inspect the non-secret initialization stage, file metadata, and split message-server status:"
+    warn "  ssh -i $keyfile ubuntu@$pubip '$split_diagnostics'"
     return 1
   fi
   if ! _normalize_bootstrap_output "$domain" "$raw" "$out"; then

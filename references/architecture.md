@@ -10,17 +10,17 @@
   ├─ /_p2p/*                              -> message-server:8008
   ├─ /_dirextalk/updater/v1/jobs/*        -> /run/dirextalk-updater/http.sock
   ├─ /.well-known/matrix/*                -> Caddy 静态响应
-  ├─ /.well-known/portal/*                -> message-server:8008
-  └─ /healthz                             -> /_p2p/health
+  └─ /.well-known/portal/*                -> message-server:8008
 
 message-server -> PostgreSQL 18
 coturn         -> TURN 3478 + 49160-49200/udp
 ```
 
-- **message-server**: 新部署直接使用 `dirextalk/message-server:latest`，不在本地部署器中访问 message-server GitHub Release；同时承载 Matrix homeserver 和 `/_p2p/query`/`/_p2p/command`，只读挂 updater socket 目录和 control-token file，不挂 Docker socket。
-- **PostgreSQL 18**: Matrix 与 Dirextalk 业务表共库持久化，compose 使用 `/var/lib/postgresql`。
-- **Caddy**: 唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
-- **dirextalk-updater**: 独立 GitHub 仓库/Release 的 linux/amd64 binary，支持 Ubuntu 22.04 和 24.04；deployer 固定 version/commit/SHA-256，宿主下载校验后作为 root-owned systemd service 安装。它独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token，也不安装每日 GitHub discovery timer。
+- **message-server**: 新部署使用 deployer 固定的 immutable digest/source revision；承载 Matrix homeserver 和 ProductCore，并通过固定内部边界访问 external Agent。
+- **Agent**: 独立 immutable image，拥有自己的 PostgreSQL、Qdrant、extension/core runners 与更新 wrapper；Flutter 不直接连接它。
+- **PostgreSQL 18**: message-server 与 Agent 使用相互独立的数据库/角色和持久化卷。
+- **Caddy**: 独立 edge Compose 项目的唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
+- **dirextalk-updater**: 独立 GitHub 仓库/Release 的 linux/amd64 binary；production split 主机要求 Ubuntu 24.04+、systemd >= 254。deployer 固定 version/commit/SHA-256，宿主下载校验后作为 root-owned systemd service 安装。它独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token，也不安装每日 GitHub discovery timer。
 - **coturn**: WebRTC TURN relay，Dirextalk message-server 通过 shared-secret 动态签发 TURN 凭证。
 
 ## 启动顺序
@@ -28,7 +28,7 @@ coturn         -> TURN 3478 + 49160-49200/udp
 1. `postgres` healthy。
 2. `message-init` 生成 `/etc/dirextalk-message-server/message-server.yaml` 和 signing key，并写入 TURN 配置。
 3. `message-server` 启动，加载 Matrix + Dirextalk 业务，读取 `P2P_PORTAL_PASSWORD` 和 `P2P_PORTAL_CREDENTIALS_FILE`。
-4. `message-server` 通过 bind mount 直接写宿主 `/var/dirextalk-message-server/p2p/bootstrap.json`。`init-tokens.sh` 调用 `portal.bootstrap`；如果最新服务端没有写入 `agent_room_id`，脚本会通过 Matrix Client API 创建真实 agent room、邀请并加入 `@agent:<server>`，再把 `agent_room_id` 回写到凭据文件。
+4. `message-server` 在受保护数据卷内原子生成包含真实 `agent_room_id` 的完整 Portal/Agent 凭据。canonical `export-portal-bootstrap.sh` 校验容器与 stack 归属后，将当前凭据密封导出到宿主 `/var/dirextalk-message-server/p2p/bootstrap.json`；Deployer 不补写凭据或房间状态。
 5. `message-server` 的 `/.well-known/portal/owner.json` handler 动态返回 owner discovery。
 6. `caddy` 对外服务 Matrix、Dirextalk API 和 well-known。
 

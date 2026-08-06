@@ -89,7 +89,7 @@ DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh verify mcp_tools
 
 ## dirextalk-connect Matrix Bridge
 
-S6 calls `agent.matrix_session.create` with the backend `agent_token`, not the owner `access_token`. Current message-server builds must return a Matrix session for `@agent:<server>`, not for `@owner:<server>`. S6 retries transient HTTP 000/404/408/409/425/429/5xx responses before failing, because the Matrix action can become reachable after `/healthz`; defaults are 12 attempts with exponential backoff capped by `DIREXTALK_MATRIX_SESSION_RETRY_MAX_INTERVAL`. The resulting session is stored at:
+S6 calls `agent.matrix_session.create` with the backend `agent_token`, not the owner `access_token`. Current message-server builds must return a Matrix session for `@agent:<server>`, not for `@owner:<server>`. S6 retries transient HTTP 000/404/408/409/425/429/5xx responses before failing, because the Matrix action can become reachable after `/_p2p/health`; defaults are 12 attempts with exponential backoff capped by `DIREXTALK_MATRIX_SESSION_RETRY_MAX_INTERVAL`. The resulting session is stored at:
 
 ```text
 ~/.dirextalk/nodes/<service_id>/dirextalk-connect/matrix-session.json

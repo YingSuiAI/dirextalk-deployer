@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # S7 VERIFY_E2E - end-to-end acceptance. DONE only when every check passes.
 #
-# Checks: healthz, Matrix versions, Matrix federation well-known, owner.json+CORS,
+# Checks: message-server health, Matrix versions, Matrix federation well-known, owner.json+CORS,
 # token-authenticated HTTP MCP read action, and non-empty TURN turnServer.
 # Local bridge message send/read is validated separately; this script checks HTTP actions.
 
@@ -18,7 +18,7 @@ run_phase() {
   password=$(state_get password)
   local fails=0
 
-  _check "healthz"               "https://$domain/healthz"                       "" 200 || fails=$((fails+1))
+  _check "message-server health" "https://$domain/_p2p/health"                   "" 200 || fails=$((fails+1))
   _check "matrix versions"       "https://$domain/_matrix/client/versions"       "" 200 || fails=$((fails+1))
   _check_matrix_server_wellknown "$domain" || fails=$((fails+1))
   _check_owner_cors "$domain" || fails=$((fails+1))

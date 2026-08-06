@@ -8,98 +8,58 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 export DIREXTALK_WORKDIR="$tmp/work"
-export RUN_ID=ticket3-release-test
-export AWS_DEFAULT_REGION=us-east-1
+export RUN_ID=production-split-release-test
+export AWS_DEFAULT_REGION=ap-east-1
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null
-
-mkdir -p "$tmp/bin"
-export REAL_NODE=$(json_node)
-cat > "$tmp/bin/node" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-case "${1:-}" in
-  *server-release-resolver.mjs*)
-    echo "default image selection must not invoke a GitHub release resolver" >&2
-    exit 97
-    ;;
-esac
-exec "$REAL_NODE" "$@"
-EOF
-cat > "$tmp/bin/go" <<'EOF'
-#!/usr/bin/env bash
-echo "server release resolution must not require local Go" >&2
-exit 99
-EOF
-cat > "$tmp/bin/mktemp" <<'EOF'
-#!/usr/bin/env bash
-echo "server release resolution must not depend on a shell temp path" >&2
-exit 98
-EOF
-chmod 0755 "$tmp/bin/"*
-export PATH="$tmp/bin:$PATH"
-# Git Bash can resolve a native node.exe before an extensionless shim on PATH.
-# Pin the JSON/runtime selector to the shim so this test is fully offline.
-export NODE="$tmp/bin/node"
-export MSYS_NO_PATHCONV=1
-
+warn() { printf '%s\n' "$*" >&2; }
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/server-release.sh"
 
+server_release_validate_pin
 server_release_prepare_state
-json_test_check "$STATE_JSON" 'data.server_release.source === "default_latest" && data.server_release.version === "latest" && data.server_release.image === "dirextalk/message-server:latest" && data.server_release.image_ref === "dirextalk/message-server:latest" && data.server_release.digest === "" && data.server_release.manifest_digest === ""'
+json_test_check "$STATE_JSON" 'data.server_release.source === "production_split" && data.server_release.version === "v1.1.2" && data.server_release.image === "docker.io/dirextalk/message-server:v1.1.2" && data.server_release.image_ref === "docker.io/dirextalk/message-server@sha256:dc7c02c41eeb731be87d37d35e511c34c8c739ed6367c65a174b00347d020775" && data.server_release.digest === "sha256:dc7c02c41eeb731be87d37d35e511c34c8c739ed6367c65a174b00347d020775" && data.server_release.manifest_digest === data.server_release.digest'
+json_test_check "$STATE_JSON" 'data.split_release.message_source_revision === "efa72eb0975ce33c60db0faa003eb5e07bdb9d07" && data.split_release.split_source_revision === "f36099ef925a020f00432ab8b97f76fa902b066e" && data.split_release.agent_version === "v1.0.2" && data.split_release.agent_image === "docker.io/dirextalk/agent@sha256:a522e78882a15c33f45e9bafbd770ad7c76e2c9d222b0e66410621c888b0c528" && data.split_release.agent_source_revision === "bd0fd34f9e7812f2c2c0d26f3d332a7befacdc24" && data.split_release.caddy_image === "docker.io/library/caddy@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9" && data.split_release.coturn_image === "docker.io/coturn/coturn:4.6.3-alpine@sha256:e2bca2f79a4269d7240de5872ab60a9305013ad37296d2acf14f9510874346be"'
 
-state_set server_release.image attacker/image:v1.1.0
-server_release_prepare_state
-json_test_check "$STATE_JSON" 'data.server_release.source === "default_latest" && data.server_release.image === "dirextalk/message-server:latest" && data.server_release.image_ref === "dirextalk/message-server:latest"'
+[ "$DIREXTALK_AGENT_VERSION" = v1.0.2 ]
+[ "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" = docker.io/dirextalk/agent@sha256:a522e78882a15c33f45e9bafbd770ad7c76e2c9d222b0e66410621c888b0c528 ]
+[ "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" = docker.io/library/caddy@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9 ]
+[ "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" = docker.io/coturn/coturn:4.6.3-alpine@sha256:e2bca2f79a4269d7240de5872ab60a9305013ad37296d2acf14f9510874346be ]
+[ "$DIREXTALK_MESSAGE_SOURCE_REVISION" = efa72eb0975ce33c60db0faa003eb5e07bdb9d07 ]
+[ "$DIREXTALK_SPLIT_SOURCE_REVISION" = f36099ef925a020f00432ab8b97f76fa902b066e ]
+[ "$DIREXTALK_AGENT_SOURCE_REVISION" = bd0fd34f9e7812f2c2c0d26f3d332a7befacdc24 ]
 
 res_set instance_id i-existing
-if MESSAGE_SERVER_IMAGE=dirextalk/message-server:debug DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
-  server_release_prepare_state 2>"$tmp/frozen-latest.err"; then
-  echo "existing infrastructure must freeze the selected latest image" >&2
-  exit 1
-fi
-json_test_check "$STATE_JSON" 'data.server_release.source === "default_latest" && data.server_release.image_ref === "dirextalk/message-server:latest"'
-
-# Existing nodes created by older deployer versions remain resumable without
-# performing release discovery or switching their recorded image.
-state_set_raw server_release '{"source":"github_release","version":"v1.1.0","image":"dirextalk/message-server:v1.1.0","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","image_ref":"dirextalk/message-server:v1.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
 server_release_prepare_state
-json_test_check "$STATE_JSON" 'data.server_release.source === "github_release" && data.server_release.version === "v1.1.0"'
-
-res_set instance_id ""
-state_set_raw server_release '{}'
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:debug DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
-  server_release_prepare_state
-res_set instance_id i-debug-existing
-unset MESSAGE_SERVER_IMAGE DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE
-server_release_prepare_state
-json_test_check "$STATE_JSON" 'data.server_release.source === "debug_override" && data.server_release.image_ref === "dirextalk/message-server:debug"'
-if MESSAGE_SERVER_IMAGE=dirextalk/message-server:other DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
-  server_release_prepare_state 2>"$tmp/frozen-debug.err"; then
-  echo "existing infrastructure must reject a different debug override" >&2
+state_set split_release.agent_version v9.9.9
+if server_release_prepare_state 2>"$tmp/split-mismatch.err"; then
+  echo "existing infrastructure accepted a different Agent release" >&2
   exit 1
 fi
-
-state_set_raw server_release '{}'
-res_set instance_id ""
-if MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest server_release_prepare_state 2>"$tmp/override.err"; then
-  echo "MESSAGE_SERVER_IMAGE must not silently replace the default image policy" >&2
+grep -q 'different Agent/Caddy/coturn/source pins' "$tmp/split-mismatch.err"
+state_set split_release.agent_version v1.0.2
+state_set server_release.version v9.9.9
+if server_release_prepare_state 2>"$tmp/mismatch.err"; then
+  echo "existing infrastructure accepted a different production release" >&2
   exit 1
 fi
-grep -q 'DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1' "$tmp/override.err"
+grep -q 'refusing replacement or compatibility fallback' "$tmp/mismatch.err"
 
-if MESSAGE_SERVER_IMAGE=$'dirextalk/message-server:debug\nINJECTED=true' \
-  DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
-  server_release_prepare_state 2>"$tmp/invalid-override.err"; then
-  echo "debug image override must reject multiline or shell-sensitive input" >&2
-  exit 1
-fi
+for variable in MESSAGE_SERVER_IMAGE DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE; do
+  state_set_raw server_release '{}'
+  res_set instance_id ''
+  if env "$variable=forbidden" bash -c '
+    set -euo pipefail
+    warn() { printf "%s\n" "$*" >&2; }
+    source "$1/scripts/lib/json.sh"
+    source "$1/scripts/lib/state.sh"
+    source "$1/scripts/lib/server-release.sh"
+    server_release_validate_override
+  ' bash "$ROOT" 2>"$tmp/override.err"; then
+    echo "$variable override was accepted" >&2
+    exit 1
+  fi
+done
 
-MESSAGE_SERVER_IMAGE=dirextalk/message-server:debug \
-  DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
-  server_release_prepare_state
-json_test_check "$STATE_JSON" 'data.server_release.source === "debug_override" && data.server_release.image === "dirextalk/message-server:debug" && data.server_release.image_ref === "dirextalk/message-server:debug" && data.server_release.digest === "" && data.server_release.manifest_digest === ""'
-
-echo "server image selection ok"
+echo "production split release pin ok"

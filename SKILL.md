@@ -148,8 +148,9 @@ Step-by-step onboarding flow:
         deployment.
      2. **Dedicated IAM deployment user:** safer because it avoids root keys,
         but requires more AWS console steps. Explain in one sentence: "This
-        temporary user lets the deployment tool create and later destroy this
-        Dirextalk node; delete or disable it after deployment."
+        temporary `DirextalkDeployer` user with `AdministratorAccess` lets the
+        deployment tool create and later destroy this Dirextalk node; delete or
+        disable it after deployment."
    - Root access keys are allowed when the operator explicitly chooses them.
      Do not block deployment only because STS returns a root ARN; report
      `root=true`, repeat the security warning once, and continue if the user
@@ -217,24 +218,6 @@ Step-by-step onboarding flow:
    - Check EC2-VPC Elastic IP quota before mutating AWS resources. For explicit
      EC2, also check default VPC, EC2 vCPU quota, and AMI availability.
 
-Credential choices for first-time users:
-
-- **Root access key (default fastest path):** simpler for first deployment, but
-  highly privileged, must be saved securely, never pasted into chat, and deleted
-  or rotated after use.
-- **Dedicated IAM deployment user:** safer because it avoids root keys. Create a
-  temporary `DirextalkDeployer` user with `AdministratorAccess`, then delete or
-  disable it after deployment.
-
-Root access keys are allowed when the operator explicitly chooses them. Report
-only redacted identity details, such as account, `root=true|false`, and a
-redacted ARN. Prefer the helpers:
-
-```bash
-bash scripts/aws-credentials.sh import-csv /path/to/accessKeys.csv dirextalk-deployer <region>
-bash scripts/aws-credentials.sh verify dirextalk-deployer
-```
-
 Before final deployment confirmation:
 
 ```bash
@@ -279,32 +262,22 @@ CONFIRM_DOMAIN_BINDING=1
 DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
-Normal server selection uses `dirextalk/message-server:latest` directly and
-does not query message-server GitHub Releases before provisioning. Each new
-deployment therefore pulls the image currently published under `latest`.
-`MESSAGE_SERVER_IMAGE` is disabled unless
-`DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1` explicitly marks a
-debug/legacy deployment. The independent `YingSuiAI/dirextalk-updater`
-host binary is downloaded only on a verified Ubuntu 22.04 or 24.04 x86_64 server from
+Normal deployment consumes the deployer-owned production split release. Its
+message-server, external Agent, and Caddy images are immutable digest references
+bound to full source revisions, and its canonical runtime bundle is packaged
+with the deployer. The target host never clones a source repository and no
+mutable image override is part of the production path. The independent
+`YingSuiAI/dirextalk-updater`
+host binary is downloaded only on a verified Ubuntu 24.04+ x86_64 server with
+systemd >= 254 from
 the deployer-pinned Release URL and must match the deployer-pinned SHA-256.
 The local deployer host does not need Go and does not SCP updater artifacts.
 The updater pin and checksum contract remains independent from the default
-message-server image selection.
+split release selection.
 
 The updater does not install or run a daily GitHub release-discovery timer.
 After the direct-version migration, an authorized client/server release action
 creates the target-version job instead.
-
-The only legacy host adoption path is `scripts/adopt-legacy-node.sh`. It first
-requires a dry-run proof of the fixed d1 v0.15.2 Compose project, approved image
-digest, live health, binary version, and systemd Caddy identity. Mutation then
-requires an explicit semantic user confirmation of the reviewed adoption. The
-script's printed confirmation token is machine-only: the agent supplies it
-after that approval and never asks the user to copy it. It creates the updater-owned
-`/var/dirextalk-message-server` view without pulling or recreating the running
-container, installs the pinned updater with `caddy_mode=systemd`, and
-transactionally adds only `/_dirextalk/updater/v1/jobs/*` to Caddy. Never use
-this command to guess or normalize another legacy topology.
 
 Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
 `route53` only when the current AWS account contains a matching public hosted
@@ -479,9 +452,21 @@ or disable temporary credentials and rotate/remove root access keys if used.
 
 ## Update, Reset, And Destroy
 
-Use `bash scripts/update.sh` for image-only refresh. It preserves infrastructure,
-TLS storage, local credentials, runtime checks, dirextalk-connect daemon
-state, and MCP artifacts unless verification proves credentials were regenerated.
+Production Agent upgrades are authorized through the server release API and
+executed by the pinned updater's canonical split wrapper. Do not mutate the
+split Compose environment with an arbitrary image override.
+
+Use `DOMAIN=<domain> bash scripts/update.sh` to update an existing production
+split node. It stages the current helpers and runs the receipt-bound canonical
+reconcile path. On host reboot, the installed
+`dirextalk-split-recovery.service` runs after Docker and restores only the
+receipt-bound Agent runtime; do not replace it with ad hoc Compose commands.
+Treat remote operation results as three states: `0` succeeded, `3` is an
+expected negative state that requires an operator decision, and every other
+nonzero status is an infrastructure or contract failure. Read
+`references/verification-recovery.md` before manual reconcile or reboot
+recovery, and close the operation only after its identity, cgroup, health, and
+persistence gates pass.
 
 Use `bash scripts/reset-app-data.sh` only after an explicit semantic user
 confirmation that application data will be cleared. Set

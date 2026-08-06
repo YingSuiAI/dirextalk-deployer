@@ -689,6 +689,17 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       image_ref: st.server_release?.image_ref || "",
       manifest_digest: st.server_release?.manifest_digest || ""
     },
+    split_release: {
+      message_version: st.split_release?.message_version || "",
+      message_image: st.split_release?.message_image || "",
+      message_source_revision: st.split_release?.message_source_revision || "",
+      split_source_revision: st.split_release?.split_source_revision || "",
+      agent_version: st.split_release?.agent_version || "",
+      agent_image: st.split_release?.agent_image || "",
+      agent_source_revision: st.split_release?.agent_source_revision || "",
+      caddy_image: st.split_release?.caddy_image || "",
+      coturn_image: st.split_release?.coturn_image || ""
+    },
     updater_release: {
       version: st.updater_release?.version || "",
       commit: st.updater_release?.commit || "",

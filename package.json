@@ -1,6 +1,6 @@
 {
   "name": "dirextalk-deployer",
-  "version": "0.1.56",
+  "version": "0.1.57",
   "description": "Versioned Dirextalk deployer agent skill and portable deployment orchestration tools.",
   "type": "module",
   "bin": {
@@ -14,7 +14,20 @@
     "agents/",
     "assets/",
     "bin/",
-    "references/",
+    "references/agent-targets.md",
+    "references/architecture.md",
+    "references/deployment-lessons.md",
+    "references/deployment-workflow.md",
+    "references/iam-policy.json",
+    "references/runtime-wiring.md",
+    "references/state-machine.md",
+    "references/token-refresh.md",
+    "references/tooling.md",
+    "references/troubleshooting.md",
+    "references/user-journey.md",
+    "references/verification-recovery.md",
+    "references/voip-turn-runbook.md",
+    "references/windows-deployment-notes.md",
     "scripts/"
   ],
   "scripts": {

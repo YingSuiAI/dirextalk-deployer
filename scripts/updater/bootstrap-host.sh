@@ -5,8 +5,6 @@ set -euo pipefail
 root=${DIREXTALK_BOOTSTRAP_ROOT:-}
 base="$root/var/dirextalk-message-server"
 timeout=${DIREXTALK_BOOTSTRAP_TIMEOUT:-900}
-adopt_existing=${DIREXTALK_BOOTSTRAP_ADOPT_EXISTING:-0}
-legacy_source=${DIREXTALK_LEGACY_ADOPT_SOURCE_DIR:-}
 requested_stable_ip=${1:-}
 lock_dir="$root/run/lock"
 lock_file="$lock_dir/dirextalk-bootstrap.lock"
@@ -17,7 +15,7 @@ stage_file="$base/.bootstrap-stage"
 write_bootstrap_stage() {
   local stage=$1 stage_tmp
   case "$stage" in
-    prerequisites|lock|updater|compose_pull|compose_up|pin_image|init_tokens|completed) ;;
+    prerequisites|lock|updater|completed) ;;
     *) return 0 ;;
   esac
   if ! mkdir -p "$base" 2>/dev/null; then
@@ -45,6 +43,14 @@ valid_public_ip() {
   done
 }
 
+supported_ubuntu_version() {
+  local version=$1 major minor
+  [[ "$version" =~ ^([0-9]+)\.([0-9]+)$ ]] || return 1
+  major=$((10#${BASH_REMATCH[1]}))
+  minor=$((10#${BASH_REMATCH[2]}))
+  [ "$major" -gt 24 ] || { [ "$major" -eq 24 ] && [ "$minor" -ge 4 ]; }
+}
+
 if [ -n "$requested_stable_ip" ]; then
   valid_public_ip "$requested_stable_ip" || { echo "invalid stable public IP" >&2; exit 1; }
 fi
@@ -52,10 +58,10 @@ fi
 ready() {
   [ -s "$base/stable-public-ip" ] \
     && [ -f "$base/.env" ] \
-    && [ -f "$base/docker-compose.yml" ] \
+    && [ -x "$base/production-ops/bootstrap-production.sh" ] \
+    && [ -f "$base/deploy/split-agent/compose.yaml" ] \
     && [ -x "$base/updater/install.sh" ] \
-    && [ -f "$base/updater/release.env" ] \
-    && { [ "$adopt_existing" = 1 ] || [ -x "$base/init-tokens.sh" ]; }
+    && [ -f "$base/updater/release.env" ]
 }
 
 mkdir -p "$lock_dir"
@@ -101,11 +107,20 @@ write_bootstrap_stage updater
 arch=$(uname -m)
 os_release="$root/etc/os-release"
 [ "$arch" = x86_64 ] || { echo "unsupported host architecture: v1 requires x86_64" >&2; exit 1; }
-[ -f "$os_release" ] || { echo "cannot identify supported Ubuntu 22.04 or 24.04 host" >&2; exit 1; }
+[ -f "$os_release" ] || { echo "cannot identify supported Ubuntu 24.04+ host" >&2; exit 1; }
 os_id=$(sed -n 's/^ID=//p' "$os_release" | tr -d '"' | head -n 1)
 os_version=$(sed -n 's/^VERSION_ID=//p' "$os_release" | tr -d '"' | head -n 1)
-[ "$os_id" = ubuntu ] && { [ "$os_version" = 22.04 ] || [ "$os_version" = 24.04 ]; } || {
-  echo "unsupported host distribution: v1 requires Ubuntu 22.04 or 24.04" >&2
+[ "$os_id" = ubuntu ] && supported_ubuntu_version "$os_version" || {
+  echo "unsupported host distribution: production requires Ubuntu 24.04+" >&2
+  exit 1
+}
+systemd_version_output=$(systemctl --version 2>/dev/null) || {
+  echo "cannot identify supported systemd version: production requires systemd >= 254" >&2
+  exit 1
+}
+systemd_version=$(sed -n '1s/^systemd \([0-9][0-9]*\).*/\1/p' <<<"$systemd_version_output")
+[[ "$systemd_version" =~ ^[0-9]+$ ]] && [ "$systemd_version" -ge 254 ] || {
+  echo "unsupported systemd version: production requires systemd >= 254" >&2
   exit 1
 }
 
@@ -140,60 +155,7 @@ fi
 chmod 0755 "$updater_binary"
 [ -x "$updater_binary" ] || { echo "verified updater binary is not executable" >&2; exit 1; }
 
-first_nonempty_env_value() {
-  local key=$1
-  awk -F= -v key="$key" '
-    $1 == key {
-      value=substr($0, index($0, "=") + 1)
-      if (value != "") { print value; exit }
-    }
-  ' "$base/.env"
-}
-
-turn_secret=$(first_nonempty_env_value TURN_SECRET)
-if [ -z "$turn_secret" ]; then
-  turn_secret=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
-fi
-p2p_portal_password=$(first_nonempty_env_value P2P_PORTAL_PASSWORD)
-if [ -z "$p2p_portal_password" ]; then
-  random_number=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')
-  p2p_portal_password=$(printf '%08d' "$((random_number % 100000000))")
-fi
-[ -n "$turn_secret" ] && [ -n "$p2p_portal_password" ] || {
-  echo "failed to establish non-empty service secrets" >&2
-  exit 1
-}
-
-env_tmp=$(mktemp "$base/.env.XXXXXX")
-awk '$0 !~ /^(PUBLIC_IP|TURN_SECRET|P2P_PORTAL_PASSWORD)=/' "$base/.env" > "$env_tmp"
-printf 'PUBLIC_IP=%s\n' "$stable_ip" >> "$env_tmp"
-printf 'TURN_SECRET=%s\n' "$turn_secret" >> "$env_tmp"
-printf 'P2P_PORTAL_PASSWORD=%s\n' "$p2p_portal_password" >> "$env_tmp"
-chmod 0600 "$env_tmp"
-mv -f "$env_tmp" "$base/.env"
-
 bash "$base/updater/install.sh" "$updater_binary"
-if [ "$adopt_existing" = 1 ]; then
-  [ "$legacy_source" = /root/dirextalk/dirextalk-message-server ] || {
-    echo "legacy adoption source is not approved" >&2
-    exit 1
-  }
-  bash "$base/updater/adopt-legacy-host.sh" probe "$legacy_source" "$base/updater" >/dev/null
-  touch "$base/.deploy-done"
-  write_bootstrap_stage completed
-  exit 0
-fi
-mkdir -p "$base/p2p"
-chmod 0700 "$base"
-cd "$base"
-write_bootstrap_stage compose_pull
-docker compose --env-file .env pull
-write_bootstrap_stage compose_up
-docker compose --env-file .env up -d
-write_bootstrap_stage pin_image
-"$updater_binary" --config "$root/etc/dirextalk-updater/config.json" pin-initial-latest
-domain=$(awk -F= '$1 == "DOMAIN" { print substr($0, index($0, "=") + 1); exit }' .env)
-write_bootstrap_stage init_tokens
-DOMAIN="$domain" bash init-tokens.sh
-touch .deploy-done
+bash "$base/production-ops/bootstrap-production.sh"
+touch "$base/.deploy-done"
 write_bootstrap_stage completed

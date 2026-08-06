@@ -125,28 +125,18 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-Normal deployment uses `dirextalk/message-server:latest` directly and records
-that selection in `state.json`; it does not query message-server GitHub Releases
-before provisioning. Each new deployment therefore pulls the image currently
-published under `latest`. The host updater is a separate
+Normal deployment uses the deployer-owned production split release: immutable
+message-server, Agent, and Caddy image digests plus their full source revisions.
+The packaged canonical runtime bundle starts message-server, the external Agent,
+two PostgreSQL databases, Qdrant, extension/core runners, and a separate Caddy
+edge project. The target host never clones either source repository. The host updater is a separate
 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release:
-the supported Ubuntu 22.04 or 24.04 x86_64 host downloads the deployer-pinned updater asset and
+the supported Ubuntu 24.04+ x86_64 host with systemd >= 254 downloads the deployer-pinned updater asset and
 verifies the deployer-pinned SHA-256 before atomic installation. The local
 machine does not need Go, and S3 never copies an updater binary over SSH.
 The updater remains independently pinned and checksum-verified. New direct
 version upgrades do not install a daily GitHub discovery timer; an update is
 created only when an authorized client requests the current central target.
-
-One pre-updater node can be adopted only through the explicit, fixed d1
-contract. Run `scripts/adopt-legacy-node.sh --dry-run <state.json>` with
-`DIREXTALK_LEGACY_ADOPT_SOURCE_DIR=/root/dirextalk/dirextalk-message-server`
-and `DIREXTALK_LEGACY_ADOPT_SSH_USER=root`. After reviewing the read-only
-v0.15.2 image/digest, health, Compose, and host-Caddy evidence, set the exact
-confirmation printed by the command and rerun without `--dry-run`. It never
-pulls or starts a different image: it creates the updater-owned immutable
-Compose view, copies live P2P state, installs the pinned updater, and adds only
-the public updater jobs route to validated host Caddy. Other legacy topologies
-and existing formal release state are rejected.
 
 `DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
 
@@ -195,16 +185,9 @@ Destroy stops and uninstalls the local `dirextalk-connect` daemon only when its 
 matches the current service's `~/.dirextalk/nodes/<service_id>/dirextalk-connect`
 directory, then removes that service directory.
 
-Update an existing node without deleting data:
-
-```bash
-DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
-DOMAIN=<domain> MESSAGE_SERVER_IMAGE=dirextalk/message-server:<debug-tag> bash scripts/update.sh
-```
-
-This is an explicit debug/legacy override, not the normal production upgrade
-path. Image refresh restarts the remote service only. It leaves local credentials,
-`dirextalk-connect`, MCP artifacts, and runtime checks intact.
+Production Agent upgrades are client-initiated through the pinned updater and
+its canonical split update wrapper. Arbitrary mutable image overrides are not a
+supported production operation.
 
 Reset application data while preserving EC2, DNS, fixed IP, and Caddy TLS:
 
@@ -218,6 +201,12 @@ orchestrate run regenerates local credentials/MCP artifacts and automatically
 reinstalls/restarts `dirextalk-connect` unless explicitly overridden with
 `DIREXTALK_AGENT_INSTALL=recommend` or `skip`. MCP uses the server HTTP endpoint
 and does not install a local MCP CLI.
+
+Deployment is delivered only after S0-S7 and
+`DOMAIN=<domain> bash scripts/orchestrate.sh verify runtime` pass. This final
+gate proves the service-scoped `dirextalk-connect` daemon is `Running`, its logs
+contain `dirextalk-connect is running` without Agent backend errors, and the MCP
+runtime checks succeed.
 
 ## Local Bridge
 

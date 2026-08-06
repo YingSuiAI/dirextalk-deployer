@@ -9,6 +9,184 @@ trap 'rm -rf "$tmp"' EXIT
 
 # shellcheck disable=SC1090
 source "$ROOT/scripts/lib/ops.sh"
+bootstrap_helper="$ROOT/scripts/cloud-init/split/bootstrap-production.sh"
+common_helper="$ROOT/scripts/cloud-init/split/production-ops-common.sh"
+reconcile_helper="$ROOT/scripts/cloud-init/split/reconcile-production.sh"
+recover_helper="$ROOT/scripts/cloud-init/split/recover-production.sh"
+reset_helper="$ROOT/scripts/cloud-init/split/reset-production.sh"
+grep -Fq 'production_require_control_file "$production_edge_receipt" 400' "$common_helper"
+grep -Fq 'production_require_control_file "$production_receipt" 400' "$common_helper"
+grep -Fq 'control.env_identity' "$common_helper"
+grep -Fq 'control.manifest_identity' "$common_helper"
+grep -Fq '"$production_edge_id" 2>/dev/null' "$common_helper"
+grep -Fq 'com.docker.compose.project' "$common_helper"
+grep -Fq 'com.docker.compose.service' "$common_helper"
+grep -Fq 'production_verify_edge' "$reconcile_helper"
+grep -Fq 'bootstrap-production.sh" --reconcile-edge' "$reconcile_helper"
+grep -Fq 'recover-production.sh"' "$reconcile_helper"
+if grep -Fq 'start-local.sh' "$reconcile_helper"; then
+  echo "production reconcile called the first-fresh start wrapper" >&2
+  exit 1
+fi
+[ "$(grep -Fc 'production_verify_edge' "$reset_helper")" -eq 2 ]
+grep -Fq 'docker container rm -f "$production_edge_id"' "$reset_helper"
+grep -Fq 'cleanup-local.sh" --purge "$production_run"' "$reset_helper"
+grep -Fq 'production_require_control_file "$production_base/image-attestation" 400' "$reset_helper"
+grep -Fq 'mv "$production_base/image-attestation" "$audit_dir/image-attestation.previous"' "$reset_helper"
+grep -Fq '"$production_base/runner-preparation.env"' "$reset_helper"
+grep -Fq '"$production_base/production-ops/bootstrap-production.sh"' "$reset_helper"
+if grep -Eq 'docker compose|docker volume rm|compose down' "$reconcile_helper" "$reset_helper"; then
+  echo "production operations bypassed the receipt-bound canonical helpers" >&2
+  exit 1
+fi
+production_helpers=$(ops_production_helpers_prelude)
+bootstrap_payload=$(base64 <"$bootstrap_helper" | tr -d '\r\n')
+grep -Fq "payload='$bootstrap_payload'" <<<"$production_helpers"
+grep -Fq 'for helper in bootstrap-production.sh production-ops-common.sh recover-production.sh reconcile-production.sh reset-production.sh' <<<"$production_helpers"
+grep -Fq 'install -o root -g root -m 0755 "$helper_tmp" "/var/dirextalk-message-server/production-ops/$helper"' <<<"$production_helpers"
+
+# Exercise the real production reconcile wrapper with its owning helpers
+# replaced by deterministic boundaries. The wrapper must distinguish success,
+# an expected negative result, and infrastructure failure at the actual call
+# site without inferring a status after an unmatched if.
+reconcile_fixture="$tmp/reconcile-wrapper"
+mkdir -p "$reconcile_fixture/split/scripts" "$reconcile_fixture/base/p2p"
+cp "$reconcile_helper" "$reconcile_fixture/reconcile-production.sh"
+cat >"$reconcile_fixture/recover-production.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'recover\n' >>"$RECONCILE_CALLS"
+"$RECONCILE_SPLIT/scripts/restart-agent-local.sh" "$RECONCILE_RUN"
+EOF
+cat >"$reconcile_fixture/production-ops-common.sh" <<'EOF'
+production_die() { printf 'die:%s\n' "$*" >>"$RECONCILE_CALLS"; exit 1; }
+production_negative() { printf 'negative:%s\n' "$*" >>"$RECONCILE_CALLS"; exit 3; }
+production_bind_runtime() {
+  printf 'bind\n' >>"$RECONCILE_CALLS"
+  RECONCILE_BIND_COUNT=$((RECONCILE_BIND_COUNT + 1))
+  export RECONCILE_BIND_COUNT
+  if [ "${RECONCILE_BIND_FAIL_AT:-0}" -eq "$RECONCILE_BIND_COUNT" ]; then
+    production_die 'injected runtime identity rebind failure'
+  fi
+  production_base=$RECONCILE_BASE
+  production_split=$RECONCILE_SPLIT
+  production_run=$RECONCILE_RUN
+  production_stack=d-abcdefghijklmnopqrstuvwxyz
+  production_edge_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+}
+production_verify_edge() { printf 'verify-edge\n' >>"$RECONCILE_CALLS"; }
+production_require_control_file() {
+  [ -f "$1" ] && [ ! -L "$1" ] && [ "$(stat -c '%u:%a' "$1")" = "$(id -u):$2" ] || production_die 'invalid fixture control file'
+}
+EOF
+cat >"$reconcile_fixture/bootstrap-production.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'edge:%s\n' "$*" >>"$RECONCILE_CALLS"
+exit "${RECONCILE_EDGE_STATUS:-0}"
+EOF
+cat >"$reconcile_fixture/split/scripts/restart-agent-local.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'restart:%s\n' "$1" >>"$RECONCILE_CALLS"
+exit "${RECONCILE_RESTART_STATUS:-0}"
+EOF
+cat >"$reconcile_fixture/split/scripts/export-portal-bootstrap.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'export:%s:%s\n' "$1" "$2" >>"$RECONCILE_CALLS"
+case "${RECONCILE_EXPORT_MODE:-success}" in
+  success)
+    printf '%s\n' '{"access_token":"new-access","agent_token":"new-agent","password":"new-password","owner_user_id":"@owner:example.test"}' >"$2"
+    chmod 0400 "$2"
+    ;;
+  fail) exit 17 ;;
+  invalid)
+    printf '%s\n' '{"access_token":"incomplete"}' >"$2"
+    chmod 0400 "$2"
+    ;;
+  *) exit 18 ;;
+esac
+EOF
+chmod 0755 "$reconcile_fixture/"*.sh "$reconcile_fixture/split/scripts/"*.sh
+chmod 0700 "$reconcile_fixture/base/p2p"
+
+write_old_bootstrap() {
+  rm -f "$reconcile_fixture/base/p2p/bootstrap.json"
+  printf '%s\n' '{"access_token":"old-access","agent_token":"old-agent","password":"old-password","owner_user_id":"@owner:old.example.test"}' \
+    >"$reconcile_fixture/base/p2p/bootstrap.json"
+  chmod 0400 "$reconcile_fixture/base/p2p/bootstrap.json"
+}
+
+run_reconcile_fixture() {
+  RECONCILE_CALLS=$1 RECONCILE_BASE="$reconcile_fixture/base" \
+    RECONCILE_SPLIT="$reconcile_fixture/split" RECONCILE_RUN="$reconcile_fixture/run" \
+    RECONCILE_EDGE_STATUS=${2:-0} RECONCILE_RESTART_STATUS=${3:-0} \
+    RECONCILE_EXPORT_MODE=${4:-success} RECONCILE_BIND_FAIL_AT=${5:-0} RECONCILE_BIND_COUNT=0 \
+    bash "$reconcile_fixture/reconcile-production.sh" >/dev/null 2>&1
+}
+
+reconcile_success="$tmp/reconcile-success.calls"
+write_old_bootstrap
+run_reconcile_fixture "$reconcile_success"
+grep -Fqx 'edge:--reconcile-edge' "$reconcile_success"
+grep -Fqx 'recover' "$reconcile_success"
+grep -Fqx "restart:$reconcile_fixture/run" "$reconcile_success"
+grep -Eq "^export:$reconcile_fixture/run:$reconcile_fixture/base/p2p/\.bootstrap-refresh\.[^/]+/bootstrap\.json$" "$reconcile_success"
+json_test_check "$reconcile_fixture/base/p2p/bootstrap.json" "data.access_token === 'new-access' && data.owner_user_id === '@owner:example.test'"
+[ "$(stat -c '%a' "$reconcile_fixture/base/p2p/bootstrap.json")" = 400 ]
+
+reconcile_negative="$tmp/reconcile-negative.calls"
+write_old_bootstrap
+if run_reconcile_fixture "$reconcile_negative" 0 3; then
+  echo "production reconcile accepted an expected-negative runtime result" >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 3 ]
+grep -Fqx 'negative:existing runtime recovery reported an expected negative state' "$reconcile_negative"
+if grep -Fq 'export:' "$reconcile_negative"; then
+  echo "expected-negative reconcile continued after the runtime wrapper" >&2
+  exit 1
+fi
+
+reconcile_infra="$tmp/reconcile-infrastructure.calls"
+write_old_bootstrap
+if run_reconcile_fixture "$reconcile_infra" 0 17; then
+  echo "production reconcile accepted an infrastructure runtime failure" >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 1 ]
+grep -Fqx 'die:existing runtime recovery failed' "$reconcile_infra"
+if grep -Fq 'export:' "$reconcile_infra"; then
+  echo "infrastructure-failed reconcile continued after the runtime wrapper" >&2
+  exit 1
+fi
+
+reconcile_export_failure="$tmp/reconcile-export-failure.calls"
+write_old_bootstrap
+old_bootstrap_sha=$(sha256sum "$reconcile_fixture/base/p2p/bootstrap.json" | awk '{print $1}')
+if run_reconcile_fixture "$reconcile_export_failure" 0 0 fail; then
+  echo "production reconcile accepted a portal bootstrap export failure" >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 1 ]
+[ "$(sha256sum "$reconcile_fixture/base/p2p/bootstrap.json" | awk '{print $1}')" = "$old_bootstrap_sha" ]
+grep -Fqx 'die:portal bootstrap refresh failed' "$reconcile_export_failure"
+
+reconcile_identity_failure="$tmp/reconcile-identity-failure.calls"
+write_old_bootstrap
+old_bootstrap_sha=$(sha256sum "$reconcile_fixture/base/p2p/bootstrap.json" | awk '{print $1}')
+if run_reconcile_fixture "$reconcile_identity_failure" 0 0 success 3; then
+  echo "production reconcile accepted a runtime identity rebind failure" >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 1 ]
+[ "$(sha256sum "$reconcile_fixture/base/p2p/bootstrap.json" | awk '{print $1}')" = "$old_bootstrap_sha" ]
+grep -Fqx 'die:injected runtime identity rebind failure' "$reconcile_identity_failure"
 ops_desired_state_helper_payload | base64 --decode > "$tmp/decoded-desired-state-helper.sh"
 cmp "$ROOT/scripts/updater/set-desired-state.sh" "$tmp/decoded-desired-state-helper.sh"
 legacy_root="$tmp/base-99f55dd-remote"
@@ -121,58 +299,30 @@ assert_contains() {
 service_dir="$HOME/.dirextalk/nodes/ops.example.test"
 state="$service_dir/state.json"
 write_state "$state" "$service_dir"
+printf 'ops.example.test ssh-ed25519 AAAATEST\n' > "$service_dir/known_hosts"
 
 update_calls="$tmp/update.calls"
 : > "$update_calls"
-if CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" MESSAGE_SERVER_IMAGE="dirextalk/message-server:test" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-unconfirmed.out" 2>&1; then
-  echo "update image override must require explicit debug/legacy confirmation" >&2
-  exit 1
-fi
-for unsafe_image in \
-  'dirextalk/message-server:debug#e touch /tmp/injected' \
-  $'dirextalk/message-server:debug\n#e touch /tmp/injected' \
-  $'dirextalk/message-server:debug\rbroken' \
-  $'dirextalk/message-server:debug\tbroken' \
-  'dirextalk/message-server:debug broken'; do
-  : > "$update_calls"
-  if CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" \
-    MESSAGE_SERVER_IMAGE="$unsafe_image" DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 \
-    bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-unsafe.out" 2>&1; then
-    echo "unsafe debug image override reached update SSH path" >&2
-    exit 1
-  fi
-  [ ! -s "$update_calls" ] || { echo "unsafe debug image override reached SSH" >&2; cat "$update_calls" >&2; exit 1; }
-done
-CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" MESSAGE_SERVER_IMAGE="dirextalk/message-server:test" DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
+CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
 assert_not_contains "$tmp/update.out" 'Old credentials and runtime checks were cleared'
 assert_not_contains "$tmp/update.out" 'Scoped local bridge daemon was stopped'
 assert_not_contains "$tmp/update.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'
 
-assert_contains "$update_calls" 'docker compose --env-file \.env pull'
-assert_contains "$update_calls" 'docker compose --env-file \.env up -d'
 assert_contains "$update_calls" 'set-desired-state\.sh maintenance'
 assert_contains "$update_calls" 'set-desired-state\.sh running'
+assert_contains "$update_calls" 'StrictHostKeyChecking=yes'
+assert_contains "$update_calls" 'UserKnownHostsFile=.*known_hosts'
 assert_contains "$update_calls" 'base64 --decode'
 assert_contains "$update_calls" 'install -m 0755.*set-desired-state\.sh'
-assert_contains "$update_calls" 'cd /var/dirextalk-message-server'
-assert_contains "$update_calls" 'bash /var/dirextalk-message-server/init-tokens\.sh'
-assert_contains "$update_calls" '/var/dirextalk-message-server/p2p/bootstrap\.json'
-assert_contains "$update_calls" 'dirextalk/message-server:test'
-assert_contains "$update_calls" 'MESSAGE_SERVER_IMAGE=\$escaped_image'
+assert_contains "$update_calls" 'install -o root -g root -m 0755.*reconcile-production\.sh'
+assert_contains "$update_calls" 'bootstrap-production\.sh'
+assert_contains "$update_calls" 'install -o root -g root -m 0755.*production-ops/\$helper'
+assert_contains "$update_calls" '/var/dirextalk-message-server/production-ops/reconcile-production\.sh'
 deprecated_remote_dir="/opt""/p2p"
-assert_not_contains "$update_calls" "$deprecated_remote_dir|exec -T message-server sh -c .*bootstrap\\.json"
+assert_not_contains "$update_calls" "$deprecated_remote_dir|docker compose|MESSAGE_SERVER_IMAGE|init-tokens\\.sh"
 assert_not_contains "$update_calls" 'dirextalk-connect daemon status --service-name ops\.example\.test'
 assert_not_contains "$update_calls" 'dirextalk-connect daemon stop --service-name ops\.example\.test'
 assert_not_contains "$update_calls" 'volume rm|down -v|postgres-data|message-config|message-data|caddy-data|caddy-config'
-
-write_state "$state" "$service_dir"
-update_default_calls="$tmp/update-default.calls"
-: > "$update_default_calls"
-env -u MESSAGE_SERVER_IMAGE CALLS="$update_default_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update-default.out"
-assert_contains "$update_default_calls" 'sudo sh -lc'
-assert_not_contains "$update_default_calls" 'sudo MESSAGE_SERVER_IMAGE='
-assert_contains "$update_default_calls" 'docker compose --env-file \.env pull'
-assert_contains "$update_default_calls" 'docker compose --env-file \.env up -d'
 
 json_test_check "$state" "String(data.password) === '12345678' && data.access_token === 'ACCESS_SECRET' && data.agent_token === 'AGENT_SECRET' && data.agent_room_id === '!old:ops.example.test' && data.connect_install_status === 'installed' && data.phases.S4_BOOTSTRAP_STACK.status === 'done' && data.phases.S5_INIT_TOKENS.status === 'done' && data.phases.S6_WIRE_LOCAL.status === 'done' && data.phases.S7_VERIFY_E2E.status === 'done' && data.user_confirmations.agent_mcp_runtime.status === 'confirmed' && data.runtime_checks.summary.status === 'passed'"
 
@@ -181,6 +331,7 @@ assert_file_exists "$update_report"
 json_test_check "$update_report" "data.operation_type === 'update' && data.status === 'update_remote_restart_complete' && data.security.secrets_included === false && !('user_confirmation' in data.gates) && data.runtime_checks.summary.status === 'passed' && data.connect.install_status === 'installed' && data.credentials.status === 'current_or_not_recorded' && data.mcp.status === 'current_or_not_recorded'"
 
 write_state "$state" "$service_dir"
+printf 'ops.example.test ssh-ed25519 AAAATEST\n' > "$service_dir/known_hosts"
 if CALLS="$tmp/reset-unconfirmed.calls" PATH="$fakebin:$PATH" bash "$ROOT/scripts/reset-app-data.sh" "$state" >/dev/null 2>&1; then
   echo "reset-app-data must require explicit confirmation" >&2
   exit 1
@@ -193,26 +344,18 @@ assert_contains "$tmp/reset.out" 'Old credentials and runtime checks were cleare
 assert_contains "$tmp/reset.out" 'Scoped local bridge daemon was stopped'
 assert_contains "$tmp/reset.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'
 
-assert_contains "$reset_calls" 'docker compose --env-file \.env down'
 assert_contains "$reset_calls" 'sudo sh -lc'
 assert_contains "$reset_calls" 'set-desired-state\.sh maintenance'
 assert_contains "$reset_calls" 'set-desired-state\.sh running'
 assert_contains "$reset_calls" 'base64 --decode'
 assert_contains "$reset_calls" 'install -m 0755.*set-desired-state\.sh'
-assert_contains "$reset_calls" 'docker volume rm'
-assert_contains "$reset_calls" 'postgres-data'
-assert_contains "$reset_calls" 'message-config'
-assert_contains "$reset_calls" 'message-data'
-assert_contains "$reset_calls" 'docker compose --env-file \.env up -d'
-assert_contains "$reset_calls" 'cd /var/dirextalk-message-server'
-assert_contains "$reset_calls" 'bash /var/dirextalk-message-server/init-tokens\.sh'
-assert_contains "$reset_calls" '/var/dirextalk-message-server/p2p/bootstrap\.json'
-assert_contains "$reset_calls" 'rm -f /var/dirextalk-message-server/p2p/bootstrap\.json'
+assert_contains "$reset_calls" 'install -o root -g root -m 0755.*reset-production\.sh'
+assert_contains "$reset_calls" '/var/dirextalk-message-server/production-ops/reset-production\.sh'
 deprecated_owner_file="wellknown/""owner\\.json"
 assert_not_contains "$reset_calls" "$deprecated_remote_dir|$deprecated_owner_file"
 assert_contains "$reset_calls" 'dirextalk-connect daemon status --service-name ops\.example\.test'
 assert_contains "$reset_calls" 'dirextalk-connect daemon stop --service-name ops\.example\.test'
-assert_not_contains "$reset_calls" 'caddy-data|caddy-config|down -v'
+assert_not_contains "$reset_calls" 'docker compose|postgres-data|message-config|message-data|caddy-data|caddy-config|down -v'
 
 json_test_check "$state" "!(data.password || data.access_token || data.agent_token || data.agent_room_id) && data.connect_install_status === 'refresh_pending' && data.mcp_install_status === 'refresh_pending' && !('mcp_host_probe_status' in data) && !('mcp_daemon_install_status' in data) && !('mcp_daemon_install_command' in data) && !('mcp_daemon_status_command' in data) && !('mcp_daemon_url' in data) && !('mcp_daemon_proxy_command' in data) && data.phases.S5_INIT_TOKENS.status === 'pending' && data.phases.S6_WIRE_LOCAL.status === 'pending' && data.phases.S7_VERIFY_E2E.status === 'pending' && !data.user_confirmations && !data.runtime_checks"
 

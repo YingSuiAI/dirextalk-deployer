@@ -3,7 +3,7 @@
 ## dirextalk-connect Bridge
 
 - `agent_room_id` must be a real Matrix room id beginning with `!`. Values like `!agent:<domain>` are legacy pseudo ids and must be fixed by redeploying or restarting a current message-server build.
-- Current message-server images require `P2P_PORTAL_PASSWORD` and an explicit `portal.bootstrap` call. The cloud `init-tokens.sh` script is responsible for that call and for creating a real Matrix agent room when the backend credentials file does not already include `agent_room_id`.
+- Current message-server images create the Portal/Agent bootstrap and real Matrix `agent_room_id` during service initialization. The deployer only exports that complete file through the canonical receipt-bound helper; an incomplete export is a server/bootstrap failure, not a client-side credential repair path.
 - `agent.matrix_session.create` must return `@agent:<server>`. If it returns `@owner:<server>`, deploy a message-server build that includes agent Matrix session support.
 - `dirextalk-connect/config.toml` must contain one Matrix platform and the same `room_id` as S5/S6 state.
 - `dirextalk-connect daemon status --service-name <service_id>` checks the local bridge process for the current Dirextalk node. If no daemon is installed, run the command printed in S6 state `connect_install_command`.

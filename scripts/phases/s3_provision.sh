@@ -18,12 +18,17 @@ DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
 
 run_phase() {
+  state_set deployment_layout split-agent
   if ! updater_release_validate_pin; then
     phase_set S3_PROVISION failed "pinned updater release metadata is invalid"
     return 1
   fi
   if ! server_release_prepare_state; then
     phase_set S3_PROVISION failed "message-server image selection failed"
+    return 1
+  fi
+  if ! _split_release_validate; then
+    phase_set S3_PROVISION failed "split Agent release inputs are invalid or incomplete"
     return 1
   fi
   aws_env_prep
@@ -39,6 +44,26 @@ run_phase() {
       return 2
       ;;
   esac
+}
+
+_split_release_validate() {
+  local image revision
+  for image in \
+    "$(state_get server_release.image_ref)" \
+    "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" \
+    "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" \
+    "$DIREXTALK_COTURN_IMAGE_IMMUTABLE"; do
+    printf '%s\n' "$image" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$' || {
+      warn "Split Agent deployment requires immutable message-server, Agent, Caddy, and coturn image digests before infrastructure creation."
+      return 1
+    }
+  done
+  for revision in "$DIREXTALK_MESSAGE_SOURCE_REVISION" "$DIREXTALK_SPLIT_SOURCE_REVISION" "$DIREXTALK_AGENT_SOURCE_REVISION"; do
+    printf '%s\n' "$revision" | grep -Eq '^[0-9a-f]{40}$' || {
+      warn "Split Agent deployment requires full message-server and Agent source revisions."
+      return 1
+    }
+  done
 }
 
 _run_phase_ec2() {
@@ -118,7 +143,7 @@ _run_phase_ec2() {
     log "Security group already exists; skipping."; sg=$(res_get sg_id)
   fi
 
-  # 3) Render cloud-init with compose/Caddyfile/init-tokens embedded.
+  # 3) Render cloud-init with the pinned updater bootstrap embedded.
   local domain_mode domain
   domain_mode=$(state_get domain_mode)
   domain=$(state_get domain)
@@ -134,6 +159,12 @@ _run_phase_ec2() {
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
+    --agent-image "${DIREXTALK_AGENT_IMAGE_IMMUTABLE:-}" \
+    --caddy-image "${DIREXTALK_CADDY_IMAGE_IMMUTABLE:-}" \
+    --coturn-image "${DIREXTALK_COTURN_IMAGE_IMMUTABLE:-}" \
+    --message-source-revision "${DIREXTALK_MESSAGE_SOURCE_REVISION:-}" \
+    --split-source-revision "${DIREXTALK_SPLIT_SOURCE_REVISION:-}" \
+    --agent-source-revision "${DIREXTALK_AGENT_SOURCE_REVISION:-}" \
     > "$userdata"
   local userdata_aws
   userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
@@ -281,6 +312,12 @@ _run_phase_lightsail() {
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
+    --agent-image "${DIREXTALK_AGENT_IMAGE_IMMUTABLE:-}" \
+    --caddy-image "${DIREXTALK_CADDY_IMAGE_IMMUTABLE:-}" \
+    --coturn-image "${DIREXTALK_COTURN_IMAGE_IMMUTABLE:-}" \
+    --message-source-revision "${DIREXTALK_MESSAGE_SOURCE_REVISION:-}" \
+    --split-source-revision "${DIREXTALK_SPLIT_SOURCE_REVISION:-}" \
+    --agent-source-revision "${DIREXTALK_AGENT_SOURCE_REVISION:-}" \
     > "$userdata"
   userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
   res_set user_data "$userdata"
@@ -413,8 +450,10 @@ _is_canonical_ipv4() {
 }
 
 _resume_host_bootstrap() {
-  local public_ip=$1 keyfile=$2 legacy_source=${3:-}
+  local public_ip=$1 keyfile=$2
   local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt result identity integration_bundle remote_command
+  local split_bundle
+  local -a integration_files
   local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
   local attempts=${DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS:-60}
   local delay=${DIREXTALK_BOOTSTRAP_SSH_DELAY:-5}
@@ -427,29 +466,40 @@ _resume_host_bootstrap() {
     return 1
   }
   integration_bundle=$(mktemp "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz") || return 1
-  if ! tar -C "$S3_PHASE_DIR" -cf - \
-      cloud-init/init-tokens.sh \
+  split_bundle=$(mktemp "$DIREXTALK_WORKDIR/.split-agent-runtime.XXXXXX.tar.gz") || return 1
+  if ! bash "$S3_PHASE_DIR/render/render-split-bundle.sh" "$split_bundle"; then
+    rm -f "$split_bundle"
+    warn "Failed to render the canonical split Agent runtime bundle."
+    return 1
+  fi
+  integration_files=( -C "$S3_PHASE_DIR" -cf - \
+      cloud-init/split/Caddyfile \
+      cloud-init/split/edge-compose.override.yaml \
+      cloud-init/split/bootstrap-production.sh \
+      cloud-init/split/production-ops-common.sh \
+      cloud-init/split/recover-production.sh \
+      cloud-init/split/reconcile-production.sh \
+      cloud-init/split/reset-production.sh \
+      cloud-init/split/dirextalk-split-recovery.service \
       updater/bootstrap-host.sh \
       updater/install.sh \
       updater/reconcile-host.sh \
-      updater/adopt-legacy-host.sh \
-      updater/legacy-d1-compose.p2p.yml \
-      updater/legacy-adopt-compose.yml \
       updater/set-desired-state.sh \
       updater/release.env \
       updater/config.json \
-      updater/config.legacy-compose-caddy.json \
-      updater/config.legacy-systemd-caddy.json \
-      updater/dirextalk-updater.service \
-      | gzip -n > "$integration_bundle"; then
+      updater/dirextalk-updater.service )
+  integration_files+=( -C "${split_bundle%/*}" "${split_bundle##*/}" )
+  if ! tar "${integration_files[@]}" | gzip -n > "$integration_bundle"; then
     rm -f "$integration_bundle"
+    [ -z "$split_bundle" ] || rm -f "$split_bundle"
     warn "Failed to build the updater integration bundle."
     return 1
   fi
-  case "$ssh_user:$legacy_source" in
-    ubuntu:) remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'" ;;
-    root:/root/dirextalk/dirextalk-message-server) remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip' '$legacy_source'" ;;
-    *) rm -f "$integration_bundle"; warn "Host bootstrap rejected an unsupported SSH user or legacy source."; return 1 ;;
+  case "$ssh_user" in
+    ubuntu)
+      remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo install -d -o root -g root -m 0700 /var/dirextalk-message-server /var/dirextalk-message-server/production-ops && sudo tar --no-same-owner -xzf \"\$stage/${split_bundle##*/}\" -C /var/dirextalk-message-server && sudo chown -R 0:0 /var/dirextalk-message-server/deploy && sudo install -o root -g root -m 0400 \"\$stage/cloud-init/split/Caddyfile\" \"\$stage/cloud-init/split/edge-compose.override.yaml\" /var/dirextalk-message-server/production-ops/ && sudo install -o root -g root -m 0755 \"\$stage/cloud-init/split/bootstrap-production.sh\" \"\$stage/cloud-init/split/production-ops-common.sh\" \"\$stage/cloud-init/split/recover-production.sh\" \"\$stage/cloud-init/split/reconcile-production.sh\" \"\$stage/cloud-init/split/reset-production.sh\" /var/dirextalk-message-server/production-ops/ && sudo install -o root -g root -m 0644 \"\$stage/cloud-init/split/dirextalk-split-recovery.service\" /etc/systemd/system/dirextalk-split-recovery.service && sudo systemctl daemon-reload && sudo systemctl enable dirextalk-split-recovery.service >/dev/null && sudo sshd -T | grep -qx 'passwordauthentication no' && sudo sshd -T | grep -qx 'pubkeyauthentication yes' && sudo bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'"
+      ;;
+    *) rm -f "$integration_bundle" "$split_bundle"; warn "Host bootstrap requires the supported Ubuntu SSH user."; return 1 ;;
   esac
   identity=$(printf '%s\t%s\t%s' "$UPDATER_PIN_VERSION" "$UPDATER_PIN_COMMIT" "$UPDATER_PIN_SHA256")
   log "Synchronizing the pinned updater integration and resuming bootstrap through the stable public IP before DNS gating..."
@@ -464,6 +514,7 @@ _resume_host_bootstrap() {
         "$remote_command" < "$integration_bundle"); then
       if [ "$(printf '%s\n' "$result" | tail -n 1)" = "$identity" ]; then
         rm -f "$integration_bundle"
+        [ -z "$split_bundle" ] || rm -f "$split_bundle"
         updater_release_record_state
         return $?
       fi
@@ -474,6 +525,7 @@ _resume_host_bootstrap() {
     [ "$attempt" -le "$attempts" ] && sleep "$delay"
   done
   rm -f "$integration_bundle"
+  [ -z "$split_bundle" ] || rm -f "$split_bundle"
   warn "Timed out resuming host bootstrap through $public_ip. Rerun S3 to retry the idempotent bootstrap."
   return 1
 }

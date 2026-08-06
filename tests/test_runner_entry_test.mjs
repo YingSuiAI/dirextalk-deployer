@@ -53,7 +53,6 @@ assert.ok(!affectedInvocation.args.includes("tests/s6_wire_local_test.sh"));
 
 const fullInvocation = buildTestInvocation("full");
 assert.ok(fullInvocation.args.includes("tests/s6_run_phase_failure_test.sh::extended"));
-assert.ok(fullInvocation.args.includes("tests/legacy_adopt_test.sh"));
 const noGitInvocation = buildTestInvocation("affected", {
   root: "C:\\source-archive",
   env: {},

@@ -1,139 +1,11 @@
 #!/usr/bin/env bash
-# Select the normal server target without a release-discovery network request.
-# MESSAGE_SERVER_IMAGE remains an explicit debug/legacy override.
+# The deployer owns one immutable production split release. There is no
+# mutable image override, legacy adoption, or standard Compose fallback.
 
-DEFAULT_MESSAGE_SERVER_IMAGE=dirextalk/message-server:latest
-
-server_release_validate_override() {
-  if [ -n "${MESSAGE_SERVER_IMAGE:-}" ] && [ "${DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE:-0}" != "1" ]; then
-    warn "MESSAGE_SERVER_IMAGE is a debug/legacy override and is disabled for normal production installs."
-    warn "Use the default latest image, or explicitly set DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 for a debug/legacy deployment."
-    return 1
-  fi
-  if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
-    if ! server_release_image_is_safe "$MESSAGE_SERVER_IMAGE"; then
-      warn "MESSAGE_SERVER_IMAGE contains invalid characters for a debug/legacy image reference."
-      return 1
-    fi
-  fi
-}
-
-server_release_image_is_safe() {
-  case "${1:-}" in
-    ''|*$'\n'*|*$'\r'*|*$'\t'*|*' '*) return 1 ;;
-  esac
-  printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$'
-}
-
-server_release_state_is_default_latest() {
-  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
-  [ "$source" = "default_latest" ] \
-    && [ "$version" = "latest" ] \
-    && [ "$image" = "$DEFAULT_MESSAGE_SERVER_IMAGE" ] \
-    && [ "$image_ref" = "$DEFAULT_MESSAGE_SERVER_IMAGE" ] \
-    && [ -z "$digest" ] \
-    && [ -z "$manifest_digest" ]
-}
-
-server_release_state_is_formal() {
-  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
-  [ "$source" = "github_release" ] \
-    && server_release_is_version "$version" \
-    && [ "$image" = "dirextalk/message-server:$version" ] \
-    && server_release_is_digest "$digest" \
-    && server_release_is_digest "$manifest_digest" \
-    && [ "$image_ref" = "$image@$digest" ]
-}
-
-server_release_state_is_debug() {
-  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
-  [ "$source" = "debug_override" ] \
-    && [ "$version" = "debug" ] \
-    && server_release_image_is_safe "$image" \
-    && [ "$image_ref" = "$image" ] \
-    && [ -z "$digest" ] \
-    && [ -z "$manifest_digest" ]
-}
-
-server_release_state_is_legacy_adopted() {
-  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5
-  local approved=sha256:d57a0b7830f7248e29fe7c45c0848cb1167454709fd33effe07ff074415f571c
-  [ "$source" = legacy_adopted ] \
-    && [ "$version" = v0.15.2 ] \
-    && [ "$image" = dirextalk/message-server:v0.15.2 ] \
-    && [ "$digest" = "$approved" ] \
-    && [ "$image_ref" = "$image@$digest" ]
-}
-
-server_release_prepare_state() {
-  server_release_validate_override || return 1
-  local source version image digest image_ref manifest_digest resolved_json instance_id
-
-  source=$(state_get server_release.source)
-  version=$(state_get server_release.version)
-  image=$(state_get server_release.image)
-  image_ref=$(state_get server_release.image_ref)
-  digest=$(state_get server_release.digest)
-  manifest_digest=$(state_get server_release.manifest_digest)
-  instance_id=$(state_get resources.instance_id)
-
-  if [ -n "$instance_id" ]; then
-    if server_release_state_is_default_latest "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
-      if [ -z "${MESSAGE_SERVER_IMAGE:-}" ] || [ "$MESSAGE_SERVER_IMAGE" = "$image_ref" ]; then
-        return 0
-      fi
-      warn "Server image is frozen after infrastructure creation; the existing default latest image cannot be replaced by an override."
-      return 1
-    fi
-    # Preserve already-created nodes that were deployed before the default
-    # switched away from formal GitHub Release resolution. This compatibility
-    # check never performs a GitHub request.
-    if server_release_state_is_formal "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
-      if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
-        warn "Server release is frozen after infrastructure creation; the existing formal release cannot be replaced by an image override."
-        return 1
-      fi
-      return 0
-    fi
-    if server_release_state_is_debug "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest"; then
-      if [ -z "${MESSAGE_SERVER_IMAGE:-}" ] || [ "$MESSAGE_SERVER_IMAGE" = "$image_ref" ]; then
-        return 0
-      fi
-      warn "Server release is frozen after infrastructure creation; the existing debug image cannot be changed."
-      return 1
-    fi
-    if server_release_state_is_legacy_adopted "$source" "$version" "$image" "$digest" "$image_ref"; then
-      [ -z "${MESSAGE_SERVER_IMAGE:-}" ] || {
-        warn "An adopted legacy release cannot be replaced by an image override."
-        return 1
-      }
-      return 0
-    fi
-    warn "Server release state is missing or inconsistent for existing infrastructure; refusing to select a replacement release."
-    return 1
-  fi
-
-  if [ -n "${MESSAGE_SERVER_IMAGE:-}" ]; then
-    resolved_json=$(json_build object \
-      source=debug_override \
-      version=debug \
-      "image=$MESSAGE_SERVER_IMAGE" \
-      digest= \
-      "image_ref=$MESSAGE_SERVER_IMAGE" \
-      manifest_digest=) || return 1
-    state_set_raw server_release "$resolved_json" || return 1
-    return 0
-  fi
-
-  resolved_json=$(json_build object \
-    source=default_latest \
-    version=latest \
-    "image=$DEFAULT_MESSAGE_SERVER_IMAGE" \
-    digest= \
-    "image_ref=$DEFAULT_MESSAGE_SERVER_IMAGE" \
-    manifest_digest=) || return 1
-  state_set_raw server_release "$resolved_json"
-}
+SERVER_RELEASE_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+SERVER_RELEASE_PIN=$SERVER_RELEASE_LIB_DIR/../cloud-init/split/release.env
+# shellcheck disable=SC1090
+source "$SERVER_RELEASE_PIN"
 
 server_release_is_version() {
   printf '%s\n' "$1" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
@@ -141,4 +13,109 @@ server_release_is_version() {
 
 server_release_is_digest() {
   printf '%s\n' "$1" | grep -Eq '^sha256:[0-9a-f]{64}$'
+}
+
+server_release_is_immutable_image() {
+  printf '%s\n' "$1" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$'
+}
+
+server_release_validate_pin() {
+  [ -f "$SERVER_RELEASE_PIN" ] && [ ! -L "$SERVER_RELEASE_PIN" ] || return 1
+  server_release_is_version "$DIREXTALK_MESSAGE_SERVER_VERSION" || return 1
+  server_release_is_version "$DIREXTALK_AGENT_VERSION" || return 1
+  [ "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" = "docker.io/dirextalk/message-server@${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}" ] || return 1
+  [ "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" = "docker.io/dirextalk/agent@${DIREXTALK_AGENT_IMAGE_IMMUTABLE##*@}" ] || return 1
+  [ "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" = "docker.io/library/caddy@${DIREXTALK_CADDY_IMAGE_IMMUTABLE##*@}" ] || return 1
+  [ "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" = "docker.io/coturn/coturn:4.6.3-alpine@${DIREXTALK_COTURN_IMAGE_IMMUTABLE##*@}" ] || return 1
+  server_release_is_immutable_image "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" || return 1
+  server_release_is_immutable_image "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" || return 1
+  server_release_is_immutable_image "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" || return 1
+  server_release_is_immutable_image "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" || return 1
+  printf '%s\n' "$DIREXTALK_MESSAGE_SOURCE_REVISION" "$DIREXTALK_SPLIT_SOURCE_REVISION" "$DIREXTALK_AGENT_SOURCE_REVISION" \
+    | grep -Eq '^[0-9a-f]{40}$' || return 1
+  [ "$(printf '%s\n' "$DIREXTALK_MESSAGE_SOURCE_REVISION" "$DIREXTALK_SPLIT_SOURCE_REVISION" "$DIREXTALK_AGENT_SOURCE_REVISION" | grep -Ec '^[0-9a-f]{40}$')" -eq 3 ]
+}
+
+server_release_validate_override() {
+  if [ -n "${MESSAGE_SERVER_IMAGE:-}" ] || [ -n "${DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE:-}" ]; then
+    warn "Mutable message-server image overrides are not supported by the production split deployer."
+    return 1
+  fi
+  server_release_validate_pin || {
+    warn "The deployer-owned production split release pin is invalid."
+    return 1
+  }
+}
+
+server_release_state_matches_pin() {
+  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
+  local expected_digest=${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}
+  [ "$source" = production_split ] \
+    && [ "$version" = "$DIREXTALK_MESSAGE_SERVER_VERSION" ] \
+    && [ "$image" = "docker.io/dirextalk/message-server:$DIREXTALK_MESSAGE_SERVER_VERSION" ] \
+    && [ "$digest" = "$expected_digest" ] \
+    && [ "$image_ref" = "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" ] \
+    && [ "$manifest_digest" = "$expected_digest" ]
+}
+
+server_release_split_state_matches_pin() {
+  [ "$(state_get split_release.message_version)" = "$DIREXTALK_MESSAGE_SERVER_VERSION" ] \
+    && [ "$(state_get split_release.message_image)" = "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" ] \
+    && [ "$(state_get split_release.message_source_revision)" = "$DIREXTALK_MESSAGE_SOURCE_REVISION" ] \
+    && [ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ] \
+    && [ "$(state_get split_release.agent_version)" = "$DIREXTALK_AGENT_VERSION" ] \
+    && [ "$(state_get split_release.agent_image)" = "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" ] \
+    && [ "$(state_get split_release.agent_source_revision)" = "$DIREXTALK_AGENT_SOURCE_REVISION" ] \
+    && [ "$(state_get split_release.caddy_image)" = "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" ] \
+    && [ "$(state_get split_release.coturn_image)" = "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" ]
+}
+
+server_release_record_split_state() {
+  local split_json
+  split_json=$(json_build object \
+    "message_version=$DIREXTALK_MESSAGE_SERVER_VERSION" \
+    "message_image=$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" \
+    "message_source_revision=$DIREXTALK_MESSAGE_SOURCE_REVISION" \
+    "split_source_revision=$DIREXTALK_SPLIT_SOURCE_REVISION" \
+    "agent_version=$DIREXTALK_AGENT_VERSION" \
+    "agent_image=$DIREXTALK_AGENT_IMAGE_IMMUTABLE" \
+    "agent_source_revision=$DIREXTALK_AGENT_SOURCE_REVISION" \
+    "caddy_image=$DIREXTALK_CADDY_IMAGE_IMMUTABLE" \
+    "coturn_image=$DIREXTALK_COTURN_IMAGE_IMMUTABLE") || return 1
+  state_set_raw split_release "$split_json"
+}
+
+server_release_prepare_state() {
+  server_release_validate_override || return 1
+  local source version image digest image_ref manifest_digest expected_digest resolved_json instance_id
+  source=$(state_get server_release.source)
+  version=$(state_get server_release.version)
+  image=$(state_get server_release.image)
+  digest=$(state_get server_release.digest)
+  image_ref=$(state_get server_release.image_ref)
+  manifest_digest=$(state_get server_release.manifest_digest)
+  instance_id=$(state_get resources.instance_id)
+
+  if [ -n "$instance_id" ]; then
+    server_release_state_matches_pin "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest" || {
+      warn "Existing infrastructure is not bound to the current production split release; refusing replacement or compatibility fallback."
+      return 1
+    }
+    server_release_split_state_matches_pin || {
+      warn "Existing infrastructure has incomplete or different Agent/Caddy/coturn/source pins; refusing replacement."
+      return 1
+    }
+    return 0
+  fi
+
+  expected_digest=${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}
+  resolved_json=$(json_build object \
+    source=production_split \
+    "version=$DIREXTALK_MESSAGE_SERVER_VERSION" \
+    "image=docker.io/dirextalk/message-server:$DIREXTALK_MESSAGE_SERVER_VERSION" \
+    "digest=$expected_digest" \
+    "image_ref=$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" \
+    "manifest_digest=$expected_digest") || return 1
+  state_set_raw server_release "$resolved_json" || return 1
+  server_release_record_split_state
 }

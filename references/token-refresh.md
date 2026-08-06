@@ -84,7 +84,7 @@ dirextalk-connect daemon logs --service-name <service_id> -n 120
 ## 验证
 
 ```bash
-curl -skf https://<domain>/healthz && echo OK
+curl -fsS https://<domain>/_p2p/health && echo OK
 curl -sk https://<domain>/.well-known/portal/owner.json
 curl -sk https://<domain>/_matrix/client/versions
 ```

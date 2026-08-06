@@ -83,7 +83,7 @@ export SSH_COMMAND_TIMEOUT=19
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/phases/s4_bootstrap_stack.sh"
-_healthz_ok resume.example.test
+_server_health_ok resume.example.test
 grep -q -- '--connect-timeout 7' "$CURL_LOG"
 grep -q -- '--max-time 11' "$CURL_LOG"
 grep -q -- '--resolve resume.example.test:443:203.0.113.10' "$CURL_LOG"
@@ -114,6 +114,43 @@ fi
 printf '{"password":12345678,"agent_token":"agent","access_token":"access"}\n' > "$tmp/bootstrap-numeric-code.json"
 if _extract_output_tokens "$tmp/bootstrap-numeric-code.json" >/dev/null; then
   echo "S5 must reject numeric initialization codes; they must stay JSON strings to preserve leading zeros" >&2
+  exit 1
+fi
+
+# Failure diagnostics must bind Compose to the protected production split
+# controls and must never print bootstrap credentials.
+export WARN_LOG="$tmp/split-diagnostics.log"
+warn() { printf '%s\n' "$*" >> "$WARN_LOG"; }
+poll_until() { return 1; }
+
+: > "$WARN_LOG"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/phases/s4_bootstrap_stack.sh"
+if run_phase; then
+  echo "S4 timeout fixture unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '/var/dirextalk-message-server/split/.manifest' "$WARN_LOG"
+grep -Fq -- '--project-name "$stack" -f /var/dirextalk-message-server/deploy/split-agent/compose.yaml --env-file /var/dirextalk-message-server/split/.env ps' "$WARN_LOG"
+grep -Fq -- '--env-file /var/dirextalk-message-server/split/.env logs --tail=80 message-server' "$WARN_LOG"
+if grep -Fq 'cd /var/dirextalk-message-server && sudo docker compose' "$WARN_LOG"; then
+  echo "S4 diagnostics fell back to the removed root-level Compose project" >&2
+  exit 1
+fi
+
+: > "$WARN_LOG"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/phases/s5_init_tokens.sh"
+if run_phase; then
+  echo "S5 missing-bootstrap fixture unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq 'init_tokens_stage=' "$WARN_LOG"
+grep -Fq 'bootstrap.json size=%s mode=%a owner=%U:%G modified=%y' "$WARN_LOG"
+grep -Fq -- '--project-name "$stack" -f /var/dirextalk-message-server/deploy/split-agent/compose.yaml --env-file /var/dirextalk-message-server/split/.env ps' "$WARN_LOG"
+grep -Fq -- '--env-file /var/dirextalk-message-server/split/.env logs --tail=40 message-server' "$WARN_LOG"
+if grep -Fq "sudo cat $DIREXTALK_REMOTE_BOOTSTRAP_FILE" "$WARN_LOG"; then
+  echo "S5 diagnostics would print bootstrap credentials" >&2
   exit 1
 fi
 

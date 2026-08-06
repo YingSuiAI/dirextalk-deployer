@@ -2,6 +2,20 @@
 
 `dirextalk-deployer` is a cross-platform deployment product and agent skill, not a Linux-only script collection. Maintain it as a portable orchestration layer driven by Git Bash on native Windows and Bash on Linux/macOS/WSL while deploying a Linux-based Dirextalk server.
 
+## Development
+
+- This vNext repository is being built from zero. Implement the best target
+  contract directly. Do not retain historical-version compatibility code.
+- Do not add dual paths, version negotiation, compatibility shims, or fallback
+  branches for superseded designs. Replace the old contract and migrate test or
+  development data directly; a frozen external boundary requires an explicit
+  product decision, not a second production path.
+- Prioritize core product behavior and real device/node evidence. Do not add
+  anti-counterfeit or exhaustive adversarial-observer machinery beyond the
+  required release provenance unless a concrete product threat or gate needs it.
+- Review the final production path strictly; model and fixture tests do not
+  substitute for executable integration evidence.
+
 ## Product Scope
 
 - Deploy, resume, verify, destroy, and locally wire a production Dirextalk message server.
@@ -40,8 +54,7 @@ Use `scripts/lib/git-bash.sh`, `scripts/lib/local-paths.sh`, and `scripts/lib/pa
 - Prefer small helpers for platform conversion, command discovery, and output formatting. Do not scatter OS-specific path rewrites across phase bodies.
 - Use `scripts/json.mjs` through `scripts/lib/json.sh` for JSON reads/writes. Do not reintroduce legacy external JSON CLI dependencies.
 - Remote server commands may assume Linux because the EC2 host is Linux. Local commands must not assume Linux.
-- Version 1 cloud hosts may run Ubuntu 22.04 or 24.04 on x86_64. New cloud hosts still default to Ubuntu 24.04; bootstrap must verify the supported host set before downloading the pinned updater or starting Compose.
-- Pre-updater d1 adoption is never inferred by normal resume. Use only `scripts/adopt-legacy-node.sh` after its fixed v0.15.2/digest/Compose/systemd-Caddy dry run and an explicit semantic user confirmation; the agent supplies the script's machine confirmation token and it must not pull or recreate the running image.
+- Production split cloud hosts require Ubuntu 24.04+ on x86_64 with systemd >= 254; bootstrap must verify that host contract before downloading the pinned updater or starting Compose.
 - Use `dirextalk_native_tool_path` at every shell-to-native file-path boundary and `dirextalk_normalize_local_path` for persisted consumer paths. This includes Node scripts and input files, AWS `file://` arguments, curl output/header files, `dirextalk-connect.exe`, local agent executables, Windows user profile paths, and npm global binaries.
 - When adding a new local runtime or agent executable, support explicit override env vars before detection. For connect this includes `DIREXTALK_CONNECT_AGENT`, `DIREXTALK_CONNECT_AGENT_CMD`, and runtime-specific aliases such as `DIREXTALK_CODEX_COMMAND`, `DIREXTALK_GEMINI_COMMAND`, or `DIREXTALK_CLAUDE_CODE_COMMAND`. Host-owned OpenClaw/Hermes bridges reject generic child command/args overrides.
 - Do not make Codex, Claude, Gemini, Cursor, or any other provider the semantic default for an unknown runtime. Unknown or ambiguous detection should require an explicit `DIREXTALK_CONNECT_AGENT`.
@@ -92,8 +105,8 @@ an explicit boundary.
 
 `npm run test:quick` runs the portable baseline, and `npm run test:stage` runs
 the default Lightsail workflow lane. Run them only when that whole boundary is
-actually affected. `npm run test:full` retains EC2, legacy adoption, updater,
-DNS, S6, and runtime compatibility matrices for explicit manual validation or
+actually affected. `npm run test:full` retains EC2, updater, DNS, S6, and
+runtime compatibility matrices for explicit manual validation or
 a genuinely broad cross-cutting change; it is not a routine development or
 publishing requirement. For changed shell files, run focused `bash -n` checks;
 CI retains one repository-wide syntax check because it is inexpensive.

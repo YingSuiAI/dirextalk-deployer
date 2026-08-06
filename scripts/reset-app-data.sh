@@ -19,8 +19,8 @@ ops_require_state "$STATE_JSON"
 
 if [ "${DIREXTALK_RESET_APP_DATA_CONFIRM:-0}" != "1" ]; then
   cat >&2 <<'EOF'
-reset-app-data is destructive for application data.
-It preserves EC2, Elastic IP/public IPv4, DNS, and Caddy TLS volumes, but clears Matrix/message-server data.
+reset-app-data is destructive for all message-server and Agent application data.
+It preserves the cloud instance, fixed public IP, DNS, and Caddy TLS volumes.
 Set DIREXTALK_RESET_APP_DATA_CONFIRM=1 to continue.
 EOF
   exit 2

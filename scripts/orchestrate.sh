@@ -9,7 +9,7 @@
 #
 # Usage:
 #   export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-east-1
-#   # Normal server selection uses dirextalk/message-server:latest directly.
+#   # Production images and source revisions come from the deployer-owned split release pin.
 #   # First run asks for region, production domain, instance size, and existing-state handling.
 #   # Non-interactive:
 #   #   DOMAIN=__DOMAIN__ CONFIRM_DOMAIN_BINDING=1 INSTANCE_TYPE=t3.small
@@ -232,7 +232,7 @@ status_next_action() {
     S2_DOMAIN)          echo "confirm the long-lived domain, DNS authority, and irreversible Matrix server_name binding" ;;
     S3_PROVISION)       echo "inspect Lightsail/EC2 provisioning, fixed public IP allocation, firewall/security group creation, and DNS record setup" ;;
     S4_BOOTSTRAP_STACK) echo "inspect cloud-init, Docker, Caddy/TLS, and message-server logs over SSH" ;;
-    S5_INIT_TOKENS)     echo "inspect /var/dirextalk-message-server/p2p/bootstrap.json, init-tokens.sh, and message-server bootstrap logs" ;;
+    S5_INIT_TOKENS)     echo "inspect the protected bootstrap export and message-server bootstrap logs" ;;
     S6_WIRE_LOCAL)      echo "refresh local credentials, dirextalk-connect config, MCP snippets, and agent runtime settings without destroying cloud resources" ;;
     S7_VERIFY_E2E)      echo "inspect the failed health, Matrix, well-known, owner.json/CORS, TURN, MCP, or runtime gate before declaring delivery" ;;
     DONE)               echo "give the user the App domain and eight-digit initialization code, then record App initialization and agent/MCP confirmation separately" ;;

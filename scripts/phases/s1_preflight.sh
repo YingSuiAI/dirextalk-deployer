@@ -16,7 +16,7 @@ run_phase() {
   aws_env_prep
   phase_set S1_PREFLIGHT in_progress "running preflight checks"
   if ! server_release_validate_override; then
-    phase_set S1_PREFLIGHT failed "mutable server image override requires explicit debug/legacy confirmation"
+    phase_set S1_PREFLIGHT failed "production split release validation failed"
     return 1
   fi
   local cloud_provider

@@ -1,0 +1,289 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+TEST_TMP=$(mktemp -d)
+trap 'rm -rf "$TEST_TMP"' EXIT
+
+fixture="$TEST_TMP/message-server"
+split="$fixture/deploy/split-agent"
+mkdir -p "$split/scripts" "$split/apparmor.d" "$split/systemd" "$split/sysusers.d"
+git -C "$fixture" init -q
+git -C "$fixture" config user.email test@example.invalid
+git -C "$fixture" config user.name Test
+
+files=(
+  compose.yaml compose.direct-tls.yaml edge-compose.yaml
+  apparmor.d/dirextalk-runner-userns
+  systemd/dirextalk-extension-runner@.service
+  systemd/dirextalk-core-runner@.service
+  sysusers.d/dirextalk-split-agent.conf
+  scripts/provision-local.sh
+  scripts/initialize-capability-ca.sh
+  scripts/initialize-message-server.sh
+  scripts/materialize-agent-secrets.sh
+  scripts/message-server-entrypoint.sh
+  scripts/prepare-runner-cgroups.sh
+  scripts/manage-runner-apparmor.sh
+  scripts/start-local.sh
+  scripts/verify-production-images.sh
+  scripts/verify-production-tls.sh
+  scripts/agent-runtime-local-common.sh
+  scripts/stop-agent-local.sh
+  scripts/restart-agent-local.sh
+  scripts/update-agent-local.sh
+  scripts/adopt-edge.sh
+  scripts/cutover-edge.sh
+  scripts/verify-first-fresh.sh
+)
+for file in "${files[@]}"; do
+  mkdir -p "$split/$(dirname "$file")"
+  printf '%s\n' "$file" >"$split/$file"
+done
+git -C "$fixture" add deploy
+git -C "$fixture" commit -qm fixture
+revision=$(git -C "$fixture" rev-parse HEAD)
+
+bundle="$TEST_TMP/split-agent.tar.gz"
+DIREXTALK_MESSAGE_SERVER_ROOT="$fixture" \
+  bash "$ROOT/scripts/render/render-split-bundle.sh" "$bundle"
+
+[ "$(stat -c '%a' "$bundle")" = 600 ]
+tar -tzf "$bundle" | grep -Fxq deploy/split-agent/compose.yaml
+tar -tzf "$bundle" | grep -Fxq deploy/split-agent/compose.direct-tls.yaml
+tar -tzf "$bundle" | grep -Fxq deploy/split-agent/scripts/prepare-runner-cgroups.sh
+tar -tzf "$bundle" | grep -Fxq deploy/split-agent/scripts/start-local.sh
+tar -tzf "$bundle" | grep -Fxq deploy/split-agent/scripts/adopt-edge.sh
+tar -tzf "$bundle" | grep -Fxq deploy/split-agent/scripts/cutover-edge.sh
+[ "$(tar -xOzf "$bundle" deploy/split-agent/SOURCE_REVISION)" = "$revision" ]
+tar -tzf "$bundle" | grep -Fxq deploy/split-agent/SOURCE_FILES.sha256
+mkdir -p "$TEST_TMP/unpacked"
+tar -xzf "$bundle" -C "$TEST_TMP/unpacked"
+(cd "$TEST_TMP/unpacked/deploy/split-agent" && sha256sum -c --status SOURCE_FILES.sha256)
+if tar -tzf "$bundle" | grep -Eq '(^|/)(tests?|container|aws)/|compose\.local\.yaml$|\.gitignore$'; then
+  echo "split bundle contains source-only or test assets" >&2
+  exit 1
+fi
+
+sha_file="$bundle.sha256"
+sha256sum "$bundle" >"$sha_file"
+packaged="$TEST_TMP/packaged-copy.tar.gz"
+DIREXTALK_MESSAGE_SERVER_ROOT="$TEST_TMP/absent" \
+DIREXTALK_SPLIT_BUNDLE_FILE="$bundle" \
+DIREXTALK_SPLIT_BUNDLE_SHA256_FILE="$sha_file" \
+  bash "$ROOT/scripts/render/render-split-bundle.sh" "$packaged"
+cmp "$bundle" "$packaged"
+
+repository_bundle="$ROOT/scripts/cloud-init/split/canonical-bundle.tar.gz"
+repository_sha="$repository_bundle.sha256"
+[ -f "$repository_bundle" ] && [ -f "$repository_sha" ]
+[ "$(sha256sum "$repository_bundle" | awk '{print $1}')" = "$(awk 'NR == 1 {print $1}' "$repository_sha")" ]
+repository_copy="$TEST_TMP/repository-copy.tar.gz"
+DIREXTALK_MESSAGE_SERVER_ROOT="$TEST_TMP/absent" \
+DIREXTALK_SPLIT_BUNDLE_FILE="$repository_bundle" \
+DIREXTALK_SPLIT_BUNDLE_SHA256_FILE="$repository_sha" \
+  bash "$ROOT/scripts/render/render-split-bundle.sh" "$repository_copy"
+cmp "$repository_bundle" "$repository_copy"
+repository_revision=$(tar -xOzf "$repository_bundle" deploy/split-agent/SOURCE_REVISION)
+printf '%s\n' "$repository_revision" | grep -Eq '^[0-9a-f]{40}$'
+[ "$repository_revision" = "$(sed -n 's/^DIREXTALK_SPLIT_SOURCE_REVISION=//p' "$ROOT/scripts/cloud-init/split/release.env")" ]
+tar -xOzf "$repository_bundle" deploy/split-agent/scripts/cleanup-local.sh \
+  | grep -F 'external|edge-terminated)' >/dev/null
+mkdir -p "$TEST_TMP/repository-unpacked"
+tar -xzf "$repository_bundle" -C "$TEST_TMP/repository-unpacked"
+(cd "$TEST_TMP/repository-unpacked/deploy/split-agent" && sha256sum -c --status SOURCE_FILES.sha256)
+grep -Fq "grep -qx 'passwordauthentication no'" "$ROOT/scripts/phases/s3_provision.sh"
+grep -Fq "grep -qx 'pubkeyauthentication yes'" "$ROOT/scripts/phases/s3_provision.sh"
+consumer="$ROOT/scripts/cloud-init/split/bootstrap-production.sh"
+edge_source="$ROOT/scripts/cloud-init/split/Caddyfile"
+edge_overlay="$ROOT/scripts/cloud-init/split/edge-compose.override.yaml"
+grep -Fq 'DIREXTALK_SPLIT_COMPOSE_MODE=production' "$consumer"
+grep -Fq 'DIREXTALK_MESSAGE_TLS_MODE=edge-terminated' "$consumer"
+grep -Fq '"$split/scripts/prepare-runner-cgroups.sh" "$stack"' "$consumer"
+grep -Fq '"$split/scripts/provision-local.sh" "$run_dir"' "$consumer"
+grep -Fq '"$split/scripts/start-local.sh" "$run_dir/.env"' "$consumer"
+grep -Fq 'sed "s/__DIREXTALK_PUBLIC_DOMAIN__/$domain/g" "$script_dir/Caddyfile"' "$consumer"
+grep -Fq 'mv -f "$caddy_tmp" "$caddyfile"' "$consumer"
+grep -Fq 'require_pair "$edge_env" DIREXTALK_CADDYFILE "$caddyfile"' "$consumer"
+grep -Fq 'cloud-init/split/Caddyfile' "$ROOT/scripts/phases/s3_provision.sh"
+grep -Fq 'cloud-init/split/edge-compose.override.yaml' "$ROOT/scripts/phases/s3_provision.sh"
+grep -Fq '/var/dirextalk-message-server/production-ops/' "$ROOT/scripts/phases/s3_provision.sh"
+grep -Fq 'source: /run/dirextalk-updater' "$edge_overlay"
+grep -Fq 'target: /run/dirextalk-updater' "$edge_overlay"
+grep -Fq 'read_only: true' "$edge_overlay"
+grep -Fq -- '-f "$script_dir/edge-compose.override.yaml"' "$consumer"
+grep -Fq 'handle /.well-known/matrix/server' "$edge_source"
+grep -Fq 'handle /.well-known/matrix/client' "$edge_source"
+grep -Fq 'header Access-Control-Allow-Origin *' "$edge_source"
+grep -Fq 'handle /.well-known/portal/*' "$edge_source"
+grep -Fq 'handle /_matrix/*' "$edge_source"
+grep -Fq 'handle /_dendrite/*' "$edge_source"
+grep -Fq 'handle /_synapse/*' "$edge_source"
+grep -Fq 'handle /_p2p/*' "$edge_source"
+grep -Fq 'handle /_dirextalk/updater/v1/jobs/*' "$edge_source"
+grep -Fq 'reverse_proxy unix//run/dirextalk-updater/http.sock' "$edge_source"
+grep -Fq 'reverse_proxy message-server:8008' "$edge_source"
+if grep -Fq 'handle /healthz' "$edge_source" || grep -Fq 'rewrite * /_p2p/health' "$edge_source"; then
+  echo "edge source restored the retired health alias" >&2
+  exit 1
+fi
+grep -Fq '"$script_dir/bootstrap-production.sh"' "$ROOT/scripts/cloud-init/split/reconcile-production.sh"
+grep -Fq "cmp \"\$portal_bootstrap\" \"\$refresh_dir/bootstrap.json\"" "$consumer"
+grep -Fq 'existing portal bootstrap differs from the running stack' "$consumer"
+if grep -Fq '/usr/local/libexec' "$consumer"; then
+  echo "split consumer must not mix a copied runner helper with its staged canonical bundle" >&2
+  exit 1
+fi
+
+# Exercise the actual first-fresh bootstrap consumer up to the canonical
+# provision boundary. The provision probe deliberately stops the bootstrap
+# after recording the release inputs, before Docker or host mutation begins.
+fresh="$TEST_TMP/first-fresh"
+fresh_split="$fresh/deploy/split-agent"
+mkdir -p "$fresh_split/scripts" "$TEST_TMP/fakebin"
+cat >"$fresh_split/scripts/prepare-runner-cgroups.sh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' 'DIREXTALK_RUNNER_PREPARED=true'
+EOF
+cat >"$fresh_split/scripts/provision-local.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'coturn=%s\nturn_external_ip=%s\nattestation=%s\noutput=%s\n' \
+  "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" "$DIREXTALK_TURN_EXTERNAL_IP" \
+  "$DIREXTALK_IMAGE_ATTESTATION_SOURCE_FILE" "$1" >"$DIREXTALK_TEST_PROVISION_CAPTURE"
+exit 42
+EOF
+cat >"$fresh_split/scripts/start-local.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 99
+EOF
+chmod 0755 "$fresh_split/scripts/"*.sh
+printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$fresh_split/SOURCE_REVISION"
+(cd "$fresh_split" && find . -type f ! -name SOURCE_FILES.sha256 -print0 \
+  | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
+cat >"$fresh/.env" <<'EOF'
+DOMAIN=turn.example.test
+MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+AGENT_IMAGE=docker.io/dirextalk/agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+SPLIT_SOURCE_REVISION=cccccccccccccccccccccccccccccccccccccccc
+AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+EOF
+chmod 0600 "$fresh/.env"
+printf '%s\n' 203.0.113.91 >"$fresh/stable-public-ip"
+chmod 0600 "$fresh/stable-public-ip"
+cat >"$TEST_TMP/fakebin/stat" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"%u:%a"*) printf '%s\n' '0:600' ;;
+  *) exec /usr/bin/stat "$@" ;;
+esac
+EOF
+chmod 0755 "$TEST_TMP/fakebin/stat"
+capture="$TEST_TMP/provision.capture"
+if PATH="$TEST_TMP/fakebin:$PATH" \
+  DIREXTALK_BOOTSTRAP_BASE="$fresh" \
+  DIREXTALK_TEST_PROVISION_CAPTURE="$capture" \
+  bash "$consumer" >"$TEST_TMP/first-fresh.out" 2>"$TEST_TMP/first-fresh.err"; then
+  echo "first-fresh bootstrap unexpectedly passed the stopping provision probe" >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 42 ] || { cat "$TEST_TMP/first-fresh.err" >&2; exit 1; }
+grep -Fqx 'coturn=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' "$capture"
+grep -Fqx 'turn_external_ip=203.0.113.91' "$capture"
+attestation=$(sed -n 's/^attestation=//p' "$capture")
+[ "$attestation" = "$fresh/image-attestation" ]
+grep -Fqx '# dirextalk-image-attestation-v2' "$attestation"
+grep -Fqx 'image.DIREXTALK_COTURN_IMAGE_IMMUTABLE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' "$attestation"
+
+# The real edge-only bootstrap consumer must converge Caddy without reading,
+# comparing, exporting, or replacing a rotated portal bootstrap credential.
+edge="$TEST_TMP/edge-only"
+edge_split="$edge/deploy/split-agent"
+edge_fakebin="$TEST_TMP/edge-fakebin"
+edge_stack=d-aaaaaaaaaaaaaaaaaaaaaaaaaa
+mkdir -p "$edge_split/scripts" "$edge/p2p" "$edge_fakebin"
+cat >"$edge_split/edge-compose.yaml" <<'EOF'
+services:
+  caddy: {}
+EOF
+cat >"$edge_split/scripts/export-portal-bootstrap.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'export-called\n' >>"$EDGE_CALLS"
+exit 99
+EOF
+chmod 0755 "$edge_split/scripts/export-portal-bootstrap.sh"
+printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$edge_split/SOURCE_REVISION"
+(cd "$edge_split" && find . -type f ! -name SOURCE_FILES.sha256 -print0 \
+  | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
+cat >"$edge/.env" <<'EOF'
+DOMAIN=edge.example.test
+MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+AGENT_IMAGE=docker.io/dirextalk/agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+SPLIT_SOURCE_REVISION=cccccccccccccccccccccccccccccccccccccccc
+AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+EOF
+chmod 0600 "$edge/.env"
+printf '%s\n' 203.0.113.92 >"$edge/stable-public-ip"
+chmod 0600 "$edge/stable-public-ip"
+printf '%s\n' "$edge_stack" >"$edge/split-stack-name"
+touch "$edge/.split-deploy-done"
+cat >"$edge/edge.env" <<EOF
+DIREXTALK_EDGE_STACK_NAME=${edge_stack}-edge
+DIREXTALK_PUBLIC_DOMAIN=edge.example.test
+DIREXTALK_MESSAGE_TLS_MODE=edge-terminated
+DIREXTALK_MESSAGE_PUBLIC_NETWORK=${edge_stack}-message-public
+DIREXTALK_CADDY_IMAGE_IMMUTABLE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+DIREXTALK_CADDY_DATA_VOLUME=${edge_stack}-caddy-data
+DIREXTALK_CADDY_CONFIG_VOLUME=${edge_stack}-caddy-config
+DIREXTALK_CADDYFILE=$edge/Caddyfile
+EOF
+chmod 0400 "$edge/edge.env"
+printf '%s\n' '{"access_token":"rotated","agent_token":"rotated-agent","password":"rotated-password","owner_user_id":"@owner:edge.example.test"}' >"$edge/p2p/bootstrap.json"
+chmod 0400 "$edge/p2p/bootstrap.json"
+edge_bootstrap_sha=$(sha256sum "$edge/p2p/bootstrap.json" | awk '{print $1}')
+cat >"$edge_fakebin/stat" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"%u:%a"*"$edge/.env"|*"%u:%a"*"$edge/stable-public-ip") printf '%s\n' '0:600' ;;
+  *"%u:%a"*"$edge/edge.env") printf '%s\n' '0:400' ;;
+  *) exec /usr/bin/stat "\$@" ;;
+esac
+EOF
+cat >"$edge_fakebin/docker" <<'EOF'
+#!/usr/bin/env bash
+printf 'docker' >>"$EDGE_CALLS"; printf ' %q' "$@" >>"$EDGE_CALLS"; printf '\n' >>"$EDGE_CALLS"
+if [ "${1:-}" = compose ]; then
+  for arg in "$@"; do
+    [ "$arg" = ps ] && { printf '%064d\n' 1; exit 0; }
+  done
+fi
+exit 0
+EOF
+chmod 0755 "$edge_fakebin/stat" "$edge_fakebin/docker"
+edge_calls="$TEST_TMP/edge-only.calls"
+: >"$edge_calls"
+PATH="$edge_fakebin:$PATH" EDGE_CALLS="$edge_calls" DIREXTALK_BOOTSTRAP_BASE="$edge" \
+  bash "$consumer" --reconcile-edge
+[ "$(sha256sum "$edge/p2p/bootstrap.json" | awk '{print $1}')" = "$edge_bootstrap_sha" ]
+if grep -Fq 'export-called' "$edge_calls"; then
+  echo "edge-only reconcile touched portal bootstrap export" >&2
+  exit 1
+fi
+grep -Fq 'compose' "$edge_calls"
+
+missing="$split/scripts/prepare-runner-cgroups.sh"
+mv "$missing" "$missing.absent"
+if DIREXTALK_MESSAGE_SERVER_ROOT="$fixture" \
+  bash "$ROOT/scripts/render/render-split-bundle.sh" "$TEST_TMP/invalid.tar.gz" >/dev/null 2>&1; then
+  echo "split bundle renderer accepted a missing runner-preparation contract" >&2
+  exit 1
+fi
+
+echo "split agent bundle test passed"

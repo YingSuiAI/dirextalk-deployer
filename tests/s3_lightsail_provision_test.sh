@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck disable=SC1090
 source "$ROOT/tests/lib/json_test.sh"
+source "$ROOT/tests/lib/split-release.sh"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -12,6 +13,7 @@ export HOME="$tmp/home"
 export DIREXTALK_HOME="$HOME/.dirextalk"
 export DIREXTALK_WORKDIR="$tmp/work"
 mkdir -p "$HOME" "$DIREXTALK_WORKDIR"
+dirextalk_test_prepare_split_release "$tmp"
 
 fakebin="$tmp/bin"
 mkdir -p "$fakebin"
@@ -68,7 +70,7 @@ printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 cat >/dev/null
-printf 'v1.0.8\t1efa90fd776d355d4cd898bcdb4922267b03d180\t04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b\n'
+printf 'v1.0.11\t720a2bb824b8b7aef9275db060cfe08c6b93b1ab\t17712c2b6ff61fd014c6badd0d0e019f30d54181c168735c61de449e8ad4d790\n'
 EOF
 chmod 700 "$fakebin/ssh"
 export PATH="$fakebin:$PATH"
@@ -99,9 +101,9 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'default_latest' && data.server_release.version === 'latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.updater_release.version === 'v1.0.8' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b'"
+json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'production_split' && data.server_release.version === 'v1.1.2' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE' && data.updater_release.version === 'v1.0.11' && data.updater_release.sha256 === '17712c2b6ff61fd014c6badd0d0e019f30d54181c168735c61de449e8ad4d790'"
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
-grep -q '^#!/usr/bin/env bash' "$userdata_file" || {
+grep -q '^#!/bin/sh' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
   sed -n '1,12p' "$userdata_file" >&2
   exit 1
@@ -128,6 +130,12 @@ grep -q 'lightsail allocate-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail attach-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 if grep -q '^scp-called$\|^scp ' "$CALLS"; then echo "S3 must not SCP updater artifacts" >&2; cat "$CALLS" >&2; exit 1; fi
 grep -q '^ssh .*ubuntu@203\.0\.113\.144.*tar.*reconcile-host\.sh.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q -- '--no-same-owner' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q -- 'chown\\ -R\\ 0:0\\ /var/dirextalk-message-server/deploy' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q -- '/var/dirextalk-message-server/production-ops' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q -- 'recover-production\.sh' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q -- '/etc/systemd/system/dirextalk-split-recovery\.service' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q -- 'systemctl\\ enable\\ dirextalk-split-recovery\.service' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)
@@ -141,6 +149,8 @@ _resume_host_bootstrap 203.0.113.144 "$(res_get key_file)"
 after=$(grep -c '^ssh ' "$CALLS")
 [ "$after" -eq $((before + 1)) ] || { echo "host bootstrap resume must be idempotently retryable" >&2; exit 1; }
 grep -q 'fromPort=49160\\,toPort=49200\\,protocol=udp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q 'fromPort=3478\\,toPort=3478\\,protocol=tcp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q 'fromPort=3478\\,toPort=3478\\,protocol=udp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 if grep -q '^aws ec2 ' "$CALLS"; then
   echo "Lightsail provisioning must not call EC2 APIs" >&2
   cat "$CALLS" >&2

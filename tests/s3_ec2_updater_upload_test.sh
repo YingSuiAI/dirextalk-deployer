@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck disable=SC1091
 source "$ROOT/tests/lib/json_test.sh"
+source "$ROOT/tests/lib/split-release.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -15,6 +16,7 @@ export AWS_DEFAULT_REGION=us-east-1
 export DIREXTALK_CLOUD_PROVIDER=ec2
 export INSTANCE_TYPE=t3.small
 mkdir -p "$HOME" "$DIREXTALK_WORKDIR" "$tmp/bin"
+dirextalk_test_prepare_split_release "$tmp"
 : > "$CALLS"
 
 cat > "$tmp/bin/aws" <<'EOF'
@@ -51,7 +53,7 @@ printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 cat >/dev/null
-printf 'v1.0.8\t1efa90fd776d355d4cd898bcdb4922267b03d180\t04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b\n'
+printf 'v1.0.11\t720a2bb824b8b7aef9275db060cfe08c6b93b1ab\t17712c2b6ff61fd014c6badd0d0e019f30d54181c168735c61de449e8ad4d790\n'
 EOF
 chmod 0700 "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH"
@@ -76,13 +78,18 @@ domain_resolves_to_ip() {
 }
 
 run_phase > "$tmp/s3.out" 2>&1 || { cat "$tmp/s3.out" >&2; exit 1; }
-json_test_check "$STATE_JSON" "data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.server_release.source === 'default_latest' && data.server_release.image_ref === 'dirextalk/message-server:latest' && data.server_release.digest === '' && data.updater_release.version === 'v1.0.8' && data.updater_release.commit === '1efa90fd776d355d4cd898bcdb4922267b03d180' && data.updater_release.sha256 === '04ec14457b59430042d1340bf2b2bd39fd4ecc38d55892ea09b38012a069969b'"
+json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.server_release.source === 'production_split' && data.server_release.version === 'v1.1.2' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE' && data.updater_release.version === 'v1.0.11' && data.updater_release.commit === '720a2bb824b8b7aef9275db060cfe08c6b93b1ab' && data.updater_release.sha256 === '17712c2b6ff61fd014c6badd0d0e019f30d54181c168735c61de449e8ad4d790'"
 if grep -q '^scp-called$\|^scp ' "$CALLS"; then
   echo "S3 must not SCP updater artifacts" >&2
   cat "$CALLS" >&2
   exit 1
 fi
 grep -q '^ssh .*ubuntu@203\.0\.113\.155.*tar.*reconcile-host\.sh.*203\.0\.113\.155' "$CALLS"
+grep -q -- '--no-same-owner' "$CALLS"
+grep -q -- 'chown\\ -R\\ 0:0\\ /var/dirextalk-message-server/deploy' "$CALLS"
+grep -q 'authorize-security-group-ingress .*--protocol tcp --port 3478 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q 'authorize-security-group-ingress .*--protocol udp --port 3478 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q 'authorize-security-group-ingress .*--protocol udp --port 49160-49200 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 address_line=$(grep -n '^aws ec2 describe-addresses' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)

@@ -146,28 +146,17 @@ DIREXTALK_CLOUD_PROVIDER=lightsail \
 bash scripts/orchestrate.sh
 ```
 
-S3 selects `dirextalk/message-server:latest` without querying message-server
-GitHub Releases and persists `server_release.source=default_latest`,
-`version=latest`, and the image reference before provisioning. Each new
-deployment pulls the image currently published under `latest`. S3 also records
+S3 validates the deployer-owned production split release and persists
+`server_release.source=production_split`, the fixed message-server version,
+digest, immutable image reference, and source revision before provisioning.
+The same release pin fixes the Agent and Caddy digests. S3 also records
 the deployer-owned independent updater version, commit, and
-SHA-256 pin. User-data on the verified Ubuntu 22.04 or 24.04 x86_64 host downloads that
+SHA-256 pin. User-data on the verified Ubuntu 24.04+ x86_64 host with systemd
+>= 254 downloads that
 fixed Release asset, verifies the local pin, and atomically installs it; no
 local Go toolchain or updater SCP step is required.
-The updater's fixed Release download and checksum contract is unchanged.
-
-### Fixed legacy d1 adoption
-
-`scripts/adopt-legacy-node.sh` is a separate explicit operation, not normal
-resume. Its dry run accepts only the recorded d1 source directory, Compose
-project `dirextalk-p2p`, runtime v0.15.2, the approved legacy digest, minimal
-healthy response, exact source Compose revision, and root-managed systemd Caddy
-running as user/group `caddy`. A confirmed run copies an updater-owned Compose
-definition and P2P state without pulling or recreating a container, records
-`server_release.source=legacy_adopted`, then enters the existing pinned updater
-bootstrap in systemd-Caddy mode. The Caddy edit exposes only public job URLs;
-validation or reload failure restores the original file and removes the partial
-updater layout.
+The updater's fixed Release download and checksum contract is unchanged. There
+is no standard Compose, mutable-image, or host-adoption production path.
 
 For EC2, replace `DIREXTALK_CLOUD_PROVIDER=lightsail` with `DIREXTALK_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
 
@@ -238,20 +227,21 @@ chat happen after deployment and require no deployer confirmation command.
 
 ## Existing Node Update
 
-Update the running service image without recreating infrastructure or deleting
-data:
+Reconcile the running production split stack without recreating infrastructure
+or deleting data:
 
 ```bash
-DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE=1 DOMAIN=__DOMAIN__ MESSAGE_SERVER_IMAGE=dirextalk/message-server:<debug-tag> bash scripts/update.sh
-DIREXTALK_EXISTING_STATE_ACTION=continue DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
+DOMAIN=__DOMAIN__ bash scripts/update.sh
 ```
 
-`update.sh` SSHes to the recorded cloud instance, runs Docker Compose pull/up,
-reruns `/var/dirextalk-message-server/init-tokens.sh`, clears stale local secret fields, stops only
-the matching service-scoped dirextalk-connect daemon when its `WorkDir` matches
-this service, and marks S4-S7 pending so health, credential sync, local
-MCP/agent wiring, and final verification run again. It does not remove Docker
-volumes.
+`update.sh` stages the current production operation helpers, enters updater
+maintenance mode, and invokes the canonical receipt-bound split reconcile
+wrapper. It preserves credentials, application volumes, local bridge state,
+and runtime evidence. The reconcile path repairs the edge, then invokes the
+same receipt-bound recovery used after reboot. Agent version changes remain
+client-initiated through the pinned updater and its canonical three-argument
+update wrapper. See `verification-recovery.md` for the three-state result and
+postcondition gates.
 
 ## Existing Node App Data Reset
 
@@ -263,9 +253,10 @@ DIREXTALK_RESET_APP_DATA_CONFIRM=1 DOMAIN=__DOMAIN__ bash scripts/reset-app-data
 DIREXTALK_EXISTING_STATE_ACTION=continue DOMAIN=__DOMAIN__ bash scripts/orchestrate.sh
 ```
 
-`reset-app-data.sh` removes only `postgres-data`, `message-config`, and
-`message-data`. It must not remove `caddy-data` or `caddy-config`; losing those
-volumes can trigger certificate reissuance and Let's Encrypt rate limits. It
+`reset-app-data.sh` verifies the protected edge and split receipts, removes the
+exact recorded edge container, and calls canonical `cleanup-local.sh --purge`
+for all message-server and Agent application data. It preserves Caddy data and
+config volumes; losing those volumes can trigger certificate reissuance and Let's Encrypt rate limits. It
 stops only the matching service-scoped dirextalk-connect daemon when its `WorkDir`
 matches this service. After reset, treat old app users, rooms, messages,
 initialization code, access token, agent token, and agent room as stale until
@@ -282,7 +273,7 @@ orchestration script may time out first.
 
 ```bash
 ssh -i <keyfile> ubuntu@<public-ip> \
-  'sudo docker logs p2p-caddy-1 --tail 20 2>&1 | grep -i "rateLimit\|retry after\|429"'
+  'stack=$(sudo sed -n "s/^stack_name=//p" /var/dirextalk-message-server/split/.manifest); sudo docker compose --project-name "${stack}-edge" --env-file /var/dirextalk-message-server/edge.env -f /var/dirextalk-message-server/deploy/split-agent/edge-compose.yaml -f /var/dirextalk-message-server/production-ops/edge-compose.override.yaml logs --tail=20 caddy 2>&1 | grep -i "rateLimit\|retry after\|429"'
 ```
 
 If rate-limited, the log shows `retry after <timestamp> UTC`.
@@ -292,7 +283,7 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
 1. **Wait for rate limit to expire** — Caddy retries in the background.
    Check progress periodically:
    ```bash
-   curl -skI https://<DOMAIN>/healthz  # returns 200 when cert is ready
+   curl -fsS https://<DOMAIN>/_p2p/health  # returns successfully when TLS and the server are ready
    ```
    Once the endpoint returns 200, re-run orchestrate.sh to complete:
    ```bash

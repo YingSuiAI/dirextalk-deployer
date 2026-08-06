@@ -96,7 +96,7 @@ done
 body=""
 code=200
 case "$url" in
-  https://s7-mcp.example.test/healthz)
+  https://s7-mcp.example.test/_p2p/health)
     body='{"status":"ok"}'
     ;;
   https://s7-mcp.example.test/_matrix/client/versions)

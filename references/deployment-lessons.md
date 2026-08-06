@@ -1,7 +1,7 @@
-# Deployment Lessons From im2.jkmf.top
+# Production Deployment Lessons
 
-This note captures operational lessons from the production deployment of
-`im2.jkmf.top` on AWS from a Windows workstation. Keep it short and practical:
+This note captures reusable lessons from deploying `<domain>` on AWS from a
+Windows workstation. Keep it short and practical:
 symptom, cause, and what the next operator or agent should do.
 
 ## Message Server Bootstrap Initialization
@@ -15,22 +15,22 @@ S5_INIT_TOKENS failed: read bootstrap.json timed out
 
 Cause:
 
-Current Dirextalk message-server builds honor
-`P2P_PORTAL_CREDENTIALS_FILE=/var/dirextalk-message-server/p2p/bootstrap.json`.
-They write the login `password`, `agent_token`, owner metadata, and
-`agent_room_id` there on startup and after portal session changes.
+The production application is the protected canonical split project. Its
+message-server atomically creates complete Portal/Agent bootstrap credentials,
+including the real Agent Matrix room, inside the owned `message_server_data`
+volume. The deployer does not repair or synthesize that server-owned state.
 
 Fix now in ops:
 
-- `docker-compose.yml` bind-mounts only the container
-  `/var/dirextalk-message-server/p2p` subtree to the same host path, so the
-  bootstrap file is directly readable from EC2 without exposing the whole data
-  volume to Caddy.
-- Cloud-side `scripts/cloud-init/init-tokens.sh` waits for message-server
-  `/_p2p/health` and calls `portal.bootstrap`.
-- Local S5 reads the file with `ssh ... sudo cat /var/dirextalk-message-server/p2p/bootstrap.json`,
-  normalizes it into local `outputs.json`, and stores `password`/`agent_token`
-  in state.
+- `bootstrap-production.sh` provisions and starts the canonical split stack
+  from `/var/dirextalk-message-server/deploy/split-agent/compose.yaml` with
+  protected `/var/dirextalk-message-server/split/.env`.
+- Canonical `deploy/split-agent/scripts/export-portal-bootstrap.sh` verifies
+  the running container belongs to that immutable stack and copies its
+  complete bootstrap file to a fresh mode-0400 host path.
+- Local S5 reads the sealed host export at
+  `/var/dirextalk-message-server/p2p/bootstrap.json`, normalizes it into local
+  `outputs.json`, and stores the current credentials in state.
 
 Portal owner discovery is served by message-server's dynamic
 `/.well-known/portal/owner.json` handler. Do not reintroduce deployer-written
@@ -70,8 +70,8 @@ diagnostic, fix the key ACL instead of disabling SSH checks.
 Symptom:
 
 - `state.json` stays at `S4_BOOTSTRAP_STACK=polling`.
-- `https://<domain>/healthz` returns `{"status":"ok"}` from another shell.
-- A leftover local `curl -skf https://<domain>/healthz` or SSH child process is
+- `https://<domain>/_p2p/health` returns `{"status":"ok"}` from another shell.
+- A leftover local `curl -skf https://<domain>/_p2p/health` or SSH child process is
   still running after the agent/operator interrupted the deployment turn.
 
 Cause:
@@ -167,7 +167,7 @@ Symptom:
 
 - S4_BOOTSTRAP_STACK health check times out after 5-10 minutes.
 - SSH reveals all containers are up and healthy (caddy, message-server, postgres, coturn).
-- `docker logs p2p-caddy-1` shows repeated errors:
+- the protected edge Compose `caddy` logs show repeated errors:
 
   ```
   HTTP 429 urn:ietf:params:acme:error:rateLimited - too many certificates (5)
@@ -177,33 +177,30 @@ Symptom:
 
 Cause: Let's Encrypt allows at most 5 certificates per domain per 168 hours (7 days). Redeploying the same domain repeatedly within a week exhausts this quota.
 
-Workaround (use when the health check is the only blocker and the rate limit is temporary):
+Recovery:
 
-1. **Add `tls internal` to the Caddyfile** so Caddy uses its built-in CA (self-signed). The directive goes on the line after the site block opener.
-
-2. Write the modified Caddyfile to the remote host. Use base64+SSH to avoid shell escaping issues:
+1. Confirm the failure in the protected edge project; do not bypass its
+   canonical Compose plus root-owned override:
    ```bash
-   echo '<base64-encoded-caddyfile>' | base64 -d | sudo tee /var/dirextalk-message-server/Caddyfile
-   sudo docker compose -f /var/dirextalk-message-server/docker-compose.yml restart caddy
+   sudo docker compose \
+     --env-file /var/dirextalk-message-server/edge.env \
+     -f /var/dirextalk-message-server/deploy/split-agent/edge-compose.yaml \
+     -f /var/dirextalk-message-server/production-ops/edge-compose.override.yaml \
+     logs --tail=120 caddy
    ```
-
-3. Wait 5 seconds, then verify HTTPS works:
-   ```bash
-   curl -sk --resolve <domain>:443:<EIP> https://<domain>/healthz
-   # Expected: {"status":"ok"}
-   ```
-
-4. Resume orchestrate.sh with:
-   ```bash
-   DIREXTALK_EXISTING_STATE_ACTION=continue bash scripts/orchestrate.sh
-   ```
-
-5. **After deployment completes**, restore the original Caddyfile (remove `tls internal`) and restart Caddy. Caddy will retry the production Let's Encrypt cert when the rate limit resets. The self-signed cert is a temporary bridge; HTTPS will show a browser warning until the production cert is obtained.
+2. Wait for the CA retry time, or choose a different permanent test domain.
+   The production contract does not replace public TLS with `tls internal`.
+3. Resume with
+   `DIREXTALK_EXISTING_STATE_ACTION=continue bash scripts/orchestrate.sh`.
+   The root-owned production bootstrap re-renders Caddy from its protected
+   source and reuses the named Caddy data/config volumes.
+4. Verify `https://<domain>/_p2p/health`; do not use `-k` as production acceptance.
 
 Prevention:
 
 - Use a separate subdomain per deployment cycle (e.g. `__DOMAIN_A__`, `__DOMAIN_B__`) when doing repeated test deployments within 7 days.
-- Preserve the old `caddy-data` Docker volume on redeploy to carry forward the existing certificate.
+- Preserve the edge project's named Caddy data/config volumes; recovery and
+  reconcile paths validate their ownership before reuse.
 
 ## Route53 Duplicate Zone Detection
 

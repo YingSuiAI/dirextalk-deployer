@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# update.sh - update an existing EC2 node without recreating infra or deleting data.
+# update.sh - reconcile an existing production split node without deleting data.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -11,18 +11,12 @@ source "$HERE/lib/git-bash.sh"
 source "$HERE/lib/operation_report.sh"
 # shellcheck disable=SC1090
 source "$HERE/lib/ops.sh"
-warn() { printf '%s\n' "$*" >&2; }
-# shellcheck disable=SC1090
-source "$HERE/lib/server-release.sh"
-
 dirextalk_require_git_bash_on_windows || exit 1
 
 STATE_JSON=$(ops_state_path "${1:-}")
 ops_require_state "$STATE_JSON"
 
-server_release_validate_override
-
-remote_command=$(ops_update_remote_command "${MESSAGE_SERVER_IMAGE:-}")
+remote_command=$(ops_update_remote_command)
 ops_ssh "$STATE_JSON" "$remote_command"
 report=$(ops_write_report update update_remote_restart_complete "$STATE_JSON")
 

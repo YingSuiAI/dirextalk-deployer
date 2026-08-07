@@ -84,11 +84,14 @@ _resume_host_bootstrap 203.0.113.44 "$tmp/key.pem"
 [ "$(grep -c '^scp$' "$CALLS")" = 0 ]
 [ "$(grep -c '^ssh$' "$CALLS")" = 1 ]
 grep -F -q 'tar --no-same-owner -xzf -' "$REMOTE_COMMAND"
+grep -F -q 'bootstrap-host.sh" --record-stable-ip' "$REMOTE_COMMAND"
 grep -F -q 'apply-host-integration.sh' "$REMOTE_COMMAND"
+grep -F -q 'cloud-init status --wait' "$REMOTE_COMMAND"
+grep -F -q 'cloud-init status --wait >/dev/null 2>&1 || :' "$REMOTE_COMMAND"
 grep -F -q "/var/dirextalk-message-server '$recorded_old_split_revision'" "$REMOTE_COMMAND"
 grep -F -q "'203.0.113.44'" "$REMOTE_COMMAND"
 case "$(cat "$REMOTE_COMMAND")" in
-  *'sudo mktemp -d '*'sudo tar --no-same-owner -xzf -'*'apply-host-integration.sh'*) ;;
+  *'sudo mktemp -d '*'sudo tar --no-same-owner -xzf -'*'bootstrap-host.sh" --record-stable-ip'*'apply-host-integration.sh'*'cloud-init status --wait'*'printf '*) ;;
   *) echo 'split authorization must precede every canonical runtime/install mutation' >&2; exit 1 ;;
 esac
 [ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ]

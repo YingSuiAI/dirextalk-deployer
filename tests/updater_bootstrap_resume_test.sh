@@ -55,6 +55,30 @@ chmod 0755 "$tmp/bin/sha256sum" "$tmp/bin/systemctl"
 # shellcheck disable=SC1090
 source "$ROOT/scripts/updater/release.env"
 export UPDATER_PIN_SHA256 BOOTSTRAP_CALLS="$calls" BOOTSTRAP_BASE="$base"
+PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" \
+  bash "$ROOT/scripts/updater/bootstrap-host.sh" --record-stable-ip 203.0.113.20
+[ ! -s "$calls" ]
+grep -Fxq 203.0.113.20 "$base/stable-public-ip"
+[ "$(stat -c '%u:%g:%a' "$base/stable-public-ip")" = "$(id -u):$(id -g):600" ]
+if PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" \
+    bash "$ROOT/scripts/updater/bootstrap-host.sh" --record-stable-ip 203.0.113.99 >/dev/null 2>&1; then
+  echo 'stable IP recorder accepted a changed public IP' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 3 ]
+chmod 0644 "$base/stable-public-ip"
+if PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" \
+    bash "$ROOT/scripts/updater/bootstrap-host.sh" --record-stable-ip 203.0.113.20 >/dev/null 2>&1; then
+  echo 'stable IP recorder accepted an unsafe receipt' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 1 ]
+chmod 0600 "$base/stable-public-ip"
+
 PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRAP_TIMEOUT=2 \
   bash "$ROOT/scripts/updater/bootstrap-host.sh" 203.0.113.20
 
@@ -98,6 +122,17 @@ reconcile_line=$(grep -n '^reconcile$' "$calls" | tail -n 1 | cut -d: -f1)
   exit 1
 }
 grep -Fxq 203.0.113.20 "$base/stable-public-ip"
+
+exec 8>"$root/run/lock/dirextalk-bootstrap.lock"
+flock 8
+PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRAP_LOCK_FD=8 \
+  DIREXTALK_BOOTSTRAP_TIMEOUT=2 bash "$ROOT/scripts/updater/bootstrap-host.sh" 203.0.113.20
+if flock -n "$root/run/lock/dirextalk-bootstrap.lock" true; then
+  echo 'nested bootstrap released its inherited parent lock' >&2
+  exit 1
+fi
+flock -u 8
+exec 8>&-
 
 if RECONCILE_STATUS=3 PATH="$tmp/bin:$PATH" DIREXTALK_BOOTSTRAP_ROOT="$root" DIREXTALK_BOOTSTRAP_TIMEOUT=2 \
     bash "$ROOT/scripts/updater/bootstrap-host.sh" 203.0.113.20 >/dev/null 2>&1; then

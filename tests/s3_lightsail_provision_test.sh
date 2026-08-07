@@ -144,6 +144,8 @@ grep -q 'lightsail allocate-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail attach-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 if grep -q '^scp-called$\|^scp ' "$CALLS"; then echo "S3 must not SCP updater artifacts" >&2; cat "$CALLS" >&2; exit 1; fi
 grep -q '^ssh .*ubuntu@203\.0\.113\.144.*tar.*apply-host-integration\.sh.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q '^ssh .*bootstrap-host\.sh.*--record-stable-ip.*203\.0\.113\.144.*apply-host-integration\.sh' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q '^ssh .*apply-host-integration\.sh.*cloud-init.*status.*--wait.*printf' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q -- '--no-same-owner' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)

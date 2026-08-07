@@ -7,11 +7,19 @@ base="$root/var/dirextalk-message-server"
 timeout=${DIREXTALK_BOOTSTRAP_TIMEOUT:-900}
 requested_stable_ip=${1:-}
 preflight_only=false
-if [ "$requested_stable_ip" = --preflight ]; then
-  preflight_only=true
-  requested_stable_ip=${2:-}
-  [ "$#" -eq 2 ] || { echo "usage: bootstrap-host.sh --preflight <stable-public-ip>" >&2; exit 1; }
-fi
+record_stable_ip_only=false
+case "$requested_stable_ip" in
+  --preflight)
+    preflight_only=true
+    requested_stable_ip=${2:-}
+    [ "$#" -eq 2 ] || { echo "usage: bootstrap-host.sh --preflight <stable-public-ip>" >&2; exit 1; }
+    ;;
+  --record-stable-ip)
+    record_stable_ip_only=true
+    requested_stable_ip=${2:-}
+    [ "$#" -eq 2 ] || { echo "usage: bootstrap-host.sh --record-stable-ip <stable-public-ip>" >&2; exit 1; }
+    ;;
+esac
 lock_dir="$root/run/lock"
 lock_file="$lock_dir/dirextalk-bootstrap.lock"
 stage_file="$base/.bootstrap-stage"
@@ -55,6 +63,38 @@ supported_ubuntu_version() {
   major=$((10#${BASH_REMATCH[1]}))
   minor=$((10#${BASH_REMATCH[2]}))
   [ "$major" -gt 24 ] || { [ "$major" -eq 24 ] && [ "$minor" -ge 4 ]; }
+}
+
+record_stable_public_ip() {
+  local stable_ip=$1 receipt="$base/stable-public-ip" temporary owner base_identity
+  owner="$(id -u):$(id -g)"
+  mkdir -p "$base" || return 1
+  [ -d "$base" ] && [ ! -L "$base" ] || return 1
+  [ "$(stat -c '%u:%g' -- "$base")" = "$owner" ] \
+    || { echo "stable public IP receipt directory owner is invalid" >&2; return 1; }
+  base_identity=$(stat -c '%d:%i:%u:%g:%a' -- "$base") || return 1
+  if [ -e "$receipt" ] || [ -L "$receipt" ]; then
+    [ -f "$receipt" ] && [ ! -L "$receipt" ] \
+      && [ "$(stat -c '%u:%g:%a' -- "$receipt")" = "$owner:600" ] \
+      || { echo "recorded stable public IP receipt is invalid" >&2; return 1; }
+    [ "$(cat -- "$receipt")" = "$stable_ip" ] \
+      || { echo "requested stable public IP differs from the protected receipt" >&2; return 3; }
+    return 0
+  fi
+  temporary=$(mktemp "$base/.stable-public-ip.XXXXXX") || return 1
+  if ! printf '%s\n' "$stable_ip" >"$temporary" \
+      || ! chmod 0600 "$temporary" \
+      || ! sync -f "$temporary" \
+      || [ "$(stat -c '%d:%i:%u:%g:%a' -- "$base")" != "$base_identity" ] \
+      || ! mv -f "$temporary" "$receipt"; then
+    rm -f "$temporary" 2>/dev/null || true
+    return 1
+  fi
+  sync -f "$base" || return 1
+  [ "$(stat -c '%d:%i:%u:%g:%a' -- "$base")" = "$base_identity" ] \
+    && [ -f "$receipt" ] && [ ! -L "$receipt" ] \
+    && [ "$(stat -c '%u:%g:%a' -- "$receipt")" = "$owner:600" ] \
+    && [ "$(cat -- "$receipt")" = "$stable_ip" ]
 }
 
 read_unique_value() {
@@ -121,28 +161,32 @@ ready() {
     && [ -f "$base/updater/release.env" ]
 }
 
-mkdir -p "$lock_dir"
-exec 9>"$lock_file"
-flock 9
+bootstrap_lock_inherited=false
+if [ -n "${DIREXTALK_BOOTSTRAP_LOCK_FD:-}" ]; then
+  printf '%s\n' "$DIREXTALK_BOOTSTRAP_LOCK_FD" | grep -Eq '^[0-9]+$' \
+    || { echo "inherited bootstrap lock descriptor is invalid" >&2; exit 1; }
+  [ -e "/proc/self/fd/$DIREXTALK_BOOTSTRAP_LOCK_FD" ] \
+    || { echo "inherited bootstrap lock descriptor is unavailable" >&2; exit 1; }
+  [ "$(readlink -f "/proc/self/fd/$DIREXTALK_BOOTSTRAP_LOCK_FD")" = "$(readlink -f "$lock_file")" ] \
+    || { echo "inherited bootstrap lock descriptor targets the wrong file" >&2; exit 1; }
+  eval "exec 9>&$DIREXTALK_BOOTSTRAP_LOCK_FD"
+  flock -n 9 || { echo "inherited bootstrap lock is not held" >&2; exit 1; }
+  bootstrap_lock_inherited=true
+else
+  mkdir -p "$lock_dir"
+  exec 9>"$lock_file"
+  flock 9
+fi
 
 write_bootstrap_stage lock
 write_bootstrap_stage prerequisites
 if [ -n "$requested_stable_ip" ]; then
-  mkdir -p "$base"
-  if [ -e "$base/stable-public-ip" ] || [ -L "$base/stable-public-ip" ]; then
-    [ -f "$base/stable-public-ip" ] && [ ! -L "$base/stable-public-ip" ] \
-      && [ "$(stat -c '%u:%a' "$base/stable-public-ip")" = "$(id -u):600" ] \
-      || { echo "recorded stable public IP receipt is invalid" >&2; exit 1; }
-    [ "$(cat "$base/stable-public-ip")" = "$requested_stable_ip" ] \
-      || { echo "requested stable public IP differs from the protected receipt" >&2; exit 3; }
-  else
-    stable_tmp=$(mktemp "$base/.stable-public-ip.XXXXXX")
-    printf '%s\n' "$requested_stable_ip" > "$stable_tmp"
-    chmod 0600 "$stable_tmp"
-    mv -f "$stable_tmp" "$base/stable-public-ip"
-  fi
+  record_stable_public_ip "$requested_stable_ip"
 fi
-flock -u 9
+if [ "$bootstrap_lock_inherited" = false ]; then
+  flock -u 9
+fi
+[ "$record_stable_ip_only" = false ] || exit 0
 
 deadline=$(($(date +%s) + timeout))
 until ready; do
@@ -153,7 +197,9 @@ until ready; do
   sleep 5
 done
 
-flock 9
+if [ "$bootstrap_lock_inherited" = false ]; then
+  flock 9
+fi
 ready || { echo "deployment prerequisites disappeared while waiting for bootstrap lock" >&2; exit 1; }
 
 stable_ip=$(cat "$base/stable-public-ip")

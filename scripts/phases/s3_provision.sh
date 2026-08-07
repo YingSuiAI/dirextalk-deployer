@@ -594,13 +594,13 @@ _resume_host_bootstrap() {
     warn "Failed to build the updater integration bundle."
     return 1
   fi
+  identity=$(printf '%s\t%s\t%s' "$UPDATER_PIN_VERSION" "$UPDATER_PIN_COMMIT" "$UPDATER_PIN_SHA256")
   case "$ssh_user" in
     ubuntu)
-      remote_command="stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'sudo rm -rf \"\$stage\"' EXIT && sudo chmod 0700 \"\$stage\" && sudo tar --no-same-owner -xzf - -C \"\$stage\" && sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server '$recorded_split_revision' '$public_ip'"
+      remote_command="stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'sudo rm -rf \"\$stage\"' EXIT && sudo chmod 0700 \"\$stage\" && sudo tar --no-same-owner -xzf - -C \"\$stage\" && sudo bash \"\$stage/updater/bootstrap-host.sh\" --record-stable-ip '$public_ip' && sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server '$recorded_split_revision' '$public_ip' && { if sudo test -x /usr/bin/cloud-init; then sudo cloud-init status --wait >/dev/null 2>&1 || :; fi; } && printf '%s\\t%s\\t%s\\n' '$UPDATER_PIN_VERSION' '$UPDATER_PIN_COMMIT' '$UPDATER_PIN_SHA256'"
       ;;
     *) rm -f "$integration_bundle" "$split_bundle"; warn "Host bootstrap requires the supported Ubuntu SSH user."; return 1 ;;
   esac
-  identity=$(printf '%s\t%s\t%s' "$UPDATER_PIN_VERSION" "$UPDATER_PIN_COMMIT" "$UPDATER_PIN_SHA256")
   log "Synchronizing the pinned updater integration and resuming bootstrap through the stable public IP before DNS gating..."
   attempt=1
   while [ "$attempt" -le "$attempts" ]; do

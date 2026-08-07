@@ -75,9 +75,19 @@ DIREXTALK_CADDY_IMAGE_IMMUTABLE=$caddy_image
 DIREXTALK_COTURN_IMAGE_IMMUTABLE=$coturn_image
 EOF
 chmod 0400 "$stage/cloud-init/split/release.env"
-for file in bootstrap-host.sh install.sh set-desired-state.sh; do
+for file in install.sh set-desired-state.sh; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$stage/updater/$file"
 done
+cat >"$stage/updater/bootstrap-host.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ -n "${DIREXTALK_BOOTSTRAP_LOCK_FD:-}" ]
+[ -e "/proc/self/fd/$DIREXTALK_BOOTSTRAP_LOCK_FD" ]
+[ "$DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION" = "$EXPECTED_TARGET" ]
+flock -n "$DIREXTALK_BOOTSTRAP_LOCK_FD"
+printf 'fresh-bootstrap\n' >>"$FRESH_CALLS"
+touch "$FRESH_BASE/.split-deploy-done"
+EOF
 cat >"$stage/updater/reconcile-host.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -121,10 +131,43 @@ SPLIT_SOURCE_REVISION=$old
 AGENT_SOURCE_REVISION=$agent_revision
 EOF
   printf '203.0.113.44\n' >"$base/stable-public-ip"
+  touch "$base/.split-deploy-done"
+  chmod 0600 "$base/.env" "$base/stable-public-ip"
+}
+
+write_fresh() {
+  base=$1
+  rm -rf "$base"
+  mkdir -p "$base/updater"
+  printf 'user-data-updater\n' >"$base/updater/sentinel"
+  cat >"$base/.env" <<EOF
+DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
+MESSAGE_SERVER_IMAGE=$message_image
+AGENT_IMAGE=$agent_image
+CADDY_IMAGE=$caddy_image
+COTURN_IMAGE=$coturn_image
+MESSAGE_SOURCE_REVISION=$message_revision
+SPLIT_SOURCE_REVISION=$old
+AGENT_SOURCE_REVISION=$agent_revision
+EOF
+  printf '203.0.113.44\n' >"$base/stable-public-ip"
   chmod 0600 "$base/.env" "$base/stable-public-ip"
 }
 
 tree_digest() { find "$1" -type f ! -name .split-source-revision.lock -print0 | LC_ALL=C sort -z | xargs -0 sha256sum; }
+fresh_base="$tmp/fresh"
+fresh_calls="$tmp/fresh.calls"
+: >"$fresh_calls"
+write_fresh "$fresh_base"
+FRESH_BASE="$fresh_base" FRESH_CALLS="$fresh_calls" EXPECTED_OLD="$old" EXPECTED_TARGET="$target" \
+  PATH="$tmp/bin:$PATH" DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
+  bash "$apply" "$stage" "$bundle" "$fresh_base" "$old" 203.0.113.44 >/dev/null
+grep -Fxq fresh-bootstrap "$fresh_calls"
+grep -Fxq "SPLIT_SOURCE_REVISION=$target" "$fresh_base/.env"
+[ -f "$fresh_base/.split-deploy-done" ]
+[ -f "$fresh_base/deploy/split-agent/current-file" ]
+[ ! -e "$fresh_base/updater/sentinel" ]
+
 base="$tmp/live"
 write_live "$base"
 before=$(tree_digest "$base")

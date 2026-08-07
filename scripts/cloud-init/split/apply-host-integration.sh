@@ -17,6 +17,7 @@ split_bundle=$2
 base=$3
 expected_old=$4
 expected_stable_ip=$5
+host_root=${DIREXTALK_HOST_INTEGRATION_ROOT:-}
 
 [ -d "$stage" ] && [ ! -L "$stage" ] \
   && [ "$(stat -c '%u:%g:%a' -- "$stage")" = 0:0:700 ] \
@@ -35,6 +36,16 @@ else
   status=$?
   case "$status" in 3) exit 3 ;; *) exit 1 ;; esac
 fi
+
+# Fence the complete live-tree handoff from the cloud-init bootstrap waiter.
+# Nested bootstrap calls inherit this exact open lock description so the same
+# transaction can make progress without allowing a concurrent first boot.
+bootstrap_lock_dir="$host_root/run/lock"
+bootstrap_lock_file="$bootstrap_lock_dir/dirextalk-bootstrap.lock"
+install -d -o root -g root -m 0755 "$bootstrap_lock_dir" \
+  || die 'could not prepare the host bootstrap lock directory'
+exec 8>"$bootstrap_lock_file" || die 'could not open the host bootstrap lock'
+flock 8 || die 'could not acquire the host bootstrap lock'
 
 [ "$(stat -c '%d:%i:%u:%g:%a' -- "$stage")" = "$stage_identity" ] \
   || die 'transport staging identity changed after authorization'
@@ -69,6 +80,10 @@ while IFS= read -r entry; do
 done <<<"$archive_list"
 
 [ -d "$base" ] && [ ! -L "$base" ] || die 'deployment directory is unavailable'
+fresh_host=false
+if [ ! -e "$base/.split-deploy-done" ] && [ ! -L "$base/.split-deploy-done" ]; then
+  fresh_host=true
+fi
 transaction=$(mktemp -d "$base/.host-integration.XXXXXX") || die 'could not create host integration transaction'
 chmod 0700 "$transaction"
 chown 0:0 "$transaction"
@@ -85,7 +100,6 @@ service_existed=false
 service_was_enabled=false
 forward_only=false
 committed=false
-host_root=${DIREXTALK_HOST_INTEGRATION_ROOT:-}
 recovery_service=$host_root/etc/systemd/system/dirextalk-split-recovery.service
 
 rollback() {
@@ -230,7 +244,18 @@ systemctl enable dirextalk-split-recovery.service >/dev/null
 # failures preserve the authorized candidate and the old revision receipt so
 # the same update can converge forward on retry.
 forward_only=true
-if DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION="$target_revision" \
+if [ "$fresh_host" = true ]; then
+  if DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION="$target_revision" \
+      DIREXTALK_BOOTSTRAP_LOCK_FD=8 \
+      bash "$base/updater/bootstrap-host.sh" "$expected_stable_ip"; then
+    [ -f "$base/.split-deploy-done" ] && [ ! -L "$base/.split-deploy-done" ] \
+      || die 'fresh host bootstrap did not commit the split deployment marker'
+  else
+    status=$?
+    case "$status" in 3) exit 3 ;; *) exit 1 ;; esac
+  fi
+elif DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION="$target_revision" \
+    DIREXTALK_BOOTSTRAP_LOCK_FD=8 \
     bash "$base/updater/reconcile-host.sh" "$stage/updater" "$base" "$expected_stable_ip"; then
   :
 else

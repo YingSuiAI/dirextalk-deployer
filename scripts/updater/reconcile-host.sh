@@ -189,8 +189,8 @@ except (OSError, UnicodeError, json.JSONDecodeError):
     raise SystemExit(1)
 if not isinstance(value, dict) or value.get("schema_version") != 8 or value.get("desired_state") != sys.argv[2]:
     raise SystemExit(1)
-jobs = value.get("jobs")
-idempotency = value.get("idempotency")
+jobs = value.get("jobs", {})
+idempotency = value.get("idempotency", {})
 if not isinstance(jobs, dict) or jobs or not isinstance(idempotency, dict) or idempotency:
     raise SystemExit(1)
 PY

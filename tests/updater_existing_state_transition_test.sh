@@ -72,6 +72,7 @@ printf 'bootstrap\n' >>"$TEST_CALLS"
   || printf 'fresh-reset\n' >>"$TEST_CALLS"
 cp "$TEST_TARGET" "$TEST_ROOT/usr/local/bin/dirextalk-updater"
 chmod 0755 "$TEST_ROOT/usr/local/bin/dirextalk-updater"
+: >"$TEST_ROOT/target-updater-installed"
 EOF
   cat >"$TEST_SOURCE/release.env" <<EOF
 UPDATER_PIN_VERSION=v2.0.0
@@ -129,6 +130,32 @@ PY
   for _ in 1 2 3 4 5; do [ -S "$TEST_ROOT/run/dirextalk-updater/http.sock" ] && return 0; sleep 0.1; done
   return 1
 }
+rewrite_target_runtime() {
+  [ -e "$TEST_ROOT/target-updater-installed" ] || return 0
+  runtime="$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+  case "$(cat "$TEST_SCENARIO")" in
+    maps-missing)
+      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"}}' >"$runtime"
+      ;;
+    maps-empty)
+      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{}}' >"$runtime"
+      ;;
+    jobs-nonempty)
+      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{"job-1":{}},"idempotency":{}}' >"$runtime"
+      ;;
+    idempotency-nonempty)
+      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{"request-1":{}}}' >"$runtime"
+      ;;
+    jobs-wrong-type)
+      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":[],"idempotency":{}}' >"$runtime"
+      ;;
+    idempotency-wrong-type)
+      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":null}' >"$runtime"
+      ;;
+    *) return 0 ;;
+  esac
+  chmod 0600 "$runtime"
+}
 stop_socket() {
   if [ "$(cat "$TEST_SCENARIO")" = stop-failure-once ]; then
     printf 'idle\n' >"$TEST_SCENARIO"
@@ -143,6 +170,7 @@ case "$command" in
   stop) stop_socket; printf 'inactive\n' >"$TEST_SERVICE_STATE" ;;
   start)
     [ "$(cat "$TEST_SCENARIO")" != startup-failure ] || exit 17
+    rewrite_target_runtime
     start_socket; printf 'active\n' >"$TEST_SERVICE_STATE"
     ;;
   enable|daemon-reload) ;;
@@ -235,6 +263,28 @@ assert x["schema_version"] == 8 and x["desired_state"] == "running"
 PY
 [ ! -e "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ]
 [ "$(sha256sum "$TEST_ROOT/usr/local/bin/dirextalk-updater" | awk '{print $1}')" = "$TEST_TARGET_SHA" ]
+
+for idle_maps_scenario in maps-missing maps-empty; do
+  make_fixture "$idle_maps_scenario"
+  printf '%s\n' "$idle_maps_scenario" >"$TEST_SCENARIO"
+  run_reconcile >/dev/null
+  grep -Fq '"desired_state":"running"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+done
+
+for invalid_maps_scenario in \
+  jobs-nonempty idempotency-nonempty jobs-wrong-type idempotency-wrong-type; do
+  make_fixture "$invalid_maps_scenario"
+  printf '%s\n' "$invalid_maps_scenario" >"$TEST_SCENARIO"
+  if run_reconcile >"$tmp/$invalid_maps_scenario.out" 2>"$tmp/$invalid_maps_scenario.err"; then
+    echo "invalid idle runtime maps were accepted for $invalid_maps_scenario" >&2
+    exit 1
+  else
+    status=$?
+  fi
+  [ "$status" -eq 1 ]
+  grep -Fq 'new updater did not retain idle schema 8 maintenance state' \
+    "$tmp/$invalid_maps_scenario.err"
+done
 
 make_fixture active
 printf 'active-job\n' >"$TEST_SCENARIO"

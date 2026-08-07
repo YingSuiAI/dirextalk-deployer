@@ -13,9 +13,9 @@ source "$S7_DIR/../lib/local-paths.sh"
 
 run_phase() {
   phase_set S7_VERIFY_E2E in_progress "running end-to-end acceptance"
-  local domain password
+  local domain access_token
   domain=$(state_get domain)
-  password=$(state_get password)
+  access_token=$(state_get access_token)
   local fails=0
 
   _check "message-server health" "https://$domain/_p2p/health"                   "" 200 || fails=$((fails+1))
@@ -23,7 +23,7 @@ run_phase() {
   _check_matrix_server_wellknown "$domain" || fails=$((fails+1))
   _check_owner_cors "$domain" || fails=$((fails+1))
   _check_mcp_agent_auth || fails=$((fails+1))
-  _check_turn "$domain" "$password" || fails=$((fails+1))
+  _check_turn "$domain" "$access_token" || fails=$((fails+1))
 
   if [ "$fails" -eq 0 ]; then
     phase_set S7_VERIFY_E2E done "all green"
@@ -41,22 +41,6 @@ _check_mcp_agent_auth() {
   fi
   warn "  ✗ HTTP MCP dirextalk_messages_list (agent token)"
   return 1
-}
-
-_p2p_access_token() {
-  local domain=$1 password=$2 at payload_file payload_arg
-  local args=()
-  while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
-  payload_file=$(dirextalk_private_temp_file "${TMPDIR:-/tmp}" portal-auth) || return 1
-  if ! json_build portal-auth "$password" > "$payload_file"; then
-    rm -f "$payload_file"
-    return 1
-  fi
-  payload_arg=$(dirextalk_native_tool_at_path "$payload_file") || { rm -f "$payload_file"; return 1; }
-  at=$(curl -sk "${args[@]}" -X POST "https://$domain/_p2p/command" -H 'Content-Type: application/json' \
-        --data-binary "$payload_arg" 2>/dev/null | json_stdin_get access_token)
-  rm -f "$payload_file"
-  printf '%s' "$at"
 }
 
 curl_resolve_args() {
@@ -118,14 +102,13 @@ _check() {
   else warn "  ✗ $name (got $code, want $want)"; return 1; fi
 }
 
-# TURN acceptance: exchange the backend password/init-code field for Matrix access_token, then verify
-# /voip/turnServer returns non-empty valid TURN credentials.
+# TURN acceptance uses the owner Matrix access token already fetched during S5.
+# Re-authentication here would rotate the just-written deployment credentials.
 _check_turn() {
-  local domain=$1 password=$2 at turn headers headers_arg
+  local domain=$1 at=$2 turn headers headers_arg
   local args=()
   while IFS= read -r arg; do args+=("$arg"); done < <(curl_resolve_args "$domain")
-  at=$(_p2p_access_token "$domain" "$password")
-  if [ -z "$at" ]; then warn "  x TURN (failed to exchange access_token; cannot verify turnServer)"; return 1; fi
+  if [ -z "$at" ]; then warn "  x TURN (owner access_token unavailable; cannot verify turnServer)"; return 1; fi
   headers=$(dirextalk_curl_secret_headers "${TMPDIR:-/tmp}" "$at") || return 1
   headers_arg=$(dirextalk_native_tool_at_path "$headers") || { rm -f "$headers"; return 1; }
   turn=$(curl -sk "${args[@]}" "https://$domain/_matrix/client/v3/voip/turnServer" \

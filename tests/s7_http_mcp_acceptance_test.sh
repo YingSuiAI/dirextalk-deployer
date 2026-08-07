@@ -110,9 +110,14 @@ case "$url" in
     [ -n "$header_path" ] && printf 'HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: http://127.0.0.1:51820\r\n\r\n' > "$header_path"
     ;;
   https://s7-mcp.example.test/_p2p/command)
-    body='{"access_token":"OWNER_ACCESS"}'
+    echo "S7 TURN acceptance must not rotate the owner portal session" >&2
+    exit 1
     ;;
   https://s7-mcp.example.test/_matrix/client/v3/voip/turnServer)
+    case "$secret_headers" in
+      *"Authorization: Bearer OWNER_ACCESS"*) ;;
+      *) echo "TURN acceptance did not use the S5 owner access token" >&2; exit 1 ;;
+    esac
     body='{"username":"u","password":"p","ttl":86400,"uris":["turn:s7-mcp.example.test:3478?transport=udp"]}'
     ;;
   https://s7-mcp.example.test/mcp)

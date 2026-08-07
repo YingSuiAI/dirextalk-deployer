@@ -40,8 +40,8 @@ run_phase() {
     warn "  Check Caddy reverse_proxy and message-server /.well-known/portal/owner.json handler."
   fi
 
-  local password token access_token asurl agent_room_id
-  if ! IFS=$'\t' read -r password token access_token < <(_extract_output_tokens "$out"); then
+  local password token bootstrap_access_token asurl agent_room_id owner_session owner_auth_status
+  if ! IFS=$'\t' read -r password token bootstrap_access_token < <(_extract_output_tokens "$out"); then
     phase_set S5_INIT_TOKENS failed "bootstrap.json missing password/access/agent credentials"
     fail "bootstrap.json must contain password as an eight-digit initialization-code string plus access_token and agent_token."
   fi
@@ -56,6 +56,47 @@ run_phase() {
     fail "bootstrap.json must contain a real Matrix agent_room_id; legacy !agent:<domain> ids are not supported."
   fi
 
+  owner_session=$(mktemp "$DIREXTALK_WORKDIR/.owner-matrix-session.XXXXXX") || {
+    phase_set S5_INIT_TOKENS failed "failed to allocate owner Matrix session file"
+    return 1
+  }
+  chmod 600 "$owner_session" || {
+    rm -f "$owner_session"
+    phase_set S5_INIT_TOKENS failed "failed to protect owner Matrix session file"
+    return 1
+  }
+  owner_auth_status=0
+  _create_owner_matrix_session "$domain" "$pubip" "$password" "$owner_session" || owner_auth_status=$?
+  case "$owner_auth_status" in
+    0) ;;
+    3)
+      rm -f "$owner_session"
+      phase_set S5_INIT_TOKENS failed "portal authentication rejected initialization code"
+      warn "portal.auth rejected the protected eight-digit initialization code."
+      return 3
+      ;;
+    *)
+      rm -f "$owner_session"
+      phase_set S5_INIT_TOKENS failed "failed to create owner Matrix session"
+      warn "portal.auth could not create a valid owner Matrix session."
+      return 1
+      ;;
+  esac
+
+  local access_token owner_user_id owner_homeserver owner_device_id
+  access_token=$(json_get "$owner_session" access_token)
+  owner_user_id=$(json_get "$owner_session" user_id)
+  owner_homeserver=$(json_get "$owner_session" homeserver)
+  owner_device_id=$(json_get "$owner_session" device_id)
+  rm -f "$owner_session"
+  if [ "$owner_user_id" != "@owner:$domain" ] ||
+     [ "$owner_homeserver" != "$asurl" ] ||
+     [ -z "$owner_device_id" ] || [ -z "$access_token" ]; then
+    phase_set S5_INIT_TOKENS failed "portal authentication returned invalid owner Matrix identity"
+    fail "portal.auth must return the canonical owner Matrix session for this deployment."
+    return 1
+  fi
+
   # Store tokens in state for S6. state.json is local-only and chmod 0600.
   state_set as_url "$asurl"
   state_set password "$password"
@@ -64,8 +105,62 @@ run_phase() {
   state_set agent_room_id "$agent_room_id"
 
   phase_set S5_INIT_TOKENS done "got password (len=${#password}) as_url=$asurl agent_room_id=$agent_room_id"
-  ok "Tokens fetched from bootstrap.json."
+  ok "Bootstrap credentials fetched and owner Matrix session created."
   return 0
+}
+
+_create_owner_matrix_session() {
+  local domain=$1 pubip=$2 password=$3 out=$4 request response
+  local request_curl response_curl request_arg code curl_status
+  [ -n "$domain" ] && [ -n "$pubip" ] || return 1
+  mkdir -p "$(dirname "$out")" || return 1
+  request=$(mktemp "$(dirname "$out")/.portal-auth-request.XXXXXX") || return 1
+  response=$(mktemp "$(dirname "$out")/.portal-auth-response.XXXXXX") || {
+    rm -f "$request"
+    return 1
+  }
+  if ! chmod 600 "$request" "$response" || ! json_build portal-auth "$password" > "$request"; then
+    rm -f "$request" "$response"
+    return 1
+  fi
+  request_curl=$(dirextalk_native_tool_path "$request") || { rm -f "$request" "$response"; return 1; }
+  response_curl=$(dirextalk_native_tool_path "$response") || { rm -f "$request" "$response"; return 1; }
+  request_arg="@$request_curl"
+  curl_status=0
+  code=$(curl -sS \
+    --connect-timeout "${DIREXTALK_PORTAL_AUTH_CURL_CONNECT_TIMEOUT:-10}" \
+    --max-time "${DIREXTALK_PORTAL_AUTH_CURL_MAX_TIME:-20}" \
+    --resolve "$domain:443:$pubip" \
+    --output "$response_curl" --write-out '%{http_code}' \
+    --request POST --header 'Content-Type: application/json' \
+    --data-binary "$request_arg" "https://$domain/_p2p/command" 2>/dev/null) || curl_status=$?
+  rm -f "$request"
+  if [ "$curl_status" -ne 0 ]; then
+    rm -f "$response"
+    return 1
+  fi
+  case "$code" in
+    200)
+      if [ "$(json_type "$response" access_token)" != "string" ] ||
+         [ "$(json_type "$response" device_id)" != "string" ] ||
+         [ "$(json_type "$response" user_id)" != "string" ] ||
+         [ "$(json_type "$response" homeserver)" != "string" ] ||
+         ! json_assert "$response" matrix-session >/dev/null ||
+         ! chmod 600 "$response" || ! mv -f "$response" "$out"; then
+        rm -f "$response"
+        return 1
+      fi
+      return 0
+      ;;
+    401|403)
+      rm -f "$response"
+      return 3
+      ;;
+    *)
+      rm -f "$response"
+      return 1
+      ;;
+  esac
 }
 
 _extract_output_tokens() {

@@ -26,15 +26,55 @@ EOF
 cat > "$tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 cat <<'JSON'
-{"password":"12345678","agent_token":"agent-test","access_token":"owner-test","agent_room_id":"!real:resume.example.test","as_url":"https://resume.example.test"}
+{"password":"12345678","agent_token":"agent-test","access_token":"bootstrap-p2p-test","agent_room_id":"!real:resume.example.test","as_url":"https://resume.example.test"}
 JSON
 EOF
 cat > "$tmp/bin/curl" <<'EOF'
 #!/usr/bin/env bash
-printf '200'
+set -euo pipefail
+out= data= url= resolve=
+args=("$@")
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output|-o) out=$2; shift 2 ;;
+    --data-binary) data=$2; shift 2 ;;
+    --resolve) resolve=$2; shift 2 ;;
+    https://*) url=$1; shift ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "${args[*]}" >> "$PORTAL_CURL_LOG"
+case "$url" in
+  https://resume.example.test/.well-known/portal/owner.json)
+    printf '200'
+    ;;
+  https://resume.example.test/_p2p/command)
+    [ "$resolve" = "resume.example.test:443:203.0.113.10" ]
+    [ -n "$out" ] && [ "$(stat -c '%a' "$out")" = 600 ]
+    case "$data" in @*) request=${data#@} ;; *) exit 91 ;; esac
+    [ "$(stat -c '%a' "$request")" = 600 ]
+    [ "$(tr -d '\n' < "$request")" = '{"action":"portal.auth","params":{"password":"12345678"}}' ]
+    case "${PORTAL_CURL_MODE:-success}" in
+      success)
+        printf '%s\n' '{"access_token":"matrix-owner-test","device_id":"OWNER_DEVICE","user_id":"@owner:resume.example.test","homeserver":"https://resume.example.test"}' > "$out"
+        printf '200'
+        ;;
+      rejected)
+        printf '%s\n' '{"errcode":"M_FORBIDDEN","error":"password invalid"}' > "$out"
+        printf '401'
+        ;;
+      infrastructure)
+        exit 7
+        ;;
+      *) exit 92 ;;
+    esac
+    ;;
+  *) exit 93 ;;
+esac
 EOF
 chmod 0755 "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH"
+export PORTAL_CURL_LOG="$tmp/portal-curl.log"
 
 log() { :; }
 warn() { :; }
@@ -46,7 +86,46 @@ poll_until() { local _label=$1 _interval=$2 _maximum=$3; shift 3; "$@"; }
 source "$ROOT/scripts/phases/s5_init_tokens.sh"
 run_phase
 
-json_test_check "$STATE_JSON" "data.phases.S5_INIT_TOKENS.status === 'done' && data.password === '12345678' && data.agent_token === 'agent-test' && data.access_token === 'owner-test' && data.agent_room_id === '!real:resume.example.test'"
+json_test_check "$STATE_JSON" "data.phases.S5_INIT_TOKENS.status === 'done' && data.password === '12345678' && data.agent_token === 'agent-test' && data.access_token === 'matrix-owner-test' && data.access_token !== 'bootstrap-p2p-test' && data.agent_room_id === '!real:resume.example.test'"
+grep -q -- '--resolve resume.example.test:443:203.0.113.10' "$PORTAL_CURL_LOG"
+grep -q -- '--request POST' "$PORTAL_CURL_LOG"
+grep -q -- '--header Content-Type: application/json' "$PORTAL_CURL_LOG"
+grep -q -- '--data-binary @' "$PORTAL_CURL_LOG"
+if grep -Eq '12345678|matrix-owner-test|bootstrap-p2p-test|agent-test' "$PORTAL_CURL_LOG"; then
+  echo "S5 portal authentication leaked a credential into curl argv" >&2
+  exit 1
+fi
+if find "$DIREXTALK_WORKDIR" -maxdepth 1 \( -name '.portal-auth-*' -o -name '.owner-matrix-session.*' \) | grep -q .; then
+  echo "S5 left protected portal authentication temporary files behind" >&2
+  exit 1
+fi
+
+# The real S5 consumer must preserve the last good token and fail closed while
+# distinguishing an authentication rejection from an infrastructure failure.
+export PORTAL_CURL_MODE=rejected
+set +e
+run_phase >/dev/null 2>"$tmp/portal-rejected.err"
+portal_status=$?
+set -e
+[ "$portal_status" -eq 3 ]
+json_test_check "$STATE_JSON" "data.phases.S5_INIT_TOKENS.status === 'failed' && data.access_token === 'matrix-owner-test' && data.agent_token === 'agent-test'"
+if grep -Eq '12345678|matrix-owner-test|bootstrap-p2p-test|agent-test' "$tmp/portal-rejected.err"; then
+  echo "S5 expected-negative diagnostics leaked credentials" >&2
+  exit 1
+fi
+
+export PORTAL_CURL_MODE=infrastructure
+set +e
+run_phase >/dev/null 2>"$tmp/portal-infrastructure.err"
+portal_status=$?
+set -e
+[ "$portal_status" -eq 1 ]
+json_test_check "$STATE_JSON" "data.phases.S5_INIT_TOKENS.status === 'failed' && data.access_token === 'matrix-owner-test' && data.agent_token === 'agent-test'"
+if grep -Eq '12345678|matrix-owner-test|bootstrap-p2p-test|agent-test' "$tmp/portal-infrastructure.err"; then
+  echo "S5 infrastructure diagnostics leaked credentials" >&2
+  exit 1
+fi
+unset PORTAL_CURL_MODE
 
 # Keep the timeout and initialization-code shape contract beside the S5
 # success flow instead of maintaining a second bootstrap-token test file.

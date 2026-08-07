@@ -39,7 +39,8 @@ ops_production_helpers_prelude() {
   reconcile_payload=$(base64 < "$OPS_LIB_DIR/../cloud-init/split/reconcile-production.sh" | tr -d '\r\n')
   reset_payload=$(base64 < "$OPS_LIB_DIR/../cloud-init/split/reset-production.sh" | tr -d '\r\n')
   service_payload=$(base64 < "$OPS_LIB_DIR/../cloud-init/split/dirextalk-split-recovery.service" | tr -d '\r\n')
-  template=$(cat <<'EOF'
+  template=''
+  IFS= read -r -d '' template <<'EOF' || [ -n "$template" ]
 set -eu
 sudo install -d -o root -g root -m 0700 /var/dirextalk-message-server/production-ops
 helper_tmp=''
@@ -68,7 +69,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable dirextalk-split-recovery.service >/dev/null
 trap - EXIT
 EOF
-)
   template=${template/__DIREXTALK_PRODUCTION_BOOTSTRAP__/$bootstrap_payload}
   template=${template/__DIREXTALK_PRODUCTION_COMMON__/$common_payload}
   template=${template/__DIREXTALK_PRODUCTION_RECOVER__/$recover_payload}

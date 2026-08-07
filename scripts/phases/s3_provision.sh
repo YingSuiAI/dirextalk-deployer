@@ -222,10 +222,29 @@ _run_phase_ec2() {
     return 1
   }
   res_set public_ip "$pubip"
-  if ! _resume_host_bootstrap "$pubip" "$keyfile"; then
-    phase_set S3_PROVISION failed "failed to resume host bootstrap on EC2"
-    return 1
+  if [ -n "$(state_get node_identity)" ]; then
+    _record_provisioned_node_identity ec2 "$iid" "$pubip" "$keyfile" || {
+      phase_set S3_PROVISION failed "recorded EC2 node identity changed before bootstrap resume"
+      return 1
+    }
   fi
+  local resume_status=0
+  _resume_host_bootstrap "$pubip" "$keyfile" || resume_status=$?
+  case "$resume_status" in
+    0) ;;
+    3)
+      phase_set S3_PROVISION failed "protected split tooling revision advance rejected on EC2"
+      return 3
+      ;;
+    *)
+      phase_set S3_PROVISION failed "failed to resume host bootstrap on EC2"
+      return 1
+      ;;
+  esac
+  _record_provisioned_node_identity ec2 "$iid" "$pubip" "$keyfile" || {
+    phase_set S3_PROVISION failed "failed to record immutable EC2 node identity"
+    return 1
+  }
   log "Public IP = $pubip; domain = $(state_get domain)"
 
   if [ "$domain_mode" = "route53" ]; then
@@ -367,10 +386,29 @@ _run_phase_lightsail() {
   }
   res_set public_ip "$pubip"
   res_set static_ip_name "$static_ip_name"
-  if ! _resume_host_bootstrap "$pubip" "$keyfile"; then
-    phase_set S3_PROVISION failed "failed to resume host bootstrap on Lightsail"
-    return 1
+  if [ -n "$(state_get node_identity)" ]; then
+    _record_provisioned_node_identity lightsail "$instance_name" "$pubip" "$keyfile" || {
+      phase_set S3_PROVISION failed "recorded Lightsail node identity changed before bootstrap resume"
+      return 1
+    }
   fi
+  local resume_status=0
+  _resume_host_bootstrap "$pubip" "$keyfile" || resume_status=$?
+  case "$resume_status" in
+    0) ;;
+    3)
+      phase_set S3_PROVISION failed "protected split tooling revision advance rejected on Lightsail"
+      return 3
+      ;;
+    *)
+      phase_set S3_PROVISION failed "failed to resume host bootstrap on Lightsail"
+      return 1
+      ;;
+  esac
+  _record_provisioned_node_identity lightsail "$instance_name" "$pubip" "$keyfile" || {
+    phase_set S3_PROVISION failed "failed to record immutable Lightsail node identity"
+    return 1
+  }
   log "Public IP = $pubip; domain = $(state_get domain)"
 
   if [ "$domain_mode" = "route53" ]; then
@@ -386,6 +424,52 @@ _run_phase_lightsail() {
   _record_lightsail_cost_estimate "$bundle"
   phase_set S3_PROVISION done "lightsail_instance=$instance_name ip=$pubip domain=$(state_get domain)"
   return 0
+}
+
+_record_provisioned_node_identity() {
+  local provider=$1 instance_selector=$2 public_ip=$3 keyfile=$4
+  local account region provider_id provider_arn support_code='' provider_read host_read machine_id docker_engine_id receipt recorded
+  local known_hosts="$DIREXTALK_WORKDIR/known_hosts"
+  account=$(aws sts get-caller-identity --query Account --output text) || return 1
+  region=$(state_get region)
+  printf '%s\n' "$account" | grep -Eq '^[0-9]{12}$' || return 1
+  [ -n "$region" ] && [ -f "$known_hosts" ] && [ ! -L "$known_hosts" ] || return 1
+  case "$provider" in
+    lightsail)
+      # AWS CLI JMESPath backticks below are literals.
+      # shellcheck disable=SC2016
+      provider_read=$(AWS_DEFAULT_REGION="$region" aws lightsail get-instance --instance-name "$instance_selector" \
+        --query 'join(`\t`,[instance.arn,instance.supportCode,instance.publicIpAddress])' --output text) || return 1
+      IFS=$'\t' read -r provider_arn support_code provider_ip <<<"$provider_read"
+      [ "$provider_ip" = "$public_ip" ] || return 1
+      provider_id=${provider_arn##*/}
+      [ -n "$support_code" ] && printf '%s\n' "$provider_id" | grep -Eq '^[0-9a-f-]{36}$' || return 1
+      ;;
+    ec2)
+      provider_id=$instance_selector
+      # AWS CLI JMESPath backticks below are literals.
+      # shellcheck disable=SC2016
+      provider_read=$(AWS_DEFAULT_REGION="$region" aws ec2 describe-instances --instance-ids "$provider_id" \
+        --query 'join(`\t`,[Reservations[0].OwnerId,Reservations[0].Instances[0].InstanceId,Reservations[0].Instances[0].PublicIpAddress])' --output text) || return 1
+      [ "$provider_read" = "$account"$'\t'"$provider_id"$'\t'"$public_ip" ] || return 1
+      provider_arn="arn:aws:ec2:$region:$account:instance/$provider_id"
+      ;;
+    *) return 1 ;;
+  esac
+  host_read=$(ssh -T -i "$keyfile" -o BatchMode=yes -o ConnectTimeout=10 \
+    -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts" ubuntu@"$public_ip" \
+    "set -eu; printf '%s\\t' \"\$(cat /etc/machine-id)\"; sudo docker info --format '{{.ID}}'") || return 1
+  IFS=$'\t' read -r machine_id docker_engine_id <<<"$host_read"
+  printf '%s\n' "$machine_id" | grep -Eq '^[0-9a-f]{32}$' \
+    && printf '%s\n' "$docker_engine_id" | grep -Eq '^[A-Za-z0-9:+._-]{8,128}$' || return 1
+  receipt=$(json_build node-identity "$account" "$region" "$provider" "$provider_id" \
+    "$provider_arn" "$support_code" "$public_ip" "$machine_id" "$docker_engine_id") || return 1
+  recorded=$(state_get node_identity)
+  if [ -n "$recorded" ]; then
+    [ "$recorded" = "$receipt" ] || return 1
+    return 0
+  fi
+  state_set_raw node_identity "$receipt"
 }
 
 _ensure_ec2_eip_attachment() {
@@ -452,7 +536,7 @@ _is_canonical_ipv4() {
 _resume_host_bootstrap() {
   local public_ip=$1 keyfile=$2
   local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt result identity integration_bundle remote_command
-  local split_bundle
+  local split_bundle recorded_split_revision ssh_status
   local -a integration_files
   local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
   local attempts=${DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS:-60}
@@ -463,6 +547,11 @@ _resume_host_bootstrap() {
   }
   [ -n "$public_ip" ] && [ -f "$keyfile" ] || {
     warn "Host bootstrap resume requires a stable public IP and the recorded SSH key."
+    return 1
+  }
+  recorded_split_revision=$(state_get split_release.split_source_revision)
+  printf '%s\n' "$recorded_split_revision" | grep -Eq '^[0-9a-f]{40}$' || {
+    warn "Host bootstrap resume requires the recorded split source revision."
     return 1
   }
   integration_bundle=$(mktemp "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz") || return 1
@@ -476,6 +565,10 @@ _resume_host_bootstrap() {
       cloud-init/split/Caddyfile \
       cloud-init/split/edge-compose.override.yaml \
       cloud-init/split/bootstrap-production.sh \
+      cloud-init/split/apply-host-integration.sh \
+      cloud-init/split/authorize-split-source-revision.sh \
+      cloud-init/split/advance-split-source-revision.sh \
+      cloud-init/split/release.env \
       cloud-init/split/production-ops-common.sh \
       cloud-init/split/recover-production.sh \
       cloud-init/split/reconcile-production.sh \
@@ -497,7 +590,7 @@ _resume_host_bootstrap() {
   fi
   case "$ssh_user" in
     ubuntu)
-      remote_command="stage=\$(mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'rm -rf \"\$stage\"' EXIT && tar -xzf - -C \"\$stage\" && sudo install -d -o root -g root -m 0700 /var/dirextalk-message-server /var/dirextalk-message-server/production-ops && sudo tar --no-same-owner -xzf \"\$stage/${split_bundle##*/}\" -C /var/dirextalk-message-server && sudo chown -R 0:0 /var/dirextalk-message-server/deploy && sudo install -o root -g root -m 0400 \"\$stage/cloud-init/split/Caddyfile\" \"\$stage/cloud-init/split/edge-compose.override.yaml\" /var/dirextalk-message-server/production-ops/ && sudo install -o root -g root -m 0755 \"\$stage/cloud-init/split/bootstrap-production.sh\" \"\$stage/cloud-init/split/production-ops-common.sh\" \"\$stage/cloud-init/split/recover-production.sh\" \"\$stage/cloud-init/split/reconcile-production.sh\" \"\$stage/cloud-init/split/reset-production.sh\" /var/dirextalk-message-server/production-ops/ && sudo install -o root -g root -m 0644 \"\$stage/cloud-init/split/dirextalk-split-recovery.service\" /etc/systemd/system/dirextalk-split-recovery.service && sudo systemctl daemon-reload && sudo systemctl enable dirextalk-split-recovery.service >/dev/null && sudo sshd -T | grep -qx 'passwordauthentication no' && sudo sshd -T | grep -qx 'pubkeyauthentication yes' && sudo bash \"\$stage/updater/reconcile-host.sh\" \"\$stage/updater\" /var/dirextalk-message-server '$public_ip'"
+      remote_command="stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'sudo rm -rf \"\$stage\"' EXIT && sudo chmod 0700 \"\$stage\" && sudo tar --no-same-owner -xzf - -C \"\$stage\" && sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server '$recorded_split_revision' '$public_ip'"
       ;;
     *) rm -f "$integration_bundle" "$split_bundle"; warn "Host bootstrap requires the supported Ubuntu SSH user."; return 1 ;;
   esac
@@ -515,10 +608,21 @@ _resume_host_bootstrap() {
       if [ "$(printf '%s\n' "$result" | tail -n 1)" = "$identity" ]; then
         rm -f "$integration_bundle"
         [ -z "$split_bundle" ] || rm -f "$split_bundle"
+        server_release_advance_split_state "$recorded_split_revision" || {
+          warn "Local split release state changed before the tooling revision commit."
+          return 1
+        }
         updater_release_record_state
         return $?
       fi
       warn "Remote updater identity did not match the deployer pin (attempt $attempt/$attempts)."
+    else
+      ssh_status=$?
+      if [ "$ssh_status" -eq 3 ]; then
+        rm -f "$integration_bundle" "$split_bundle"
+        warn "Remote split tooling revision advance was rejected by the protected release boundary."
+        return 3
+      fi
     fi
     warn "SSH/updater integration bootstrap is not ready (attempt $attempt/$attempts); retrying in ${delay}s."
     attempt=$((attempt + 1))

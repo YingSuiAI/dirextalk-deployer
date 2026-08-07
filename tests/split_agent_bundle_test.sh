@@ -13,7 +13,7 @@ git -C "$fixture" config user.email test@example.invalid
 git -C "$fixture" config user.name Test
 
 files=(
-  compose.yaml compose.direct-tls.yaml edge-compose.yaml
+  compose.yaml compose.production.yaml compose.direct-tls.yaml edge-compose.yaml
   apparmor.d/dirextalk-runner-userns
   systemd/dirextalk-extension-runner@.service
   systemd/dirextalk-core-runner@.service
@@ -32,6 +32,7 @@ files=(
   scripts/stop-agent-local.sh
   scripts/restart-agent-local.sh
   scripts/update-agent-local.sh
+  scripts/update-message-server-local.sh
   scripts/adopt-edge.sh
   scripts/cutover-edge.sh
   scripts/verify-first-fresh.sh
@@ -49,14 +50,16 @@ DIREXTALK_MESSAGE_SERVER_ROOT="$fixture" \
   bash "$ROOT/scripts/render/render-split-bundle.sh" "$bundle"
 
 [ "$(stat -c '%a' "$bundle")" = 600 ]
-tar -tzf "$bundle" | grep -Fxq deploy/split-agent/compose.yaml
-tar -tzf "$bundle" | grep -Fxq deploy/split-agent/compose.direct-tls.yaml
-tar -tzf "$bundle" | grep -Fxq deploy/split-agent/scripts/prepare-runner-cgroups.sh
-tar -tzf "$bundle" | grep -Fxq deploy/split-agent/scripts/start-local.sh
-tar -tzf "$bundle" | grep -Fxq deploy/split-agent/scripts/adopt-edge.sh
-tar -tzf "$bundle" | grep -Fxq deploy/split-agent/scripts/cutover-edge.sh
+tar -tzf "$bundle" deploy/split-agent/compose.yaml >/dev/null
+tar -tzf "$bundle" deploy/split-agent/compose.production.yaml >/dev/null
+tar -tzf "$bundle" deploy/split-agent/compose.direct-tls.yaml >/dev/null
+tar -tzf "$bundle" deploy/split-agent/scripts/prepare-runner-cgroups.sh >/dev/null
+tar -tzf "$bundle" deploy/split-agent/scripts/start-local.sh >/dev/null
+tar -tzf "$bundle" deploy/split-agent/scripts/adopt-edge.sh >/dev/null
+tar -tzf "$bundle" deploy/split-agent/scripts/cutover-edge.sh >/dev/null
+tar -tzf "$bundle" deploy/split-agent/scripts/update-message-server-local.sh >/dev/null
 [ "$(tar -xOzf "$bundle" deploy/split-agent/SOURCE_REVISION)" = "$revision" ]
-tar -tzf "$bundle" | grep -Fxq deploy/split-agent/SOURCE_FILES.sha256
+tar -tzf "$bundle" deploy/split-agent/SOURCE_FILES.sha256 >/dev/null
 mkdir -p "$TEST_TMP/unpacked"
 tar -xzf "$bundle" -C "$TEST_TMP/unpacked"
 (cd "$TEST_TMP/unpacked/deploy/split-agent" && sha256sum -c --status SOURCE_FILES.sha256)
@@ -87,18 +90,24 @@ cmp "$repository_bundle" "$repository_copy"
 repository_revision=$(tar -xOzf "$repository_bundle" deploy/split-agent/SOURCE_REVISION)
 printf '%s\n' "$repository_revision" | grep -Eq '^[0-9a-f]{40}$'
 [ "$repository_revision" = "$(sed -n 's/^DIREXTALK_SPLIT_SOURCE_REVISION=//p' "$ROOT/scripts/cloud-init/split/release.env")" ]
+tar -tzf "$repository_bundle" deploy/split-agent/compose.production.yaml >/dev/null
+tar -tzf "$repository_bundle" deploy/split-agent/scripts/update-message-server-local.sh >/dev/null
 tar -xOzf "$repository_bundle" deploy/split-agent/scripts/cleanup-local.sh \
   | grep -F 'external|edge-terminated)' >/dev/null
 mkdir -p "$TEST_TMP/repository-unpacked"
 tar -xzf "$repository_bundle" -C "$TEST_TMP/repository-unpacked"
 (cd "$TEST_TMP/repository-unpacked/deploy/split-agent" && sha256sum -c --status SOURCE_FILES.sha256)
-grep -Fq "grep -qx 'passwordauthentication no'" "$ROOT/scripts/phases/s3_provision.sh"
-grep -Fq "grep -qx 'pubkeyauthentication yes'" "$ROOT/scripts/phases/s3_provision.sh"
+host_integration="$ROOT/scripts/cloud-init/split/apply-host-integration.sh"
+grep -Fq 'sshd_effective=$(sshd -T)' "$host_integration"
+grep -Fq "grep -Fx 'passwordauthentication no' <<<\"\$sshd_effective\"" "$host_integration"
+grep -Fq "grep -Fx 'pubkeyauthentication yes' <<<\"\$sshd_effective\"" "$host_integration"
 consumer="$ROOT/scripts/cloud-init/split/bootstrap-production.sh"
 edge_source="$ROOT/scripts/cloud-init/split/Caddyfile"
 edge_overlay="$ROOT/scripts/cloud-init/split/edge-compose.override.yaml"
 grep -Fq 'DIREXTALK_SPLIT_COMPOSE_MODE=production' "$consumer"
 grep -Fq 'DIREXTALK_MESSAGE_TLS_MODE=edge-terminated' "$consumer"
+grep -Fq 'staged production Compose override is missing' "$consumer"
+grep -Fq 'staged message-server update adapter is not executable' "$consumer"
 grep -Fq '"$split/scripts/prepare-runner-cgroups.sh" "$stack"' "$consumer"
 grep -Fq '"$split/scripts/provision-local.sh" "$run_dir"' "$consumer"
 grep -Fq '"$split/scripts/start-local.sh" "$run_dir/.env"' "$consumer"
@@ -107,7 +116,8 @@ grep -Fq 'mv -f "$caddy_tmp" "$caddyfile"' "$consumer"
 grep -Fq 'require_pair "$edge_env" DIREXTALK_CADDYFILE "$caddyfile"' "$consumer"
 grep -Fq 'cloud-init/split/Caddyfile' "$ROOT/scripts/phases/s3_provision.sh"
 grep -Fq 'cloud-init/split/edge-compose.override.yaml' "$ROOT/scripts/phases/s3_provision.sh"
-grep -Fq '/var/dirextalk-message-server/production-ops/' "$ROOT/scripts/phases/s3_provision.sh"
+grep -Fq '"$candidate_ops/"' "$host_integration"
+grep -Fq 'mv -- "$candidate_split" "$base/deploy/split-agent"' "$host_integration"
 grep -Fq 'source: /run/dirextalk-updater' "$edge_overlay"
 grep -Fq 'target: /run/dirextalk-updater' "$edge_overlay"
 grep -Fq 'read_only: true' "$edge_overlay"
@@ -156,6 +166,11 @@ cat >"$fresh_split/scripts/start-local.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 99
 EOF
+: >"$fresh_split/compose.production.yaml"
+cat >"$fresh_split/scripts/update-message-server-local.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
 chmod 0755 "$fresh_split/scripts/"*.sh
 printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$fresh_split/SOURCE_REVISION"
 (cd "$fresh_split" && find . -type f ! -name SOURCE_FILES.sha256 -print0 \
@@ -199,6 +214,35 @@ attestation=$(sed -n 's/^attestation=//p' "$capture")
 grep -Fqx '# dirextalk-image-attestation-v2' "$attestation"
 grep -Fqx 'image.DIREXTALK_COTURN_IMAGE_IMMUTABLE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' "$attestation"
 
+# Required production update inputs fail closed before runner preparation or
+# any Docker/host mutation. Rebuild the source manifest after each fixture
+# change so this exercises the bootstrap readiness gate itself.
+mv "$fresh_split/compose.production.yaml" "$fresh_split/compose.production.yaml.absent"
+(cd "$fresh_split" && find . -type f ! -name SOURCE_FILES.sha256 -print0 \
+  | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
+rm -f "$capture" "$fresh/runner-preparation.env" "$fresh/split-stack-name" "$fresh/.split-bootstrap-stage"
+if PATH="$TEST_TMP/fakebin:$PATH" DIREXTALK_BOOTSTRAP_BASE="$fresh" \
+    DIREXTALK_TEST_PROVISION_CAPTURE="$capture" \
+    bash "$consumer" >/dev/null 2>"$TEST_TMP/missing-production-compose.err"; then
+  echo "first-fresh bootstrap accepted a missing production Compose override" >&2
+  exit 1
+fi
+grep -Fqx 'staged production Compose override is missing' "$TEST_TMP/missing-production-compose.err"
+[ ! -e "$fresh/runner-preparation.env" ]
+mv "$fresh_split/compose.production.yaml.absent" "$fresh_split/compose.production.yaml"
+
+chmod 0644 "$fresh_split/scripts/update-message-server-local.sh"
+(cd "$fresh_split" && find . -type f ! -name SOURCE_FILES.sha256 -print0 \
+  | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
+if PATH="$TEST_TMP/fakebin:$PATH" DIREXTALK_BOOTSTRAP_BASE="$fresh" \
+    DIREXTALK_TEST_PROVISION_CAPTURE="$capture" \
+    bash "$consumer" >/dev/null 2>"$TEST_TMP/nonexecutable-message-update.err"; then
+  echo "first-fresh bootstrap accepted a non-executable message-server update adapter" >&2
+  exit 1
+fi
+grep -Fqx 'staged message-server update adapter is not executable' "$TEST_TMP/nonexecutable-message-update.err"
+[ ! -e "$fresh/runner-preparation.env" ]
+
 # The real edge-only bootstrap consumer must converge Caddy without reading,
 # comparing, exporting, or replacing a rotated portal bootstrap credential.
 edge="$TEST_TMP/edge-only"
@@ -206,6 +250,7 @@ edge_split="$edge/deploy/split-agent"
 edge_fakebin="$TEST_TMP/edge-fakebin"
 edge_stack=d-aaaaaaaaaaaaaaaaaaaaaaaaaa
 mkdir -p "$edge_split/scripts" "$edge/p2p" "$edge_fakebin"
+: >"$edge_split/compose.production.yaml"
 cat >"$edge_split/edge-compose.yaml" <<'EOF'
 services:
   caddy: {}
@@ -216,6 +261,11 @@ printf 'export-called\n' >>"$EDGE_CALLS"
 exit 99
 EOF
 chmod 0755 "$edge_split/scripts/export-portal-bootstrap.sh"
+cat >"$edge_split/scripts/update-message-server-local.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod 0755 "$edge_split/scripts/update-message-server-local.sh"
 printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$edge_split/SOURCE_REVISION"
 (cd "$edge_split" && find . -type f ! -name SOURCE_FILES.sha256 -print0 \
   | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
@@ -278,12 +328,17 @@ if grep -Fq 'export-called' "$edge_calls"; then
 fi
 grep -Fq 'compose' "$edge_calls"
 
-missing="$split/scripts/prepare-runner-cgroups.sh"
-mv "$missing" "$missing.absent"
-if DIREXTALK_MESSAGE_SERVER_ROOT="$fixture" \
-  bash "$ROOT/scripts/render/render-split-bundle.sh" "$TEST_TMP/invalid.tar.gz" >/dev/null 2>&1; then
-  echo "split bundle renderer accepted a missing runner-preparation contract" >&2
-  exit 1
-fi
+for relative in compose.production.yaml scripts/update-message-server-local.sh scripts/prepare-runner-cgroups.sh; do
+  missing="$split/$relative"
+  mv "$missing" "$missing.absent"
+  if DIREXTALK_MESSAGE_SERVER_ROOT="$fixture" \
+    bash "$ROOT/scripts/render/render-split-bundle.sh" "$TEST_TMP/invalid.tar.gz" \
+      >/dev/null 2>"$TEST_TMP/missing-input.err"; then
+    echo "split bundle renderer accepted a missing required input: $relative" >&2
+    exit 1
+  fi
+  grep -Fq "missing canonical split deployment asset: $split/$relative" "$TEST_TMP/missing-input.err"
+  mv "$missing.absent" "$missing"
+done
 
 echo "split agent bundle test passed"

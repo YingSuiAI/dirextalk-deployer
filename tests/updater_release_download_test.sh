@@ -25,8 +25,9 @@ DOMAIN=service.example.test
 EOF
 touch "$base/deploy/split-agent/compose.yaml"
 printf '#!/bin/sh\nprintf "split-production\\n" >> "$BOOTSTRAP_CALLS"\n' > "$base/production-ops/bootstrap-production.sh"
+printf '#!/bin/sh\nprintf "reconcile\\n" >> "$BOOTSTRAP_CALLS"\n' > "$base/production-ops/reconcile-production.sh"
 printf '#!/bin/sh\nprintf "install %%s\\n" "$1" >> "$BOOTSTRAP_CALLS"\n' > "$base/updater/install.sh"
-chmod 0755 "$base/production-ops/bootstrap-production.sh" "$base/updater/install.sh"
+chmod 0755 "$base/production-ops/bootstrap-production.sh" "$base/production-ops/reconcile-production.sh" "$base/updater/install.sh"
 
 cat > "$tmp/bin/uname" <<'EOF'
 #!/usr/bin/env bash

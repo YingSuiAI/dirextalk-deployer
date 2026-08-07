@@ -84,9 +84,9 @@ done
 
 legacy_json_cli_name=$(printf '\152\161')
 legacy_json_cli_pattern="(^|[^[:alnum:]_])${legacy_json_cli_name}([^[:alnum:]_]|$)|${legacy_json_cli_name}\\.exe"
-if grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md SKILL.md references AGENTS.md agents package.json docs >/dev/null; then
+if git grep -n -I -E "$legacy_json_cli_pattern" -- scripts tests README.md SKILL.md references AGENTS.md agents package.json docs >/dev/null; then
   echo "current docs/scripts/tests must use scripts/json.mjs instead of the legacy external JSON CLI" >&2
-  grep -R -n -E "$legacy_json_cli_pattern" scripts tests README.md SKILL.md references AGENTS.md agents package.json docs >&2
+  git grep -n -I -E "$legacy_json_cli_pattern" -- scripts tests README.md SKILL.md references AGENTS.md agents package.json docs >&2
   exit 1
 fi
 

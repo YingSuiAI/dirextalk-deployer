@@ -23,7 +23,8 @@ cat > "$tmp/bin/ssh" <<'EOF'
 printf 'ssh\n' >> "$CALLS"
 printf '%s\n' "${!#}" > "$REMOTE_COMMAND"
 cat >/dev/null
-printf 'v1.0.11\t720a2bb824b8b7aef9275db060cfe08c6b93b1ab\t17712c2b6ff61fd014c6badd0d0e019f30d54181c168735c61de449e8ad4d790\n'
+[ "${SSH_STATUS:-0}" -eq 0 ] || exit "$SSH_STATUS"
+printf 'v1.0.12\t5ab9e87ccc6926ce3054a436308f655745eadd12\t95764862b1452ca7b9450f8431a087020a3e1e5ed786b35e0aac5905e8a3ede7\n'
 EOF
 cat > "$tmp/bin/aws" <<'EOF'
 #!/usr/bin/env bash
@@ -43,6 +44,9 @@ source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null 2>&1
 # shellcheck disable=SC1091
 source "$ROOT/scripts/phases/s3_provision.sh"
+server_release_record_split_state
+recorded_old_split_revision=f36099ef925a020f00432ab8b97f76fa902b066e
+state_set split_release.split_source_revision "$recorded_old_split_revision"
 
 invalid_ips=(
   ''
@@ -79,8 +83,36 @@ done
 _resume_host_bootstrap 203.0.113.44 "$tmp/key.pem"
 [ "$(grep -c '^scp$' "$CALLS")" = 0 ]
 [ "$(grep -c '^ssh$' "$CALLS")" = 1 ]
-grep -F -q 'tar -xzf -' "$REMOTE_COMMAND"
-grep -F -q 'reconcile-host.sh' "$REMOTE_COMMAND"
+grep -F -q 'tar --no-same-owner -xzf -' "$REMOTE_COMMAND"
+grep -F -q 'apply-host-integration.sh' "$REMOTE_COMMAND"
+grep -F -q "/var/dirextalk-message-server '$recorded_old_split_revision'" "$REMOTE_COMMAND"
 grep -F -q "'203.0.113.44'" "$REMOTE_COMMAND"
+case "$(cat "$REMOTE_COMMAND")" in
+  *'sudo mktemp -d '*'sudo tar --no-same-owner -xzf -'*'apply-host-integration.sh'*) ;;
+  *) echo 'split authorization must precede every canonical runtime/install mutation' >&2; exit 1 ;;
+esac
+[ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ]
+
+: >"$CALLS"
+if SSH_STATUS=3 DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS=3 \
+    _resume_host_bootstrap 203.0.113.44 "$tmp/key.pem" >/dev/null 2>&1; then
+  echo 'host bootstrap resume accepted an expected-negative tooling revision advance' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 3 ]
+[ "$(grep -c '^ssh$' "$CALLS")" -eq 1 ]
+
+: >"$CALLS"
+if SSH_STATUS=17 DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS=1 \
+    _resume_host_bootstrap 203.0.113.44 "$tmp/key.pem" >/dev/null 2>&1; then
+  echo 'host bootstrap resume accepted an infrastructure-failed tooling revision advance' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 1 ]
+[ "$(grep -c '^ssh$' "$CALLS")" -eq 1 ]
 
 echo "s3 public IP validation ok"

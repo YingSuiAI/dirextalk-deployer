@@ -303,32 +303,14 @@ printf 'ops.example.test ssh-ed25519 AAAATEST\n' > "$service_dir/known_hosts"
 
 update_calls="$tmp/update.calls"
 : > "$update_calls"
-CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" bash "$ROOT/scripts/update.sh" "$state" > "$tmp/update.out"
-assert_not_contains "$tmp/update.out" 'Old credentials and runtime checks were cleared'
-assert_not_contains "$tmp/update.out" 'Scoped local bridge daemon was stopped'
-assert_not_contains "$tmp/update.out" 'rerun orchestrate with DIREXTALK_EXISTING_STATE_ACTION=continue'
-
-assert_contains "$update_calls" 'set-desired-state\.sh maintenance'
-assert_contains "$update_calls" 'set-desired-state\.sh running'
-assert_contains "$update_calls" 'StrictHostKeyChecking=yes'
-assert_contains "$update_calls" 'UserKnownHostsFile=.*known_hosts'
-assert_contains "$update_calls" 'base64 --decode'
-assert_contains "$update_calls" 'install -m 0755.*set-desired-state\.sh'
-assert_contains "$update_calls" 'install -o root -g root -m 0755.*reconcile-production\.sh'
-assert_contains "$update_calls" 'bootstrap-production\.sh'
-assert_contains "$update_calls" 'install -o root -g root -m 0755.*production-ops/\$helper'
-assert_contains "$update_calls" '/var/dirextalk-message-server/production-ops/reconcile-production\.sh'
+if CALLS="$update_calls" PATH="$fakebin:$PATH" CONNECT_WORK_DIR="$service_dir/dirextalk-connect" \
+    bash "$ROOT/scripts/update.sh" "$state" >"$tmp/update.out" 2>&1; then
+  echo 'update accepted legacy state without immutable node identity' >&2
+  exit 1
+fi
+[ ! -s "$update_calls" ]
 deprecated_remote_dir="/opt""/p2p"
-assert_not_contains "$update_calls" "$deprecated_remote_dir|docker compose|MESSAGE_SERVER_IMAGE|init-tokens\\.sh"
-assert_not_contains "$update_calls" 'dirextalk-connect daemon status --service-name ops\.example\.test'
-assert_not_contains "$update_calls" 'dirextalk-connect daemon stop --service-name ops\.example\.test'
-assert_not_contains "$update_calls" 'volume rm|down -v|postgres-data|message-config|message-data|caddy-data|caddy-config'
-
-json_test_check "$state" "String(data.password) === '12345678' && data.access_token === 'ACCESS_SECRET' && data.agent_token === 'AGENT_SECRET' && data.agent_room_id === '!old:ops.example.test' && data.connect_install_status === 'installed' && data.phases.S4_BOOTSTRAP_STACK.status === 'done' && data.phases.S5_INIT_TOKENS.status === 'done' && data.phases.S6_WIRE_LOCAL.status === 'done' && data.phases.S7_VERIFY_E2E.status === 'done' && data.user_confirmations.agent_mcp_runtime.status === 'confirmed' && data.runtime_checks.summary.status === 'passed'"
-
-update_report="$service_dir/operation-report.json"
-assert_file_exists "$update_report"
-json_test_check "$update_report" "data.operation_type === 'update' && data.status === 'update_remote_restart_complete' && data.security.secrets_included === false && !('user_confirmation' in data.gates) && data.runtime_checks.summary.status === 'passed' && data.connect.install_status === 'installed' && data.credentials.status === 'current_or_not_recorded' && data.mcp.status === 'current_or_not_recorded'"
+json_test_check "$state" "data.split_release === undefined && data.updater_release === undefined && String(data.password) === '12345678' && data.access_token === 'ACCESS_SECRET' && data.agent_token === 'AGENT_SECRET'"
 
 write_state "$state" "$service_dir"
 printf 'ops.example.test ssh-ed25519 AAAATEST\n' > "$service_dir/known_hosts"

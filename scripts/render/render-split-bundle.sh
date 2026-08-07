@@ -51,10 +51,18 @@ if { [ "$packaged_bundle_explicit" = true ] || [ "$message_root_explicit" = fals
     echo "packaged split bundle does not match its SHA-256" >&2
     exit 1
   }
-  tar -tzf "$packaged_bundle" deploy/split-agent/SOURCE_REVISION >/dev/null || {
-    echo "packaged split bundle lacks source provenance" >&2
-    exit 1
-  }
+  packaged_required=(
+    SOURCE_REVISION
+    SOURCE_FILES.sha256
+    compose.production.yaml
+    scripts/update-message-server-local.sh
+  )
+  for file in "${packaged_required[@]}"; do
+    tar -tzf "$packaged_bundle" "deploy/split-agent/$file" >/dev/null || {
+      echo "packaged split bundle lacks required asset: $file" >&2
+      exit 1
+    }
+  done
   tmp=$(mktemp "${output%/*}/.split-agent-bundle.XXXXXX.tar.gz")
   cp "$packaged_bundle" "$tmp"
   chmod 0600 "$tmp"
@@ -64,6 +72,7 @@ fi
 
 required=(
   compose.yaml
+  compose.production.yaml
   compose.direct-tls.yaml
   edge-compose.yaml
   apparmor.d/dirextalk-runner-userns
@@ -76,6 +85,7 @@ required=(
   scripts/adopt-edge.sh
   scripts/cutover-edge.sh
   scripts/update-agent-local.sh
+  scripts/update-message-server-local.sh
 )
 
 for file in "${required[@]}"; do

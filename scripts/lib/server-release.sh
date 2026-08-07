@@ -70,6 +70,36 @@ server_release_split_state_matches_pin() {
     && [ "$(state_get split_release.coturn_image)" = "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" ]
 }
 
+server_release_split_business_state_matches_pin() {
+  [ "$(state_get split_release.message_version)" = "$DIREXTALK_MESSAGE_SERVER_VERSION" ] \
+    && [ "$(state_get split_release.message_image)" = "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" ] \
+    && [ "$(state_get split_release.message_source_revision)" = "$DIREXTALK_MESSAGE_SOURCE_REVISION" ] \
+    && [ "$(state_get split_release.agent_version)" = "$DIREXTALK_AGENT_VERSION" ] \
+    && [ "$(state_get split_release.agent_image)" = "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" ] \
+    && [ "$(state_get split_release.agent_source_revision)" = "$DIREXTALK_AGENT_SOURCE_REVISION" ] \
+    && [ "$(state_get split_release.caddy_image)" = "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" ] \
+    && [ "$(state_get split_release.coturn_image)" = "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" ]
+}
+
+server_release_split_state_can_advance() {
+  local recorded
+  server_release_split_business_state_matches_pin || return 1
+  recorded=$(state_get split_release.split_source_revision)
+  printf '%s\n' "$recorded" | grep -Eq '^[0-9a-f]{40}$'
+}
+
+server_release_advance_split_state() {
+  local expected_old=$1 recorded
+  server_release_split_business_state_matches_pin || return 1
+  recorded=$(state_get split_release.split_source_revision)
+  case "$recorded" in
+    "$DIREXTALK_SPLIT_SOURCE_REVISION") return 0 ;;
+    "$expected_old") ;;
+    *) return 1 ;;
+  esac
+  state_set split_release.split_source_revision "$DIREXTALK_SPLIT_SOURCE_REVISION"
+}
+
 server_release_record_split_state() {
   local split_json
   split_json=$(json_build object \
@@ -101,7 +131,7 @@ server_release_prepare_state() {
       warn "Existing infrastructure is not bound to the current production split release; refusing replacement or compatibility fallback."
       return 1
     }
-    server_release_split_state_matches_pin || {
+    server_release_split_state_matches_pin || server_release_split_state_can_advance || {
       warn "Existing infrastructure has incomplete or different Agent/Caddy/coturn/source pins; refusing replacement."
       return 1
     }

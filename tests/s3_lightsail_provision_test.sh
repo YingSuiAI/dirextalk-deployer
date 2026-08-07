@@ -13,6 +13,7 @@ export HOME="$tmp/home"
 export DIREXTALK_HOME="$HOME/.dirextalk"
 export DIREXTALK_WORKDIR="$tmp/work"
 mkdir -p "$HOME" "$DIREXTALK_WORKDIR"
+printf 'fixture-host-key\n' >"$DIREXTALK_WORKDIR/known_hosts"
 dirextalk_test_prepare_split_release "$tmp"
 
 fakebin="$tmp/bin"
@@ -25,6 +26,7 @@ printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 
 case "${1:-} ${2:-}" in
+  "sts get-caller-identity") printf '123456789012\n' ;;
   "lightsail get-bundles")
     printf '{"bundles":[{"bundleId":"medium_3_0","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"transferPerMonthInGb":3072,"cpuCount":2,"supportedPlatforms":["LINUX_UNIX"]}]}\n'
     ;;
@@ -37,7 +39,10 @@ case "${1:-} ${2:-}" in
     printf '%s\n' '-----END OPENSSH PRIVATE KEY-----'
     ;;
   "lightsail get-instance")
-    printf 'running\n'
+    case "$*" in
+      *instance.arn*) printf 'arn:aws:lightsail:us-east-1:123456789012:Instance/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\t123456789012/i-0123456789abcdef0\t203.0.113.144\n' ;;
+      *) printf 'running\n' ;;
+    esac
     ;;
   "lightsail get-static-ip")
     case "$*" in
@@ -70,7 +75,10 @@ printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 cat >/dev/null
-printf 'v1.0.11\t720a2bb824b8b7aef9275db060cfe08c6b93b1ab\t17712c2b6ff61fd014c6badd0d0e019f30d54181c168735c61de449e8ad4d790\n'
+case "${!#}" in
+  *'/etc/machine-id'*) printf '0123456789abcdef0123456789abcdef\tDOCKERENGINE1234\n' ;;
+  *) printf 'v1.0.12\t5ab9e87ccc6926ce3054a436308f655745eadd12\t95764862b1452ca7b9450f8431a087020a3e1e5ed786b35e0aac5905e8a3ede7\n' ;;
+esac
 EOF
 chmod 700 "$fakebin/ssh"
 export PATH="$fakebin:$PATH"
@@ -101,7 +109,7 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'production_split' && data.server_release.version === 'v1.1.2' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE' && data.updater_release.version === 'v1.0.11' && data.updater_release.sha256 === '17712c2b6ff61fd014c6badd0d0e019f30d54181c168735c61de449e8ad4d790'"
+json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'production_split' && data.server_release.version === 'v1.1.2' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE' && data.updater_release.version === 'v1.0.12' && data.updater_release.sha256 === '95764862b1452ca7b9450f8431a087020a3e1e5ed786b35e0aac5905e8a3ede7' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef' && data.node_identity.docker_engine_id === 'DOCKERENGINE1234'" || { cat "$STATE_JSON" >&2; exit 1; }
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
 grep -q '^#!/bin/sh' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
@@ -129,13 +137,8 @@ grep -q -- '--availability-zone us-east-1b' "$CALLS" || { cat "$CALLS" >&2; exit
 grep -q 'lightsail allocate-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'lightsail attach-static-ip' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 if grep -q '^scp-called$\|^scp ' "$CALLS"; then echo "S3 must not SCP updater artifacts" >&2; cat "$CALLS" >&2; exit 1; fi
-grep -q '^ssh .*ubuntu@203\.0\.113\.144.*tar.*reconcile-host\.sh.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q '^ssh .*ubuntu@203\.0\.113\.144.*tar.*apply-host-integration\.sh.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q -- '--no-same-owner' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-grep -q -- 'chown\\ -R\\ 0:0\\ /var/dirextalk-message-server/deploy' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-grep -q -- '/var/dirextalk-message-server/production-ops' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-grep -q -- 'recover-production\.sh' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-grep -q -- '/etc/systemd/system/dirextalk-split-recovery\.service' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-grep -q -- 'systemctl\\ enable\\ dirextalk-split-recovery\.service' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)

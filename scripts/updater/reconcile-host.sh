@@ -9,6 +9,22 @@ stable_ip=${3:-}
   echo "usage: reconcile-host.sh <integration-dir> <deployment-dir> <stable-public-ip>" >&2
   exit 1
 }
+for file in bootstrap-host.sh install.sh reconcile-host.sh set-desired-state.sh \
+  release.env config.json dirextalk-updater.service; do
+  [ -f "$source_dir/$file" ] && [ ! -L "$source_dir/$file" ] || {
+    echo "staged updater integration file is unavailable: $file" >&2
+    exit 1
+  }
+done
+if bash "$source_dir/bootstrap-host.sh" --preflight "$stable_ip"; then
+  :
+else
+  preflight_status=$?
+  case "$preflight_status" in
+    3) echo "existing host preflight reported an expected negative state" >&2; exit 3 ;;
+    *) echo "existing host preflight failed" >&2; exit 1 ;;
+  esac
+fi
 integration_dir="$base/updater"
 install -d -m 0755 "$integration_dir"
 rm -f "$integration_dir/dirextalk-updater-discovery.service" \

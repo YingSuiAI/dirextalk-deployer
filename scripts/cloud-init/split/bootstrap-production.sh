@@ -59,6 +59,14 @@ require_digest() {
 
 [ -f "$env_file" ] && [ ! -L "$env_file" ] || { echo "missing protected bootstrap env" >&2; exit 1; }
 [ "$(stat -c '%u:%a' "$env_file")" = "0:600" ] || { echo "bootstrap env must be root-owned mode 0600" >&2; exit 1; }
+[ -f "$split/compose.production.yaml" ] && [ ! -L "$split/compose.production.yaml" ] || {
+  echo "staged production Compose override is missing" >&2
+  exit 1
+}
+[ -x "$split/scripts/update-message-server-local.sh" ] && [ ! -L "$split/scripts/update-message-server-local.sh" ] || {
+  echo "staged message-server update adapter is not executable" >&2
+  exit 1
+}
 [ -f "$split/SOURCE_REVISION" ] || { echo "staged canonical split source is missing" >&2; exit 1; }
 [ -f "$split/SOURCE_FILES.sha256" ] || { echo "staged canonical split source manifest is missing" >&2; exit 1; }
 (cd "$split" && sha256sum -c --status SOURCE_FILES.sha256) || {
@@ -76,6 +84,7 @@ agent_image=$(read_env AGENT_IMAGE)
 caddy_image=$(read_env CADDY_IMAGE)
 message_revision=$(read_env MESSAGE_SOURCE_REVISION)
 split_revision=$(read_env SPLIT_SOURCE_REVISION)
+runtime_split_revision=${DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION:-$split_revision}
 agent_revision=$(read_env AGENT_SOURCE_REVISION)
 require_digest MESSAGE_SERVER_IMAGE "$message_image"
 require_digest AGENT_IMAGE "$agent_image"
@@ -85,7 +94,11 @@ require_digest COTURN_IMAGE "$coturn_image"
 for revision in "$message_revision" "$split_revision" "$agent_revision"; do
   printf '%s\n' "$revision" | grep -Eq '^[0-9a-f]{40}$' || { echo "source revision is invalid" >&2; exit 1; }
 done
-[ "$(cat "$split/SOURCE_REVISION")" = "$split_revision" ] || {
+[ "$(printf '%s\n' "$runtime_split_revision" | grep -Ec '^[0-9a-f]{40}$')" -eq 1 ] || {
+  echo "authorized runtime split revision is invalid" >&2
+  exit 1
+}
+[ "$(cat "$split/SOURCE_REVISION")" = "$runtime_split_revision" ] || {
   echo "staged split contract revision differs from the pinned deployment revision" >&2
   exit 1
 }

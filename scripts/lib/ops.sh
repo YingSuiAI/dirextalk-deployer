@@ -7,6 +7,8 @@ source "$OPS_LIB_DIR/paths.sh"
 # shellcheck disable=SC1090
 source "$OPS_LIB_DIR/json.sh"
 
+OPS_SPLIT_DIR=$OPS_LIB_DIR/../cloud-init/split
+
 ops_desired_state_helper_payload() {
   base64 < "$OPS_LIB_DIR/../updater/set-desired-state.sh" | tr -d '\r\n'
 }
@@ -142,6 +144,168 @@ ops_ssh() {
     -o "UserKnownHostsFile=$known_hosts" -o ConnectTimeout=10 ubuntu@"$pubip" "$command"
 }
 
+ops_require_existing_node_identity() {
+  local state=$1 field value
+  for field in \
+    aws_account_id region cloud_provider provider_instance_id \
+    provider_instance_arn public_ip machine_id docker_engine_id; do
+    value=$(ops_state_get "$state" ".node_identity.$field")
+    [ -n "$value" ] || {
+      echo "state is missing immutable node_identity.$field; refusing existing-node update" >&2
+      return 1
+    }
+  done
+  [ "$(ops_state_get "$state" .region)" = "$(ops_state_get "$state" .node_identity.region)" ] \
+    && [ "$(ops_state_get "$state" .cloud_provider)" = "$(ops_state_get "$state" .node_identity.cloud_provider)" ] \
+    && [ "$(ops_state_get "$state" .resources.public_ip)" = "$(ops_state_get "$state" .node_identity.public_ip)" ] \
+    || {
+      echo "mutable deployment coordinates differ from the immutable node identity receipt" >&2
+      return 1
+    }
+  case "$(ops_state_get "$state" .node_identity.cloud_provider)" in
+    lightsail)
+      [ -n "$(ops_state_get "$state" .node_identity.provider_support_code)" ] || {
+        echo "state is missing immutable node_identity.provider_support_code" >&2
+        return 1
+      }
+      ;;
+    ec2) ;;
+    *) echo "unsupported existing-node cloud provider" >&2; return 1 ;;
+  esac
+  if ! printf '%s\n' "$(ops_state_get "$state" .node_identity.aws_account_id)" | grep -Eq '^[0-9]{12}$' \
+    || ! printf '%s\n' "$(ops_state_get "$state" .node_identity.machine_id)" | grep -Eq '^[0-9a-f]{32}$' \
+    || ! printf '%s\n' "$(ops_state_get "$state" .node_identity.docker_engine_id)" | grep -Eq '^[A-Za-z0-9:+._-]{8,128}$' \
+    || ! printf '%s\n' "$(ops_state_get "$state" .node_identity.public_ip)" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+    echo "immutable node identity receipt contains malformed values" >&2
+    return 1
+  fi
+}
+
+ops_verify_existing_node_identity() {
+  local state=$1 account region provider provider_id provider_arn support_code public_ip
+  local actual_account actual_provider machine_id docker_engine_id actual_host
+  ops_require_existing_node_identity "$state" || return 1
+  account=$(ops_state_get "$state" .node_identity.aws_account_id)
+  region=$(ops_state_get "$state" .node_identity.region)
+  provider=$(ops_state_get "$state" .node_identity.cloud_provider)
+  provider_id=$(ops_state_get "$state" .node_identity.provider_instance_id)
+  provider_arn=$(ops_state_get "$state" .node_identity.provider_instance_arn)
+  support_code=$(ops_state_get "$state" .node_identity.provider_support_code)
+  public_ip=$(ops_state_get "$state" .node_identity.public_ip)
+
+  actual_account=$(aws sts get-caller-identity --query Account --output text) || return 1
+  [ "$actual_account" = "$account" ] || {
+    echo "AWS account identity differs from the existing-node receipt" >&2
+    return 1
+  }
+  case "$provider" in
+    lightsail)
+      # AWS CLI JMESPath backticks below are literals.
+      # shellcheck disable=SC2016
+      actual_provider=$(aws --region "$region" lightsail get-instance \
+        --instance-name "$(ops_state_get "$state" .resources.lightsail_instance_name)" \
+        --query 'join(`\t`,[instance.arn,instance.supportCode,instance.publicIpAddress])' --output text) || return 1
+      [ "$actual_provider" = "$provider_arn"$'\t'"$support_code"$'\t'"$public_ip" ] || {
+        echo "Lightsail instance identity differs from the existing-node receipt" >&2
+        return 1
+      }
+      case "$provider_arn" in */"$provider_id") ;; *) echo "Lightsail provider identifier is not bound to its ARN" >&2; return 1 ;; esac
+      ;;
+    ec2)
+      # AWS CLI JMESPath backticks below are literals.
+      # shellcheck disable=SC2016
+      actual_provider=$(aws --region "$region" ec2 describe-instances --instance-ids "$provider_id" \
+        --query 'join(`\t`,[Reservations[0].OwnerId,Reservations[0].Instances[0].InstanceId,Reservations[0].Instances[0].PublicIpAddress])' --output text) || return 1
+      [ "$actual_provider" = "$account"$'\t'"$provider_id"$'\t'"$public_ip" ] \
+        && [ "$provider_arn" = "arn:aws:ec2:$region:$account:instance/$provider_id" ] || {
+        echo "EC2 instance identity differs from the existing-node receipt" >&2
+        return 1
+      }
+      ;;
+  esac
+
+  actual_host=$(ops_ssh "$state" "set -eu; printf '%s\\t' \"\$(cat /etc/machine-id)\"; sudo docker info --format '{{.ID}}'") || return 1
+  IFS=$'\t' read -r machine_id docker_engine_id <<<"$actual_host"
+  [ "$machine_id" = "$(ops_state_get "$state" .node_identity.machine_id)" ] \
+    && [ "$docker_engine_id" = "$(ops_state_get "$state" .node_identity.docker_engine_id)" ] || {
+      echo "SSH host identity differs from the existing-node receipt" >&2
+      return 1
+    }
+}
+
+ops_stage_current_host_integration() (
+  local state=$1 expected_old=$2 integration_bundle split_bundle split_sha_file expected_sha actual_sha result status
+  local remote_command public_ip identity
+  local -a integration_files
+  split_bundle=$OPS_SPLIT_DIR/canonical-bundle.tar.gz
+  split_sha_file=$split_bundle.sha256
+  [ -f "$split_bundle" ] && [ ! -L "$split_bundle" ] \
+    && [ -f "$split_sha_file" ] && [ ! -L "$split_sha_file" ] || {
+      echo "packaged canonical split bundle or checksum is missing" >&2
+      return 1
+    }
+  expected_sha=$(awk 'NF == 2 && $2 == "canonical-bundle.tar.gz" {print $1}' "$split_sha_file")
+  actual_sha=$(sha256sum "$split_bundle" | awk '{print $1}')
+  printf '%s\n' "$expected_sha" | grep -Eq '^[0-9a-f]{64}$' && [ "$actual_sha" = "$expected_sha" ] || {
+    echo "packaged canonical split bundle checksum differs" >&2
+    return 1
+  }
+  integration_bundle=$(mktemp "${state%/*}/.existing-update.XXXXXX.tar.gz") || return 1
+  trap 'rm -f "$integration_bundle"' EXIT
+  integration_files=( -C "$OPS_LIB_DIR/.." -cf - \
+    cloud-init/split/Caddyfile \
+    cloud-init/split/edge-compose.override.yaml \
+    cloud-init/split/bootstrap-production.sh \
+    cloud-init/split/apply-host-integration.sh \
+    cloud-init/split/authorize-split-source-revision.sh \
+    cloud-init/split/advance-split-source-revision.sh \
+    cloud-init/split/release.env \
+    cloud-init/split/production-ops-common.sh \
+    cloud-init/split/recover-production.sh \
+    cloud-init/split/reconcile-production.sh \
+    cloud-init/split/reset-production.sh \
+    cloud-init/split/dirextalk-split-recovery.service \
+    updater/bootstrap-host.sh updater/install.sh updater/reconcile-host.sh \
+    updater/set-desired-state.sh updater/release.env updater/config.json \
+    updater/dirextalk-updater.service )
+  integration_files+=( -C "${split_bundle%/*}" "${split_bundle##*/}" )
+  tar "${integration_files[@]}" | gzip -n >"$integration_bundle" || return 1
+  public_ip=$(ops_state_get "$state" .node_identity.public_ip)
+  expected_machine_id=$(ops_state_get "$state" .node_identity.machine_id)
+  expected_docker_engine_id=$(ops_state_get "$state" .node_identity.docker_engine_id)
+  remote_command="set -eu; expected_machine_id=$(ops_sh_quote "$expected_machine_id"); expected_docker_engine_id=$(ops_sh_quote "$expected_docker_engine_id"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX); trap 'sudo rm -rf \"\$stage\"' EXIT; sudo chmod 0700 \"\$stage\"; sudo tar --no-same-owner -xzf - -C \"\$stage\"; sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server $(ops_sh_quote "$expected_old") $(ops_sh_quote "$public_ip"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; printf '%s\\t%s\\t%s\\n' \"\$expected_machine_id\" \"\$expected_docker_engine_id\" $(ops_sh_quote "$actual_sha")"
+  if result=$(ops_ssh "$state" "$remote_command" <"$integration_bundle"); then
+    :
+  else
+    status=$?
+    case "$status" in 3) return 3 ;; *) return 1 ;; esac
+  fi
+  identity=$(printf '%s\n' "$result" | tail -n 1)
+  [ "$identity" = "$(ops_state_get "$state" .node_identity.machine_id)"$'\t'"$(ops_state_get "$state" .node_identity.docker_engine_id)"$'\t'"$actual_sha" ] || {
+    echo "remote host integration completion receipt differs" >&2
+    return 1
+  }
+)
+
+ops_commit_existing_update_release() {
+  local state=$1 expected_split_json=$2 expected_updater_json=$3 split_json updater_json
+  split_json=$(json_build object \
+    "message_version=$DIREXTALK_MESSAGE_SERVER_VERSION" \
+    "message_image=$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" \
+    "message_source_revision=$DIREXTALK_MESSAGE_SOURCE_REVISION" \
+    "split_source_revision=$DIREXTALK_SPLIT_SOURCE_REVISION" \
+    "agent_version=$DIREXTALK_AGENT_VERSION" \
+    "agent_image=$DIREXTALK_AGENT_IMAGE_IMMUTABLE" \
+    "agent_source_revision=$DIREXTALK_AGENT_SOURCE_REVISION" \
+    "caddy_image=$DIREXTALK_CADDY_IMAGE_IMMUTABLE" \
+    "coturn_image=$DIREXTALK_COTURN_IMAGE_IMMUTABLE") || return 1
+  updater_json=$(json_build object \
+    "version=$UPDATER_PIN_VERSION" "commit=$UPDATER_PIN_COMMIT" "url=$UPDATER_PIN_URL" \
+    "asset=$UPDATER_PIN_ASSET" "sha256=$UPDATER_PIN_SHA256" "os=$UPDATER_PIN_OS" \
+    "arch=$UPDATER_PIN_ARCH" "ubuntu_version=$UPDATER_PIN_UBUNTU_VERSION") || return 1
+  json_mutate "$state" existing-update-release-commit "$expected_split_json" "$expected_updater_json" "$split_json" "$updater_json"
+}
+
 ops_connect_service_name() {
   local state=$1 service_name service_dir
   service_name=$(ops_state_get "$state" '.agent_service_id')
@@ -192,17 +356,6 @@ ops_stop_scoped_daemon() {
   ops_paths_match "$target_work_dir" "$work_dir" || return 1
 
   "$binary" daemon stop --service-name "$service_name" >/dev/null 2>&1
-}
-
-ops_update_remote_command() {
-  local remote_script
-  remote_script="$(ops_desired_state_helper_prelude)"$'\n'"$(ops_production_helpers_prelude)"$'\n'$(cat <<'EOF'
-sudo /var/dirextalk-message-server/updater/set-desired-state.sh maintenance
-sudo /var/dirextalk-message-server/production-ops/reconcile-production.sh
-sudo /var/dirextalk-message-server/updater/set-desired-state.sh running
-EOF
-)
-  printf 'sudo sh -lc %s\n' "$(ops_sh_quote "$remote_script")"
 }
 
 ops_reset_remote_command() {

@@ -17,7 +17,8 @@
 #   DOMAIN=__DOMAIN__ bash orchestrate.sh status   # show current service state only
 #   bash orchestrate.sh reset           # archive state.json; destroy will no longer know the resources
 #
-# Exit codes: 0=DONE / 1=phase failed / 2=waiting for user action.
+# Exit codes: 0=DONE / 1=phase or infrastructure failure / 2=waiting for user
+# action / 3=expected protected negative state.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
@@ -677,6 +678,7 @@ cmd_run() {
     case "$rc" in
       0)  ok "Phase $cur completed." ;;
       2)  warn "Phase $cur is waiting for user action (credentials/quota/confirmation). Resolve it and rerun this script to resume."; return 2 ;;
+      3)  warn "Phase $cur stopped at an expected protected negative state (rc=3). Inspect the immutable/protected boundary before rerunning; this is not an infrastructure failure."; return 3 ;;
       *)  warn "Phase $cur failed (rc=$rc). Fix it and rerun to resume, or ask the agent to destroy this node to remove resources."; return 1 ;;
     esac
   done

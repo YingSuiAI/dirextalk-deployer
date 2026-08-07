@@ -369,6 +369,19 @@ function cmdBuild(args) {
       data = {};
       for (const [key, value] of parsePairs(args.slice(1))) setPath(data, key, parseScalar(value));
       break;
+    case "node-identity":
+      data = {
+        aws_account_id: required(args, 1, "aws_account_id"),
+        region: required(args, 2, "region"),
+        cloud_provider: required(args, 3, "cloud_provider"),
+        provider_instance_id: required(args, 4, "provider_instance_id"),
+        provider_instance_arn: required(args, 5, "provider_instance_arn"),
+        provider_support_code: args[6] || "",
+        public_ip: required(args, 7, "public_ip"),
+        machine_id: required(args, 8, "machine_id"),
+        docker_engine_id: required(args, 9, "docker_engine_id")
+      };
+      break;
     case "matrix-session-create":
       data = { action: "agent.matrix_session.create", params: { device_id: required(args, 1, "device_id") } };
       writeOutput(`${JSON.stringify(data)}\n`);
@@ -571,6 +584,19 @@ function cmdMutate(args) {
         ts,
         evidence: "existing node operation requires fresh verification"
       };
+      break;
+    }
+    case "existing-update-release-commit": {
+      const expectedSplitRelease = JSON.parse(required(args, 2, "expected_split_release_json"));
+      const expectedUpdaterRelease = JSON.parse(required(args, 3, "expected_updater_release_json"));
+      const splitRelease = JSON.parse(required(args, 4, "split_release_json"));
+      const updaterRelease = JSON.parse(required(args, 5, "updater_release_json"));
+      if (JSON.stringify(data.split_release) !== JSON.stringify(expectedSplitRelease)
+          || JSON.stringify(data.updater_release) !== JSON.stringify(expectedUpdaterRelease)) {
+        throw new Error("local release state changed during existing-node update");
+      }
+      data.split_release = splitRelease;
+      data.updater_release = updaterRelease;
       break;
     }
     case "delete": {

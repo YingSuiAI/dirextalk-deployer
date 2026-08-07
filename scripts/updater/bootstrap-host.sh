@@ -6,6 +6,12 @@ root=${DIREXTALK_BOOTSTRAP_ROOT:-}
 base="$root/var/dirextalk-message-server"
 timeout=${DIREXTALK_BOOTSTRAP_TIMEOUT:-900}
 requested_stable_ip=${1:-}
+preflight_only=false
+if [ "$requested_stable_ip" = --preflight ]; then
+  preflight_only=true
+  requested_stable_ip=${2:-}
+  [ "$#" -eq 2 ] || { echo "usage: bootstrap-host.sh --preflight <stable-public-ip>" >&2; exit 1; }
+fi
 lock_dir="$root/run/lock"
 lock_file="$lock_dir/dirextalk-bootstrap.lock"
 stage_file="$base/.bootstrap-stage"
@@ -51,14 +57,65 @@ supported_ubuntu_version() {
   [ "$major" -gt 24 ] || { [ "$major" -eq 24 ] && [ "$minor" -ge 4 ]; }
 }
 
+read_unique_value() {
+  local file=$1 key=$2 count value
+  count=$(awk -F= -v wanted="$key" '$1 == wanted {n++} END {print n+0}' "$file")
+  [ "$count" -eq 1 ] || { echo "$file must contain exactly one $key" >&2; return 1; }
+  value=$(awk -F= -v wanted="$key" '$1 == wanted {print substr($0,length(wanted)+2); exit}' "$file")
+  [ -n "$value" ] || { echo "$file contains an empty $key" >&2; return 1; }
+  printf '%s' "$value"
+}
+
+preflight_existing_host() {
+  local expected_ip=$1 receipt="$base/stable-public-ip" env_file="$base/.env"
+  local source_revision_file="$base/deploy/split-agent/SOURCE_REVISION"
+  local recorded_ip recorded_revision canonical_revision owner
+  owner="$(id -u):$(id -g)"
+
+  [ -f "$receipt" ] && [ ! -L "$receipt" ] \
+    && [ "$(stat -c '%u:%g:%a' -- "$receipt")" = "$owner:600" ] \
+    || { echo "recorded stable public IP receipt is invalid" >&2; return 1; }
+  recorded_ip=$(cat -- "$receipt")
+  valid_public_ip "$recorded_ip" || { echo "recorded stable public IP receipt is malformed" >&2; return 1; }
+  [ "$recorded_ip" = "$expected_ip" ] \
+    || { echo "requested stable public IP differs from the protected receipt" >&2; return 3; }
+
+  if [ -e "$base/.split-deploy-done" ] || [ -L "$base/.split-deploy-done" ]; then
+    [ -f "$base/.split-deploy-done" ] && [ ! -L "$base/.split-deploy-done" ] \
+      && [ "$(stat -c '%u:%g' -- "$base/.split-deploy-done")" = "$owner" ] \
+      || { echo "completed split deployment marker is invalid" >&2; return 1; }
+    [ -f "$env_file" ] && [ ! -L "$env_file" ] \
+      && [ "$(stat -c '%u:%g:%a' -- "$env_file")" = "$owner:600" ] \
+      || { echo "protected root environment is invalid" >&2; return 1; }
+    [ -f "$source_revision_file" ] && [ ! -L "$source_revision_file" ] \
+      && [ "$(stat -c '%u:%g:%a' -- "$source_revision_file")" = "$owner:644" ] \
+      || { echo "staged canonical split source revision is invalid" >&2; return 1; }
+    recorded_revision=$(read_unique_value "$env_file" SPLIT_SOURCE_REVISION) || return 1
+    canonical_revision=$(cat -- "$source_revision_file")
+    printf '%s\n' "$canonical_revision" | grep -Eq '^[0-9a-f]{40}$' \
+      || { echo "staged canonical split source revision is malformed" >&2; return 1; }
+    if [ "$recorded_revision" != "$canonical_revision" ]; then
+      [ -n "${DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION:-}" ] \
+        && [ "$canonical_revision" = "$DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION" ] \
+        || { echo "protected split source revision differs from the staged canonical runtime" >&2; return 3; }
+    fi
+  fi
+}
+
 if [ -n "$requested_stable_ip" ]; then
   valid_public_ip "$requested_stable_ip" || { echo "invalid stable public IP" >&2; exit 1; }
+fi
+
+if [ "$preflight_only" = true ]; then
+  preflight_existing_host "$requested_stable_ip"
+  exit $?
 fi
 
 ready() {
   [ -s "$base/stable-public-ip" ] \
     && [ -f "$base/.env" ] \
     && [ -x "$base/production-ops/bootstrap-production.sh" ] \
+    && [ -x "$base/production-ops/reconcile-production.sh" ] \
     && [ -f "$base/deploy/split-agent/compose.yaml" ] \
     && [ -x "$base/updater/install.sh" ] \
     && [ -f "$base/updater/release.env" ]
@@ -68,19 +125,22 @@ mkdir -p "$lock_dir"
 exec 9>"$lock_file"
 flock 9
 
-if [ -e "$base/.deploy-done" ]; then
-  write_bootstrap_stage completed
-  exit 0
-fi
-
 write_bootstrap_stage lock
 write_bootstrap_stage prerequisites
 if [ -n "$requested_stable_ip" ]; then
   mkdir -p "$base"
-  stable_tmp=$(mktemp "$base/.stable-public-ip.XXXXXX")
-  printf '%s\n' "$requested_stable_ip" > "$stable_tmp"
-  chmod 0600 "$stable_tmp"
-  mv -f "$stable_tmp" "$base/stable-public-ip"
+  if [ -e "$base/stable-public-ip" ] || [ -L "$base/stable-public-ip" ]; then
+    [ -f "$base/stable-public-ip" ] && [ ! -L "$base/stable-public-ip" ] \
+      && [ "$(stat -c '%u:%a' "$base/stable-public-ip")" = "$(id -u):600" ] \
+      || { echo "recorded stable public IP receipt is invalid" >&2; exit 1; }
+    [ "$(cat "$base/stable-public-ip")" = "$requested_stable_ip" ] \
+      || { echo "requested stable public IP differs from the protected receipt" >&2; exit 3; }
+  else
+    stable_tmp=$(mktemp "$base/.stable-public-ip.XXXXXX")
+    printf '%s\n' "$requested_stable_ip" > "$stable_tmp"
+    chmod 0600 "$stable_tmp"
+    mv -f "$stable_tmp" "$base/stable-public-ip"
+  fi
 fi
 flock -u 9
 
@@ -94,10 +154,6 @@ until ready; do
 done
 
 flock 9
-if [ -e "$base/.deploy-done" ]; then
-  write_bootstrap_stage completed
-  exit 0
-fi
 ready || { echo "deployment prerequisites disappeared while waiting for bootstrap lock" >&2; exit 1; }
 
 stable_ip=$(cat "$base/stable-public-ip")
@@ -156,6 +212,29 @@ chmod 0755 "$updater_binary"
 [ -x "$updater_binary" ] || { echo "verified updater binary is not executable" >&2; exit 1; }
 
 bash "$base/updater/install.sh" "$updater_binary"
-bash "$base/production-ops/bootstrap-production.sh"
+if [ -e "$base/.split-deploy-done" ] || [ -L "$base/.split-deploy-done" ]; then
+  [ -f "$base/.split-deploy-done" ] && [ ! -L "$base/.split-deploy-done" ] \
+    && [ "$(stat -c '%u' "$base/.split-deploy-done")" = "$(id -u)" ] \
+    || { echo "completed split deployment marker is invalid" >&2; exit 1; }
+  if bash "$base/production-ops/reconcile-production.sh"; then
+    :
+  else
+    reconcile_status=$?
+    case "$reconcile_status" in
+      3) echo "existing production reconcile reported an expected negative state" >&2; exit 3 ;;
+      *) echo "existing production reconcile failed" >&2; exit 1 ;;
+    esac
+  fi
+else
+  if bash "$base/production-ops/bootstrap-production.sh"; then
+    :
+  else
+    bootstrap_status=$?
+    case "$bootstrap_status" in
+      3) echo "fresh production bootstrap reported an expected negative state" >&2; exit 3 ;;
+      *) echo "fresh production bootstrap failed" >&2; exit 1 ;;
+    esac
+  fi
+fi
 touch "$base/.deploy-done"
 write_bootstrap_stage completed

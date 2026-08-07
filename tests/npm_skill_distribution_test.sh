@@ -137,6 +137,8 @@ for (const required of [
   "scripts/lib/server-release.sh",
   "scripts/updater/release.env",
   "scripts/cloud-init/split/bootstrap-production.sh",
+  "scripts/cloud-init/split/authorize-split-source-revision.sh",
+  "scripts/cloud-init/split/advance-split-source-revision.sh",
   "scripts/cloud-init/split/production-ops-common.sh",
   "scripts/cloud-init/split/recover-production.sh",
   "scripts/cloud-init/split/reconcile-production.sh",

@@ -50,6 +50,74 @@ write_stage() {
   mv -f "$tmp" "$stage_file"
 }
 
+cleanup_failed_application_start() {
+  local start_status=$1 run_identity env_identity manifest_identity env_sha256 manifest_sha256
+  local cleanup_status control_file receipt=$run_dir/.cleanup-receipt
+  [ -d "$run_dir" ] && [ ! -L "$run_dir" ] || {
+    echo "application start failed (status $start_status) before a recoverable run directory was available" >&2
+    return 1
+  }
+  run_identity=$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir") || return 1
+  for control_file in "$run_dir/.env" "$run_dir/.manifest"; do
+    [ -f "$control_file" ] && [ ! -L "$control_file" ] || {
+      echo "application start failed (status $start_status) without a recoverable control file: $control_file" >&2
+      return 1
+    }
+  done
+  env_identity=$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir/.env") || return 1
+  manifest_identity=$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir/.manifest") || return 1
+  env_sha256=$(sha256sum -- "$run_dir/.env" | awk '{print $1}') || return 1
+  manifest_sha256=$(sha256sum -- "$run_dir/.manifest" | awk '{print $1}') || return 1
+
+  revalidate_failed_run() {
+    [ "$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir" 2>/dev/null)" = "$run_identity" ] \
+      && [ "$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir/.env" 2>/dev/null)" = "$env_identity" ] \
+      && [ "$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir/.manifest" 2>/dev/null)" = "$manifest_identity" ] \
+      && [ "$(sha256sum -- "$run_dir/.env" 2>/dev/null | awk '{print $1}')" = "$env_sha256" ] \
+      && [ "$(sha256sum -- "$run_dir/.manifest" 2>/dev/null | awk '{print $1}')" = "$manifest_sha256" ]
+  }
+
+  if [ -e "$receipt" ] || [ -L "$receipt" ]; then
+    [ -f "$receipt" ] && [ ! -L "$receipt" ] || {
+      echo "application start cleanup receipt is not a regular control file" >&2
+      return 1
+    }
+    revalidate_failed_run || { echo "application start controls changed before cleanup" >&2; return 1; }
+    if "$split/scripts/cleanup-local.sh" --purge "$run_dir"; then
+      :
+    else
+      cleanup_status=$?
+      echo "application start failed (status $start_status) and stack cleanup failed (status $cleanup_status)" >&2
+      return 1
+    fi
+  else
+    revalidate_failed_run || { echo "application start controls changed before cleanup" >&2; return 1; }
+    if "$split/scripts/cleanup-provision-failure.sh" "$run_dir"; then
+      :
+    else
+      cleanup_status=$?
+      if [ "$cleanup_status" -eq 3 ]; then
+        echo "application start failed (status $start_status) and provision cleanup stopped in an expected negative state" >&2
+        return 1
+      else
+        echo "application start failed (status $start_status) and provision cleanup failed (status $cleanup_status)" >&2
+        return 1
+      fi
+    fi
+  fi
+
+  revalidate_failed_run || { echo "application start controls changed after cleanup" >&2; return 1; }
+  rm -rf -- "$run_dir" || {
+    echo "failed application run directory could not be removed after cleanup" >&2
+    return 1
+  }
+  [ ! -e "$run_dir" ] && [ ! -L "$run_dir" ] || {
+    echo "failed application run directory remains after cleanup" >&2
+    return 1
+  }
+  echo "application start failed (status $start_status); partial fresh stack was cleaned for retry" >&2
+}
+
 require_digest() {
   printf '%s\n' "$2" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$' || {
     echo "$1 must be an immutable image digest" >&2
@@ -67,6 +135,12 @@ require_digest() {
   echo "staged message-server update adapter is not executable" >&2
   exit 1
 }
+for cleanup_helper in cleanup-local.sh cleanup-provision-failure.sh; do
+  [ -x "$split/scripts/$cleanup_helper" ] && [ ! -L "$split/scripts/$cleanup_helper" ] || {
+    echo "staged split cleanup helper is not executable: $cleanup_helper" >&2
+    exit 1
+  }
+done
 [ -f "$split/SOURCE_REVISION" ] || { echo "staged canonical split source is missing" >&2; exit 1; }
 [ -f "$split/SOURCE_FILES.sha256" ] || { echo "staged canonical split source manifest is missing" >&2; exit 1; }
 (cd "$split" && sha256sum -c --status SOURCE_FILES.sha256) || {
@@ -195,7 +269,13 @@ EOF
   fi
 
   write_stage application_start
-  "$split/scripts/start-local.sh" "$run_dir/.env"
+  if "$split/scripts/start-local.sh" "$run_dir/.env"; then
+    :
+  else
+    start_status=$?
+    cleanup_failed_application_start "$start_status" || exit 1
+    exit "$start_status"
+  fi
 fi
 
 write_stage edge_start

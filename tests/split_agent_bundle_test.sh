@@ -26,6 +26,8 @@ files=(
   scripts/prepare-runner-cgroups.sh
   scripts/manage-runner-apparmor.sh
   scripts/start-local.sh
+  scripts/cleanup-local.sh
+  scripts/cleanup-provision-failure.sh
   scripts/verify-production-images.sh
   scripts/verify-production-tls.sh
   scripts/agent-runtime-local-common.sh
@@ -178,6 +180,14 @@ cat >"$fresh_split/scripts/start-local.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 99
 EOF
+cat >"$fresh_split/scripts/cleanup-local.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 99
+EOF
+cat >"$fresh_split/scripts/cleanup-provision-failure.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 99
+EOF
 : >"$fresh_split/compose.production.yaml"
 cat >"$fresh_split/scripts/update-message-server-local.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -286,7 +296,15 @@ cat >"$edge_split/scripts/update-message-server-local.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod 0755 "$edge_split/scripts/update-message-server-local.sh"
+cat >"$edge_split/scripts/cleanup-local.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 99
+EOF
+cat >"$edge_split/scripts/cleanup-provision-failure.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 99
+EOF
+chmod 0755 "$edge_split/scripts/"*.sh
 printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$edge_split/SOURCE_REVISION"
 (cd "$edge_split" && find . -type f ! -name SOURCE_FILES.sha256 -print0 \
   | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)

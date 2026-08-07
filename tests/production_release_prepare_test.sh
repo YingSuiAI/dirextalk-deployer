@@ -39,6 +39,8 @@ populate_message_split() {
     scripts/provision-local.sh
     scripts/prepare-runner-cgroups.sh
     scripts/start-local.sh
+    scripts/cleanup-local.sh
+    scripts/cleanup-provision-failure.sh
     scripts/adopt-edge.sh
     scripts/cutover-edge.sh
     scripts/update-agent-local.sh

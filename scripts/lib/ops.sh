@@ -300,6 +300,7 @@ ops_commit_existing_update_release() {
     "agent_version=$(ops_state_get "$state" .split_release.agent_version)" \
     "agent_image=$(ops_state_get "$state" .split_release.agent_image)" \
     "agent_source_revision=$(ops_state_get "$state" .split_release.agent_source_revision)" \
+    "postgres_image=$(ops_state_get "$state" .split_release.postgres_image)" \
     "caddy_image=$(ops_state_get "$state" .split_release.caddy_image)" \
     "coturn_image=$(ops_state_get "$state" .split_release.coturn_image)") || return 1
   updater_json=$(json_build object \

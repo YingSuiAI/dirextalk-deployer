@@ -263,7 +263,8 @@ DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
 Normal deployment consumes the deployer-owned production split release. Its
-message-server, external Agent, and Caddy images are immutable digest references
+message-server, external Agent, PostgreSQL/pgvector, and Caddy images are
+immutable digest references
 bound to full source revisions, and its canonical runtime bundle is packaged
 with the deployer. The target host never clones a source repository and no
 mutable image override is part of the production path. The independent

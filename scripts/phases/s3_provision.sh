@@ -51,13 +51,18 @@ _split_release_validate() {
   for image in \
     "$(state_get server_release.image_ref)" \
     "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" \
+    "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" \
     "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" \
     "$DIREXTALK_COTURN_IMAGE_IMMUTABLE"; do
     printf '%s\n' "$image" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$' || {
-      warn "Split Agent deployment requires immutable message-server, Agent, Caddy, and coturn image digests before infrastructure creation."
+      warn "Split Agent deployment requires immutable message-server, Agent, PostgreSQL, Caddy, and coturn image digests before infrastructure creation."
       return 1
     }
   done
+  [ "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" = "docker.io/pgvector/pgvector:pg18@${DIREXTALK_POSTGRES_IMAGE_IMMUTABLE##*@}" ] || {
+    warn "Split Agent deployment requires the pinned pgvector/pgvector:pg18 image."
+    return 1
+  }
   for revision in "$DIREXTALK_MESSAGE_SOURCE_REVISION" "$DIREXTALK_SPLIT_SOURCE_REVISION" "$DIREXTALK_AGENT_SOURCE_REVISION"; do
     printf '%s\n' "$revision" | grep -Eq '^[0-9a-f]{40}$' || {
       warn "Split Agent deployment requires full message-server and Agent source revisions."
@@ -164,6 +169,7 @@ _run_phase_ec2() {
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
     --agent-image "${DIREXTALK_AGENT_IMAGE_IMMUTABLE:-}" \
+    --postgres-image "${DIREXTALK_POSTGRES_IMAGE_IMMUTABLE:-}" \
     --caddy-image "${DIREXTALK_CADDY_IMAGE_IMMUTABLE:-}" \
     --coturn-image "${DIREXTALK_COTURN_IMAGE_IMMUTABLE:-}" \
     --message-source-revision "${DIREXTALK_MESSAGE_SOURCE_REVISION:-}" \
@@ -337,6 +343,7 @@ _run_phase_lightsail() {
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
     --agent-image "${DIREXTALK_AGENT_IMAGE_IMMUTABLE:-}" \
+    --postgres-image "${DIREXTALK_POSTGRES_IMAGE_IMMUTABLE:-}" \
     --caddy-image "${DIREXTALK_CADDY_IMAGE_IMMUTABLE:-}" \
     --coturn-image "${DIREXTALK_COTURN_IMAGE_IMMUTABLE:-}" \
     --message-source-revision "${DIREXTALK_MESSAGE_SOURCE_REVISION:-}" \

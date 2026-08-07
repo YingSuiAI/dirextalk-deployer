@@ -81,6 +81,7 @@ printf '%s\n' "$domain" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$' || {
 }
 message_image=$(read_env MESSAGE_SERVER_IMAGE)
 agent_image=$(read_env AGENT_IMAGE)
+postgres_image=$(read_env POSTGRES_IMAGE)
 caddy_image=$(read_env CADDY_IMAGE)
 message_revision=$(read_env MESSAGE_SOURCE_REVISION)
 split_revision=$(read_env SPLIT_SOURCE_REVISION)
@@ -91,6 +92,11 @@ release_catalog_origin=$(read_env DIREXTALK_RELEASE_CATALOG_ORIGIN)
   || { echo "protected release catalog origin is invalid" >&2; exit 1; }
 require_digest MESSAGE_SERVER_IMAGE "$message_image"
 require_digest AGENT_IMAGE "$agent_image"
+require_digest POSTGRES_IMAGE "$postgres_image"
+[ "$postgres_image" = "docker.io/pgvector/pgvector:pg18@${postgres_image##*@}" ] || {
+  echo "POSTGRES_IMAGE must use the pinned pgvector/pgvector:pg18 image" >&2
+  exit 1
+}
 require_digest CADDY_IMAGE "$caddy_image"
 coturn_image=$(read_env COTURN_IMAGE)
 require_digest COTURN_IMAGE "$coturn_image"
@@ -153,8 +159,6 @@ else
 
   attestation=$base/image-attestation
   if [ ! -f "$attestation" ]; then
-  postgres_image=docker.io/library/postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
-  qdrant_image=qdrant/qdrant:v1.18.3@sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286
   attestation_tmp=$(mktemp "$base/.image-attestation.XXXXXX")
   cat >"$attestation_tmp" <<EOF
 # dirextalk-image-attestation-v2
@@ -166,7 +170,6 @@ image.DIREXTALK_POSTGRES_IMAGE_IMMUTABLE=$postgres_image
 image.DIREXTALK_UTILITY_IMAGE_IMMUTABLE=$postgres_image
 image.DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE=$message_image
 image.DIREXTALK_AGENT_IMAGE_IMMUTABLE=$agent_image
-image.DIREXTALK_QDRANT_IMAGE_IMMUTABLE=$qdrant_image
 image.DIREXTALK_COTURN_IMAGE_IMMUTABLE=$coturn_image
 EOF
   chmod 0400 "$attestation_tmp"
@@ -183,6 +186,7 @@ EOF
   DIREXTALK_CORE_WORKLOAD_ENABLED=true \
   DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE="$message_image" \
   DIREXTALK_AGENT_IMAGE_IMMUTABLE="$agent_image" \
+  DIREXTALK_POSTGRES_IMAGE_IMMUTABLE="$postgres_image" \
   DIREXTALK_COTURN_IMAGE_IMMUTABLE="$coturn_image" \
   DIREXTALK_RELEASE_CATALOG_ORIGIN="$release_catalog_origin" \
   DIREXTALK_TURN_EXTERNAL_IP="$turn_external_ip" \

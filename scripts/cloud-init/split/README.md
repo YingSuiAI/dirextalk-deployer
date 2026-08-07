@@ -15,10 +15,12 @@ Deployer release must carry the same generated bundle plus its
 target host.
 
 The target host never clones source. `bootstrap-production.sh` consumes the
-staged bundle, requires immutable message-server, Agent, Caddy, and coturn digests,
+staged bundle, requires immutable message-server, Agent, PostgreSQL/pgvector,
+Caddy, and coturn digests,
 binds TURN's external address to the updater-recorded stable public IPv4,
-prepares the two systemd-delegated runner cgroups, provisions the two databases
-and Qdrant in production mode, starts the application stack, and then starts
+prepares the two systemd-delegated runner cgroups, provisions one PostgreSQL
+container and volume with distinct Message Server and Agent roles/databases,
+starts the application stack, and then starts
 the separate canonical Caddy edge project.
 
 `release.env` is the only production release selection. It binds the

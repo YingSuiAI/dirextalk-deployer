@@ -149,7 +149,7 @@ bash scripts/orchestrate.sh
 S3 validates the deployer-owned production split release and persists
 `server_release.source=production_split`, the fixed message-server version,
 digest, immutable image reference, and source revision before provisioning.
-The same release pin fixes the Agent and Caddy digests. S3 also records
+The same release pin fixes the Agent, PostgreSQL/pgvector, and Caddy digests. S3 also records
 the deployer-owned independent updater version, commit, and
 SHA-256 pin. User-data on the verified Ubuntu 24.04+ x86_64 host with systemd
 >= 254 downloads that

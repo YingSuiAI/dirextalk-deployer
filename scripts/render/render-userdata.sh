@@ -18,7 +18,7 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 CI="$HERE/cloud-init"
 source "$HERE/lib/domain.sh"
 
-DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; AGENT_IMAGE=""; CADDY_IMAGE=""; COTURN_IMAGE=""
+DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; AGENT_IMAGE=""; POSTGRES_IMAGE=""; CADDY_IMAGE=""; COTURN_IMAGE=""
 MESSAGE_SOURCE_REVISION=""; SPLIT_SOURCE_REVISION=""; AGENT_SOURCE_REVISION=""; RELEASE_CATALOG_ORIGIN=""; FORMAT="cloud-config"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -27,6 +27,7 @@ while [ $# -gt 0 ]; do
     --acme) ACME=$2; shift 2;;
     --message-server-image) MESSAGE_SERVER_IMAGE=$2; shift 2;;
     --agent-image) AGENT_IMAGE=$2; shift 2;;
+    --postgres-image) POSTGRES_IMAGE=$2; shift 2;;
     --caddy-image) CADDY_IMAGE=$2; shift 2;;
     --coturn-image) COTURN_IMAGE=$2; shift 2;;
     --message-source-revision) MESSAGE_SOURCE_REVISION=$2; shift 2;;
@@ -51,12 +52,16 @@ b64() { base64 | tr -d '\n'; }
 sed_replacement_escape() { printf '%s' "$1" | sed 's/[\\&#]/\\&/g'; }
 split_env=''
 split_cloud_env=''
-for value in "$MESSAGE_SERVER_IMAGE" "$AGENT_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE"; do
+for value in "$MESSAGE_SERVER_IMAGE" "$AGENT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE"; do
   printf '%s\n' "$value" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$' || {
-    echo "split application and Caddy images must be immutable digest references" >&2
+    echo "split application, PostgreSQL, and Caddy images must be immutable digest references" >&2
     exit 1
   }
 done
+[ "$POSTGRES_IMAGE" = "docker.io/pgvector/pgvector:pg18@${POSTGRES_IMAGE##*@}" ] || {
+  echo "--postgres-image must be an immutable docker.io/pgvector/pgvector:pg18 reference" >&2
+  exit 1
+}
 for value in "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_REVISION"; do
   printf '%s\n' "$value" | grep -Eq '^[0-9a-f]{40}$' || {
     echo "split image source revisions must be full lowercase Git commits" >&2
@@ -67,8 +72,8 @@ done
   echo "--release-catalog-origin must be https://imadmin.dirextalk.ai" >&2
   exit 1
 }
-split_env=$(printf 'AGENT_IMAGE=%s\nCADDY_IMAGE=%s\nCOTURN_IMAGE=%s\nMESSAGE_SOURCE_REVISION=%s\nSPLIT_SOURCE_REVISION=%s\nAGENT_SOURCE_REVISION=%s\nDIREXTALK_RELEASE_CATALOG_ORIGIN=%s\n' \
-  "$AGENT_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE" "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_REVISION" "$RELEASE_CATALOG_ORIGIN")
+split_env=$(printf 'AGENT_IMAGE=%s\nPOSTGRES_IMAGE=%s\nCADDY_IMAGE=%s\nCOTURN_IMAGE=%s\nMESSAGE_SOURCE_REVISION=%s\nSPLIT_SOURCE_REVISION=%s\nAGENT_SOURCE_REVISION=%s\nDIREXTALK_RELEASE_CATALOG_ORIGIN=%s\n' \
+  "$AGENT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE" "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_REVISION" "$RELEASE_CATALOG_ORIGIN")
 split_cloud_env=$(printf '%s\n' "$split_env" | sed 's/^/      /')
 
 # Build a deterministic tar.gz bundle with fixed permissions and no extra attrs.

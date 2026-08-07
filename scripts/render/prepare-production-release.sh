@@ -212,6 +212,7 @@ render_release_pin() {
   printf 'DIREXTALK_AGENT_VERSION=%s\n' "$agent_version"
   printf 'DIREXTALK_AGENT_IMAGE_IMMUTABLE=%s\n' "$agent_image"
   printf 'DIREXTALK_AGENT_SOURCE_REVISION=%s\n' "$agent_revision"
+  printf 'DIREXTALK_POSTGRES_IMAGE_IMMUTABLE=%s\n' "$postgres_image"
   printf 'DIREXTALK_CADDY_IMAGE_IMMUTABLE=%s\n' "$caddy_image"
   printf 'DIREXTALK_COTURN_IMAGE_IMMUTABLE=%s\n' "$coturn_image"
 }
@@ -237,6 +238,8 @@ require_clean_repository "$agent_root" 'Agent'
 
 caddy_image=$(read_unique_pair "$release_pin" DIREXTALK_CADDY_IMAGE_IMMUTABLE) \
   || die 'existing Caddy image pin is invalid'
+postgres_image=$(read_unique_pair "$release_pin" DIREXTALK_POSTGRES_IMAGE_IMMUTABLE) \
+  || die 'existing PostgreSQL image pin is invalid'
 coturn_image=$(read_unique_pair "$release_pin" DIREXTALK_COTURN_IMAGE_IMMUTABLE) \
   || die 'existing coturn image pin is invalid'
 release_catalog_origin=$(read_unique_pair "$release_pin" DIREXTALK_RELEASE_CATALOG_ORIGIN) \
@@ -245,6 +248,8 @@ release_catalog_origin=$(read_unique_pair "$release_pin" DIREXTALK_RELEASE_CATAL
   || die 'production release catalog origin must be https://imadmin.dirextalk.ai'
 printf '%s\n' "$caddy_image" | grep -Eq '^docker\.io/library/caddy@sha256:[0-9a-f]{64}$' \
   || die 'existing Caddy image pin is not immutable'
+printf '%s\n' "$postgres_image" | grep -Eq '^docker\.io/pgvector/pgvector:pg18@sha256:[0-9a-f]{64}$' \
+  || die 'existing PostgreSQL image pin must be immutable pgvector/pgvector:pg18'
 printf '%s\n' "$coturn_image" | grep -Eq '^docker\.io/coturn/coturn:4\.6\.3-alpine@sha256:[0-9a-f]{64}$' \
   || die 'existing coturn image pin is not immutable'
 

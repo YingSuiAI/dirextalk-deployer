@@ -7,6 +7,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 message='docker.io/dirextalk/message-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 agent='docker.io/dirextalk/agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+postgres='docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
 caddy='docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
 coturn='docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 message_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -17,6 +18,7 @@ common=(
   --acme ops@example.test
   --message-server-image "$message"
   --agent-image "$agent"
+  --postgres-image "$postgres"
   --caddy-image "$caddy"
   --coturn-image "$coturn"
   --message-source-revision "$message_revision"
@@ -41,6 +43,7 @@ sed -n "/^exec \/usr\/bin\/env bash <<'DIREXTALK_BOOTSTRAP_BASH'$/,/^DIREXTALK_B
 for rendered in "$tmp/user-data.yaml" "$tmp/user-data.sh"; do
   grep -Fq "MESSAGE_SERVER_IMAGE=$message" "$rendered"
   grep -Fq "AGENT_IMAGE=$agent" "$rendered"
+  grep -Fq "POSTGRES_IMAGE=$postgres" "$rendered"
   grep -Fq "CADDY_IMAGE=$caddy" "$rendered"
   grep -Fq "COTURN_IMAGE=$coturn" "$rendered"
   grep -Fq "MESSAGE_SOURCE_REVISION=$message_revision" "$rendered"
@@ -71,6 +74,7 @@ if bash "$ROOT/scripts/render/render-userdata.sh" \
   --domain service.example.test \
   --message-server-image dirextalk/message-server:latest \
   --agent-image "$agent" \
+  --postgres-image "$postgres" \
   --caddy-image "$caddy" \
   --coturn-image "$coturn" \
   --message-source-revision "$message_revision" \

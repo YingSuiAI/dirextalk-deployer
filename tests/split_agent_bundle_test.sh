@@ -97,6 +97,17 @@ tar -xOzf "$repository_bundle" deploy/split-agent/scripts/cleanup-local.sh \
 mkdir -p "$TEST_TMP/repository-unpacked"
 tar -xzf "$repository_bundle" -C "$TEST_TMP/repository-unpacked"
 (cd "$TEST_TMP/repository-unpacked/deploy/split-agent" && sha256sum -c --status SOURCE_FILES.sha256)
+repository_compose="$TEST_TMP/repository-unpacked/deploy/split-agent/compose.yaml"
+[ "$(grep -Ec '^  postgres:$' "$repository_compose")" -eq 1 ]
+grep -Fq 'image: ${DIREXTALK_POSTGRES_IMAGE_IMMUTABLE:?set an immutable PostgreSQL image reference}' "$repository_compose"
+grep -Fq 'aliases: [message-postgres]' "$repository_compose"
+grep -Fq 'aliases: [agent-postgres]' "$repository_compose"
+grep -Fq 'postgres_data:/var/lib/postgresql' "$repository_compose"
+if grep -Ei 'qdrant|message[_-]postgres[_-](data|volume)|agent[_-]postgres[_-](data|volume)' \
+    "$repository_compose" >/dev/null; then
+  echo 'canonical split bundle retained superseded Qdrant or per-application PostgreSQL resources' >&2
+  exit 1
+fi
 host_integration="$ROOT/scripts/cloud-init/split/apply-host-integration.sh"
 grep -Fq 'sshd_effective=$(sshd -T)' "$host_integration"
 grep -Fq "grep -Fx 'passwordauthentication no' <<<\"\$sshd_effective\"" "$host_integration"
@@ -180,6 +191,7 @@ cat >"$fresh/.env" <<'EOF'
 DOMAIN=turn.example.test
 MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 AGENT_IMAGE=docker.io/dirextalk/agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+POSTGRES_IMAGE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -215,6 +227,12 @@ grep -Fqx 'catalog_origin=https://imadmin.dirextalk.ai' "$capture"
 attestation=$(sed -n 's/^attestation=//p' "$capture")
 [ "$attestation" = "$fresh/image-attestation" ]
 grep -Fqx '# dirextalk-image-attestation-v2' "$attestation"
+grep -Fqx 'image.DIREXTALK_POSTGRES_IMAGE_IMMUTABLE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' "$attestation"
+grep -Fqx 'image.DIREXTALK_UTILITY_IMAGE_IMMUTABLE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' "$attestation"
+if grep -Eiq 'qdrant' "$attestation"; then
+  echo 'first-fresh image attestation retained Qdrant' >&2
+  exit 1
+fi
 grep -Fqx 'image.DIREXTALK_COTURN_IMAGE_IMMUTABLE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' "$attestation"
 
 # Required production update inputs fail closed before runner preparation or
@@ -276,6 +294,7 @@ cat >"$edge/.env" <<'EOF'
 DOMAIN=edge.example.test
 MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 AGENT_IMAGE=docker.io/dirextalk/agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+POSTGRES_IMAGE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

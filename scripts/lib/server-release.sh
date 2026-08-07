@@ -27,10 +27,12 @@ server_release_validate_pin() {
   server_release_is_version "$DIREXTALK_AGENT_VERSION" || return 1
   [ "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" = "docker.io/dirextalk/message-server@${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}" ] || return 1
   [ "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" = "docker.io/dirextalk/agent@${DIREXTALK_AGENT_IMAGE_IMMUTABLE##*@}" ] || return 1
+  [ "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" = "docker.io/pgvector/pgvector:pg18@${DIREXTALK_POSTGRES_IMAGE_IMMUTABLE##*@}" ] || return 1
   [ "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" = "docker.io/library/caddy@${DIREXTALK_CADDY_IMAGE_IMMUTABLE##*@}" ] || return 1
   [ "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" = "docker.io/coturn/coturn:4.6.3-alpine@${DIREXTALK_COTURN_IMAGE_IMMUTABLE##*@}" ] || return 1
   server_release_is_immutable_image "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" || return 1
   server_release_is_immutable_image "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" || return 1
+  server_release_is_immutable_image "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" || return 1
   server_release_is_immutable_image "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" || return 1
   server_release_is_immutable_image "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" || return 1
   printf '%s\n' "$DIREXTALK_MESSAGE_SOURCE_REVISION" "$DIREXTALK_SPLIT_SOURCE_REVISION" "$DIREXTALK_AGENT_SOURCE_REVISION" \
@@ -79,12 +81,13 @@ server_release_split_state_matches_pin() {
     && [ "$(state_get split_release.agent_version)" = "$DIREXTALK_AGENT_VERSION" ] \
     && [ "$(state_get split_release.agent_image)" = "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" ] \
     && [ "$(state_get split_release.agent_source_revision)" = "$DIREXTALK_AGENT_SOURCE_REVISION" ] \
+    && [ "$(state_get split_release.postgres_image)" = "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" ] \
     && [ "$(state_get split_release.caddy_image)" = "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" ] \
     && [ "$(state_get split_release.coturn_image)" = "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" ]
 }
 
 server_release_split_state_can_advance() {
-  local recorded message_version agent_version message_image agent_image caddy_image coturn_image
+  local recorded message_version agent_version message_image agent_image postgres_image caddy_image coturn_image
   local message_revision agent_revision
   recorded=$(state_get split_release.split_source_revision)
   [ "$(state_get split_release.release_catalog_origin)" = "$DIREXTALK_RELEASE_CATALOG_ORIGIN" ] || return 1
@@ -92,6 +95,7 @@ server_release_split_state_can_advance() {
   agent_version=$(state_get split_release.agent_version)
   message_image=$(state_get split_release.message_image)
   agent_image=$(state_get split_release.agent_image)
+  postgres_image=$(state_get split_release.postgres_image)
   caddy_image=$(state_get split_release.caddy_image)
   coturn_image=$(state_get split_release.coturn_image)
   message_revision=$(state_get split_release.message_source_revision)
@@ -100,6 +104,8 @@ server_release_split_state_can_advance() {
     && server_release_is_version "$agent_version" \
     && server_release_is_immutable_image "$message_image" \
     && server_release_is_immutable_image "$agent_image" \
+    && [ "$postgres_image" = "docker.io/pgvector/pgvector:pg18@${postgres_image##*@}" ] \
+    && server_release_is_immutable_image "$postgres_image" \
     && server_release_is_immutable_image "$caddy_image" \
     && server_release_is_immutable_image "$coturn_image" \
     && printf '%s\n' "$message_revision" "$agent_revision" "$recorded" \
@@ -130,6 +136,7 @@ server_release_record_split_state() {
     "agent_version=$DIREXTALK_AGENT_VERSION" \
     "agent_image=$DIREXTALK_AGENT_IMAGE_IMMUTABLE" \
     "agent_source_revision=$DIREXTALK_AGENT_SOURCE_REVISION" \
+    "postgres_image=$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" \
     "caddy_image=$DIREXTALK_CADDY_IMAGE_IMMUTABLE" \
     "coturn_image=$DIREXTALK_COTURN_IMAGE_IMMUTABLE") || return 1
   state_set_raw split_release "$split_json"

@@ -126,9 +126,11 @@ bash scripts/orchestrate.sh
 ```
 
 Normal deployment uses the deployer-owned production split release: immutable
-message-server, Agent, and Caddy image digests plus their full source revisions.
+message-server, Agent, PostgreSQL/pgvector, and Caddy image digests plus their
+full source revisions.
 The packaged canonical runtime bundle starts message-server, the external Agent,
-two PostgreSQL databases, Qdrant, extension/core runners, and a separate Caddy
+one PostgreSQL/pgvector container with isolated Message Server and Agent roles
+and databases, extension/core runners, and a separate Caddy
 edge project. The target host never clones either source repository. The host updater is a separate
 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release:
 the supported Ubuntu 24.04+ x86_64 host with systemd >= 254 downloads the deployer-pinned updater asset and

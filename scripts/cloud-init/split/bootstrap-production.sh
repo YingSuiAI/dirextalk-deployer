@@ -52,6 +52,7 @@ write_stage() {
 
 cleanup_failed_application_start() {
   local start_status=$1 run_identity env_identity manifest_identity env_sha256 manifest_sha256
+  local preparation=$base/runner-preparation.env preparation_identity preparation_sha256
   local cleanup_status control_file receipt=$run_dir/.cleanup-receipt
   [ -d "$run_dir" ] && [ ! -L "$run_dir" ] || {
     echo "application start failed (status $start_status) before a recoverable run directory was available" >&2
@@ -68,6 +69,12 @@ cleanup_failed_application_start() {
   manifest_identity=$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir/.manifest") || return 1
   env_sha256=$(sha256sum -- "$run_dir/.env" | awk '{print $1}') || return 1
   manifest_sha256=$(sha256sum -- "$run_dir/.manifest" | awk '{print $1}') || return 1
+  [ -f "$preparation" ] && [ ! -L "$preparation" ] || {
+    echo "application start failed (status $start_status) without a recoverable runner preparation receipt" >&2
+    return 1
+  }
+  preparation_identity=$(stat -c '%d:%i:%u:%g:%a' -- "$preparation") || return 1
+  preparation_sha256=$(sha256sum -- "$preparation" | awk '{print $1}') || return 1
 
   revalidate_failed_run() {
     [ "$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir" 2>/dev/null)" = "$run_identity" ] \
@@ -77,12 +84,18 @@ cleanup_failed_application_start() {
       && [ "$(sha256sum -- "$run_dir/.manifest" 2>/dev/null | awk '{print $1}')" = "$manifest_sha256" ]
   }
 
+  revalidate_runner_preparation() {
+    [ "$(stat -c '%d:%i:%u:%g:%a' -- "$preparation" 2>/dev/null)" = "$preparation_identity" ] \
+      && [ "$(sha256sum -- "$preparation" 2>/dev/null | awk '{print $1}')" = "$preparation_sha256" ]
+  }
+
   if [ -e "$receipt" ] || [ -L "$receipt" ]; then
     [ -f "$receipt" ] && [ ! -L "$receipt" ] || {
       echo "application start cleanup receipt is not a regular control file" >&2
       return 1
     }
     revalidate_failed_run || { echo "application start controls changed before cleanup" >&2; return 1; }
+    revalidate_runner_preparation || { echo "runner preparation receipt changed before cleanup" >&2; return 1; }
     if "$split/scripts/cleanup-local.sh" --purge "$run_dir"; then
       :
     else
@@ -92,6 +105,7 @@ cleanup_failed_application_start() {
     fi
   else
     revalidate_failed_run || { echo "application start controls changed before cleanup" >&2; return 1; }
+    revalidate_runner_preparation || { echo "runner preparation receipt changed before cleanup" >&2; return 1; }
     if "$split/scripts/cleanup-provision-failure.sh" "$run_dir"; then
       :
     else
@@ -107,6 +121,15 @@ cleanup_failed_application_start() {
   fi
 
   revalidate_failed_run || { echo "application start controls changed after cleanup" >&2; return 1; }
+  revalidate_runner_preparation || { echo "runner preparation receipt changed after cleanup" >&2; return 1; }
+  rm -f -- "$preparation" || {
+    echo "runner preparation receipt could not be invalidated after cleanup" >&2
+    return 1
+  }
+  [ ! -e "$preparation" ] && [ ! -L "$preparation" ] || {
+    echo "runner preparation receipt remains after cleanup" >&2
+    return 1
+  }
   rm -rf -- "$run_dir" || {
     echo "failed application run directory could not be removed after cleanup" >&2
     return 1

@@ -12,12 +12,24 @@ mkdir -p "$split/scripts" "$fakebin"
 
 cat >"$split/scripts/prepare-runner-cgroups.sh" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' 'DIREXTALK_RUNNER_PREPARED=true'
+set -euo pipefail
+count=0
+[ ! -f "$DIREXTALK_TEST_PREPARATION_COUNT" ] || count=$(cat "$DIREXTALK_TEST_PREPARATION_COUNT")
+printf '%s\n' "$((count + 1))" >"$DIREXTALK_TEST_PREPARATION_COUNT"
+: >"$DIREXTALK_TEST_RUNNER_INTEGRATION"
+printf 'prepare %s\n' "$((count + 1))" >>"$DIREXTALK_TEST_CLEANUP_CALLS"
+printf '%s\n' \
+  'DIREXTALK_RUNNER_PREPARED=true' \
+  "DIREXTALK_RUNNER_APPARMOR_PROFILE_PATH=$DIREXTALK_TEST_RUNNER_INTEGRATION"
 EOF
 cat >"$split/scripts/provision-local.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 out=$1
+[ -f "${DIREXTALK_RUNNER_APPARMOR_PROFILE_PATH:-}" ] || {
+  echo 'runner host integration is unavailable' >&2
+  exit 72
+}
 [ ! -e "$DIREXTALK_TEST_RESOURCE" ] || { echo 'fresh network already exists' >&2; exit 71; }
 count=0
 [ ! -f "$DIREXTALK_TEST_PROVISION_COUNT" ] || count=$(cat "$DIREXTALK_TEST_PROVISION_COUNT")
@@ -35,6 +47,7 @@ count=0
 [ ! -f "$DIREXTALK_TEST_START_COUNT" ] || count=$(cat "$DIREXTALK_TEST_START_COUNT")
 count=$((count + 1))
 printf '%s\n' "$count" >"$DIREXTALK_TEST_START_COUNT"
+printf 'start %s\n' "$count" >>"$DIREXTALK_TEST_CLEANUP_CALLS"
 if [ "$count" -eq 1 ]; then
   [ "${DIREXTALK_TEST_NO_RECEIPT:-false}" != true ] || exit 42
   : >"$DIREXTALK_TEST_RESOURCE"
@@ -52,6 +65,7 @@ set -euo pipefail
 [ -z "${DIREXTALK_TEST_CLEANUP_LOCAL_STATUS:-}" ] || exit "$DIREXTALK_TEST_CLEANUP_LOCAL_STATUS"
 printf 'cleanup-local %s\n' "$1" >>"$DIREXTALK_TEST_CLEANUP_CALLS"
 rm -f "$DIREXTALK_TEST_RESOURCE"
+rm -f "$DIREXTALK_TEST_RUNNER_INTEGRATION"
 EOF
 cat >"$split/scripts/cleanup-provision-failure.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -121,6 +135,8 @@ export DIREXTALK_TEST_RESOURCE=$tmp/fresh-network
 export DIREXTALK_TEST_PROVISION_COUNT=$tmp/provision-count
 export DIREXTALK_TEST_START_COUNT=$tmp/start-count
 export DIREXTALK_TEST_CLEANUP_CALLS=$tmp/cleanup-calls
+export DIREXTALK_TEST_PREPARATION_COUNT=$tmp/preparation-count
+export DIREXTALK_TEST_RUNNER_INTEGRATION=$tmp/runner-integration
 
 if PATH="$fakebin:$PATH" bash "$consumer" >"$tmp/first.out" 2>"$tmp/first.err"; then
   echo 'first bootstrap unexpectedly succeeded' >&2
@@ -133,11 +149,25 @@ grep -Fqx 'cleanup-local --purge' "$DIREXTALK_TEST_CLEANUP_CALLS"
 grep -Fq 'partial fresh stack was cleaned for retry' "$tmp/first.err"
 [ ! -e "$DIREXTALK_TEST_RESOURCE" ]
 [ ! -e "$base/split" ]
+[ ! -e "$base/runner-preparation.env" ]
+[ ! -e "$DIREXTALK_TEST_RUNNER_INTEGRATION" ]
 [ "$(cat "$DIREXTALK_TEST_PROVISION_COUNT")" -eq 1 ]
+[ "$(cat "$DIREXTALK_TEST_PREPARATION_COUNT")" -eq 1 ]
 
 PATH="$fakebin:$PATH" bash "$consumer" >"$tmp/retry.out" 2>"$tmp/retry.err"
 [ "$(cat "$DIREXTALK_TEST_PROVISION_COUNT")" -eq 2 ]
 [ "$(cat "$DIREXTALK_TEST_START_COUNT")" -eq 2 ]
+[ "$(cat "$DIREXTALK_TEST_PREPARATION_COUNT")" -eq 2 ]
+[ -f "$DIREXTALK_TEST_RUNNER_INTEGRATION" ]
+[ -f "$base/runner-preparation.env" ]
+cat >"$tmp/expected-retry-events" <<'EOF'
+prepare 1
+start 1
+cleanup-local --purge
+prepare 2
+start 2
+EOF
+cmp "$tmp/expected-retry-events" "$DIREXTALK_TEST_CLEANUP_CALLS"
 [ -f "$base/.split-deploy-done" ]
 [ -f "$base/p2p/bootstrap.json" ]
 [ "$(cat "$base/.split-bootstrap-stage")" = completed ]
@@ -152,6 +182,8 @@ if PATH="$fakebin:$PATH" \
     DIREXTALK_TEST_PROVISION_COUNT="$tmp/negative-provision-count" \
     DIREXTALK_TEST_START_COUNT="$tmp/negative-start-count" \
     DIREXTALK_TEST_CLEANUP_CALLS="$tmp/negative-cleanup-calls" \
+    DIREXTALK_TEST_PREPARATION_COUNT="$tmp/negative-preparation-count" \
+    DIREXTALK_TEST_RUNNER_INTEGRATION="$tmp/negative-runner-integration" \
     DIREXTALK_TEST_NO_RECEIPT=true \
     DIREXTALK_TEST_PROVISION_CLEANUP_STATUS=3 \
     bash "$consumer" >"$tmp/negative.out" 2>"$tmp/negative.err"; then
@@ -160,6 +192,8 @@ if PATH="$fakebin:$PATH" \
 fi
 grep -Fq 'provision cleanup stopped in an expected negative state' "$tmp/negative.err"
 [ -d "$negative/split" ]
+[ -f "$negative/runner-preparation.env" ]
+[ -f "$tmp/negative-runner-integration" ]
 
 # Infrastructure cleanup failure is separately reported and also preserves
 # the receipt-bound directory and resource for an operator-safe retry.
@@ -171,6 +205,8 @@ if PATH="$fakebin:$PATH" \
     DIREXTALK_TEST_PROVISION_COUNT="$tmp/infra-provision-count" \
     DIREXTALK_TEST_START_COUNT="$tmp/infra-start-count" \
     DIREXTALK_TEST_CLEANUP_CALLS="$tmp/infra-cleanup-calls" \
+    DIREXTALK_TEST_PREPARATION_COUNT="$tmp/infra-preparation-count" \
+    DIREXTALK_TEST_RUNNER_INTEGRATION="$tmp/infra-runner-integration" \
     DIREXTALK_TEST_CLEANUP_LOCAL_STATUS=74 \
     bash "$consumer" >"$tmp/infra.out" 2>"$tmp/infra.err"; then
   echo 'infrastructure cleanup failure bootstrap unexpectedly succeeded' >&2
@@ -179,5 +215,7 @@ fi
 grep -Fq 'stack cleanup failed (status 74)' "$tmp/infra.err"
 [ -d "$infra/split" ]
 [ -e "$tmp/infra-resource" ]
+[ -f "$infra/runner-preparation.env" ]
+[ -f "$tmp/infra-runner-integration" ]
 
 echo 'production bootstrap first-start failure cleanup and retry test passed'

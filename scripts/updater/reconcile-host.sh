@@ -187,7 +187,7 @@ try:
     value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 except (OSError, UnicodeError, json.JSONDecodeError):
     raise SystemExit(1)
-if not isinstance(value, dict) or value.get("schema_version") != 8 or value.get("desired_state") != sys.argv[2]:
+if not isinstance(value, dict) or value.get("schema_version") != 9 or value.get("desired_state") != sys.argv[2]:
     raise SystemExit(1)
 jobs = value.get("jobs", {})
 idempotency = value.get("idempotency", {})
@@ -327,7 +327,7 @@ if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then
   shape=$(runtime_shape) || die 'quarantined updater transition runtime is invalid'
   schema=${shape%%$'\t'*}
   desired=${shape#*$'\t'}
-  [ "$schema" = 8 ] || die 'quarantined updater transition did not create fresh schema 8 state'
+  [ "$schema" = 9 ] || die 'quarantined updater transition did not create fresh schema 9 state'
   systemctl start dirextalk-updater.service \
     || die 'could not start updater to inspect quarantined transition state'
   case "$desired" in
@@ -342,7 +342,7 @@ if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then
       parsed_identity=$(target_identity) \
         || die 'running updater transition identity does not match the deployer pin'
       validate_runtime_state running \
-        || die 'running updater transition did not retain fresh idle schema 8 state'
+        || die 'running updater transition did not retain fresh idle schema 9 state'
       remove_quarantine
       printf '%s\n' "$parsed_identity"
       exit 0
@@ -367,7 +367,7 @@ else
   quiesce_current_updater
   shape=$(runtime_shape) || die 'installed updater runtime state is invalid after maintenance'
   schema=${shape%%$'\t'*}
-  if [ "$current_sha" != "$UPDATER_PIN_SHA256" ] || [ "$schema" != 8 ]; then
+  if [ "$current_sha" != "$UPDATER_PIN_SHA256" ] || [ "$schema" != 9 ]; then
     [ -f "$runtime_file" ] && [ ! -L "$runtime_file" ] \
       && [ "$(stat -c '%u:%g:%a' -- "$runtime_file")" = 0:0:600 ] \
       || die 'old updater runtime state is unavailable after maintenance'
@@ -381,9 +381,9 @@ fi
 
 if [ -e "$quarantine" ]; then
   if [ ! -e "$runtime_file" ]; then
-    state_tmp=$(mktemp "$state_dir/.runtime.json.schema8.XXXXXX") \
-      || die 'could not create fresh schema 8 updater state'
-    printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{}}' >"$state_tmp"
+    state_tmp=$(mktemp "$state_dir/.runtime.json.schema9.XXXXXX") \
+      || die 'could not create fresh schema 9 updater state'
+    printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{}}' >"$state_tmp"
     chmod 0600 "$state_tmp"
     chown 0:0 "$state_tmp"
     sync -f "$state_tmp"
@@ -392,7 +392,7 @@ if [ -e "$quarantine" ]; then
   fi
 fi
 validate_runtime_state maintenance \
-  || die 'current updater runtime is not idle schema 8 maintenance state'
+  || die 'current updater runtime is not idle schema 9 maintenance state'
 
 integration_dir="$base/updater"
 install -d -m 0755 "$integration_dir"
@@ -424,7 +424,7 @@ fi
 parsed_identity=$(target_identity) \
   || die 'active updater identity does not match the deployer pin'
 validate_runtime_state maintenance \
-  || die 'new updater did not retain idle schema 8 maintenance state'
+  || die 'new updater did not retain idle schema 9 maintenance state'
 
 running_body="$transition_dir/running.json"
 if code=$(desired_request running "$running_body"); then :; else die 'updater running request failed'; fi
@@ -439,7 +439,7 @@ else
   die 'new updater did not become ready'
 fi
 validate_runtime_state running \
-  || die 'new updater did not persist ready schema 8 state'
+  || die 'new updater did not persist ready schema 9 state'
 
 remove_quarantine
 printf '%s\n' "$parsed_identity"

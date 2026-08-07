@@ -44,6 +44,7 @@ coturn_image=docker.io/coturn/coturn:4.6.3-alpine@sha256:$(printf 'd%.0s' {1..64
 write_pin() {
   [ ! -e "$tmp/release.env" ] || chmod 0600 "$tmp/release.env"
   cat >"$tmp/release.env" <<EOF
+DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
 DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE=$message_image
 DIREXTALK_MESSAGE_SOURCE_REVISION=$message_revision
 DIREXTALK_SPLIT_SOURCE_REVISION=$current
@@ -57,6 +58,7 @@ EOF
 write_env() {
   cat >"$tmp/.env" <<EOF
 DOMAIN=service.example.test
+DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
 MESSAGE_SERVER_IMAGE=$message_image
 AGENT_IMAGE=$agent_image
 CADDY_IMAGE=$caddy_image

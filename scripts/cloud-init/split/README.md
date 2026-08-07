@@ -23,8 +23,12 @@ the separate canonical Caddy edge project.
 
 `release.env` is the only production release selection. It binds the
 message-server and Agent versions to immutable image digests and full source
-revisions, pins the independent Caddy and Alpine coturn images, and records a separate split
+revisions, fixes the single Message Server-owned release catalog origin at
+`https://imadmin.dirextalk.ai`, pins the independent Caddy and Alpine coturn images, and records a separate split
 deployment revision so deployment-only fixes do not misstate image provenance.
+Existing node state without `split_release.release_catalog_origin` is obsolete
+and fails closed. This release does not seed, migrate, or infer that field;
+redeploy the node through the fresh-state path.
 `reconcile-production.sh` and
 `reset-production.sh` consume the protected split and edge receipts; they do
 not fall back to a root-level or standard Compose project.

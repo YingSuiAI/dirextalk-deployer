@@ -716,6 +716,7 @@ function buildOperationReport(operation, status, stateFile, generatedAt, st) {
       manifest_digest: st.server_release?.manifest_digest || ""
     },
     split_release: {
+      release_catalog_origin: st.split_release?.release_catalog_origin || "",
       message_version: st.split_release?.message_version || "",
       message_image: st.split_release?.message_image || "",
       message_source_revision: st.split_release?.message_source_revision || "",

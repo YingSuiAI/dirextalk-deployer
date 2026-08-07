@@ -21,6 +21,8 @@ server_release_is_immutable_image() {
 
 server_release_validate_pin() {
   [ -f "$SERVER_RELEASE_PIN" ] && [ ! -L "$SERVER_RELEASE_PIN" ] || return 1
+  [ "$(grep -Ec '^DIREXTALK_RELEASE_CATALOG_ORIGIN=' "$SERVER_RELEASE_PIN")" -eq 1 ] || return 1
+  [ "$DIREXTALK_RELEASE_CATALOG_ORIGIN" = https://imadmin.dirextalk.ai ] || return 1
   server_release_is_version "$DIREXTALK_MESSAGE_SERVER_VERSION" || return 1
   server_release_is_version "$DIREXTALK_AGENT_VERSION" || return 1
   [ "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" = "docker.io/dirextalk/message-server@${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}" ] || return 1
@@ -69,7 +71,8 @@ server_release_state_is_recorded_current() {
 }
 
 server_release_split_state_matches_pin() {
-  [ "$(state_get split_release.message_version)" = "$DIREXTALK_MESSAGE_SERVER_VERSION" ] \
+  [ "$(state_get split_release.release_catalog_origin)" = "$DIREXTALK_RELEASE_CATALOG_ORIGIN" ] \
+    && [ "$(state_get split_release.message_version)" = "$DIREXTALK_MESSAGE_SERVER_VERSION" ] \
     && [ "$(state_get split_release.message_image)" = "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" ] \
     && [ "$(state_get split_release.message_source_revision)" = "$DIREXTALK_MESSAGE_SOURCE_REVISION" ] \
     && [ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ] \
@@ -84,6 +87,7 @@ server_release_split_state_can_advance() {
   local recorded message_version agent_version message_image agent_image caddy_image coturn_image
   local message_revision agent_revision
   recorded=$(state_get split_release.split_source_revision)
+  [ "$(state_get split_release.release_catalog_origin)" = "$DIREXTALK_RELEASE_CATALOG_ORIGIN" ] || return 1
   message_version=$(state_get split_release.message_version)
   agent_version=$(state_get split_release.agent_version)
   message_image=$(state_get split_release.message_image)
@@ -118,6 +122,7 @@ server_release_advance_split_state() {
 server_release_record_split_state() {
   local split_json
   split_json=$(json_build object \
+    "release_catalog_origin=$DIREXTALK_RELEASE_CATALOG_ORIGIN" \
     "message_version=$DIREXTALK_MESSAGE_SERVER_VERSION" \
     "message_image=$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" \
     "message_source_revision=$DIREXTALK_MESSAGE_SOURCE_REVISION" \

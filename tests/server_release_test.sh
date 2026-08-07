@@ -19,16 +19,19 @@ source "$ROOT/scripts/lib/server-release.sh"
 
 server_release_validate_pin
 server_release_prepare_state
-json_test_check "$STATE_JSON" 'data.server_release.source === "production_split" && data.server_release.version === "v1.1.3" && data.server_release.image === "docker.io/dirextalk/message-server:v1.1.3" && data.server_release.image_ref === "docker.io/dirextalk/message-server@sha256:15501d438db03986c9ef045dbff6a184c2a0951963c969a7c2d324ef4d59f387" && data.server_release.digest === "sha256:15501d438db03986c9ef045dbff6a184c2a0951963c969a7c2d324ef4d59f387" && data.server_release.manifest_digest === data.server_release.digest'
-json_test_check "$STATE_JSON" 'data.split_release.message_source_revision === "e94bc0c066514cf1a9dda59a43824bfcae228143" && data.split_release.split_source_revision === "e94bc0c066514cf1a9dda59a43824bfcae228143" && data.split_release.agent_version === "v1.0.2" && data.split_release.agent_image === "docker.io/dirextalk/agent@sha256:a522e78882a15c33f45e9bafbd770ad7c76e2c9d222b0e66410621c888b0c528" && data.split_release.agent_source_revision === "bd0fd34f9e7812f2c2c0d26f3d332a7befacdc24" && data.split_release.caddy_image === "docker.io/library/caddy@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9" && data.split_release.coturn_image === "docker.io/coturn/coturn:4.6.3-alpine@sha256:e2bca2f79a4269d7240de5872ab60a9305013ad37296d2acf14f9510874346be"'
+message_digest=${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}
+json_test_check "$STATE_JSON" "data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image === 'docker.io/dirextalk/message-server:$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE' && data.server_release.digest === '$message_digest' && data.server_release.manifest_digest === data.server_release.digest"
+json_test_check "$STATE_JSON" "data.split_release.message_source_revision === '$DIREXTALK_MESSAGE_SOURCE_REVISION' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.agent_version === '$DIREXTALK_AGENT_VERSION' && data.split_release.agent_image === '$DIREXTALK_AGENT_IMAGE_IMMUTABLE' && data.split_release.agent_source_revision === '$DIREXTALK_AGENT_SOURCE_REVISION' && data.split_release.caddy_image === '$DIREXTALK_CADDY_IMAGE_IMMUTABLE' && data.split_release.coturn_image === '$DIREXTALK_COTURN_IMAGE_IMMUTABLE'"
+[ "$(state_get split_release.release_catalog_origin)" = https://imadmin.dirextalk.ai ]
 
-[ "$DIREXTALK_AGENT_VERSION" = v1.0.2 ]
-[ "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" = docker.io/dirextalk/agent@sha256:a522e78882a15c33f45e9bafbd770ad7c76e2c9d222b0e66410621c888b0c528 ]
+[ "$DIREXTALK_AGENT_VERSION" = "$(state_get split_release.agent_version)" ]
+[ "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" = "$(state_get split_release.agent_image)" ]
 [ "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" = docker.io/library/caddy@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9 ]
 [ "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" = docker.io/coturn/coturn:4.6.3-alpine@sha256:e2bca2f79a4269d7240de5872ab60a9305013ad37296d2acf14f9510874346be ]
-[ "$DIREXTALK_MESSAGE_SOURCE_REVISION" = e94bc0c066514cf1a9dda59a43824bfcae228143 ]
-[ "$DIREXTALK_SPLIT_SOURCE_REVISION" = e94bc0c066514cf1a9dda59a43824bfcae228143 ]
-[ "$DIREXTALK_AGENT_SOURCE_REVISION" = bd0fd34f9e7812f2c2c0d26f3d332a7befacdc24 ]
+[ "$DIREXTALK_MESSAGE_SOURCE_REVISION" = "$(state_get split_release.message_source_revision)" ]
+[ "$DIREXTALK_SPLIT_SOURCE_REVISION" = "$(state_get split_release.split_source_revision)" ]
+[ "$DIREXTALK_AGENT_SOURCE_REVISION" = "$(state_get split_release.agent_source_revision)" ]
+[ "$DIREXTALK_RELEASE_CATALOG_ORIGIN" = https://imadmin.dirextalk.ai ]
 
 res_set instance_id i-existing
 server_release_prepare_state
@@ -45,7 +48,7 @@ server_release_prepare_state
   echo "existing infrastructure lost its recorded Agent release" >&2
   exit 1
 }
-state_set split_release.agent_version v1.0.2
+state_set split_release.agent_version "$DIREXTALK_AGENT_VERSION"
 if server_release_advance_split_state "$old_split_revision"; then
   :
 else

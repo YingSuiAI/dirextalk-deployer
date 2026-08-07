@@ -157,8 +157,9 @@ printf '%s\n' 'DIREXTALK_RUNNER_PREPARED=true'
 EOF
 cat >"$fresh_split/scripts/provision-local.sh" <<'EOF'
 #!/usr/bin/env bash
-printf 'coturn=%s\nturn_external_ip=%s\nattestation=%s\noutput=%s\n' \
+printf 'coturn=%s\nturn_external_ip=%s\ncatalog_origin=%s\nattestation=%s\noutput=%s\n' \
   "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" "$DIREXTALK_TURN_EXTERNAL_IP" \
+  "$DIREXTALK_RELEASE_CATALOG_ORIGIN" \
   "$DIREXTALK_IMAGE_ATTESTATION_SOURCE_FILE" "$1" >"$DIREXTALK_TEST_PROVISION_CAPTURE"
 exit 42
 EOF
@@ -184,6 +185,7 @@ COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:ddddddddddddddddddddddd
 MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 SPLIT_SOURCE_REVISION=cccccccccccccccccccccccccccccccccccccccc
 AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
 EOF
 chmod 0600 "$fresh/.env"
 printf '%s\n' 203.0.113.91 >"$fresh/stable-public-ip"
@@ -209,6 +211,7 @@ fi
 [ "$status" -eq 42 ] || { cat "$TEST_TMP/first-fresh.err" >&2; exit 1; }
 grep -Fqx 'coturn=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' "$capture"
 grep -Fqx 'turn_external_ip=203.0.113.91' "$capture"
+grep -Fqx 'catalog_origin=https://imadmin.dirextalk.ai' "$capture"
 attestation=$(sed -n 's/^attestation=//p' "$capture")
 [ "$attestation" = "$fresh/image-attestation" ]
 grep -Fqx '# dirextalk-image-attestation-v2' "$attestation"
@@ -278,6 +281,7 @@ COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:ddddddddddddddddddddddd
 MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 SPLIT_SOURCE_REVISION=cccccccccccccccccccccccccccccccccccccccc
 AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
 EOF
 chmod 0600 "$edge/.env"
 printf '%s\n' 203.0.113.92 >"$edge/stable-public-ip"

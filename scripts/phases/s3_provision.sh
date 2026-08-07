@@ -64,6 +64,10 @@ _split_release_validate() {
       return 1
     }
   done
+  [ "$DIREXTALK_RELEASE_CATALOG_ORIGIN" = https://imadmin.dirextalk.ai ] || {
+    warn "Production split deployment requires the pinned production release catalog origin."
+    return 1
+  }
 }
 
 _run_phase_ec2() {
@@ -165,6 +169,7 @@ _run_phase_ec2() {
     --message-source-revision "${DIREXTALK_MESSAGE_SOURCE_REVISION:-}" \
     --split-source-revision "${DIREXTALK_SPLIT_SOURCE_REVISION:-}" \
     --agent-source-revision "${DIREXTALK_AGENT_SOURCE_REVISION:-}" \
+    --release-catalog-origin "${DIREXTALK_RELEASE_CATALOG_ORIGIN:-}" \
     > "$userdata"
   local userdata_aws
   userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
@@ -337,6 +342,7 @@ _run_phase_lightsail() {
     --message-source-revision "${DIREXTALK_MESSAGE_SOURCE_REVISION:-}" \
     --split-source-revision "${DIREXTALK_SPLIT_SOURCE_REVISION:-}" \
     --agent-source-revision "${DIREXTALK_AGENT_SOURCE_REVISION:-}" \
+    --release-catalog-origin "${DIREXTALK_RELEASE_CATALOG_ORIGIN:-}" \
     > "$userdata"
   userdata_aws=$(dirextalk_native_tool_path "$userdata") || return 1
   res_set user_data "$userdata"

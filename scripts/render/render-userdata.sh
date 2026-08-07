@@ -10,8 +10,8 @@
 # clone repos.
 #
 # Usage:
-#   render-userdata.sh --domain <domain> --acme <email> --message-server-image <img> > user-data.yaml
-#   render-userdata.sh --format shell --domain <domain> --acme <email> --message-server-image <img> > user-data.sh
+#   render-userdata.sh --domain <domain> --acme <email> --message-server-image <img> --release-catalog-origin <origin> > user-data.yaml
+#   render-userdata.sh --format shell --domain <domain> --acme <email> --message-server-image <img> --release-catalog-origin <origin> > user-data.sh
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -19,7 +19,7 @@ CI="$HERE/cloud-init"
 source "$HERE/lib/domain.sh"
 
 DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; AGENT_IMAGE=""; CADDY_IMAGE=""; COTURN_IMAGE=""
-MESSAGE_SOURCE_REVISION=""; SPLIT_SOURCE_REVISION=""; AGENT_SOURCE_REVISION=""; FORMAT="cloud-config"
+MESSAGE_SOURCE_REVISION=""; SPLIT_SOURCE_REVISION=""; AGENT_SOURCE_REVISION=""; RELEASE_CATALOG_ORIGIN=""; FORMAT="cloud-config"
 while [ $# -gt 0 ]; do
   case "$1" in
     --format) FORMAT=$2; shift 2;;
@@ -32,6 +32,7 @@ while [ $# -gt 0 ]; do
     --message-source-revision) MESSAGE_SOURCE_REVISION=$2; shift 2;;
     --split-source-revision) SPLIT_SOURCE_REVISION=$2; shift 2;;
     --agent-source-revision) AGENT_SOURCE_REVISION=$2; shift 2;;
+    --release-catalog-origin) RELEASE_CATALOG_ORIGIN=$2; shift 2;;
     --as-image) MESSAGE_SERVER_IMAGE=$2; shift 2;;
     *) echo "unknown arg: $1" >&2; exit 1;;
   esac
@@ -62,8 +63,12 @@ for value in "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_
     exit 1
   }
 done
-split_env=$(printf 'AGENT_IMAGE=%s\nCADDY_IMAGE=%s\nCOTURN_IMAGE=%s\nMESSAGE_SOURCE_REVISION=%s\nSPLIT_SOURCE_REVISION=%s\nAGENT_SOURCE_REVISION=%s\n' \
-  "$AGENT_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE" "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_REVISION")
+[ "$RELEASE_CATALOG_ORIGIN" = https://imadmin.dirextalk.ai ] || {
+  echo "--release-catalog-origin must be https://imadmin.dirextalk.ai" >&2
+  exit 1
+}
+split_env=$(printf 'AGENT_IMAGE=%s\nCADDY_IMAGE=%s\nCOTURN_IMAGE=%s\nMESSAGE_SOURCE_REVISION=%s\nSPLIT_SOURCE_REVISION=%s\nAGENT_SOURCE_REVISION=%s\nDIREXTALK_RELEASE_CATALOG_ORIGIN=%s\n' \
+  "$AGENT_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE" "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_REVISION" "$RELEASE_CATALOG_ORIGIN")
 split_cloud_env=$(printf '%s\n' "$split_env" | sed 's/^/      /')
 
 # Build a deterministic tar.gz bundle with fixed permissions and no extra attrs.

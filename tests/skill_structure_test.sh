@@ -262,10 +262,14 @@ if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*example\.com([^[:alnum:]_]|$)' SKIL
   exit 1
 fi
 
-if grep -RE '(^|[^[:alnum:]_])([a-z0-9-]+\.)*dirextalk\.ai([^[:alnum:]_]|$)' SKILL.md references scripts >/dev/null; then
+if grep -R -n -E '(^|[^[:alnum:]_])([a-z0-9-]+\.)*dirextalk\.ai([^[:alnum:]_]|$)' SKILL.md references scripts \
+  | sed 's#https://imadmin\.dirextalk\.ai#__DIREXTALK_RELEASE_CATALOG_ORIGIN__#g' \
+  | grep -E '(^|[^[:alnum:]_])([a-z0-9-]+\.)*dirextalk\.ai([^[:alnum:]_]|$)' >/dev/null; then
   echo "published docs/scripts must use placeholders such as __DOMAIN__, not real Dirextalk-owned domains" >&2
   exit 1
 fi
+
+grep -Fqx 'DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai' scripts/cloud-init/split/release.env
 
 grep -Fq 'https://deployer.dirextalk.ai/' README.md
 grep -Fq 'https://github.com/YingSuiAI/dirextalk-deployer' README.md

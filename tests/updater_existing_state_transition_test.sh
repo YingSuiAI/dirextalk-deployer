@@ -135,22 +135,22 @@ rewrite_target_runtime() {
   runtime="$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
   case "$(cat "$TEST_SCENARIO")" in
     maps-missing)
-      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"}}' >"$runtime"
+      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"}}' >"$runtime"
       ;;
     maps-empty)
-      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{}}' >"$runtime"
+      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{}}' >"$runtime"
       ;;
     jobs-nonempty)
-      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{"job-1":{}},"idempotency":{}}' >"$runtime"
+      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{"job-1":{}},"idempotency":{}}' >"$runtime"
       ;;
     idempotency-nonempty)
-      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{"request-1":{}}}' >"$runtime"
+      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{"request-1":{}}}' >"$runtime"
       ;;
     jobs-wrong-type)
-      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":[],"idempotency":{}}' >"$runtime"
+      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":[],"idempotency":{}}' >"$runtime"
       ;;
     idempotency-wrong-type)
-      printf '%s\n' '{"schema_version":8,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":null}' >"$runtime"
+      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":null}' >"$runtime"
       ;;
     *) return 0 ;;
   esac
@@ -259,7 +259,7 @@ grep -Fq 'systemctl:start dirextalk-updater.service' "$TEST_CALLS"
 python3 - "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json" <<'PY'
 import json, pathlib, sys
 x=json.loads(pathlib.Path(sys.argv[1]).read_text())
-assert x["schema_version"] == 8 and x["desired_state"] == "running"
+assert x["schema_version"] == 9 and x["desired_state"] == "running"
 PY
 [ ! -e "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ]
 [ "$(sha256sum "$TEST_ROOT/usr/local/bin/dirextalk-updater" | awk '{print $1}')" = "$TEST_TARGET_SHA" ]
@@ -282,7 +282,7 @@ for invalid_maps_scenario in \
     status=$?
   fi
   [ "$status" -eq 1 ]
-  grep -Fq 'new updater did not retain idle schema 8 maintenance state' \
+  grep -Fq 'new updater did not retain idle schema 9 maintenance state' \
     "$tmp/$invalid_maps_scenario.err"
 done
 
@@ -306,7 +306,7 @@ printf 'startup-failure\n' >"$TEST_SCENARIO"
 if run_reconcile >/dev/null 2>&1; then echo 'new updater startup failure was accepted' >&2; exit 1; else status=$?; fi
 [ "$status" -eq 1 ]
 [ -f "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ]
-grep -Fq '"schema_version":8' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+grep -Fq '"schema_version":9' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
 printf 'idle\n' >"$TEST_SCENARIO"
 run_reconcile >/dev/null
 [ ! -e "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ]
@@ -320,7 +320,7 @@ grep -Fq '"schema_version":7' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json
 grep -Fq '"desired_state":"maintenance"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
 [ ! -e "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ]
 run_reconcile >/dev/null
-grep -Fq '"schema_version":8' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+grep -Fq '"schema_version":9' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
 grep -Fq '"desired_state":"running"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
 [ ! -e "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ]
 
@@ -328,7 +328,7 @@ make_fixture same_sha_schema7
 cp "$TEST_TARGET" "$TEST_ROOT/usr/local/bin/dirextalk-updater"
 run_reconcile >/dev/null
 grep -Fqx 'fresh-reset' "$TEST_CALLS"
-grep -Fq '"schema_version":8' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+grep -Fq '"schema_version":9' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
 
 make_fixture post_running_retry
 printf 'post-running-failure\n' >"$TEST_SCENARIO"

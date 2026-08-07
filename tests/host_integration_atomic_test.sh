@@ -65,6 +65,7 @@ printf 'fixture\n' >"$stage/cloud-init/split/Caddyfile"
 printf 'services: {}\n' >"$stage/cloud-init/split/edge-compose.override.yaml"
 printf '[Unit]\nDescription=fixture\n' >"$stage/cloud-init/split/dirextalk-split-recovery.service"
 cat >"$stage/cloud-init/split/release.env" <<EOF
+DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
 DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE=$message_image
 DIREXTALK_MESSAGE_SOURCE_REVISION=$message_revision
 DIREXTALK_SPLIT_SOURCE_REVISION=$target
@@ -110,6 +111,7 @@ write_live() {
   printf 'old-ops\n' >"$base/production-ops/sentinel"
   printf 'old-updater\n' >"$base/updater/sentinel"
   cat >"$base/.env" <<EOF
+DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
 MESSAGE_SERVER_IMAGE=$message_image
 AGENT_IMAGE=$agent_image
 CADDY_IMAGE=$caddy_image

@@ -24,7 +24,7 @@ printf 'ssh\n' >> "$CALLS"
 printf '%s\n' "${!#}" > "$REMOTE_COMMAND"
 cat >/dev/null
 [ "${SSH_STATUS:-0}" -eq 0 ] || exit "$SSH_STATUS"
-printf 'v1.0.13\td4363e3e1dda0a5d44e14b3f8a2d1b46dea01f89\tba70986e58e2bd5b6d69c4915bf7d577b967f83899aa72b86264a4199cf505aa\n'
+printf 'v1.0.14\tdc97777c7169ea498199f7b31689f8373fe6c04c\t4deac3f24267bdb493d58b598e8f7ce69b5957a373f2103774d148f202e6189f\n'
 EOF
 cat > "$tmp/bin/aws" <<'EOF'
 #!/usr/bin/env bash

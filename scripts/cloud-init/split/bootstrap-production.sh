@@ -86,6 +86,9 @@ message_revision=$(read_env MESSAGE_SOURCE_REVISION)
 split_revision=$(read_env SPLIT_SOURCE_REVISION)
 runtime_split_revision=${DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION:-$split_revision}
 agent_revision=$(read_env AGENT_SOURCE_REVISION)
+release_catalog_origin=$(read_env DIREXTALK_RELEASE_CATALOG_ORIGIN)
+[ "$release_catalog_origin" = https://imadmin.dirextalk.ai ] \
+  || { echo "protected release catalog origin is invalid" >&2; exit 1; }
 require_digest MESSAGE_SERVER_IMAGE "$message_image"
 require_digest AGENT_IMAGE "$agent_image"
 require_digest CADDY_IMAGE "$caddy_image"
@@ -181,6 +184,7 @@ EOF
   DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE="$message_image" \
   DIREXTALK_AGENT_IMAGE_IMMUTABLE="$agent_image" \
   DIREXTALK_COTURN_IMAGE_IMMUTABLE="$coturn_image" \
+  DIREXTALK_RELEASE_CATALOG_ORIGIN="$release_catalog_origin" \
   DIREXTALK_TURN_EXTERNAL_IP="$turn_external_ip" \
   DIREXTALK_IMAGE_ATTESTATION_SOURCE_FILE="$attestation" \
       "$split/scripts/provision-local.sh" "$run_dir"

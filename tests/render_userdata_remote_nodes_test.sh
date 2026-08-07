@@ -22,6 +22,7 @@ common=(
   --message-source-revision "$message_revision"
   --split-source-revision "$split_revision"
   --agent-source-revision "$agent_revision"
+  --release-catalog-origin https://imadmin.dirextalk.ai
 )
 
 bash "$ROOT/scripts/render/render-userdata.sh" "${common[@]}" >"$tmp/user-data.yaml"
@@ -45,6 +46,7 @@ for rendered in "$tmp/user-data.yaml" "$tmp/user-data.sh"; do
   grep -Fq "MESSAGE_SOURCE_REVISION=$message_revision" "$rendered"
   grep -Fq "SPLIT_SOURCE_REVISION=$split_revision" "$rendered"
   grep -Fq "AGENT_SOURCE_REVISION=$agent_revision" "$rendered"
+  grep -Fq 'DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai' "$rendered"
   if grep -Eq 'docker-compose\.yml|compose\.local\.yaml|caddy:2|P2P_PORTAL_PASSWORD=' "$rendered"; then
     echo "user-data retained the removed standard/mutable runtime" >&2
     exit 1
@@ -73,8 +75,16 @@ if bash "$ROOT/scripts/render/render-userdata.sh" \
   --coturn-image "$coturn" \
   --message-source-revision "$message_revision" \
   --split-source-revision "$split_revision" \
-  --agent-source-revision "$agent_revision" >/dev/null 2>&1; then
+  --agent-source-revision "$agent_revision" \
+  --release-catalog-origin https://imadmin.dirextalk.ai >/dev/null 2>&1; then
   echo "split renderer accepted a mutable message-server image" >&2
+  exit 1
+fi
+
+if bash "$ROOT/scripts/render/render-userdata.sh" \
+  "${common[@]}" \
+  --release-catalog-origin https://example.invalid >/dev/null 2>&1; then
+  echo "split renderer accepted an arbitrary release catalog origin" >&2
   exit 1
 fi
 

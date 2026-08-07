@@ -33,11 +33,11 @@ write_state() {
     node_identity=$(printf '{"aws_account_id":"%s","region":"%s","cloud_provider":"lightsail","provider_instance_id":"%s","provider_instance_arn":"%s","provider_support_code":"%s","public_ip":"%s","machine_id":"%s","docker_engine_id":"%s"}' \
       "$account" "$region" "$provider_id" "$provider_arn" "$support_code" "$public_ip" "$machine_id" "$docker_engine_id")
   fi
-  printf '{"run_id":"update-test","domain":"update.example.test","region":"%s","cloud_provider":"lightsail","resources":{"key_file":"%s","public_ip":"%s","lightsail_instance_name":"dirextalk-update-test"},"node_identity":%s,"server_release":{"source":"production_split","version":"%s","image":"docker.io/dirextalk/message-server:%s","digest":"%s","image_ref":"%s","manifest_digest":"%s"},"split_release":{"message_version":"%s","message_image":"%s","message_source_revision":"%s","split_source_revision":"%s","agent_version":"%s","agent_image":"%s","agent_source_revision":"%s","caddy_image":"%s","coturn_image":"%s"},"updater_release":{"version":"v0.0.1"}}\n' \
+  printf '{"run_id":"update-test","domain":"update.example.test","region":"%s","cloud_provider":"lightsail","resources":{"key_file":"%s","public_ip":"%s","lightsail_instance_name":"dirextalk-update-test"},"node_identity":%s,"server_release":{"source":"production_split","version":"%s","image":"docker.io/dirextalk/message-server:%s","digest":"%s","image_ref":"%s","manifest_digest":"%s"},"split_release":{"release_catalog_origin":"%s","message_version":"%s","message_image":"%s","message_source_revision":"%s","split_source_revision":"%s","agent_version":"%s","agent_image":"%s","agent_source_revision":"%s","caddy_image":"%s","coturn_image":"%s"},"updater_release":{"version":"v0.0.1"}}\n' \
     "$region" "$DIREXTALK_WORKDIR/key.pem" "$public_ip" "$node_identity" \
     "$DIREXTALK_MESSAGE_SERVER_VERSION" "$DIREXTALK_MESSAGE_SERVER_VERSION" \
     "${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}" "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" \
-    "${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}" "$DIREXTALK_MESSAGE_SERVER_VERSION" \
+    "${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}" "$DIREXTALK_RELEASE_CATALOG_ORIGIN" "$DIREXTALK_MESSAGE_SERVER_VERSION" \
     "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" "$DIREXTALK_MESSAGE_SOURCE_REVISION" "$old_revision" \
     "$DIREXTALK_AGENT_VERSION" "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" "$DIREXTALK_AGENT_SOURCE_REVISION" \
     "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" >"$DIREXTALK_WORKDIR/state.json"
@@ -83,6 +83,18 @@ export TEST_TRANSPORT="$tmp/transport.tar.gz"
 write_state false
 if bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null 2>&1; then
   echo 'existing-node update accepted state without immutable identity' >&2
+  exit 1
+fi
+[ ! -s "$CALLS" ]
+
+# State written before the sole catalog-origin contract is incompatible. The
+# deployer must fail closed instead of pre-seeding the new field or treating an
+# old node as a successful first upgrade; the supported path is a fresh deploy.
+write_state true
+node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" delete split_release.release_catalog_origin
+: >"$CALLS"
+if bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null 2>&1; then
+  echo 'existing-node update accepted state without release catalog origin' >&2
   exit 1
 fi
 [ ! -s "$CALLS" ]

@@ -40,6 +40,13 @@ for (const required of [
 }
 assert.doesNotMatch(s6Affected.join("\n"), /legacy_adopt|root_volume_size/);
 
+const releasePreparationAffected = selectAffectedTests([
+  "scripts/render/prepare-production-release.sh",
+]);
+assert.ok(releasePreparationAffected.includes("tests/production_release_prepare_test.sh"));
+assert.ok(!releasePreparationAffected.includes("tests/s3_lightsail_provision_test.sh"));
+assert.ok(!releasePreparationAffected.includes("tests/split_agent_bundle_test.sh"));
+
 const affectedInvocation = buildTestInvocation("affected", {
   changedFiles: ["scripts/lib/git-bash.sh"],
 });

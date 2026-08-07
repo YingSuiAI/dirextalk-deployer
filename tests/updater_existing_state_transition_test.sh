@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case "$(uname -s)" in
+  Linux) ;;
+  *) printf 'updater existing state transition skipped on non-Linux host\n'; exit 0 ;;
+esac
+
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 tmp=$(mktemp -d)
 cleanup() {

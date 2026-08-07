@@ -77,7 +77,13 @@ printf '\n' >> "$CALLS"
 cat >/dev/null
 case "${!#}" in
   *'/etc/machine-id'*) printf '0123456789abcdef0123456789abcdef\tDOCKERENGINE1234\n' ;;
-  *) printf 'v1.0.12\t5ab9e87ccc6926ce3054a436308f655745eadd12\t95764862b1452ca7b9450f8431a087020a3e1e5ed786b35e0aac5905e8a3ede7\n' ;;
+  *)
+    if [ -f "$TMPDIR/updater-identity" ]; then
+      cat "$TMPDIR/updater-identity"
+    else
+      printf 'v1.0.13\td4363e3e1dda0a5d44e14b3f8a2d1b46dea01f89\tba70986e58e2bd5b6d69c4915bf7d577b967f83899aa72b86264a4199cf505aa\n'
+    fi
+    ;;
 esac
 EOF
 chmod 700 "$fakebin/ssh"
@@ -109,7 +115,7 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'production_split' && data.server_release.version === 'v1.1.2' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE' && data.updater_release.version === 'v1.0.12' && data.updater_release.sha256 === '95764862b1452ca7b9450f8431a087020a3e1e5ed786b35e0aac5905e8a3ede7' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef' && data.node_identity.docker_engine_id === 'DOCKERENGINE1234'" || { cat "$STATE_JSON" >&2; exit 1; }
+json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'production_split' && data.server_release.version === 'v1.1.3' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE' && data.updater_release.version === 'v1.0.13' && data.updater_release.sha256 === 'ba70986e58e2bd5b6d69c4915bf7d577b967f83899aa72b86264a4199cf505aa' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef' && data.node_identity.docker_engine_id === 'DOCKERENGINE1234'" || { cat "$STATE_JSON" >&2; exit 1; }
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
 grep -q '^#!/bin/sh' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
@@ -151,6 +157,34 @@ before=$(grep -c '^ssh ' "$CALLS")
 _resume_host_bootstrap 203.0.113.144 "$(res_get key_file)"
 after=$(grep -c '^ssh ' "$CALLS")
 [ "$after" -eq $((before + 1)) ] || { echo "host bootstrap resume must be idempotently retryable" >&2; exit 1; }
+
+recorded_split_revision=$(state_get split_release.split_source_revision)
+recorded_message_version=$(state_get split_release.message_version)
+recorded_message_image=$(state_get split_release.message_image)
+recorded_agent_version=$(state_get split_release.agent_version)
+recorded_agent_image=$(state_get split_release.agent_image)
+DIREXTALK_MESSAGE_SERVER_VERSION=v9.1.0
+DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE=docker.io/dirextalk/message-server@sha256:$(printf '1%.0s' {1..64})
+DIREXTALK_MESSAGE_SOURCE_REVISION=1111111111111111111111111111111111111111
+DIREXTALK_AGENT_VERSION=v9.2.0
+DIREXTALK_AGENT_IMAGE_IMMUTABLE=docker.io/dirextalk/agent@sha256:$(printf '2%.0s' {1..64})
+DIREXTALK_AGENT_SOURCE_REVISION=2222222222222222222222222222222222222222
+DIREXTALK_CADDY_IMAGE_IMMUTABLE=docker.io/library/caddy@sha256:$(printf '3%.0s' {1..64})
+DIREXTALK_COTURN_IMAGE_IMMUTABLE=docker.io/coturn/coturn:4.6.3-alpine@sha256:$(printf '4%.0s' {1..64})
+DIREXTALK_SPLIT_SOURCE_REVISION=3333333333333333333333333333333333333333
+UPDATER_PIN_VERSION=v1.0.13
+UPDATER_PIN_COMMIT=4444444444444444444444444444444444444444
+UPDATER_PIN_SHA256=$(printf '5%.0s' {1..64})
+UPDATER_PIN_URL=https://github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.13/dirextalk-updater-linux-amd64
+printf '%s\t%s\t%s\n' "$UPDATER_PIN_VERSION" "$UPDATER_PIN_COMMIT" "$UPDATER_PIN_SHA256" >"$TMPDIR/updater-identity"
+_resume_host_bootstrap 203.0.113.144 "$(res_get key_file)"
+[ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ]
+[ "$(state_get split_release.message_version)" = "$recorded_message_version" ]
+[ "$(state_get split_release.message_image)" = "$recorded_message_image" ]
+[ "$(state_get split_release.agent_version)" = "$recorded_agent_version" ]
+[ "$(state_get split_release.agent_image)" = "$recorded_agent_image" ]
+[ "$(state_get updater_release.version)" = v1.0.13 ]
+[ "$recorded_split_revision" != "$(state_get split_release.split_source_revision)" ]
 grep -q 'fromPort=49160\\,toPort=49200\\,protocol=udp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'fromPort=3478\\,toPort=3478\\,protocol=tcp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'fromPort=3478\\,toPort=3478\\,protocol=udp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }

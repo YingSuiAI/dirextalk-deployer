@@ -156,8 +156,14 @@ candidate_ops="$candidate/production-ops"
 install -d -o root -g root -m 0700 "$candidate_ops"
 install -o root -g root -m 0400 \
   "$stage/cloud-init/split/Caddyfile" \
-  "$stage/cloud-init/split/edge-compose.override.yaml" \
-  "$release_pin" "$candidate_ops/"
+  "$stage/cloud-init/split/edge-compose.override.yaml" "$candidate_ops/"
+# Existing-node operations must not persist the package's fresh-deploy product
+# defaults as if they described the running node. Keep only the tooling target
+# needed by the split revision transaction.
+printf 'DIREXTALK_SPLIT_SOURCE_REVISION=%s\n' "$target_revision" \
+  >"$candidate_ops/release.env"
+chmod 0400 "$candidate_ops/release.env"
+chown 0:0 "$candidate_ops/release.env"
 install -o root -g root -m 0755 \
   "$stage/cloud-init/split/bootstrap-production.sh" "$advance" \
   "$stage/cloud-init/split/production-ops-common.sh" \

@@ -58,6 +58,16 @@ server_release_state_matches_pin() {
     && [ "$manifest_digest" = "$expected_digest" ]
 }
 
+server_release_state_is_recorded_current() {
+  local source=$1 version=$2 image=$3 digest=$4 image_ref=$5 manifest_digest=$6
+  [ "$source" = production_split ] \
+    && server_release_is_version "$version" \
+    && [ "$image" = "docker.io/dirextalk/message-server:$version" ] \
+    && server_release_is_digest "$digest" \
+    && [ "$image_ref" = "docker.io/dirextalk/message-server@$digest" ] \
+    && [ "$manifest_digest" = "$digest" ]
+}
+
 server_release_split_state_matches_pin() {
   [ "$(state_get split_release.message_version)" = "$DIREXTALK_MESSAGE_SERVER_VERSION" ] \
     && [ "$(state_get split_release.message_image)" = "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" ] \
@@ -70,27 +80,32 @@ server_release_split_state_matches_pin() {
     && [ "$(state_get split_release.coturn_image)" = "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" ]
 }
 
-server_release_split_business_state_matches_pin() {
-  [ "$(state_get split_release.message_version)" = "$DIREXTALK_MESSAGE_SERVER_VERSION" ] \
-    && [ "$(state_get split_release.message_image)" = "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" ] \
-    && [ "$(state_get split_release.message_source_revision)" = "$DIREXTALK_MESSAGE_SOURCE_REVISION" ] \
-    && [ "$(state_get split_release.agent_version)" = "$DIREXTALK_AGENT_VERSION" ] \
-    && [ "$(state_get split_release.agent_image)" = "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" ] \
-    && [ "$(state_get split_release.agent_source_revision)" = "$DIREXTALK_AGENT_SOURCE_REVISION" ] \
-    && [ "$(state_get split_release.caddy_image)" = "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" ] \
-    && [ "$(state_get split_release.coturn_image)" = "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" ]
-}
-
 server_release_split_state_can_advance() {
-  local recorded
-  server_release_split_business_state_matches_pin || return 1
+  local recorded message_version agent_version message_image agent_image caddy_image coturn_image
+  local message_revision agent_revision
   recorded=$(state_get split_release.split_source_revision)
-  printf '%s\n' "$recorded" | grep -Eq '^[0-9a-f]{40}$'
+  message_version=$(state_get split_release.message_version)
+  agent_version=$(state_get split_release.agent_version)
+  message_image=$(state_get split_release.message_image)
+  agent_image=$(state_get split_release.agent_image)
+  caddy_image=$(state_get split_release.caddy_image)
+  coturn_image=$(state_get split_release.coturn_image)
+  message_revision=$(state_get split_release.message_source_revision)
+  agent_revision=$(state_get split_release.agent_source_revision)
+  server_release_is_version "$message_version" \
+    && server_release_is_version "$agent_version" \
+    && server_release_is_immutable_image "$message_image" \
+    && server_release_is_immutable_image "$agent_image" \
+    && server_release_is_immutable_image "$caddy_image" \
+    && server_release_is_immutable_image "$coturn_image" \
+    && printf '%s\n' "$message_revision" "$agent_revision" "$recorded" \
+      | grep -Eq '^[0-9a-f]{40}$' \
+    && [ "$(printf '%s\n' "$message_revision" "$agent_revision" "$recorded" | grep -Ec '^[0-9a-f]{40}$')" -eq 3 ]
 }
 
 server_release_advance_split_state() {
   local expected_old=$1 recorded
-  server_release_split_business_state_matches_pin || return 1
+  server_release_split_state_can_advance || return 1
   recorded=$(state_get split_release.split_source_revision)
   case "$recorded" in
     "$DIREXTALK_SPLIT_SOURCE_REVISION") return 0 ;;
@@ -127,12 +142,12 @@ server_release_prepare_state() {
   instance_id=$(state_get resources.instance_id)
 
   if [ -n "$instance_id" ]; then
-    server_release_state_matches_pin "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest" || {
-      warn "Existing infrastructure is not bound to the current production split release; refusing replacement or compatibility fallback."
+    server_release_state_is_recorded_current "$source" "$version" "$image" "$digest" "$image_ref" "$manifest_digest" || {
+      warn "Existing infrastructure has an invalid recorded message-server release; refusing tooling mutation."
       return 1
     }
-    server_release_split_state_matches_pin || server_release_split_state_can_advance || {
-      warn "Existing infrastructure has incomplete or different Agent/Caddy/coturn/source pins; refusing replacement."
+    server_release_split_state_can_advance || {
+      warn "Existing infrastructure has an invalid recorded split release; refusing tooling mutation."
       return 1
     }
     return 0

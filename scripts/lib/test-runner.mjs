@@ -26,6 +26,8 @@ const quickTests = [
   "tests/region_recommendation_test.sh",
   "tests/updater_platform_contract_test.sh",
   "tests/updater_atomic_install_test.sh",
+  "tests/updater_existing_state_transition_test.sh",
+  "tests/updater_desired_state_transition_test.sh",
 ];
 
 const stageTests = [
@@ -87,7 +89,7 @@ const affectedRules = [
   [/^scripts\/lib\/operation_report\.sh$|^scripts\/json\.mjs$/, ["tests/operation_report_test.sh", "tests/final_delivery_runtime_gate_test.sh"]],
   [/^scripts\/lib\/(?:connect-agent-adapters|mcp-client-adapters|connect-daemon-logs|remote-mcp-contract)\.sh$/, ["tests/s6_wire_local_test.sh", "tests/s6_run_phase_failure_test.sh", "tests/mcp_tools_runtime_check_test.sh", "tests/destroy_host_mcp_cleanup_test.sh"]],
   [/^scripts\/lib\/server-release\.sh$/, ["tests/server_release_test.sh", "tests/s3_lightsail_provision_test.sh"]],
-  [/^scripts\/lib\/updater-release\.sh$|^scripts\/updater\//, ["tests/updater_platform_contract_test.sh", "tests/updater_atomic_install_test.sh", "tests/updater_release_pin_test.sh", "tests/updater_bundle_test.sh", "tests/updater_bootstrap_resume_test.sh", "tests/updater_release_download_test.sh"]],
+  [/^scripts\/lib\/updater-release\.sh$|^scripts\/updater\//, ["tests/updater_platform_contract_test.sh", "tests/updater_atomic_install_test.sh", "tests/updater_existing_state_transition_test.sh", "tests/updater_desired_state_transition_test.sh", "tests/updater_release_pin_test.sh", "tests/updater_bundle_test.sh", "tests/updater_bootstrap_resume_test.sh", "tests/updater_release_download_test.sh", "tests/host_integration_atomic_test.sh", "tests/existing_node_update_test.sh"]],
   [/^scripts\/pricing-estimate\.sh$/, ["tests/pricing_estimate_test.sh", "tests/s1_lightsail_availability_fallback_test.sh"]],
   [/^scripts\/phases\/s1_/, ["tests/s1_lightsail_availability_fallback_test.sh", "tests/lightsail_static_ip_quota_test.sh", "tests/eip_preflight_test.sh", "tests/root_volume_size_test.sh", "tests/pricing_estimate_test.sh"]],
   [/^scripts\/phases\/s3_/, ["tests/s3_lightsail_provision_test.sh", "tests/s3_ec2_updater_upload_test.sh", "tests/s3_stable_ip_reconcile_test.sh", "tests/s3_public_ip_validation_test.sh", "tests/root_volume_size_test.sh"]],

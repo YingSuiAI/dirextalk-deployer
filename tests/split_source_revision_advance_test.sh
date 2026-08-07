@@ -80,15 +80,16 @@ grep -Fqx "SPLIT_SOURCE_REVISION=$current" "$tmp/.env"
 [ "$(stat -c '%a' "$tmp/.env")" = 600 ]
 
 write_env
-sed -i "s#^AGENT_IMAGE=.*#AGENT_IMAGE=docker.io/dirextalk/agent@sha256:$(printf 'e%.0s' {1..64})#" "$tmp/.env"
-if PATH="$tmp/bin:$PATH" bash "$helper" "$tmp/.env" "$old" "$tmp/release.env" >/dev/null 2>&1; then
-  echo 'split source advance accepted a changed business image pin' >&2
+existing_agent_image=docker.io/dirextalk/agent@sha256:$(printf 'e%.0s' {1..64})
+sed -i "s#^AGENT_IMAGE=.*#AGENT_IMAGE=$existing_agent_image#" "$tmp/.env"
+before_business=$(grep -v '^SPLIT_SOURCE_REVISION=' "$tmp/.env")
+PATH="$tmp/bin:$PATH" bash "$helper" "$tmp/.env" "$old" "$tmp/release.env" >/dev/null
+grep -Fqx "SPLIT_SOURCE_REVISION=$current" "$tmp/.env"
+[ "$before_business" = "$(grep -v '^SPLIT_SOURCE_REVISION=' "$tmp/.env")" ] || {
+  echo 'split source advance replaced existing-node product release facts' >&2
   exit 1
-else
-  status=$?
-fi
-[ "$status" -eq 3 ]
-grep -Fqx "SPLIT_SOURCE_REVISION=$old" "$tmp/.env"
+}
+grep -Fqx "AGENT_IMAGE=$existing_agent_image" "$tmp/.env"
 
 write_env
 printf 'SPLIT_SOURCE_REVISION=%s\n' "$old" >>"$tmp/.env"

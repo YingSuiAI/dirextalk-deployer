@@ -289,16 +289,19 @@ ops_stage_current_host_integration() (
 
 ops_commit_existing_update_release() {
   local state=$1 expected_split_json=$2 expected_updater_json=$3 split_json updater_json
+  # Preserve the node's recorded product release. A newer deployer package may
+  # carry different defaults for fresh nodes; an existing tooling update only
+  # advances the canonical split scripts and updater pin.
   split_json=$(json_build object \
-    "message_version=$DIREXTALK_MESSAGE_SERVER_VERSION" \
-    "message_image=$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" \
-    "message_source_revision=$DIREXTALK_MESSAGE_SOURCE_REVISION" \
+    "message_version=$(ops_state_get "$state" .split_release.message_version)" \
+    "message_image=$(ops_state_get "$state" .split_release.message_image)" \
+    "message_source_revision=$(ops_state_get "$state" .split_release.message_source_revision)" \
     "split_source_revision=$DIREXTALK_SPLIT_SOURCE_REVISION" \
-    "agent_version=$DIREXTALK_AGENT_VERSION" \
-    "agent_image=$DIREXTALK_AGENT_IMAGE_IMMUTABLE" \
-    "agent_source_revision=$DIREXTALK_AGENT_SOURCE_REVISION" \
-    "caddy_image=$DIREXTALK_CADDY_IMAGE_IMMUTABLE" \
-    "coturn_image=$DIREXTALK_COTURN_IMAGE_IMMUTABLE") || return 1
+    "agent_version=$(ops_state_get "$state" .split_release.agent_version)" \
+    "agent_image=$(ops_state_get "$state" .split_release.agent_image)" \
+    "agent_source_revision=$(ops_state_get "$state" .split_release.agent_source_revision)" \
+    "caddy_image=$(ops_state_get "$state" .split_release.caddy_image)" \
+    "coturn_image=$(ops_state_get "$state" .split_release.coturn_image)") || return 1
   updater_json=$(json_build object \
     "version=$UPDATER_PIN_VERSION" "commit=$UPDATER_PIN_COMMIT" "url=$UPDATER_PIN_URL" \
     "asset=$UPDATER_PIN_ASSET" "sha256=$UPDATER_PIN_SHA256" "os=$UPDATER_PIN_OS" \

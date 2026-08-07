@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Atomically advance only the deploy-tooling split source revision after
-# proving that every business image and source pin is unchanged.
+# Atomically advance only the deploy-tooling split source revision. Existing
+# nodes retain their protected product image/source facts; the package release
+# file describes fresh-deploy defaults and is not an active-runtime receipt.
 set -euo pipefail
 
 die() { printf 'split source revision advance: %s\n' "$*" >&2; exit 1; }
@@ -46,31 +47,9 @@ pin_identity=$(file_identity "$release_pin")
 env_sha=$(sha256sum -- "$env_file" | awk '{print $1}')
 pin_sha=$(sha256sum -- "$release_pin" | awk '{print $1}')
 
-message_image=$(read_unique "$release_pin" DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE)
-agent_image=$(read_unique "$release_pin" DIREXTALK_AGENT_IMAGE_IMMUTABLE)
-caddy_image=$(read_unique "$release_pin" DIREXTALK_CADDY_IMAGE_IMMUTABLE)
-coturn_image=$(read_unique "$release_pin" DIREXTALK_COTURN_IMAGE_IMMUTABLE)
-message_revision=$(read_unique "$release_pin" DIREXTALK_MESSAGE_SOURCE_REVISION)
 current_split_revision=$(read_unique "$release_pin" DIREXTALK_SPLIT_SOURCE_REVISION)
-agent_revision=$(read_unique "$release_pin" DIREXTALK_AGENT_SOURCE_REVISION)
-
-for image in "$message_image" "$agent_image" "$caddy_image" "$coturn_image"; do
-  printf '%s\n' "$image" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$' || die 'production release pin contains an invalid immutable image'
-done
-for revision in "$message_revision" "$current_split_revision" "$agent_revision"; do
-  printf '%s\n' "$revision" | grep -Eq '^[0-9a-f]{40}$' || die 'production release pin contains an invalid source revision'
-done
-
-require_unchanged_pin() {
-  local key=$1 expected=$2
-  [ "$(read_unique "$env_file" "$key")" = "$expected" ] || negative "$key differs from the current business release pin"
-}
-require_unchanged_pin MESSAGE_SERVER_IMAGE "$message_image"
-require_unchanged_pin AGENT_IMAGE "$agent_image"
-require_unchanged_pin CADDY_IMAGE "$caddy_image"
-require_unchanged_pin COTURN_IMAGE "$coturn_image"
-require_unchanged_pin MESSAGE_SOURCE_REVISION "$message_revision"
-require_unchanged_pin AGENT_SOURCE_REVISION "$agent_revision"
+printf '%s\n' "$current_split_revision" | grep -Eq '^[0-9a-f]{40}$' \
+  || die 'tooling release pin contains an invalid split source revision'
 recorded_split_revision=$(read_unique "$env_file" SPLIT_SOURCE_REVISION)
 case "$recorded_split_revision" in
   "$current_split_revision") exit 0 ;;

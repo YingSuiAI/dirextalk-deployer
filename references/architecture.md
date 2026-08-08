@@ -44,3 +44,44 @@ coturn         -> TURN 3478 + 49160-49200/udp
 ## 域名模型
 
 Matrix `server_name` 必须是长期真实域名。部署后更换 `DOMAIN` 等同创建新的 homeserver 身份，不要保留旧 PostgreSQL/message-server 数据卷后直接改域名。
+
+## Agent Cloud Worker edge 基础契约
+
+Agent Cloud Worker 的 `WorkerControl`、`Model Relay` 和受控 HTTPS
+`CONNECT` proxy 都保持端到端 TLS。Worker edge 只读取 TLS ClientHello 的
+SNI 后透传原始 TCP 字节，不能终止 TLS 后再建立第二条 TLS 连接。
+
+首个 private 拓扑使用同 Region、default VPC 内的独立 edge EC2、EIP、
+官方 HAProxy Alpine immutable image 和 edge-local Squid。它不占用或改动 S2
+Lightsail 上现有 Caddy 的 `:443`：三个公网 A 记录指向 edge EIP；private
+hosted zone 的同名 A 记录指向 edge private IP。Worker SG 只允许到这个 private
+IP 的 `443`，HAProxy 将三个互异 SNI 分别透传到 S2 private IP 的
+`10443`/`11443` 和 edge 本机 Squid TLS listener；未知或缺少 SNI 直接拒绝。
+
+`worker-edge-compose.yaml` 只接受官方 HAProxy Alpine immutable digest 和经
+message split bundle 构建、验证并以 digest 固定的 Squid Alpine image。
+`verify-worker-edge-image.sh` 在激活前通过 `haproxy -vv` 和对渲染配置执行
+`haproxy -c` 验证镜像与配置。该基础包默认不启动，也不创建 AWS 资源。
+Compose 同时运行 Squid service，并只在 edge 主机的 `127.0.0.1` 暴露受控 TLS
+CONNECT listener；Squid image 和 exact-FQDN policy 由 owning message split
+edge bundle 提供。缺少该 service 及其 allow-list/readback gate 时，Worker
+edge 能力保持关闭。
+
+该基础包不是自动激活路径。激活前还必须由 owning Agent/Compose contract
+提供三个互不复用的 TLS listener、证书/信任摘要和 Squid policy，完成
+三个 public/private DNS 记录和安全组规则，并验证 fresh-state TLS、gRPC、relay 和 CONNECT
+路径。部署 Region 通过 `DIREXTALK_WORKER_EDGE_REGION` 显式传入，不能固定为
+某一区域。`DIREXTALK_WORKER_EDGE_ROUTE_MODE=private` 需要不可变私网路径证明；
+另一个允许值是部署时显式选择的 `controlled-public`。运行时不得在私网失败后
+静默直连公网。
+
+本地 deployer 渲染器通过仓库统一 JSON helper 读取证据；它不安装到 edge host、
+不调用 AWS，也不把任意调用者提供的 digest 当成 AWS 证明。它读取一个
+mode `0600` 的 `dirextalk-worker-edge-evidence-v1` JSON，校验并绑定 account、
+region、run id、Lightsail ARN/private IP/default VPC/peering、edge instance/private
+IP/EIP allocation、private hosted zone 三条同名记录、Worker/edge SG 精确规则、
+三个 backend 以及最终 owner/region readback，并把实际文件 SHA-256 写进配置。
+未来 provisioning wrapper 必须在每次生成该文件前重新执行 STS owner/region 和
+上述资源 readback，并原子写入；本仓库当前没有这个 AWS reader，因此能力仍然
+关闭。当前只读证据显示 Lightsail VPC peering 为 `false`，所以现状不能激活
+private 模式；同 Region 本身不构成私网可达证明。

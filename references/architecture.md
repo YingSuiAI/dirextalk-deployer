@@ -51,7 +51,7 @@ Agent Cloud Worker 的 `WorkerControl`、`Model Relay` 和受控 HTTPS
 `CONNECT` proxy 都保持端到端 TLS。Worker edge 只读取 TLS ClientHello 的
 SNI 后透传原始 TCP 字节，不能终止 TLS 后再建立第二条 TLS 连接。
 
-首个 private 拓扑使用同 Region、default VPC 内的独立 edge EC2、EIP、
+private 拓扑使用同 Region、default VPC 内的独立 edge EC2、EIP、
 官方 HAProxy Alpine immutable image 和 edge-local Squid。它不占用或改动 S2
 Lightsail 上现有 Caddy 的 `:443`：三个公网 A 记录指向 edge EIP；private
 hosted zone 的同名 A 记录指向 edge private IP。Worker SG 只允许到这个 private
@@ -72,16 +72,18 @@ edge 能力保持关闭。
 三个 public/private DNS 记录和安全组规则，并验证 fresh-state TLS、gRPC、relay 和 CONNECT
 路径。部署 Region 通过 `DIREXTALK_WORKER_EDGE_REGION` 显式传入，不能固定为
 某一区域。`DIREXTALK_WORKER_EDGE_ROUTE_MODE=private` 需要不可变私网路径证明；
-另一个允许值是部署时显式选择的 `controlled-public`。运行时不得在私网失败后
-静默直连公网。
+另一个允许值是部署时显式选择的 `controlled-public`。该模式可以让 edge 与
+S2 位于不同 Region；HAProxy 只把 WorkerControl/Model Relay 的 SNI 流量送往
+经过回读的 S2 public IP `10443`/`11443`，Lightsail firewall 只允许经过回读的
+edge EIP `/32`。这不是 private 模式失败后的 fallback，运行时不得在两种模式间
+静默切换。
 
-本地 deployer 渲染器通过仓库统一 JSON helper 读取证据；它不安装到 edge host、
-不调用 AWS，也不把任意调用者提供的 digest 当成 AWS 证明。它读取一个
-mode `0600` 的 `dirextalk-worker-edge-evidence-v1` JSON，校验并绑定 account、
-region、run id、Lightsail ARN/private IP/default VPC/peering、edge instance/private
-IP/EIP allocation、private hosted zone 三条同名记录、Worker/edge SG 精确规则、
-三个 backend 以及最终 owner/region readback，并把实际文件 SHA-256 写进配置。
-未来 provisioning wrapper 必须在每次生成该文件前重新执行 STS owner/region 和
-上述资源 readback，并原子写入；本仓库当前没有这个 AWS reader，因此能力仍然
-关闭。当前只读证据显示 Lightsail VPC peering 为 `false`，所以现状不能激活
-private 模式；同 Region 本身不构成私网可达证明。
+`read-worker-edge-evidence.sh` 在每个 AWS read 前重新验证 STS account，按不可变
+Lightsail ARN/support code、edge instance ID、EIP allocation、hosted zone 和 SG ID
+读取资源，并要求所有 run-owned 资源带精确 owner/account-generation/run-id tags。
+它同时回读 public/private DNS、Lightsail control listener firewall、Worker/edge SG
+的 DNS/TLS-only 规则和最终 backend 地址，然后原子写入 mode `0600` 的
+`dirextalk-worker-edge-evidence-v2`。`render-worker-edge.sh` 只接受这份 evidence，
+再次绑定 account、owner/generation、两个 Region、route mode 和全部 endpoint 后，
+把实际文件 SHA-256 写进 HAProxy 配置。当前 Lightsail VPC peering 为 `false`，所以
+只能使用明确的 `controlled-public`，不能声称 private 可达。

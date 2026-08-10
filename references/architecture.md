@@ -54,8 +54,10 @@ SNI 后透传原始 TCP 字节，不能终止 TLS 后再建立第二条 TLS 连�
 private 拓扑使用同 Region、default VPC 内的独立 edge EC2、EIP、
 官方 HAProxy Alpine immutable image 和 edge-local Squid。它不占用或改动 S2
 Lightsail 上现有 Caddy 的 `:443`：三个公网 A 记录指向 edge EIP；private
-hosted zone 的同名 A 记录指向 edge private IP。Worker SG 只允许到这个 private
-IP 的 `443`，HAProxy 将三个互异 SNI 分别透传到 S2 private IP 的
+hosted zone 的同名 A 记录指向 edge private IP。当前开发规则让长期 edge SG 对
+部署时显式指定并回读验证的私有 Worker 子网 CIDR 放行全协议/全端口；它不接受
+`0.0.0.0/0` 或公网 CIDR。edge 主机上的 HAProxy 仍只监听 `443`，并将三个互异
+SNI 分别透传到 S2 private IP 的
 `10443`/`11443` 和 edge 本机 Squid TLS listener；未知或缺少 SNI 直接拒绝。
 
 `worker-edge-compose.yaml` 只接受官方 HAProxy Alpine immutable digest 和经
@@ -79,11 +81,12 @@ edge EIP `/32`。这不是 private 模式失败后的 fallback，运行时不得
 静默切换。
 
 `read-worker-edge-evidence.sh` 在每个 AWS read 前重新验证 STS account，按不可变
-Lightsail ARN/support code、edge instance ID、EIP allocation、hosted zone 和 SG ID
+Lightsail ARN/support code、edge instance ID、EIP allocation、hosted zone 和 edge SG ID
 读取资源，并要求所有 run-owned 资源带精确 owner/account-generation/run-id tags。
-它同时回读 public/private DNS、Lightsail control listener firewall、Worker/edge SG
-的 DNS/TLS-only 规则和最终 backend 地址，然后原子写入 mode `0600` 的
-`dirextalk-worker-edge-evidence-v2`。`render-worker-edge.sh` 只接受这份 evidence，
+它同时回读 public/private DNS、Lightsail control listener firewall、edge SG 精确的
+私有 Worker 子网 CIDR 全协议/全端口入站、DNS/TLS-only 出站规则和最终 backend 地址；长期
+evidence 不读取或声称验证一次性 Worker SG 的 egress。随后它原子写入 mode `0600` 的
+`dirextalk-worker-edge-evidence-v3`。`render-worker-edge.sh` 只接受这份 evidence，
 再次绑定 account、owner/generation、两个 Region、route mode 和全部 endpoint 后，
 把实际文件 SHA-256 写进 HAProxy 配置。当前 Lightsail VPC peering 为 `false`，所以
 只能使用明确的 `controlled-public`，不能声称 private 可达。

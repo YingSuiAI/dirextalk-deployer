@@ -59,6 +59,10 @@ if grep -q 'SECRET_ARGV_SENTINEL' "$tmp/node-argv.log"; then
 fi
 json_check "$tmp/argv-safe.json" "data.agent_token === 'SECRET_ARGV_SENTINEL'"
 
+json_build object aws_account_id=066107820442 generation=7 > "$tmp/numeric-identity.json"
+json_check "$tmp/numeric-identity.json" \
+  "data.aws_account_id === '066107820442' && data.generation === 7"
+
 cat > "$tmp/input.json" <<'JSON'
 {
   "domain": "im.test",

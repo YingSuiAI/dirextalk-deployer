@@ -55,6 +55,7 @@ s2_private_ip=${DIREXTALK_WORKER_EDGE_S2_PRIVATE_IP:-}
 s2_public_ip=${DIREXTALK_WORKER_EDGE_S2_PUBLIC_IP:-}
 lightsail_vpc_peered=${DIREXTALK_WORKER_EDGE_LIGHTSAIL_VPC_PEERED:-false}
 evidence_file=${DIREXTALK_WORKER_EDGE_EVIDENCE_FILE:-}
+worker_source_cidr=${DIREXTALK_WORKER_EDGE_SOURCE_CIDR:-}
 
 require_ipv4() {
   local name=$1 value=$2 octet
@@ -67,6 +68,21 @@ require_ipv4() {
 require_ipv4 DIREXTALK_WORKER_EDGE_LISTEN_IP "$listen_ip"
 require_ipv4 DIREXTALK_WORKER_EDGE_S2_PRIVATE_IP "$s2_private_ip"
 require_ipv4 DIREXTALK_WORKER_EDGE_S2_PUBLIC_IP "$s2_public_ip"
+printf '%s\n' "$worker_source_cidr" | grep -Eq '^((0|[1-9][0-9]{0,2})\.){3}(0|[1-9][0-9]{0,2})/(1[6-9]|2[0-8])$' \
+  || die 'DIREXTALK_WORKER_EDGE_SOURCE_CIDR must be an AWS IPv4 subnet CIDR (/16 through /28)'
+worker_source_ip=${worker_source_cidr%/*}
+worker_source_prefix=${worker_source_cidr##*/}
+require_ipv4 DIREXTALK_WORKER_EDGE_SOURCE_CIDR "$worker_source_ip"
+IFS=. read -r worker_source_a worker_source_b worker_source_c worker_source_d <<<"$worker_source_ip"
+if ! { [ "$worker_source_a" -eq 10 ] ||
+  { [ "$worker_source_a" -eq 172 ] && [ "$worker_source_b" -ge 16 ] && [ "$worker_source_b" -le 31 ]; } ||
+  { [ "$worker_source_a" -eq 192 ] && [ "$worker_source_b" -eq 168 ]; }; }; then
+  die 'DIREXTALK_WORKER_EDGE_SOURCE_CIDR must be a private RFC1918 subnet'
+fi
+worker_source_value=$(( (worker_source_a << 24) | (worker_source_b << 16) | (worker_source_c << 8) | worker_source_d ))
+worker_source_mask=$(( (0xFFFFFFFF << (32 - worker_source_prefix)) & 0xFFFFFFFF ))
+[ $((worker_source_value & worker_source_mask)) -eq "$worker_source_value" ] \
+  || die 'DIREXTALK_WORKER_EDGE_SOURCE_CIDR must identify a canonical network'
 
 printf '%s\n' "$region" | grep -Eq '^[a-z]{2}(-[a-z0-9]+)+-[1-9][0-9]*$' \
   || die 'DIREXTALK_WORKER_EDGE_REGION must be an explicit AWS region'
@@ -113,13 +129,13 @@ case "$evidence_file" in /*) ;; *) die 'Worker edge evidence path must be absolu
 evidence_identity=$(stat -c '%d:%i:%u:%g:%a' "$evidence_file")
 evidence_sha=$(sha256sum "$evidence_file" | awk '{print $1}')
 json_check "$evidence_file" "
-  data.schema === 'dirextalk-worker-edge-evidence-v2' &&
+  data.schema === 'dirextalk-worker-edge-evidence-v3' &&
   /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(data.run_id) &&
   /^[0-9]{12}$/.test(data.account_id) && data.owner_id === '$owner_id' && String(data.account_generation) === '$account_generation' &&
   data.edge_region === '$region' && data.route_mode === '$route_mode' &&
   data.lightsail.region === '$s2_region' &&
   new RegExp('^arn:aws:lightsail:' + data.lightsail.region + ':' + data.account_id + ':Instance/[0-9a-f-]{36}$').test(data.lightsail.instance_arn) &&
-  /^\\d{12}\\/i-[0-9a-f]{8,17}$/.test(data.lightsail.support_code) &&
+  typeof data.lightsail.support_code === 'string' && /\\S/.test(data.lightsail.support_code) &&
   data.lightsail.private_ip === '$s2_private_ip' && data.lightsail.public_ip === '$s2_public_ip' &&
   /^vpc-[0-9a-f]{8,17}$/.test(data.lightsail.default_vpc_id) &&
   data.edge.owner_account_id === data.account_id && data.edge.region === '$region' &&
@@ -135,11 +151,9 @@ json_check "$evidence_file" "
   JSON.stringify(data.public_dns.records.worker_control) === JSON.stringify({hostname:'$control_domain',address:data.edge.public_ip}) &&
   JSON.stringify(data.public_dns.records.model_relay) === JSON.stringify({hostname:'$relay_domain',address:data.edge.public_ip}) &&
   JSON.stringify(data.public_dns.records.outbound_proxy) === JSON.stringify({hostname:'$proxy_domain',address:data.edge.public_ip}) &&
-  /^sg-[0-9a-f]{8,17}$/.test(data.security.worker_security_group_id) && /^sg-[0-9a-f]{8,17}$/.test(data.security.edge_security_group_id) &&
-  Array.isArray(data.security.worker_dns_egress) && data.security.worker_dns_egress.length > 0 &&
-  data.security.worker_dns_egress.every(value => /^([0-9]{1,3}\\.){3}[0-9]{1,3}\\/32$/.test(value.destination) && JSON.stringify(value.ports) === JSON.stringify([53]) && JSON.stringify(value.protocols) === JSON.stringify(['tcp','udp'])) &&
-  JSON.stringify(data.security.worker_edge_egress) === JSON.stringify({destination:'$listen_ip/32',ports:[443]}) &&
-  JSON.stringify(data.security.edge_ingress) === JSON.stringify({source_security_group_id:data.security.worker_security_group_id,ports:[443]}) &&
+  JSON.stringify(Object.keys(data.security || {}).sort()) === JSON.stringify(['edge_dns_egress','edge_https_egress','edge_ingress','edge_security_group_id','edge_to_s2']) &&
+  /^sg-[0-9a-f]{8,17}$/.test(data.security.edge_security_group_id) &&
+  JSON.stringify(data.security.edge_ingress) === JSON.stringify({source_cidr:'$worker_source_cidr',ip_protocol:'-1'}) &&
   JSON.stringify(data.security.edge_to_s2) === JSON.stringify({destination:'$s2_route_ip/32',ports:[10443,11443]}) &&
   Array.isArray(data.security.edge_dns_egress) && data.security.edge_dns_egress.length > 0 &&
   data.security.edge_dns_egress.every(value => /^([0-9]{1,3}\\.){3}[0-9]{1,3}\\/32$/.test(value.destination) && JSON.stringify(value.ports) === JSON.stringify([53]) && JSON.stringify(value.protocols) === JSON.stringify(['tcp','udp'])) &&
@@ -163,7 +177,6 @@ edge_eip_allocation_id=$(json_get "$evidence_file" edge.eip_allocation_id)
 edge_eip_association_id=$(json_get "$evidence_file" edge.eip_association_id)
 private_hosted_zone_id=$(json_get "$evidence_file" private_dns.hosted_zone_id)
 public_hosted_zone_id=$(json_get "$evidence_file" public_dns.hosted_zone_id)
-worker_security_group_id=$(json_get "$evidence_file" security.worker_security_group_id)
 edge_security_group_id=$(json_get "$evidence_file" security.edge_security_group_id)
 
 tmp=$(mktemp "${output%/*}/.${output##*/}.XXXXXX") || die 'could not create output temporary file'
@@ -191,7 +204,7 @@ sed \
   -e "s/__DIREXTALK_WORKER_EDGE_EIP_ASSOCIATION_ID__/$edge_eip_association_id/g" \
   -e "s/__DIREXTALK_WORKER_EDGE_PRIVATE_HOSTED_ZONE_ID__/$private_hosted_zone_id/g" \
   -e "s/__DIREXTALK_WORKER_EDGE_PUBLIC_HOSTED_ZONE_ID__/$public_hosted_zone_id/g" \
-  -e "s/__DIREXTALK_WORKER_SECURITY_GROUP_ID__/$worker_security_group_id/g" \
+  -e "s#__DIREXTALK_WORKER_EDGE_SOURCE_CIDR__#$worker_source_cidr#g" \
   -e "s/__DIREXTALK_WORKER_EDGE_SECURITY_GROUP_ID__/$edge_security_group_id/g" \
   "$template" >"$tmp" || die 'could not render Worker edge config'
 if grep -Eq '__DIREXTALK_[A-Z0-9_]+__' "$tmp"; then

@@ -27,7 +27,7 @@ for name in \
   DIREXTALK_WORKER_EDGE_S2_PRIVATE_IP DIREXTALK_WORKER_EDGE_S2_PUBLIC_IP \
   DIREXTALK_WORKER_EDGE_INSTANCE_ID DIREXTALK_WORKER_EDGE_EIP_ALLOCATION_ID \
   DIREXTALK_WORKER_EDGE_PRIVATE_HOSTED_ZONE_ID DIREXTALK_WORKER_EDGE_PUBLIC_HOSTED_ZONE_ID \
-  DIREXTALK_WORKER_SECURITY_GROUP_ID DIREXTALK_WORKER_EDGE_SECURITY_GROUP_ID \
+  DIREXTALK_WORKER_EDGE_SOURCE_CIDR DIREXTALK_WORKER_EDGE_SECURITY_GROUP_ID \
   DIREXTALK_WORKER_EDGE_DNS_RESOLVER_CIDR DIREXTALK_WORKER_CONTROL_DOMAIN \
   DIREXTALK_MODEL_RELAY_DOMAIN DIREXTALK_OUTBOUND_PROXY_DOMAIN; do
   required "$name"
@@ -49,7 +49,7 @@ edge_instance_id=$DIREXTALK_WORKER_EDGE_INSTANCE_ID
 edge_eip_allocation_id=$DIREXTALK_WORKER_EDGE_EIP_ALLOCATION_ID
 private_zone_id=${DIREXTALK_WORKER_EDGE_PRIVATE_HOSTED_ZONE_ID#/hostedzone/}
 public_zone_id=${DIREXTALK_WORKER_EDGE_PUBLIC_HOSTED_ZONE_ID#/hostedzone/}
-worker_sg=$DIREXTALK_WORKER_SECURITY_GROUP_ID
+worker_source_cidr=$DIREXTALK_WORKER_EDGE_SOURCE_CIDR
 edge_sg=$DIREXTALK_WORKER_EDGE_SECURITY_GROUP_ID
 dns_resolver_cidr=$DIREXTALK_WORKER_EDGE_DNS_RESOLVER_CIDR
 control_domain=$DIREXTALK_WORKER_CONTROL_DOMAIN
@@ -68,11 +68,26 @@ for value in "$s2_private_ip" "$s2_public_ip"; do
   printf '%s\n' "$value" | grep -Eq '^((0|[1-9][0-9]{0,2})\.){3}(0|[1-9][0-9]{0,2})$' || die 'S2 IP is invalid'
 done
 printf '%s\n' "$s2_arn" | grep -Eq "^arn:aws:lightsail:$s2_region:$account_id:Instance/[0-9a-f-]{36}$" || die 'S2 ARN is invalid'
-printf '%s\n' "$s2_support_code" | grep -Eq "^[0-9]{12}/i-[0-9a-f]{8,17}$" || die 'S2 support code is invalid'
-printf '%s\n' "$edge_instance_id:$edge_eip_allocation_id:$worker_sg:$edge_sg" | \
-  grep -Eq '^i-[0-9a-f]{8,17}:eipalloc-[0-9a-f]{8,17}:sg-[0-9a-f]{8,17}:sg-[0-9a-f]{8,17}$' || die 'edge AWS identifiers are invalid'
+printf '%s\n' "$edge_instance_id:$edge_eip_allocation_id:$edge_sg" | \
+  grep -Eq '^i-[0-9a-f]{8,17}:eipalloc-[0-9a-f]{8,17}:sg-[0-9a-f]{8,17}$' || die 'edge AWS identifiers are invalid'
 printf '%s\n' "$private_zone_id:$public_zone_id" | grep -Eq '^Z[A-Z0-9]{1,31}:Z[A-Z0-9]{1,31}$' || die 'hosted zone id is invalid'
 printf '%s\n' "$dns_resolver_cidr" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}/32$' || die 'DNS resolver CIDR is invalid'
+printf '%s\n' "$worker_source_cidr" | grep -Eq '^((0|[1-9][0-9]{0,2})\.){3}(0|[1-9][0-9]{0,2})/(1[6-9]|2[0-8])$' \
+  || die 'Worker source CIDR must be an AWS IPv4 subnet CIDR (/16 through /28)'
+worker_source_ip=${worker_source_cidr%/*}
+worker_source_prefix=${worker_source_cidr##*/}
+IFS=. read -r worker_source_a worker_source_b worker_source_c worker_source_d <<<"$worker_source_ip"
+for octet in "$worker_source_a" "$worker_source_b" "$worker_source_c" "$worker_source_d"; do
+  [ "$octet" -le 255 ] || die 'Worker source CIDR contains an IPv4 octet above 255'
+done
+if ! { [ "$worker_source_a" -eq 10 ] ||
+  { [ "$worker_source_a" -eq 172 ] && [ "$worker_source_b" -ge 16 ] && [ "$worker_source_b" -le 31 ]; } ||
+  { [ "$worker_source_a" -eq 192 ] && [ "$worker_source_b" -eq 168 ]; }; }; then
+  die 'Worker source CIDR must be a private RFC1918 subnet'
+fi
+worker_source_value=$(( (worker_source_a << 24) | (worker_source_b << 16) | (worker_source_c << 8) | worker_source_d ))
+worker_source_mask=$(( (0xFFFFFFFF << (32 - worker_source_prefix)) & 0xFFFFFFFF ))
+[ $((worker_source_value & worker_source_mask)) -eq "$worker_source_value" ] || die 'Worker source CIDR is not a canonical network'
 for value in "$control_domain" "$relay_domain" "$proxy_domain"; do
   printf '%s\n' "$value" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$' || die 'Worker hostname is invalid'
 done
@@ -103,11 +118,13 @@ trap cleanup EXIT HUP INT TERM
 
 edge_json=$tmp_dir/edge.json
 eip_json=$tmp_dir/eip.json
-worker_sg_json=$tmp_dir/worker-sg.json
 edge_sg_json=$tmp_dir/edge-sg.json
 private_records_json=$tmp_dir/private-records.json
 public_records_json=$tmp_dir/public-records.json
 port_states_json=$tmp_dir/port-states.json
+s2_json=$tmp_dir/s2.json
+private_zone_json=$tmp_dir/private-zone.json
+public_zone_json=$tmp_dir/public-zone.json
 
 aws_read --region "$edge_region" ec2 describe-instances --instance-ids "$edge_instance_id" --output json >"$edge_json" || die 'edge instance read failed'
 json_check "$edge_json" "
@@ -137,11 +154,20 @@ edge_public_ip=$(json_get "$eip_json" 'Addresses.0.PublicIp')
 edge_eip_association_id=$(json_get "$eip_json" 'Addresses.0.AssociationId')
 [ "$(json_get "$edge_json" 'Reservations.0.Instances.0.PublicIpAddress')" = "$edge_public_ip" ] || die 'edge instance public IP differs from its EIP'
 
-s2_shape=$(read_single --region "$s2_region" lightsail get-instance --instance-name "$s2_name" \
-  --query 'instance.[arn,supportCode,privateIpAddress,publicIpAddress,state.name]' --output text)
-IFS=$'\t' read -r actual_s2_arn actual_s2_support actual_s2_private actual_s2_public actual_s2_state extra <<<"$s2_shape"
-[ -z "${extra:-}" ] && [ "$actual_s2_arn:$actual_s2_support:$actual_s2_private:$actual_s2_public:$actual_s2_state" = \
-  "$s2_arn:$s2_support_code:$s2_private_ip:$s2_public_ip:running" ] || die 'S2 immutable identity readback differs'
+# AWS defines supportCode as an opaque support lookup value, not an account or
+# instance identifier. Ownership comes from fresh STS plus the exact ARN; the
+# protected support code is only compared byte-for-byte with the API readback.
+aws_read --region "$s2_region" lightsail get-instance --instance-name "$s2_name" --output json >"$s2_json" \
+  || die 'S2 instance read failed'
+[ "$(json_get "$s2_json" instance.name)" = "$s2_name" ] && \
+  [ "$(json_get "$s2_json" instance.arn)" = "$s2_arn" ] && \
+  [ "$(json_get "$s2_json" instance.supportCode)" = "$s2_support_code" ] && \
+  [ "$(json_get "$s2_json" instance.location.regionName)" = "$s2_region" ] && \
+  [ "$(json_get "$s2_json" instance.resourceType)" = Instance ] && \
+  [ "$(json_get "$s2_json" instance.privateIpAddress)" = "$s2_private_ip" ] && \
+  [ "$(json_get "$s2_json" instance.publicIpAddress)" = "$s2_public_ip" ] && \
+  [ "$(json_get "$s2_json" instance.state.name)" = running ] \
+  || die 'S2 immutable identity readback differs'
 
 peered=$(read_single --region "$s2_region" lightsail is-vpc-peered --query isPeered --output text)
 case "$peered" in True) peered_json=true ;; False) peered_json=false ;; *) die 'Lightsail peering readback is invalid' ;; esac
@@ -173,12 +199,18 @@ else
   " >/dev/null || die 'private mode exposes a Cloud Worker listener through Lightsail firewall'
 fi
 
-private_zone_shape=$(read_single route53 get-hosted-zone --id "$private_zone_id" \
-  --query 'join(`\t`,[HostedZone.Id,to_string(HostedZone.Config.PrivateZone),to_string(length(VPCs)),VPCs[0].VPCId,VPCs[0].VPCRegion])' --output text)
-[ "$private_zone_shape" = "/hostedzone/$private_zone_id"$'\t'"true"$'\t'"1"$'\t'"$edge_vpc"$'\t'"$edge_region" ] || die 'private hosted zone association differs'
-public_zone_shape=$(read_single route53 get-hosted-zone --id "$public_zone_id" \
-  --query 'join(`\t`,[HostedZone.Id,to_string(HostedZone.Config.PrivateZone),to_string(length(VPCs))])' --output text)
-[ "$public_zone_shape" = "/hostedzone/$public_zone_id"$'\t'"false"$'\t'"0" ] || die 'public hosted zone readback differs'
+aws_read route53 get-hosted-zone --id "$private_zone_id" --output json >"$private_zone_json" \
+  || die 'private hosted zone read failed'
+json_check "$private_zone_json" "
+  data.HostedZone?.Id === '/hostedzone/$private_zone_id' && data.HostedZone?.Config?.PrivateZone === true &&
+  JSON.stringify(data.VPCs || []) === JSON.stringify([{VPCRegion:'$edge_region',VPCId:'$edge_vpc'}])
+" >/dev/null || die 'private hosted zone association differs'
+aws_read route53 get-hosted-zone --id "$public_zone_id" --output json >"$public_zone_json" \
+  || die 'public hosted zone read failed'
+json_check "$public_zone_json" "
+  data.HostedZone?.Id === '/hostedzone/$public_zone_id' && data.HostedZone?.Config?.PrivateZone === false &&
+  (data.VPCs || []).length === 0
+" >/dev/null || die 'public hosted zone readback differs'
 
 for zone in "$private_zone_id:private:$private_records_json:$edge_private_ip" "$public_zone_id:public:$public_records_json:$edge_public_ip"; do
   IFS=: read -r zone_id zone_kind records_file address <<<"$zone"
@@ -199,32 +231,17 @@ for zone in "$private_zone_id:private:$private_records_json:$edge_private_ip" "$
   " >/dev/null || die "$zone_kind hosted zone ownership tags differ"
 done
 
-aws_read --region "$edge_region" ec2 describe-security-groups --group-ids "$worker_sg" --output json >"$worker_sg_json" || die 'Worker security group read failed'
-json_check "$worker_sg_json" "
-  (() => {
-    const g=data.SecurityGroups?.[0], tags=Object.fromEntries((g?.Tags || []).map(v => [v.Key,v.Value]));
-    const cidr=(p,proto,port,dst) => p.IpProtocol === proto && p.FromPort === port && p.ToPort === port &&
-      JSON.stringify(p.IpRanges || []) === JSON.stringify([{Description:'dirextalk-worker-edge-v2',CidrIp:dst}]) &&
-      (p.Ipv6Ranges || []).length === 0 && (p.PrefixListIds || []).length === 0 && (p.UserIdGroupPairs || []).length === 0;
-    return data.SecurityGroups?.length === 1 && g.GroupId === '$worker_sg' && g.OwnerId === '$account_id' && g.VpcId === '$edge_vpc' &&
-      (g.IpPermissions || []).length === 0 && (g.IpPermissionsEgress || []).length === 3 &&
-      [['tcp',53,'$dns_resolver_cidr'],['udp',53,'$dns_resolver_cidr'],['tcp',443,'$edge_private_ip/32']].every(v =>
-        g.IpPermissionsEgress.some(p => cidr(p,v[0],v[1],v[2]))) &&
-      tags['dirextalk-run-id'] === '$run_id' && tags['dirextalk-owner'] === '$owner_id' && tags['dirextalk-generation'] === '$account_generation';
-  })()
-" >/dev/null || die 'Worker security group rules or ownership tags differ'
-
 aws_read --region "$edge_region" ec2 describe-security-groups --group-ids "$edge_sg" --output json >"$edge_sg_json" || die 'edge security group read failed'
 json_check "$edge_sg_json" "
   (() => {
     const g=data.SecurityGroups?.[0], tags=Object.fromEntries((g?.Tags || []).map(v => [v.Key,v.Value]));
     const cidr=(p,proto,port,dst) => p.IpProtocol === proto && p.FromPort === port && p.ToPort === port &&
-      JSON.stringify(p.IpRanges || []) === JSON.stringify([{Description:'dirextalk-worker-edge-v2',CidrIp:dst}]) &&
+      JSON.stringify(p.IpRanges || []) === JSON.stringify([{Description:'dirextalk-worker-edge-v3',CidrIp:dst}]) &&
       (p.Ipv6Ranges || []).length === 0 && (p.PrefixListIds || []).length === 0 && (p.UserIdGroupPairs || []).length === 0;
     const ingress=g.IpPermissions?.[0];
-    const exactIngress=(g.IpPermissions || []).length === 1 && ingress.IpProtocol === 'tcp' && ingress.FromPort === 443 && ingress.ToPort === 443 &&
-      (ingress.IpRanges || []).length === 0 && (ingress.Ipv6Ranges || []).length === 0 && (ingress.PrefixListIds || []).length === 0 &&
-      JSON.stringify(ingress.UserIdGroupPairs || []) === JSON.stringify([{Description:'dirextalk-worker-edge-v2',UserId:'$account_id',GroupId:'$worker_sg'}]);
+    const exactIngress=(g.IpPermissions || []).length === 1 && ingress.IpProtocol === '-1' && ingress.FromPort === undefined && ingress.ToPort === undefined &&
+      JSON.stringify(ingress.IpRanges || []) === JSON.stringify([{Description:'dirextalk-worker-edge-v3',CidrIp:'$worker_source_cidr'}]) &&
+      (ingress.Ipv6Ranges || []).length === 0 && (ingress.PrefixListIds || []).length === 0 && (ingress.UserIdGroupPairs || []).length === 0;
     return data.SecurityGroups?.length === 1 && g.GroupId === '$edge_sg' && g.OwnerId === '$account_id' && g.VpcId === '$edge_vpc' && exactIngress &&
       (g.IpPermissionsEgress || []).length === 5 &&
       [['tcp',53,'$dns_resolver_cidr'],['udp',53,'$dns_resolver_cidr'],['tcp',443,'0.0.0.0/0'],['tcp',10443,'$route_ip/32'],['tcp',11443,'$route_ip/32']].every(v =>
@@ -239,7 +256,7 @@ proxy_upstream=127.0.0.1:12443
 read_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 evidence_tmp=$tmp_dir/evidence.json
 json_build object \
-  schema=dirextalk-worker-edge-evidence-v2 run_id="$run_id" account_id="$account_id" owner_id="$owner_id" account_generation="$account_generation" \
+  schema=dirextalk-worker-edge-evidence-v3 run_id="$run_id" account_id="$account_id" owner_id="$owner_id" account_generation="$account_generation" \
   edge_region="$edge_region" route_mode="$route_mode" \
   lightsail.region="$s2_region" lightsail.instance_arn="$s2_arn" lightsail.support_code="$s2_support_code" \
   lightsail.private_ip="$s2_private_ip" lightsail.public_ip="$s2_public_ip" lightsail.default_vpc_id="$s2_default_vpc" \
@@ -254,10 +271,8 @@ json_build object \
   public_dns.records.worker_control="{\"hostname\":\"$control_domain\",\"address\":\"$edge_public_ip\"}" \
   public_dns.records.model_relay="{\"hostname\":\"$relay_domain\",\"address\":\"$edge_public_ip\"}" \
   public_dns.records.outbound_proxy="{\"hostname\":\"$proxy_domain\",\"address\":\"$edge_public_ip\"}" \
-  security.worker_security_group_id="$worker_sg" security.edge_security_group_id="$edge_sg" \
-  security.worker_dns_egress="[{\"destination\":\"$dns_resolver_cidr\",\"ports\":[53],\"protocols\":[\"tcp\",\"udp\"]}]" \
-  security.worker_edge_egress="{\"destination\":\"$edge_private_ip/32\",\"ports\":[443]}" \
-  security.edge_ingress="{\"source_security_group_id\":\"$worker_sg\",\"ports\":[443]}" \
+  security.edge_security_group_id="$edge_sg" \
+  security.edge_ingress="{\"source_cidr\":\"$worker_source_cidr\",\"ip_protocol\":\"-1\"}" \
   security.edge_to_s2="{\"destination\":\"$route_ip/32\",\"ports\":[10443,11443]}" \
   security.edge_dns_egress="[{\"destination\":\"$dns_resolver_cidr\",\"ports\":[53],\"protocols\":[\"tcp\",\"udp\"]}]" \
   security.edge_https_egress='{"destination":"0.0.0.0/0","ports":[443]}' \

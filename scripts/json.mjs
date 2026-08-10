@@ -886,7 +886,7 @@ function parseScalar(value) {
   if (value === "true") return true;
   if (value === "false") return false;
   if (value === "null") return null;
-  if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value);
+  if (/^-?(0|[1-9]\d*)(\.\d+)?$/.test(value)) return Number(value);
   if ((value.startsWith("{") && value.endsWith("}")) || (value.startsWith("[") && value.endsWith("]"))) {
     return JSON.parse(value);
   }

@@ -15,6 +15,40 @@ case "$operation" in
   *) echo "usage: $0 [--reconcile-edge]" >&2; exit 2 ;;
 esac
 stable_ip_file=$base/stable-public-ip
+runner_libexec=/usr/local/libexec/dirextalk/split-agent
+
+install_runner_host_assets() {
+  install -d -o root -g root -m 0755 \
+    "$runner_libexec/scripts" \
+    "$runner_libexec/systemd" \
+    "$runner_libexec/sysusers.d" \
+    "$runner_libexec/apparmor.d"
+  install -o root -g root -m 0755 \
+    "$split/scripts/prepare-runner-cgroups.sh" \
+    "$split/scripts/manage-runner-apparmor.sh" \
+    "$runner_libexec/scripts/"
+  install -o root -g root -m 0644 \
+    "$split/systemd/dirextalk-extension-runner@.service" \
+    "$split/systemd/dirextalk-core-runner@.service" \
+    "$runner_libexec/systemd/"
+  install -o root -g root -m 0644 \
+    "$split/sysusers.d/dirextalk-split-agent.conf" \
+    "$runner_libexec/sysusers.d/"
+  install -o root -g root -m 0644 \
+    "$split/apparmor.d/dirextalk-runner-userns" \
+    "$runner_libexec/apparmor.d/dirextalk-runner-userns"
+}
+
+remove_empty_fresh_run_dir() {
+  local identity
+  [ -e "$run_dir" ] || return 0
+  [ -d "$run_dir" ] && [ ! -L "$run_dir" ] || return 1
+  [ "$(stat -c '%u:%g:%a' -- "$run_dir")" = 0:0:700 ] || return 1
+  [ -z "$(find "$run_dir" -mindepth 1 -maxdepth 1 -print -quit)" ] || return 1
+  identity=$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir") || return 1
+  [ "$(stat -c '%d:%i:%u:%g:%a' -- "$run_dir" 2>/dev/null)" = "$identity" ] || return 1
+  rmdir -- "$run_dir"
+}
 
 read_env() {
   local key=$1 count value
@@ -269,7 +303,14 @@ elif [ -f "$base/.split-deploy-done" ]; then
   stack=$(cat "$base/split-stack-name")
 else
   write_stage runner_preparation
-  if [ ! -s "$base/runner-preparation.env" ]; then
+  install_runner_host_assets
+  runner_preparation_current=false
+  if [ -s "$base/runner-preparation.env" ] \
+    && [ "$(read_pair "$base/runner-preparation.env" DIREXTALK_RUNNER_APPARMOR_MANAGER_PATH 2>/dev/null || true)" = "$runner_libexec/scripts/manage-runner-apparmor.sh" ] \
+    && [ "$(read_pair "$base/runner-preparation.env" DIREXTALK_RUNNER_PREP_HELPER_PATH 2>/dev/null || true)" = "$runner_libexec/scripts/prepare-runner-cgroups.sh" ]; then
+    runner_preparation_current=true
+  fi
+  if [ "$runner_preparation_current" = false ]; then
   if [ -s "$base/split-stack-name" ]; then
     stack=$(cat "$base/split-stack-name")
   else
@@ -277,7 +318,7 @@ else
     printf '%s\n' "$stack" >"$base/split-stack-name"
     chmod 0600 "$base/split-stack-name"
   fi
-  "$split/scripts/prepare-runner-cgroups.sh" "$stack" >"$base/runner-preparation.env"
+  "$runner_libexec/scripts/prepare-runner-cgroups.sh" "$stack" >"$base/runner-preparation.env"
   chmod 0400 "$base/runner-preparation.env"
   else
     stack=$(cat "$base/split-stack-name")
@@ -289,20 +330,34 @@ else
   set +a
 
   write_stage provision
+  if [ -e "$run_dir" ]; then
+    remove_empty_fresh_run_dir || :
+  fi
   if [ ! -e "$run_dir" ]; then
-  DIREXTALK_SPLIT_STACK_NAME="$stack" \
-  DIREXTALK_SPLIT_COMPOSE_MODE=production \
-  DIREXTALK_MESSAGE_TLS_MODE=edge-terminated \
-  DIREXTALK_MESSAGE_SERVER_NAME="$domain" \
-  DIREXTALK_CORE_EXTENSION_ENABLED=true \
-  DIREXTALK_CORE_WORKLOAD_ENABLED=true \
-  DIREXTALK_MESSAGE_SERVER_IMAGE="$message_image" \
-  DIREXTALK_AGENT_IMAGE="$agent_image" \
-  DIREXTALK_POSTGRES_IMAGE_IMMUTABLE="$postgres_image" \
-  DIREXTALK_COTURN_IMAGE_IMMUTABLE="$coturn_image" \
-  DIREXTALK_RELEASE_CATALOG_ORIGIN="$release_catalog_origin" \
-  DIREXTALK_TURN_EXTERNAL_IP="$turn_external_ip" \
-      "$split/scripts/provision-local.sh" "$run_dir"
+    if DIREXTALK_SPLIT_STACK_NAME="$stack" \
+      DIREXTALK_SPLIT_COMPOSE_MODE=production \
+      DIREXTALK_MESSAGE_TLS_MODE=edge-terminated \
+      DIREXTALK_MESSAGE_SERVER_NAME="$domain" \
+      DIREXTALK_CORE_EXTENSION_ENABLED=true \
+      DIREXTALK_CORE_WORKLOAD_ENABLED=true \
+      DIREXTALK_MESSAGE_SERVER_IMAGE="$message_image" \
+      DIREXTALK_AGENT_IMAGE="$agent_image" \
+      DIREXTALK_POSTGRES_IMAGE_IMMUTABLE="$postgres_image" \
+      DIREXTALK_COTURN_IMAGE_IMMUTABLE="$coturn_image" \
+      DIREXTALK_RELEASE_CATALOG_ORIGIN="$release_catalog_origin" \
+      DIREXTALK_TURN_EXTERNAL_IP="$turn_external_ip" \
+        "$split/scripts/provision-local.sh" "$run_dir"; then
+      :
+    else
+      provision_status=$?
+      if [ -e "$run_dir" ]; then
+        remove_empty_fresh_run_dir || {
+          echo "fresh provision failed (status $provision_status) and left a non-empty or unexpected run directory" >&2
+          exit 1
+        }
+      fi
+      exit "$provision_status"
+    fi
   fi
 
   write_stage application_start

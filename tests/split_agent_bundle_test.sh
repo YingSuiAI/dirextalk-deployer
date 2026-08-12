@@ -120,13 +120,17 @@ grep -Fq 'sshd_effective=$(sshd -T)' "$host_integration"
 grep -Fq "grep -Fx 'passwordauthentication no' <<<\"\$sshd_effective\"" "$host_integration"
 grep -Fq "grep -Fx 'pubkeyauthentication yes' <<<\"\$sshd_effective\"" "$host_integration"
 consumer="$ROOT/scripts/cloud-init/split/bootstrap-production.sh"
+consumer_exec="$TEST_TMP/bootstrap-production.sh"
+sed "s#/usr/local/libexec/dirextalk/split-agent#$TEST_TMP/runner-libexec#g" \
+  "$consumer" >"$consumer_exec"
+cp "$ROOT/scripts/cloud-init/split/Caddyfile" "$ROOT/scripts/cloud-init/split/edge-compose.override.yaml" "$TEST_TMP/"
 edge_source="$ROOT/scripts/cloud-init/split/Caddyfile"
 edge_overlay="$ROOT/scripts/cloud-init/split/edge-compose.override.yaml"
 grep -Fq 'DIREXTALK_SPLIT_COMPOSE_MODE=production' "$consumer"
 grep -Fq 'DIREXTALK_MESSAGE_TLS_MODE=edge-terminated' "$consumer"
 grep -Fq 'staged production Compose override is missing' "$consumer"
 grep -Fq 'staged message-server update adapter is not executable' "$consumer"
-grep -Fq '"$split/scripts/prepare-runner-cgroups.sh" "$stack"' "$consumer"
+grep -Fq '"$runner_libexec/scripts/prepare-runner-cgroups.sh" "$stack"' "$consumer"
 grep -Fq '"$split/scripts/provision-local.sh" "$run_dir"' "$consumer"
 grep -Fq '"$split/scripts/start-local.sh" "$run_dir/.env"' "$consumer"
 grep -Fq 'sed "s/__DIREXTALK_PUBLIC_DOMAIN__/$domain/g" "$script_dir/Caddyfile"' "$consumer"
@@ -164,20 +168,25 @@ fi
 grep -Fq '"$script_dir/bootstrap-production.sh"' "$ROOT/scripts/cloud-init/split/reconcile-production.sh"
 grep -Fq "cmp \"\$portal_bootstrap\" \"\$refresh_dir/bootstrap.json\"" "$consumer"
 grep -Fq 'existing portal bootstrap differs from the running stack' "$consumer"
-if grep -Fq '/usr/local/libexec' "$consumer"; then
-  echo "split consumer must not mix a copied runner helper with its staged canonical bundle" >&2
-  exit 1
-fi
+grep -Fq 'runner_libexec=/usr/local/libexec/dirextalk/split-agent' "$consumer"
+grep -Fq '"$split/scripts/manage-runner-apparmor.sh"' "$consumer"
 
 # Exercise the actual first-fresh bootstrap consumer up to the canonical
 # provision boundary. The provision probe deliberately stops the bootstrap
 # after recording the release inputs, before Docker or host mutation begins.
 fresh="$TEST_TMP/first-fresh"
 fresh_split="$fresh/deploy/split-agent"
-mkdir -p "$fresh_split/scripts" "$TEST_TMP/fakebin"
+mkdir -p "$fresh_split/scripts" "$fresh_split/systemd" "$fresh_split/sysusers.d" "$fresh_split/apparmor.d" "$TEST_TMP/fakebin"
 cat >"$fresh_split/scripts/prepare-runner-cgroups.sh" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' 'DIREXTALK_RUNNER_PREPARED=true'
+printf '%s\n' \
+  'DIREXTALK_RUNNER_PREPARED=true' \
+  "DIREXTALK_RUNNER_APPARMOR_MANAGER_PATH=$(cd "$(dirname "$0")" && pwd -P)/manage-runner-apparmor.sh" \
+  "DIREXTALK_RUNNER_PREP_HELPER_PATH=$(cd "$(dirname "$0")" && pwd -P)/prepare-runner-cgroups.sh"
+EOF
+cat >"$fresh_split/scripts/manage-runner-apparmor.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
 EOF
 cat >"$fresh_split/scripts/provision-local.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -204,6 +213,10 @@ cat >"$fresh_split/scripts/update-message-server-local.sh" <<'EOF'
 exit 0
 EOF
 chmod 0755 "$fresh_split/scripts/"*.sh
+printf '%s\n' extension >"$fresh_split/systemd/dirextalk-extension-runner@.service"
+printf '%s\n' core >"$fresh_split/systemd/dirextalk-core-runner@.service"
+printf '%s\n' users >"$fresh_split/sysusers.d/dirextalk-split-agent.conf"
+printf '%s\n' apparmor >"$fresh_split/apparmor.d/dirextalk-runner-userns"
 printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$fresh_split/SOURCE_REVISION"
 (cd "$fresh_split" && find . -type f ! -name SOURCE_FILES.sha256 -print0 \
   | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
@@ -231,7 +244,19 @@ case "$*" in
   *) exec /usr/bin/stat "$@" ;;
 esac
 EOF
-chmod 0755 "$TEST_TMP/fakebin/stat"
+cat >"$TEST_TMP/fakebin/install" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o|-g) shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+exec /usr/bin/install "${args[@]}"
+EOF
+chmod 0755 "$TEST_TMP/fakebin/stat" "$TEST_TMP/fakebin/install"
 cat >"$TEST_TMP/fakebin/docker" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
@@ -258,7 +283,7 @@ capture="$TEST_TMP/provision.capture"
 if PATH="$TEST_TMP/fakebin:$PATH" \
   DIREXTALK_BOOTSTRAP_BASE="$fresh" \
   DIREXTALK_TEST_PROVISION_CAPTURE="$capture" \
-  bash "$consumer" >"$TEST_TMP/first-fresh.out" 2>"$TEST_TMP/first-fresh.err"; then
+  bash "$consumer_exec" >"$TEST_TMP/first-fresh.out" 2>"$TEST_TMP/first-fresh.err"; then
   echo "first-fresh bootstrap unexpectedly passed the stopping provision probe" >&2
   exit 1
 else
@@ -279,7 +304,7 @@ mv "$fresh_split/compose.production.yaml" "$fresh_split/compose.production.yaml.
 rm -f "$capture" "$fresh/runner-preparation.env" "$fresh/split-stack-name" "$fresh/.split-bootstrap-stage"
 if PATH="$TEST_TMP/fakebin:$PATH" DIREXTALK_BOOTSTRAP_BASE="$fresh" \
     DIREXTALK_TEST_PROVISION_CAPTURE="$capture" \
-    bash "$consumer" >/dev/null 2>"$TEST_TMP/missing-production-compose.err"; then
+    bash "$consumer_exec" >/dev/null 2>"$TEST_TMP/missing-production-compose.err"; then
   echo "first-fresh bootstrap accepted a missing production Compose override" >&2
   exit 1
 fi
@@ -292,7 +317,7 @@ chmod 0644 "$fresh_split/scripts/update-message-server-local.sh"
   | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
 if PATH="$TEST_TMP/fakebin:$PATH" DIREXTALK_BOOTSTRAP_BASE="$fresh" \
     DIREXTALK_TEST_PROVISION_CAPTURE="$capture" \
-    bash "$consumer" >/dev/null 2>"$TEST_TMP/nonexecutable-message-update.err"; then
+    bash "$consumer_exec" >/dev/null 2>"$TEST_TMP/nonexecutable-message-update.err"; then
   echo "first-fresh bootstrap accepted a non-executable message-server update adapter" >&2
   exit 1
 fi
@@ -403,7 +428,7 @@ chmod 0755 "$edge_fakebin/stat" "$edge_fakebin/docker"
 edge_calls="$TEST_TMP/edge-only.calls"
 : >"$edge_calls"
 PATH="$edge_fakebin:$PATH" EDGE_CALLS="$edge_calls" DIREXTALK_BOOTSTRAP_BASE="$edge" \
-  bash "$consumer" --reconcile-edge
+  bash "$consumer_exec" --reconcile-edge
 [ "$(sha256sum "$edge/p2p/bootstrap.json" | awk '{print $1}')" = "$edge_bootstrap_sha" ]
 if grep -Fq 'export-called' "$edge_calls"; then
   echo "edge-only reconcile touched portal bootstrap export" >&2

@@ -2,13 +2,16 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
-consumer=$ROOT/scripts/cloud-init/split/bootstrap-production.sh
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+consumer=$tmp/bootstrap-production.sh
+sed "s#/usr/local/libexec/dirextalk/split-agent#$tmp/runner-libexec#g" \
+  "$ROOT/scripts/cloud-init/split/bootstrap-production.sh" >"$consumer"
+cp "$ROOT/scripts/cloud-init/split/Caddyfile" "$ROOT/scripts/cloud-init/split/edge-compose.override.yaml" "$tmp/"
 base=$tmp/production
 split=$base/deploy/split-agent
 fakebin=$tmp/fakebin
-mkdir -p "$split/scripts" "$fakebin"
+mkdir -p "$split/scripts" "$split/systemd" "$split/sysusers.d" "$split/apparmor.d" "$fakebin"
 
 cat >"$split/scripts/prepare-runner-cgroups.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -20,7 +23,9 @@ printf '%s\n' "$((count + 1))" >"$DIREXTALK_TEST_PREPARATION_COUNT"
 printf 'prepare %s\n' "$((count + 1))" >>"$DIREXTALK_TEST_CLEANUP_CALLS"
 printf '%s\n' \
   'DIREXTALK_RUNNER_PREPARED=true' \
-  "DIREXTALK_RUNNER_APPARMOR_PROFILE_PATH=$DIREXTALK_TEST_RUNNER_INTEGRATION"
+  "DIREXTALK_RUNNER_APPARMOR_PROFILE_PATH=$DIREXTALK_TEST_RUNNER_INTEGRATION" \
+  "DIREXTALK_RUNNER_APPARMOR_MANAGER_PATH=$(cd "$(dirname "$0")" && pwd -P)/manage-runner-apparmor.sh" \
+  "DIREXTALK_RUNNER_PREP_HELPER_PATH=$(cd "$(dirname "$0")" && pwd -P)/prepare-runner-cgroups.sh"
 EOF
 cat >"$split/scripts/provision-local.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -35,9 +40,14 @@ count=0
 [ ! -f "$DIREXTALK_TEST_PROVISION_COUNT" ] || count=$(cat "$DIREXTALK_TEST_PROVISION_COUNT")
 printf '%s\n' "$((count + 1))" >"$DIREXTALK_TEST_PROVISION_COUNT"
 mkdir -m 0700 "$out"
+[ "${DIREXTALK_TEST_FAIL_EMPTY_PROVISION:-false}" != true ] || exit 73
 printf 'stack=%s\n' "$DIREXTALK_SPLIT_STACK_NAME" >"$out/.env"
 printf 'stack_name=%s\n' "$DIREXTALK_SPLIT_STACK_NAME" >"$out/.manifest"
 chmod 0400 "$out/.env" "$out/.manifest"
+EOF
+cat >"$split/scripts/manage-runner-apparmor.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
 EOF
 cat >"$split/scripts/start-local.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -82,6 +92,10 @@ printf '{"ready":true}\n' >"$2"
 chmod 0400 "$2"
 EOF
 chmod 0755 "$split/scripts/"*.sh
+printf '%s\n' extension >"$split/systemd/dirextalk-extension-runner@.service"
+printf '%s\n' core >"$split/systemd/dirextalk-core-runner@.service"
+printf '%s\n' users >"$split/sysusers.d/dirextalk-split-agent.conf"
+printf '%s\n' apparmor >"$split/apparmor.d/dirextalk-runner-userns"
 : >"$split/compose.production.yaml"
 cat >"$split/edge-compose.yaml" <<'EOF'
 services:
@@ -114,8 +128,21 @@ cat >"$fakebin/stat" <<'EOF'
 case "$*" in
   *"%u:%a"*"$DIREXTALK_BOOTSTRAP_BASE/.env"|*"%u:%a"*"$DIREXTALK_BOOTSTRAP_BASE/stable-public-ip") printf '%s\n' '0:600' ;;
   *"%u:%a"*"$DIREXTALK_BOOTSTRAP_BASE/edge.env") printf '%s\n' '0:400' ;;
+  *"%u:%g:%a"*"$DIREXTALK_BOOTSTRAP_BASE/split") printf '%s\n' '0:0:700' ;;
   *) exec /usr/bin/stat "$@" ;;
 esac
+EOF
+cat >"$fakebin/install" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o|-g) shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+exec /usr/bin/install "${args[@]}"
 EOF
 cat >"$fakebin/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -134,7 +161,7 @@ case " $* " in
   *) echo "unexpected docker call: $*" >&2; exit 95 ;;
 esac
 EOF
-chmod 0755 "$fakebin/stat" "$fakebin/docker"
+chmod 0755 "$fakebin/stat" "$fakebin/install" "$fakebin/docker"
 cp -a "$base" "$tmp/pristine"
 
 export DIREXTALK_BOOTSTRAP_BASE=$base
@@ -178,6 +205,44 @@ cmp "$tmp/expected-retry-events" "$DIREXTALK_TEST_CLEANUP_CALLS"
 [ -f "$base/.split-deploy-done" ]
 [ -f "$base/p2p/bootstrap.json" ]
 [ "$(cat "$base/.split-bootstrap-stage")" = completed ]
+
+pre_control=$tmp/pre-control
+cp -a "$tmp/pristine" "$pre_control"
+mkdir -m 0700 "$pre_control/split"
+cat >"$pre_control/runner-preparation.env" <<'EOF'
+DIREXTALK_RUNNER_APPARMOR_MANAGER_PATH=/var/dirextalk-message-server/deploy/split-agent/scripts/manage-runner-apparmor.sh
+DIREXTALK_RUNNER_PREP_HELPER_PATH=/var/dirextalk-message-server/deploy/split-agent/scripts/prepare-runner-cgroups.sh
+EOF
+chmod 0600 "$pre_control/runner-preparation.env"
+if PATH="$fakebin:$PATH" \
+    DIREXTALK_BOOTSTRAP_BASE="$pre_control" \
+    DIREXTALK_TEST_RESOURCE="$tmp/pre-control-resource" \
+    DIREXTALK_TEST_PROVISION_COUNT="$tmp/pre-control-provision-count" \
+    DIREXTALK_TEST_START_COUNT="$tmp/pre-control-start-count" \
+    DIREXTALK_TEST_CLEANUP_CALLS="$tmp/pre-control-cleanup-calls" \
+    DIREXTALK_TEST_PREPARATION_COUNT="$tmp/pre-control-preparation-count" \
+    DIREXTALK_TEST_RUNNER_INTEGRATION="$tmp/pre-control-runner-integration" \
+    DIREXTALK_TEST_FAIL_EMPTY_PROVISION=true \
+    bash "$consumer" >"$tmp/pre-control-first.out" 2>"$tmp/pre-control-first.err"; then
+  echo 'empty-directory provision failure unexpectedly succeeded' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 73 ] || { cat "$tmp/pre-control-first.err" >&2; exit 1; }
+[ ! -e "$pre_control/split" ]
+printf '%s\n' 1 >"$tmp/pre-control-start-count"
+PATH="$fakebin:$PATH" \
+  DIREXTALK_BOOTSTRAP_BASE="$pre_control" \
+  DIREXTALK_TEST_RESOURCE="$tmp/pre-control-resource" \
+  DIREXTALK_TEST_PROVISION_COUNT="$tmp/pre-control-provision-count" \
+  DIREXTALK_TEST_START_COUNT="$tmp/pre-control-start-count" \
+  DIREXTALK_TEST_CLEANUP_CALLS="$tmp/pre-control-cleanup-calls" \
+  DIREXTALK_TEST_PREPARATION_COUNT="$tmp/pre-control-preparation-count" \
+  DIREXTALK_TEST_RUNNER_INTEGRATION="$tmp/pre-control-runner-integration" \
+  bash "$consumer" >"$tmp/pre-control-retry.out" 2>"$tmp/pre-control-retry.err"
+[ "$(cat "$tmp/pre-control-provision-count")" -eq 2 ]
+[ -f "$pre_control/.split-deploy-done" ]
 
 # Exit 3 from the no-receipt wrapper is an expected negative state, not proof
 # that every partial resource was removed. Preserve the controls fail closed.

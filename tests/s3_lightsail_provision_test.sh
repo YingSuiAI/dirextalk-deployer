@@ -74,10 +74,19 @@ set -euo pipefail
 printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
-cat >/dev/null
 case "${!#}" in
-  *'/etc/machine-id'*) printf '0123456789abcdef0123456789abcdef\tDOCKERENGINE1234\n' ;;
+  *'apply-host-integration.sh'*)
+    cat > "$TMPDIR/integration-upload.tar.gz"
+    tar -tzf "$TMPDIR/integration-upload.tar.gz" > "$TMPDIR/integration-upload.list"
+    if [ -f "$TMPDIR/updater-identity" ]; then
+      cat "$TMPDIR/updater-identity"
+    else
+      printf 'v1.0.14\tdc97777c7169ea498199f7b31689f8373fe6c04c\t4deac3f24267bdb493d58b598e8f7ce69b5957a373f2103774d148f202e6189f\n'
+    fi
+    ;;
+  *'/etc/machine-id'*) cat >/dev/null; printf '0123456789abcdef0123456789abcdef\tDOCKERENGINE1234\n' ;;
   *)
+    cat >/dev/null
     if [ -f "$TMPDIR/updater-identity" ]; then
       cat "$TMPDIR/updater-identity"
     else
@@ -147,6 +156,16 @@ grep -q '^ssh .*ubuntu@203\.0\.113\.144.*tar.*apply-host-integration\.sh.*203\.0
 grep -q '^ssh .*bootstrap-host\.sh.*--record-stable-ip.*203\.0\.113\.144.*apply-host-integration\.sh' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q '^ssh .*apply-host-integration\.sh.*cloud-init.*status.*--wait.*printf' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q -- '--no-same-owner' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+for required in \
+  cloud-init/split/WorkerEdge.haproxy.cfg \
+  cloud-init/split/worker-edge-compose.yaml \
+  cloud-init/split/verify-worker-edge-image.sh; do
+  grep -Fxq "$required" "$TMPDIR/integration-upload.list" || {
+    echo "host integration upload is missing $required" >&2
+    cat "$TMPDIR/integration-upload.list" >&2
+    exit 1
+  }
+done
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)

@@ -587,7 +587,9 @@ _resume_host_bootstrap() {
   fi
   integration_files=( -C "$S3_PHASE_DIR" -cf - \
       cloud-init/split/Caddyfile \
+      cloud-init/split/WorkerEdge.haproxy.cfg \
       cloud-init/split/edge-compose.override.yaml \
+      cloud-init/split/worker-edge-compose.yaml \
       cloud-init/split/bootstrap-production.sh \
       cloud-init/split/apply-host-integration.sh \
       cloud-init/split/authorize-split-source-revision.sh \
@@ -597,6 +599,7 @@ _resume_host_bootstrap() {
       cloud-init/split/recover-production.sh \
       cloud-init/split/reconcile-production.sh \
       cloud-init/split/reset-production.sh \
+      cloud-init/split/verify-worker-edge-image.sh \
       cloud-init/split/dirextalk-split-recovery.service \
       updater/bootstrap-host.sh \
       updater/install.sh \

@@ -21,7 +21,7 @@ EOF
 }
 
 DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
-DEFAULT_LIGHTSAIL_BUNDLE_ID=${DEFAULT_LIGHTSAIL_BUNDLE_ID:-small_3_1}
+DEFAULT_LIGHTSAIL_BUNDLE_ID=${DEFAULT_LIGHTSAIL_BUNDLE_ID:-small_3_0}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
 DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
 DEFAULT_LIGHTSAIL_TRANSFER_GB=${DEFAULT_LIGHTSAIL_TRANSFER_GB:-3072}
@@ -201,7 +201,9 @@ process.stdin.on("end", () => {
   const data = JSON.parse(input || "{}");
   const bundles = Array.isArray(data.bundles) ? data.bundles : [];
   const linux = bundles.filter((bundle) =>
-    Array.isArray(bundle.supportedPlatforms) && bundle.supportedPlatforms.includes("LINUX_UNIX")
+    bundle.isActive !== false &&
+    Array.isArray(bundle.supportedPlatforms) && bundle.supportedPlatforms.includes("LINUX_UNIX") &&
+    Number(bundle.cpuCount || 0) >= Number(process.argv[4] || "2")
   );
   const selected = linux.find((bundle) => wantedId && bundle.bundleId === wantedId) ||
     linux.find((bundle) => Number(bundle.ramSizeInGb) === wantedRam && Number(bundle.diskSizeInGb) === wantedDisk) ||
@@ -218,7 +220,7 @@ process.stdin.on("end", () => {
   ];
   process.stdout.write(`${fields.join("\t")}\n`);
 });
-' "$wanted_id" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB"
+' "$wanted_id" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB" "$DEFAULT_LIGHTSAIL_CPU_COUNT"
 }
 
 state=""

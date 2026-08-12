@@ -101,6 +101,11 @@ tar -xzf "$repository_bundle" -C "$TEST_TMP/repository-unpacked"
 (cd "$TEST_TMP/repository-unpacked/deploy/split-agent" && sha256sum -c --status SOURCE_FILES.sha256)
 repository_compose="$TEST_TMP/repository-unpacked/deploy/split-agent/compose.yaml"
 [ "$(grep -Ec '^  postgres:$' "$repository_compose")" -eq 1 ]
+[ "$(grep -Fc 'apparmor=dirextalk-runner-userns' "$repository_compose")" -eq 2 ]
+[ "$(grep -Fc 'seccomp=unconfined' "$repository_compose")" -eq 2 ]
+repository_apparmor="$TEST_TMP/repository-unpacked/deploy/split-agent/apparmor.d/dirextalk-runner-userns"
+grep -Fqx 'profile dirextalk-runner-userns flags=(unconfined) {' "$repository_apparmor"
+grep -Fqx '  userns,' "$repository_apparmor"
 grep -Fq 'image: ${DIREXTALK_POSTGRES_IMAGE_IMMUTABLE:?set an immutable PostgreSQL image reference}' "$repository_compose"
 grep -Fq 'aliases: [message-postgres]' "$repository_compose"
 grep -Fq 'aliases: [agent-postgres]' "$repository_compose"

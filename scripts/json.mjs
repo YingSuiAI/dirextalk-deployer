@@ -165,13 +165,14 @@ function cmdLightsailBundleSelect(args) {
   const targetPrice = numberValue(required(args, 1, "target price"));
   const targetRam = numberValue(required(args, 2, "target RAM"));
   const targetDisk = numberValue(required(args, 3, "target disk"));
+  const targetCpu = numberValue(args[4] || "2");
   const data = readJsonFile(file);
   const platformOk = (bundle) => {
     const platform = String(bundle.supportedPlatforms || bundle.supportedPlatform || bundle.platform || "").toLowerCase();
     return platform === "" || platform.includes("linux") || platform.includes("unix");
   };
   const candidates = (Array.isArray(data.bundles) ? data.bundles : [])
-    .filter(platformOk)
+    .filter((bundle) => platformOk(bundle) && bundle.isActive !== false)
     .map((bundle) => ({
       id: String(bundle.bundleId || ""),
       price: numberValue(bundle.price),
@@ -181,10 +182,10 @@ function cmdLightsailBundleSelect(args) {
       cpu: numberValue(bundle.cpuCount)
     }))
     .filter((bundle) => bundle.id && bundle.price > 0);
-  const exact = candidates.filter((bundle) => Math.abs(bundle.price - targetPrice) < 0.01 && bundle.ram >= targetRam && bundle.disk >= targetDisk);
-  const fallback = candidates.filter((bundle) => bundle.price >= targetPrice && bundle.ram >= targetRam);
+  const exact = candidates.filter((bundle) => Math.abs(bundle.price - targetPrice) < 0.01 && bundle.ram >= targetRam && bundle.disk >= targetDisk && bundle.cpu >= targetCpu);
+  const fallback = candidates.filter((bundle) => bundle.price >= targetPrice && bundle.ram >= targetRam && bundle.disk >= targetDisk && bundle.cpu >= targetCpu);
   const selected = (exact.length ? exact : fallback)
-    .sort((left, right) => left.price - right.price || left.ram - right.ram || left.disk - right.disk)[0];
+    .sort((left, right) => left.price - right.price || left.ram - right.ram || left.disk - right.disk || left.cpu - right.cpu)[0];
   if (!selected) {
     setExitCode(1);
     return;

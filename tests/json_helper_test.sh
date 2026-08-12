@@ -98,6 +98,17 @@ $JSON mutate "$tmp/state.json" set-string resources.public_ip 203.0.113.10
 $JSON mutate "$tmp/state.json" set-json runtime_checks.summary '{"status":"failed","checks":{"mcp":"failed"}}'
 [ "$($JSON get "$tmp/state.json" runtime_checks.summary.status)" = "failed" ]
 
+cat > "$tmp/lightsail-bundles.json" <<'JSON'
+{
+  "bundles": [
+    {"bundleId":"small_2_0","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"transferPerMonthInGb":3072,"cpuCount":1,"isActive":true,"supportedPlatforms":["LINUX_UNIX"]},
+    {"bundleId":"small_inactive","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"transferPerMonthInGb":3072,"cpuCount":2,"isActive":false,"supportedPlatforms":["LINUX_UNIX"]},
+    {"bundleId":"small_3_0","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"transferPerMonthInGb":3072,"cpuCount":2,"isActive":true,"supportedPlatforms":["LINUX_UNIX"]}
+  ]
+}
+JSON
+[ "$($JSON lightsail-bundle-select "$tmp/lightsail-bundles.json" 12 2 60 2 | cut -f1)" = "small_3_0" ]
+
 if $JSON build mcp-messages-list '!room:im.test' > "$tmp/legacy-mcp-action.json" 2>/dev/null; then
   echo "retired mcp-messages-list body action must not be generated" >&2
   exit 1

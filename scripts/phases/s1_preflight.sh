@@ -7,6 +7,7 @@
 DEFAULT_LIGHTSAIL_MONTHLY_USD=${DEFAULT_LIGHTSAIL_MONTHLY_USD:-12}
 DEFAULT_LIGHTSAIL_RAM_GB=${DEFAULT_LIGHTSAIL_RAM_GB:-2}
 DEFAULT_LIGHTSAIL_DISK_GB=${DEFAULT_LIGHTSAIL_DISK_GB:-60}
+DEFAULT_LIGHTSAIL_CPU_COUNT=${DEFAULT_LIGHTSAIL_CPU_COUNT:-2}
 DEFAULT_LIGHTSAIL_ZONE_SUFFIX=${DEFAULT_LIGHTSAIL_ZONE_SUFFIX:-a}
 DEFAULT_EC2_INSTANCE_TYPE=${DEFAULT_EC2_INSTANCE_TYPE:-t3.small}
 S1_PHASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
@@ -220,6 +221,7 @@ _select_lightsail_bundle() {
     res_set lightsail_bundle_price_usd "$DEFAULT_LIGHTSAIL_MONTHLY_USD"
     res_set lightsail_bundle_ram_gb "$DEFAULT_LIGHTSAIL_RAM_GB"
     res_set lightsail_bundle_disk_gb "$DEFAULT_LIGHTSAIL_DISK_GB"
+    res_set lightsail_bundle_cpu_count "$DEFAULT_LIGHTSAIL_CPU_COUNT"
     printf '%s\n' "$override"
     return 0
   fi
@@ -228,7 +230,7 @@ _select_lightsail_bundle() {
     rm -f "$tmp"
     return 1
   }
-  selected=$(json_lightsail_bundle_select "$tmp" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB") || {
+  selected=$(json_lightsail_bundle_select "$tmp" "$DEFAULT_LIGHTSAIL_MONTHLY_USD" "$DEFAULT_LIGHTSAIL_RAM_GB" "$DEFAULT_LIGHTSAIL_DISK_GB" "$DEFAULT_LIGHTSAIL_CPU_COUNT") || {
     rm -f "$tmp"
     return 1
   }

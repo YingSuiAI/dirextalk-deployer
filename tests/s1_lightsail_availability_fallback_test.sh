@@ -24,7 +24,7 @@ printf '\n' >> "$CALLS"
 
 case "${1:-} ${2:-}" in
   "lightsail get-bundles")
-    printf '{"bundles":[{"bundleId":"medium_3_0","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"supportedPlatforms":["LINUX_UNIX"]}]}\n'
+    printf '{"bundles":[{"bundleId":"medium_3_0","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"cpuCount":2,"isActive":true,"supportedPlatforms":["LINUX_UNIX"]}]}\n'
     ;;
   "lightsail get-regions")
     printf '{"regions":[{"name":"us-east-1","availabilityZones":[{"zoneName":"us-east-1a","state":"unavailable"},{"zoneName":"us-east-1b","state":"unavailable"}]}]}\n'

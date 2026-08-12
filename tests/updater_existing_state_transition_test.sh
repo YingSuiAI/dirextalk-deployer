@@ -206,7 +206,11 @@ mutate_transition_identity() {
 case "$url" in
   */control/status)
     desired=$(sed -n 's/.*"desired_state":"\([^"]*\)".*/\1/p' "$runtime")
-    if { [ "$scenario" = active-job ] || [ "$scenario" = identity-active ]; } && [ "$desired" = running ]; then
+    if [ "$scenario" = status-503 ] && [ ! -e "$TEST_ROOT/target-updater-installed" ]; then
+      printf '%s\n' '{"available":false,"error":"runtime_unavailable"}' >"$output"
+      printf '503'
+      exit 0
+    elif { [ "$scenario" = active-job ] || [ "$scenario" = identity-active ]; } && [ "$desired" = running ]; then
       printf '%s\n' '{"available":true,"updater_ready":false,"desired_state":"upgrading","active_job":{"job_id":"job-1","component":"server","status":"pulling"}}' >"$output"
     elif [ "$scenario" = post-running-failure ] && [ -e "$TEST_ROOT/handoff-running" ] && [ "$desired" = running ]; then
       exit 7
@@ -300,6 +304,15 @@ if run_reconcile >/dev/null 2>&1; then echo 'updater status infrastructure failu
 [ "$status" -eq 1 ]
 grep -Fq '"schema_version":7' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
 [ ! -e "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ]
+
+make_fixture status_503
+printf '%s\n' '{"schema_version":9,"desired_state":"running","watchdog":{"status":"failed"},"jobs":{},"idempotency":{}}' \
+  >"$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+chmod 0600 "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+printf 'status-503\n' >"$TEST_SCENARIO"
+run_reconcile >/dev/null
+grep -Fq '"desired_state":"running"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+[ "$(sha256sum "$TEST_ROOT/usr/local/bin/dirextalk-updater" | awk '{print $1}')" = "$TEST_TARGET_SHA" ]
 
 make_fixture retry
 printf 'startup-failure\n' >"$TEST_SCENARIO"

@@ -268,12 +268,29 @@ wait_for_status() {
 
 quiesce_current_updater() {
   local body="$transition_dir/status-before.json" desired_body="$transition_dir/maintenance.json"
-  local code status needs_maintenance=0
+  local code status needs_maintenance=0 runtime_desired
   systemctl cat dirextalk-updater.service >/dev/null 2>&1 \
     || die 'installed updater service is unavailable'
   systemctl is-active --quiet dirextalk-updater.service \
     || die 'installed updater is not active before state transition'
   if code=$(control_request '{}' "$body"); then :; else die 'installed updater status request failed'; fi
+  if [ "$code" = 503 ]; then
+    runtime_desired=$(runtime_shape) \
+      || die 'installed updater runtime state is invalid while status is unavailable'
+    runtime_desired=${runtime_desired#*$'\t'}
+    case "$runtime_desired" in
+      running|maintenance) ;;
+      *) die 'installed updater runtime is not idle while status is unavailable' ;;
+    esac
+    validate_runtime_state "$runtime_desired" \
+      || die 'installed updater runtime is not idle while status is unavailable'
+    systemctl stop dirextalk-updater.service \
+      || die 'could not stop unavailable updater before replacement'
+    if systemctl is-active --quiet dirextalk-updater.service; then
+      die 'unavailable updater remained active after stop'
+    fi
+    return 0
+  fi
   [ "$code" = 200 ] || die "installed updater status returned HTTP $code"
   if validate_status "$body" running true; then
     needs_maintenance=1

@@ -490,7 +490,7 @@ _record_provisioned_node_identity() {
     "$provider_arn" "$support_code" "$public_ip" "$machine_id" "$docker_engine_id") || return 1
   recorded=$(state_get node_identity)
   if [ -n "$recorded" ]; then
-    [ "$recorded" = "$receipt" ] || return 1
+    [ "$(printf '%s\n' "$recorded" | json_cli stdin-get '')" = "$(printf '%s\n' "$receipt" | json_cli stdin-get '')" ] || return 1
     return 0
   fi
   state_set_raw node_identity "$receipt"

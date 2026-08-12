@@ -386,6 +386,7 @@ edge_env=$base/edge.env
   exit 1
 }
 if [ ! -f "$edge_env" ]; then
+  static_sites_root=$(read_pair "$run_dir/.env" DIREXTALK_STATIC_SITES_ROOT)
   edge_env_tmp=$(mktemp "$base/.edge.env.XXXXXX")
   cat >"$edge_env_tmp" <<EOF
 DIREXTALK_EDGE_STACK_NAME=${stack}-edge
@@ -396,12 +397,21 @@ DIREXTALK_CADDY_IMAGE_IMMUTABLE=$caddy_image
 DIREXTALK_CADDY_DATA_VOLUME=${stack}-caddy-data
 DIREXTALK_CADDY_CONFIG_VOLUME=${stack}-caddy-config
 DIREXTALK_CADDYFILE=$caddyfile
+DIREXTALK_STATIC_SITES_ROOT=$static_sites_root
 EOF
   chmod 0400 "$edge_env_tmp"
   mv -f "$edge_env_tmp" "$edge_env"
 fi
 [ -f "$edge_env" ] && [ ! -L "$edge_env" ] || { echo "protected edge environment is unavailable" >&2; exit 1; }
 [ "$(stat -c '%u:%a' "$edge_env")" = "0:400" ] || { echo "edge environment must be root-owned mode 0400" >&2; exit 1; }
+if [ "$(awk -F= '$1 == "DIREXTALK_STATIC_SITES_ROOT" { count++ } END { print count + 0 }' "$edge_env")" -eq 0 ]; then
+  static_sites_root=$(read_pair "$run_dir/.env" DIREXTALK_STATIC_SITES_ROOT)
+  edge_env_tmp=$(mktemp "$base/.edge.env.XXXXXX")
+  cat "$edge_env" >"$edge_env_tmp"
+  printf 'DIREXTALK_STATIC_SITES_ROOT=%s\n' "$static_sites_root" >>"$edge_env_tmp"
+  chmod 0400 "$edge_env_tmp"
+  mv -f "$edge_env_tmp" "$edge_env"
+fi
 require_pair "$edge_env" DIREXTALK_EDGE_STACK_NAME "${stack}-edge"
 require_pair "$edge_env" DIREXTALK_PUBLIC_DOMAIN "$domain"
 require_pair "$edge_env" DIREXTALK_MESSAGE_TLS_MODE edge-terminated
@@ -410,6 +420,7 @@ require_pair "$edge_env" DIREXTALK_CADDY_IMAGE_IMMUTABLE "$caddy_image"
 require_pair "$edge_env" DIREXTALK_CADDY_DATA_VOLUME "${stack}-caddy-data"
 require_pair "$edge_env" DIREXTALK_CADDY_CONFIG_VOLUME "${stack}-caddy-config"
 require_pair "$edge_env" DIREXTALK_CADDYFILE "$caddyfile"
+require_pair "$edge_env" DIREXTALK_STATIC_SITES_ROOT "$(read_pair "$run_dir/.env" DIREXTALK_STATIC_SITES_ROOT)"
 caddy_tmp=$(mktemp "$base/.Caddyfile.XXXXXX")
 sed "s/__DIREXTALK_PUBLIC_DOMAIN__/$domain/g" "$script_dir/Caddyfile" >"$caddy_tmp"
 chmod 0400 "$caddy_tmp"

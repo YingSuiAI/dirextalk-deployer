@@ -41,7 +41,9 @@ count=0
 printf '%s\n' "$((count + 1))" >"$DIREXTALK_TEST_PROVISION_COUNT"
 mkdir -m 0700 "$out"
 [ "${DIREXTALK_TEST_FAIL_EMPTY_PROVISION:-false}" != true ] || exit 73
+mkdir -p "$out/static-sites/public"
 printf 'stack=%s\n' "$DIREXTALK_SPLIT_STACK_NAME" >"$out/.env"
+printf 'DIREXTALK_STATIC_SITES_ROOT=%s\n' "$out/static-sites" >>"$out/.env"
 printf 'stack_name=%s\n' "$DIREXTALK_SPLIT_STACK_NAME" >"$out/.manifest"
 chmod 0400 "$out/.env" "$out/.manifest"
 EOF

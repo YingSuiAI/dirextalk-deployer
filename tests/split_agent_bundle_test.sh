@@ -392,8 +392,11 @@ DIREXTALK_CADDY_IMAGE_IMMUTABLE=docker.io/library/caddy@sha256:ccccccccccccccccc
 DIREXTALK_CADDY_DATA_VOLUME=${edge_stack}-caddy-data
 DIREXTALK_CADDY_CONFIG_VOLUME=${edge_stack}-caddy-config
 DIREXTALK_CADDYFILE=$edge/Caddyfile
+DIREXTALK_STATIC_SITES_ROOT=$edge/static-sites
 EOF
 chmod 0400 "$edge/edge.env"
+mkdir -p "$edge/split" "$edge/static-sites/public"
+printf 'DIREXTALK_STATIC_SITES_ROOT=%s\n' "$edge/static-sites" >"$edge/split/.env"
 printf '%s\n' '{"access_token":"rotated","agent_token":"rotated-agent","password":"rotated-password","owner_user_id":"@owner:edge.example.test"}' >"$edge/p2p/bootstrap.json"
 chmod 0400 "$edge/p2p/bootstrap.json"
 edge_bootstrap_sha=$(sha256sum "$edge/p2p/bootstrap.json" | awk '{print $1}')

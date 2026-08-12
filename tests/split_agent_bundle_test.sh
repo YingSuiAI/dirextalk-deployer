@@ -178,10 +178,9 @@ printf '%s\n' 'DIREXTALK_RUNNER_PREPARED=true'
 EOF
 cat >"$fresh_split/scripts/provision-local.sh" <<'EOF'
 #!/usr/bin/env bash
-printf 'coturn=%s\nturn_external_ip=%s\ncatalog_origin=%s\nattestation=%s\noutput=%s\n' \
+printf 'coturn=%s\nturn_external_ip=%s\ncatalog_origin=%s\noutput=%s\n' \
   "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" "$DIREXTALK_TURN_EXTERNAL_IP" \
-  "$DIREXTALK_RELEASE_CATALOG_ORIGIN" \
-  "$DIREXTALK_IMAGE_ATTESTATION_SOURCE_FILE" "$1" >"$DIREXTALK_TEST_PROVISION_CAPTURE"
+  "$DIREXTALK_RELEASE_CATALOG_ORIGIN" "$1" >"$DIREXTALK_TEST_PROVISION_CAPTURE"
 exit 42
 EOF
 cat >"$fresh_split/scripts/start-local.sh" <<'EOF'
@@ -207,11 +206,13 @@ printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$fresh_split/SOURCE_REV
   | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
 cat >"$fresh/.env" <<'EOF'
 DOMAIN=turn.example.test
-MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-AGENT_IMAGE=docker.io/dirextalk/agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:latest
+AGENT_IMAGE=docker.io/dirextalk/agent:latest
 POSTGRES_IMAGE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+MESSAGE_VERSION=v1.1.32
+AGENT_VERSION=v1.0.69
 MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 SPLIT_SOURCE_REVISION=cccccccccccccccccccccccccccccccccccccccc
 AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -228,6 +229,28 @@ case "$*" in
 esac
 EOF
 chmod 0755 "$TEST_TMP/fakebin/stat"
+cat >"$TEST_TMP/fakebin/docker" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  pull) exit 0 ;;
+  image)
+    case "$3" in
+      docker.io/dirextalk/message-server:latest) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
+      docker.io/dirextalk/agent:latest) printf '%s\n' 'v1.0.69|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ;;
+      *) exit 2 ;;
+    esac
+    ;;
+  run)
+    case "$4" in
+      /usr/bin/dirextalk-message-server) printf '%s\n' v1.1.32 ;;
+      /usr/local/bin/dirextalk-agent|/usr/local/bin/dirextalk-extension-runner|/usr/local/bin/dirextalk-core-runner) printf '%s\n' v1.0.69 ;;
+      *) exit 2 ;;
+    esac
+    ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod 0755 "$TEST_TMP/fakebin/docker"
 capture="$TEST_TMP/provision.capture"
 if PATH="$TEST_TMP/fakebin:$PATH" \
   DIREXTALK_BOOTSTRAP_BASE="$fresh" \
@@ -242,16 +265,7 @@ fi
 grep -Fqx 'coturn=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' "$capture"
 grep -Fqx 'turn_external_ip=203.0.113.91' "$capture"
 grep -Fqx 'catalog_origin=https://imadmin.dirextalk.ai' "$capture"
-attestation=$(sed -n 's/^attestation=//p' "$capture")
-[ "$attestation" = "$fresh/image-attestation" ]
-grep -Fqx '# dirextalk-image-attestation-v2' "$attestation"
-grep -Fqx 'image.DIREXTALK_POSTGRES_IMAGE_IMMUTABLE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' "$attestation"
-grep -Fqx 'image.DIREXTALK_UTILITY_IMAGE_IMMUTABLE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' "$attestation"
-if grep -Eiq 'qdrant' "$attestation"; then
-  echo 'first-fresh image attestation retained Qdrant' >&2
-  exit 1
-fi
-grep -Fqx 'image.DIREXTALK_COTURN_IMAGE_IMMUTABLE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' "$attestation"
+[ ! -e "$fresh/image-attestation" ]
 
 # Required production update inputs fail closed before runner preparation or
 # any Docker/host mutation. Rebuild the source manifest after each fixture
@@ -318,11 +332,13 @@ printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$edge_split/SOURCE_REVI
   | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
 cat >"$edge/.env" <<'EOF'
 DOMAIN=edge.example.test
-MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-AGENT_IMAGE=docker.io/dirextalk/agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:latest
+AGENT_IMAGE=docker.io/dirextalk/agent:latest
 POSTGRES_IMAGE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+MESSAGE_VERSION=v1.1.32
+AGENT_VERSION=v1.0.69
 MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 SPLIT_SOURCE_REVISION=cccccccccccccccccccccccccccccccccccccccc
 AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -358,6 +374,21 @@ EOF
 cat >"$edge_fakebin/docker" <<'EOF'
 #!/usr/bin/env bash
 printf 'docker' >>"$EDGE_CALLS"; printf ' %q' "$@" >>"$EDGE_CALLS"; printf '\n' >>"$EDGE_CALLS"
+if [ "${1:-}" = pull ]; then exit 0; fi
+if [ "${1:-}" = image ]; then
+  case "$3" in
+    docker.io/dirextalk/message-server:latest) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
+    docker.io/dirextalk/agent:latest) printf '%s\n' 'v1.0.69|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ;;
+  esac
+  exit 0
+fi
+if [ "${1:-}" = run ]; then
+  case "$4" in
+    /usr/bin/dirextalk-message-server) printf '%s\n' v1.1.32 ;;
+    *) printf '%s\n' v1.0.69 ;;
+  esac
+  exit 0
+fi
 if [ "${1:-}" = compose ]; then
   for arg in "$@"; do
     [ "$arg" = ps ] && { printf '%064d\n' 1; exit 0; }

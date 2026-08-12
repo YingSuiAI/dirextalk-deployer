@@ -125,9 +125,10 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-Normal deployment uses the deployer-owned production split release: immutable
-message-server, Agent, PostgreSQL/pgvector, and Caddy image digests plus their
-full source revisions.
+Normal deployment uses the deployer-owned production split release. Message
+Server and Agent follow `latest` and are checked through their version/revision
+labels and real binary versions; PostgreSQL/pgvector, Caddy, and coturn remain
+fixed dependencies.
 The packaged canonical runtime bundle starts message-server, the external Agent,
 one PostgreSQL/pgvector container with isolated Message Server and Agent roles
 and databases, extension/core runners, and a separate Caddy

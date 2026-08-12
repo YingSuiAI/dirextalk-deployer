@@ -19,7 +19,7 @@ CI="$HERE/cloud-init"
 source "$HERE/lib/domain.sh"
 
 DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; AGENT_IMAGE=""; POSTGRES_IMAGE=""; CADDY_IMAGE=""; COTURN_IMAGE=""
-MESSAGE_SOURCE_REVISION=""; SPLIT_SOURCE_REVISION=""; AGENT_SOURCE_REVISION=""; RELEASE_CATALOG_ORIGIN=""; FORMAT="cloud-config"
+MESSAGE_VERSION=""; AGENT_VERSION=""; MESSAGE_SOURCE_REVISION=""; SPLIT_SOURCE_REVISION=""; AGENT_SOURCE_REVISION=""; RELEASE_CATALOG_ORIGIN=""; FORMAT="cloud-config"
 while [ $# -gt 0 ]; do
   case "$1" in
     --format) FORMAT=$2; shift 2;;
@@ -30,6 +30,8 @@ while [ $# -gt 0 ]; do
     --postgres-image) POSTGRES_IMAGE=$2; shift 2;;
     --caddy-image) CADDY_IMAGE=$2; shift 2;;
     --coturn-image) COTURN_IMAGE=$2; shift 2;;
+    --message-version) MESSAGE_VERSION=$2; shift 2;;
+    --agent-version) AGENT_VERSION=$2; shift 2;;
     --message-source-revision) MESSAGE_SOURCE_REVISION=$2; shift 2;;
     --split-source-revision) SPLIT_SOURCE_REVISION=$2; shift 2;;
     --agent-source-revision) AGENT_SOURCE_REVISION=$2; shift 2;;
@@ -52,9 +54,13 @@ b64() { base64 | tr -d '\n'; }
 sed_replacement_escape() { printf '%s' "$1" | sed 's/[\\&#]/\\&/g'; }
 split_env=''
 split_cloud_env=''
-for value in "$MESSAGE_SERVER_IMAGE" "$AGENT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE"; do
+case "$MESSAGE_SERVER_IMAGE:$AGENT_IMAGE" in
+  docker.io/dirextalk/message-server:latest:docker.io/dirextalk/agent:latest) ;;
+  *) echo "message-server and Agent images must use their latest release channels" >&2; exit 1 ;;
+esac
+for value in "$POSTGRES_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE"; do
   printf '%s\n' "$value" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$' || {
-    echo "split application, PostgreSQL, and Caddy images must be immutable digest references" >&2
+    echo "PostgreSQL, Caddy, and coturn images must be immutable digest references" >&2
     exit 1
   }
 done
@@ -68,12 +74,18 @@ for value in "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_
     exit 1
   }
 done
+for value in "$MESSAGE_VERSION" "$AGENT_VERSION"; do
+  printf '%s\n' "$value" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || {
+    echo "split application versions must be semantic versions" >&2
+    exit 1
+  }
+done
 [ "$RELEASE_CATALOG_ORIGIN" = https://imadmin.dirextalk.ai ] || {
   echo "--release-catalog-origin must be https://imadmin.dirextalk.ai" >&2
   exit 1
 }
-split_env=$(printf 'AGENT_IMAGE=%s\nPOSTGRES_IMAGE=%s\nCADDY_IMAGE=%s\nCOTURN_IMAGE=%s\nMESSAGE_SOURCE_REVISION=%s\nSPLIT_SOURCE_REVISION=%s\nAGENT_SOURCE_REVISION=%s\nDIREXTALK_RELEASE_CATALOG_ORIGIN=%s\n' \
-  "$AGENT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE" "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_REVISION" "$RELEASE_CATALOG_ORIGIN")
+split_env=$(printf 'AGENT_IMAGE=%s\nPOSTGRES_IMAGE=%s\nCADDY_IMAGE=%s\nCOTURN_IMAGE=%s\nMESSAGE_VERSION=%s\nAGENT_VERSION=%s\nMESSAGE_SOURCE_REVISION=%s\nSPLIT_SOURCE_REVISION=%s\nAGENT_SOURCE_REVISION=%s\nDIREXTALK_RELEASE_CATALOG_ORIGIN=%s\n' \
+  "$AGENT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE" "$MESSAGE_VERSION" "$AGENT_VERSION" "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_REVISION" "$RELEASE_CATALOG_ORIGIN")
 split_cloud_env=$(printf '%s\n' "$split_env" | sed 's/^/      /')
 
 # Build a deterministic tar.gz bundle with fixed permissions and no extra attrs.

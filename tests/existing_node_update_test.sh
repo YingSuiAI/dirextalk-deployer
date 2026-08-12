@@ -36,10 +36,10 @@ write_state() {
   printf '{"run_id":"update-test","domain":"update.example.test","region":"%s","cloud_provider":"lightsail","resources":{"key_file":"%s","public_ip":"%s","lightsail_instance_name":"dirextalk-update-test"},"node_identity":%s,"server_release":{"source":"production_split","version":"%s","image":"docker.io/dirextalk/message-server:%s","digest":"%s","image_ref":"%s","manifest_digest":"%s"},"split_release":{"release_catalog_origin":"%s","message_version":"%s","message_image":"%s","message_source_revision":"%s","split_source_revision":"%s","agent_version":"%s","agent_image":"%s","agent_source_revision":"%s","postgres_image":"%s","caddy_image":"%s","coturn_image":"%s"},"updater_release":{"version":"v0.0.1"}}\n' \
     "$region" "$DIREXTALK_WORKDIR/key.pem" "$public_ip" "$node_identity" \
     "$DIREXTALK_MESSAGE_SERVER_VERSION" "$DIREXTALK_MESSAGE_SERVER_VERSION" \
-    "${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}" "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" \
-    "${DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE##*@}" "$DIREXTALK_RELEASE_CATALOG_ORIGIN" "$DIREXTALK_MESSAGE_SERVER_VERSION" \
-    "$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE" "$DIREXTALK_MESSAGE_SOURCE_REVISION" "$old_revision" \
-    "$DIREXTALK_AGENT_VERSION" "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" "$DIREXTALK_AGENT_SOURCE_REVISION" "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" \
+    "${DIREXTALK_MESSAGE_SERVER_IMAGE##*@}" "$DIREXTALK_MESSAGE_SERVER_IMAGE" \
+    "${DIREXTALK_MESSAGE_SERVER_IMAGE##*@}" "$DIREXTALK_RELEASE_CATALOG_ORIGIN" "$DIREXTALK_MESSAGE_SERVER_VERSION" \
+    "$DIREXTALK_MESSAGE_SERVER_IMAGE" "$DIREXTALK_MESSAGE_SOURCE_REVISION" "$old_revision" \
+    "$DIREXTALK_AGENT_VERSION" "$DIREXTALK_AGENT_IMAGE" "$DIREXTALK_AGENT_SOURCE_REVISION" "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" \
     "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" >"$DIREXTALK_WORKDIR/state.json"
   chmod 0600 "$DIREXTALK_WORKDIR/state.json"
 }

@@ -115,7 +115,7 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE' && data.updater_release.version === 'v1.0.14' && data.updater_release.sha256 === '4deac3f24267bdb493d58b598e8f7ce69b5957a373f2103774d148f202e6189f' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef' && data.node_identity.docker_engine_id === 'DOCKERENGINE1234'" || { cat "$STATE_JSON" >&2; exit 1; }
+json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.updater_release.version === 'v1.0.14' && data.updater_release.sha256 === '4deac3f24267bdb493d58b598e8f7ce69b5957a373f2103774d148f202e6189f' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef' && data.node_identity.docker_engine_id === 'DOCKERENGINE1234'" || { cat "$STATE_JSON" >&2; exit 1; }
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
 grep -q '^#!/bin/sh' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
@@ -166,10 +166,10 @@ recorded_message_image=$(state_get split_release.message_image)
 recorded_agent_version=$(state_get split_release.agent_version)
 recorded_agent_image=$(state_get split_release.agent_image)
 DIREXTALK_MESSAGE_SERVER_VERSION=v9.1.0
-DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE=docker.io/dirextalk/message-server@sha256:$(printf '1%.0s' {1..64})
+DIREXTALK_MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server@sha256:$(printf '1%.0s' {1..64})
 DIREXTALK_MESSAGE_SOURCE_REVISION=1111111111111111111111111111111111111111
 DIREXTALK_AGENT_VERSION=v9.2.0
-DIREXTALK_AGENT_IMAGE_IMMUTABLE=docker.io/dirextalk/agent@sha256:$(printf '2%.0s' {1..64})
+DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent@sha256:$(printf '2%.0s' {1..64})
 DIREXTALK_AGENT_SOURCE_REVISION=2222222222222222222222222222222222222222
 DIREXTALK_CADDY_IMAGE_IMMUTABLE=docker.io/library/caddy@sha256:$(printf '3%.0s' {1..64})
 DIREXTALK_COTURN_IMAGE_IMMUTABLE=docker.io/coturn/coturn:4.6.3-alpine@sha256:$(printf '4%.0s' {1..64})

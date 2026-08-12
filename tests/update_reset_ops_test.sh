@@ -31,8 +31,6 @@ fi
 [ "$(grep -Fc 'production_verify_edge' "$reset_helper")" -eq 2 ]
 grep -Fq 'docker container rm -f "$production_edge_id"' "$reset_helper"
 grep -Fq 'cleanup-local.sh" --purge "$production_run"' "$reset_helper"
-grep -Fq 'production_require_control_file "$production_base/image-attestation" 400' "$reset_helper"
-grep -Fq 'mv "$production_base/image-attestation" "$audit_dir/image-attestation.previous"' "$reset_helper"
 grep -Fq '"$production_base/runner-preparation.env"' "$reset_helper"
 grep -Fq '"$production_base/production-ops/bootstrap-production.sh"' "$reset_helper"
 if grep -Eq 'docker compose|docker volume rm|compose down' "$reconcile_helper" "$reset_helper"; then

@@ -15,17 +15,17 @@ Deployer release must carry the same generated bundle plus its
 target host.
 
 The target host never clones source. `bootstrap-production.sh` consumes the
-staged bundle, requires immutable message-server, Agent, PostgreSQL/pgvector,
-Caddy, and coturn digests,
+staged bundle, follows the message-server and Agent `latest` release channels,
+checks their version/revision labels and real binary versions, and keeps
+PostgreSQL/pgvector, Caddy, and coturn fixed,
 binds TURN's external address to the updater-recorded stable public IPv4,
 prepares the two systemd-delegated runner cgroups, provisions one PostgreSQL
 container and volume with distinct Message Server and Agent roles/databases,
 starts the application stack, and then starts
 the separate canonical Caddy edge project.
 
-`release.env` is the only production release selection. It binds the
-message-server and Agent versions to immutable image digests and full source
-revisions, fixes the single Message Server-owned release catalog origin at
+`release.env` is the only production release selection. It records the
+message-server and Agent versions/revisions expected from `latest`, and fixes the single Message Server-owned release catalog origin at
 `https://imadmin.dirextalk.ai`, pins the independent Caddy and Alpine coturn images, and records a separate split
 deployment revision so deployment-only fixes do not misstate image provenance.
 Existing node state without `split_release.release_catalog_origin` is obsolete

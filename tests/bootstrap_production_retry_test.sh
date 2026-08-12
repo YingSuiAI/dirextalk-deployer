@@ -93,11 +93,13 @@ printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$split/SOURCE_REVISION"
 
 cat >"$base/.env" <<'EOF'
 DOMAIN=retry.example.test
-MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-AGENT_IMAGE=docker.io/dirextalk/agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:latest
+AGENT_IMAGE=docker.io/dirextalk/agent:latest
 POSTGRES_IMAGE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+MESSAGE_VERSION=v1.1.32
+AGENT_VERSION=v1.0.69
 MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 SPLIT_SOURCE_REVISION=cccccccccccccccccccccccccccccccccccccccc
 AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -119,6 +121,11 @@ cat >"$fakebin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 case " $* " in
+  *' pull --platform linux/amd64 docker.io/dirextalk/'*:latest*) ;;
+  *' image inspect docker.io/dirextalk/message-server:latest '*) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
+  *' image inspect docker.io/dirextalk/agent:latest '*) printf '%s\n' 'v1.0.69|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ;;
+  *' run --rm --entrypoint /usr/bin/dirextalk-message-server '*) printf '%s\n' v1.1.32 ;;
+  *' run --rm --entrypoint /usr/local/bin/dirextalk-'*) printf '%s\n' v1.0.69 ;;
   *' volume create '*) printf '%s\n' volume ;;
   *' compose '*' config --quiet '*) ;;
   *' compose '*' pull '*) ;;

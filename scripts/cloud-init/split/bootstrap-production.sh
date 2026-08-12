@@ -148,6 +148,13 @@ require_digest() {
   }
 }
 
+require_latest_application_image() {
+  [ "$2" = "$3" ] || {
+    echo "$1 must use its latest release channel" >&2
+    exit 1
+  }
+}
+
 [ -f "$env_file" ] && [ ! -L "$env_file" ] || { echo "missing protected bootstrap env" >&2; exit 1; }
 [ "$(stat -c '%u:%a' "$env_file")" = "0:600" ] || { echo "bootstrap env must be root-owned mode 0600" >&2; exit 1; }
 [ -f "$split/compose.production.yaml" ] && [ ! -L "$split/compose.production.yaml" ] || {
@@ -180,6 +187,8 @@ message_image=$(read_env MESSAGE_SERVER_IMAGE)
 agent_image=$(read_env AGENT_IMAGE)
 postgres_image=$(read_env POSTGRES_IMAGE)
 caddy_image=$(read_env CADDY_IMAGE)
+message_version=$(read_env MESSAGE_VERSION)
+agent_version=$(read_env AGENT_VERSION)
 message_revision=$(read_env MESSAGE_SOURCE_REVISION)
 split_revision=$(read_env SPLIT_SOURCE_REVISION)
 runtime_split_revision=${DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION:-$split_revision}
@@ -187,8 +196,8 @@ agent_revision=$(read_env AGENT_SOURCE_REVISION)
 release_catalog_origin=$(read_env DIREXTALK_RELEASE_CATALOG_ORIGIN)
 [ "$release_catalog_origin" = https://imadmin.dirextalk.ai ] \
   || { echo "protected release catalog origin is invalid" >&2; exit 1; }
-require_digest MESSAGE_SERVER_IMAGE "$message_image"
-require_digest AGENT_IMAGE "$agent_image"
+require_latest_application_image MESSAGE_SERVER_IMAGE "$message_image" docker.io/dirextalk/message-server:latest
+require_latest_application_image AGENT_IMAGE "$agent_image" docker.io/dirextalk/agent:latest
 require_digest POSTGRES_IMAGE "$postgres_image"
 [ "$postgres_image" = "docker.io/pgvector/pgvector:pg18@${postgres_image##*@}" ] || {
   echo "POSTGRES_IMAGE must use the pinned pgvector/pgvector:pg18 image" >&2
@@ -200,6 +209,31 @@ require_digest COTURN_IMAGE "$coturn_image"
 for revision in "$message_revision" "$split_revision" "$agent_revision"; do
   printf '%s\n' "$revision" | grep -Eq '^[0-9a-f]{40}$' || { echo "source revision is invalid" >&2; exit 1; }
 done
+for version in "$message_version" "$agent_version"; do
+  printf '%s\n' "$version" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+    || { echo "application version is invalid" >&2; exit 1; }
+done
+
+verify_application_image() {
+  local image=$1 expected_version=$2 expected_revision=$3 binary label probe
+  docker pull --platform linux/amd64 "$image" >/dev/null \
+    || { echo "could not pull application release channel: $image" >&2; exit 1; }
+  label=$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}|{{index .Config.Labels "org.opencontainers.image.revision"}}') \
+    || { echo "could not inspect application image: $image" >&2; exit 1; }
+  [ "$label" = "$expected_version|$expected_revision" ] \
+    || { echo "application image label does not match the prepared version/revision: $image" >&2; exit 1; }
+  for binary in ${4}; do
+    probe=$(docker run --rm --entrypoint "$binary" "$image" --version) \
+      || { echo "application binary probe failed: $binary" >&2; exit 1; }
+    [ "$probe" = "$expected_version" ] \
+      || { echo "application binary version mismatch: $binary" >&2; exit 1; }
+  done
+}
+
+verify_application_image "$message_image" "$message_version" "$message_revision" \
+  /usr/bin/dirextalk-message-server
+verify_application_image "$agent_image" "$agent_version" "$agent_revision" \
+  '/usr/local/bin/dirextalk-agent /usr/local/bin/dirextalk-extension-runner /usr/local/bin/dirextalk-core-runner'
 [ "$(printf '%s\n' "$runtime_split_revision" | grep -Ec '^[0-9a-f]{40}$')" -eq 1 ] || {
   echo "authorized runtime split revision is invalid" >&2
   exit 1
@@ -254,25 +288,6 @@ else
   . "$base/runner-preparation.env"
   set +a
 
-  attestation=$base/image-attestation
-  if [ ! -f "$attestation" ]; then
-  attestation_tmp=$(mktemp "$base/.image-attestation.XXXXXX")
-  cat >"$attestation_tmp" <<EOF
-# dirextalk-image-attestation-v2
-capability_api_version=v1.0.3
-message_source_revision=$message_revision
-agent_source_revision=$agent_revision
-capability_api_source=published
-image.DIREXTALK_POSTGRES_IMAGE_IMMUTABLE=$postgres_image
-image.DIREXTALK_UTILITY_IMAGE_IMMUTABLE=$postgres_image
-image.DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE=$message_image
-image.DIREXTALK_AGENT_IMAGE_IMMUTABLE=$agent_image
-image.DIREXTALK_COTURN_IMAGE_IMMUTABLE=$coturn_image
-EOF
-  chmod 0400 "$attestation_tmp"
-    mv -f "$attestation_tmp" "$attestation"
-  fi
-
   write_stage provision
   if [ ! -e "$run_dir" ]; then
   DIREXTALK_SPLIT_STACK_NAME="$stack" \
@@ -281,13 +296,12 @@ EOF
   DIREXTALK_MESSAGE_SERVER_NAME="$domain" \
   DIREXTALK_CORE_EXTENSION_ENABLED=true \
   DIREXTALK_CORE_WORKLOAD_ENABLED=true \
-  DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE="$message_image" \
-  DIREXTALK_AGENT_IMAGE_IMMUTABLE="$agent_image" \
+  DIREXTALK_MESSAGE_SERVER_IMAGE="$message_image" \
+  DIREXTALK_AGENT_IMAGE="$agent_image" \
   DIREXTALK_POSTGRES_IMAGE_IMMUTABLE="$postgres_image" \
   DIREXTALK_COTURN_IMAGE_IMMUTABLE="$coturn_image" \
   DIREXTALK_RELEASE_CATALOG_ORIGIN="$release_catalog_origin" \
   DIREXTALK_TURN_EXTERNAL_IP="$turn_external_ip" \
-  DIREXTALK_IMAGE_ATTESTATION_SOURCE_FILE="$attestation" \
       "$split/scripts/provision-local.sh" "$run_dir"
   fi
 

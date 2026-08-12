@@ -70,10 +70,10 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"$stage/cloud-init/split/verify-worker-e
 printf '[Unit]\nDescription=fixture\n' >"$stage/cloud-init/split/dirextalk-split-recovery.service"
 cat >"$stage/cloud-init/split/release.env" <<EOF
 DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
-DIREXTALK_MESSAGE_SERVER_IMAGE_IMMUTABLE=$message_image
+DIREXTALK_MESSAGE_SERVER_IMAGE=$message_image
 DIREXTALK_MESSAGE_SOURCE_REVISION=$message_revision
 DIREXTALK_SPLIT_SOURCE_REVISION=$target
-DIREXTALK_AGENT_IMAGE_IMMUTABLE=$agent_image
+DIREXTALK_AGENT_IMAGE=$agent_image
 DIREXTALK_AGENT_SOURCE_REVISION=$agent_revision
 DIREXTALK_CADDY_IMAGE_IMMUTABLE=$caddy_image
 DIREXTALK_COTURN_IMAGE_IMMUTABLE=$coturn_image

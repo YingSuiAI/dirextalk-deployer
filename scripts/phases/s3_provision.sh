@@ -49,14 +49,20 @@ run_phase() {
 
 _split_release_validate() {
   local image revision
+  [ "$(state_get server_release.image_ref)" = docker.io/dirextalk/message-server:latest ] || {
+    warn "Split deployment requires the Message Server latest release channel."
+    return 1
+  }
+  [ "$DIREXTALK_AGENT_IMAGE" = docker.io/dirextalk/agent:latest ] || {
+    warn "Split deployment requires the Agent latest release channel."
+    return 1
+  }
   for image in \
-    "$(state_get server_release.image_ref)" \
-    "$DIREXTALK_AGENT_IMAGE_IMMUTABLE" \
     "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" \
     "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" \
     "$DIREXTALK_COTURN_IMAGE_IMMUTABLE"; do
     printf '%s\n' "$image" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$' || {
-      warn "Split Agent deployment requires immutable message-server, Agent, PostgreSQL, Caddy, and coturn image digests before infrastructure creation."
+      warn "Split deployment requires pinned PostgreSQL, Caddy, and coturn image digests before infrastructure creation."
       return 1
     }
   done
@@ -169,10 +175,12 @@ _run_phase_ec2() {
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
-    --agent-image "${DIREXTALK_AGENT_IMAGE_IMMUTABLE:-}" \
+    --agent-image "${DIREXTALK_AGENT_IMAGE:-}" \
     --postgres-image "${DIREXTALK_POSTGRES_IMAGE_IMMUTABLE:-}" \
     --caddy-image "${DIREXTALK_CADDY_IMAGE_IMMUTABLE:-}" \
     --coturn-image "${DIREXTALK_COTURN_IMAGE_IMMUTABLE:-}" \
+    --message-version "${DIREXTALK_MESSAGE_SERVER_VERSION:-}" \
+    --agent-version "${DIREXTALK_AGENT_VERSION:-}" \
     --message-source-revision "${DIREXTALK_MESSAGE_SOURCE_REVISION:-}" \
     --split-source-revision "${DIREXTALK_SPLIT_SOURCE_REVISION:-}" \
     --agent-source-revision "${DIREXTALK_AGENT_SOURCE_REVISION:-}" \
@@ -343,10 +351,12 @@ _run_phase_lightsail() {
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
-    --agent-image "${DIREXTALK_AGENT_IMAGE_IMMUTABLE:-}" \
+    --agent-image "${DIREXTALK_AGENT_IMAGE:-}" \
     --postgres-image "${DIREXTALK_POSTGRES_IMAGE_IMMUTABLE:-}" \
     --caddy-image "${DIREXTALK_CADDY_IMAGE_IMMUTABLE:-}" \
     --coturn-image "${DIREXTALK_COTURN_IMAGE_IMMUTABLE:-}" \
+    --message-version "${DIREXTALK_MESSAGE_SERVER_VERSION:-}" \
+    --agent-version "${DIREXTALK_AGENT_VERSION:-}" \
     --message-source-revision "${DIREXTALK_MESSAGE_SOURCE_REVISION:-}" \
     --split-source-revision "${DIREXTALK_SPLIT_SOURCE_REVISION:-}" \
     --agent-source-revision "${DIREXTALK_AGENT_SOURCE_REVISION:-}" \

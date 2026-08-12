@@ -263,9 +263,9 @@ DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
 Normal deployment consumes the deployer-owned production split release. Its
-message-server, external Agent, PostgreSQL/pgvector, and Caddy images are
-immutable digest references
-bound to full source revisions, and its canonical runtime bundle is packaged
+message-server and external Agent images follow their `latest` release channels;
+startup checks their version/revision labels and real `--version` output.
+PostgreSQL/pgvector, Caddy, and coturn remain fixed dependencies, and the canonical runtime bundle is packaged
 with the deployer. The target host never clones a source repository and no
 mutable image override is part of the production path. The independent
 `YingSuiAI/dirextalk-updater`

@@ -91,7 +91,7 @@ if git grep -n -I -E "$legacy_json_cli_pattern" -- scripts tests README.md SKILL
 fi
 
 grep -q 'production split release' SKILL.md
-grep -q 'immutable digest references' SKILL.md
+grep -q 'follow their `latest` release channels' SKILL.md
 grep -q 'dirextalk-deployer' package.json
 grep -q 'bin/dirextalk-deployer.mjs' package.json
 grep -Fq 'Use only when the user explicitly invokes `$dirextalk-deployer`' SKILL.md

@@ -16,8 +16,8 @@ message-server -> PostgreSQL 18
 coturn         -> TURN 3478 + 49160-49200/udp
 ```
 
-- **message-server**: 新部署使用 deployer 固定的 immutable digest/source revision；承载 Matrix homeserver 和 ProductCore，并通过固定内部边界访问 external Agent。
-- **Agent**: 独立 immutable image；与 Message Server 共用单一 PostgreSQL/pgvector 容器，但使用隔离的非超级用户角色、database 和私有数据库网络，并拥有 extension/core runners 与更新 wrapper；Flutter 不直接连接它。
+- **message-server**: 新部署使用 `latest` release channel，并核对 version/revision 与真实二进制版本；承载 Matrix homeserver 和 ProductCore，并通过固定内部边界访问 external Agent。
+- **Agent**: 使用独立的 `latest` release channel，并核对 revision 与三个真实二进制版本；与 Message Server 共用单一 PostgreSQL/pgvector 容器，但使用隔离的非超级用户角色、database 和私有数据库网络，并拥有 extension/core runners 与更新 wrapper；Flutter 不直接连接它。
 - **PostgreSQL 18 + pgvector**: 单一容器和持久化卷；message-server 与 Agent 使用相互隔离的非超级用户角色、database 和私有数据库网络，只有 Agent database 启用 `vector` extension。
 - **Caddy**: 独立 edge Compose 项目的唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
 - **dirextalk-updater**: 独立 GitHub 仓库/Release 的 linux/amd64 binary；production split 主机要求 Ubuntu 24.04+、systemd >= 254。deployer 固定 version/commit/SHA-256，宿主下载校验后作为 root-owned systemd service 安装。它独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token，也不安装每日 GitHub discovery timer。

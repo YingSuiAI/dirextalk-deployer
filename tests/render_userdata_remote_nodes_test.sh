@@ -5,8 +5,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-message='docker.io/dirextalk/message-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-agent='docker.io/dirextalk/agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+message='docker.io/dirextalk/message-server:latest'
+agent='docker.io/dirextalk/agent:latest'
 postgres='docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
 caddy='docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
 coturn='docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
@@ -21,6 +21,8 @@ common=(
   --postgres-image "$postgres"
   --caddy-image "$caddy"
   --coturn-image "$coturn"
+  --message-version v1.1.32
+  --agent-version v1.0.69
   --message-source-revision "$message_revision"
   --split-source-revision "$split_revision"
   --agent-source-revision "$agent_revision"
@@ -46,6 +48,8 @@ for rendered in "$tmp/user-data.yaml" "$tmp/user-data.sh"; do
   grep -Fq "POSTGRES_IMAGE=$postgres" "$rendered"
   grep -Fq "CADDY_IMAGE=$caddy" "$rendered"
   grep -Fq "COTURN_IMAGE=$coturn" "$rendered"
+  grep -Fq 'MESSAGE_VERSION=v1.1.32' "$rendered"
+  grep -Fq 'AGENT_VERSION=v1.0.69' "$rendered"
   grep -Fq "MESSAGE_SOURCE_REVISION=$message_revision" "$rendered"
   grep -Fq "SPLIT_SOURCE_REVISION=$split_revision" "$rendered"
   grep -Fq "AGENT_SOURCE_REVISION=$agent_revision" "$rendered"
@@ -72,16 +76,18 @@ fi
 
 if bash "$ROOT/scripts/render/render-userdata.sh" \
   --domain service.example.test \
-  --message-server-image dirextalk/message-server:latest \
+  --message-server-image dirextalk/message-server:v1.2.3 \
   --agent-image "$agent" \
   --postgres-image "$postgres" \
   --caddy-image "$caddy" \
   --coturn-image "$coturn" \
+  --message-version v1.1.32 \
+  --agent-version v1.0.69 \
   --message-source-revision "$message_revision" \
   --split-source-revision "$split_revision" \
   --agent-source-revision "$agent_revision" \
   --release-catalog-origin https://imadmin.dirextalk.ai >/dev/null 2>&1; then
-  echo "split renderer accepted a mutable message-server image" >&2
+  echo "split renderer accepted a non-latest message-server image" >&2
   exit 1
 fi
 

@@ -114,6 +114,26 @@ fi
 # host integration performs the receipt-bound reconcile before returning;
 # update.sh then revalidates identity and atomically records both releases.
 write_state true
+node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" set-string \
+  split_release.agent_version v1.0.86
+node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" set-string \
+  split_release.agent_source_revision 300635fd615e09f9ce1f6bd4ab0f5d3ca31bac0f
+state_sha=$(sha256sum "$DIREXTALK_WORKDIR/state.json" | awk '{print $1}')
+: >"$CALLS"
+if bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null 2>&1; then
+  echo 'existing-node update staged a v1.0.87 bundle over a v1.0.86 Agent receipt' >&2
+  exit 1
+fi
+[ ! -s "$CALLS" ] || {
+  echo 'application release mismatch reached AWS or the remote updater' >&2
+  exit 1
+}
+[ "$(sha256sum "$DIREXTALK_WORKDIR/state.json" | awk '{print $1}')" = "$state_sha" ] || {
+  echo 'application release mismatch changed local release state' >&2
+  exit 1
+}
+
+write_state true
 : >"$CALLS"
 bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null
 [ "$(grep -c '^ssh:identity$' "$CALLS")" -eq 2 ]

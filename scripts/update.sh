@@ -24,6 +24,10 @@ ops_require_state "$STATE_JSON"
 server_release_validate_override
 updater_release_validate_pin
 server_release_split_state_can_advance
+server_release_split_application_matches_pin || {
+  echo "current deployer application release differs from the existing node receipt; use release.v2.apply before updating host integration" >&2
+  exit 1
+}
 recorded_split_revision=$(state_get split_release.split_source_revision)
 recorded_split_release=$(state_get split_release)
 recorded_updater_release=$(state_get updater_release)

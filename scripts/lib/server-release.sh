@@ -79,6 +79,13 @@ server_release_split_state_matches_pin() {
     && [ "$(state_get split_release.coturn_image)" = "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" ]
 }
 
+server_release_split_application_matches_pin() {
+  [ "$(state_get split_release.message_version)" = "$DIREXTALK_MESSAGE_SERVER_VERSION" ] \
+    && [ "$(state_get split_release.message_source_revision)" = "$DIREXTALK_MESSAGE_SOURCE_REVISION" ] \
+    && [ "$(state_get split_release.agent_version)" = "$DIREXTALK_AGENT_VERSION" ] \
+    && [ "$(state_get split_release.agent_source_revision)" = "$DIREXTALK_AGENT_SOURCE_REVISION" ]
+}
+
 server_release_split_state_can_advance() {
   local recorded message_version agent_version message_image agent_image postgres_image caddy_image coturn_image
   local message_revision agent_revision

@@ -390,7 +390,14 @@ DIREXTALK_STATIC_SITES_ROOT=$edge/static-sites
 EOF
 chmod 0400 "$edge/edge.env"
 mkdir -p "$edge/split" "$edge/static-sites/public"
-printf 'DIREXTALK_STATIC_SITES_ROOT=%s\n' "$edge/static-sites" >"$edge/split/.env"
+cat >"$edge/split/.env" <<EOF
+DIREXTALK_STATIC_SITES_ROOT=$edge/static-sites
+DIREXTALK_MESSAGE_SERVER_VERSION=v1.1.32
+DIREXTALK_MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+DIREXTALK_AGENT_VERSION=v1.0.69
+DIREXTALK_AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+EOF
+chmod 0400 "$edge/split/.env"
 printf '%s\n' '{"access_token":"rotated","agent_token":"rotated-agent","password":"rotated-password","owner_user_id":"@owner:edge.example.test"}' >"$edge/p2p/bootstrap.json"
 chmod 0400 "$edge/p2p/bootstrap.json"
 edge_bootstrap_sha=$(sha256sum "$edge/p2p/bootstrap.json" | awk '{print $1}')
@@ -398,7 +405,7 @@ cat >"$edge_fakebin/stat" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
   *"%u:%a"*"$edge/.env"|*"%u:%a"*"$edge/stable-public-ip") printf '%s\n' '0:600' ;;
-  *"%u:%a"*"$edge/edge.env") printf '%s\n' '0:400' ;;
+  *"%u:%a"*"$edge/edge.env"|*"%u:%a"*"$edge/split/.env") printf '%s\n' '0:400' ;;
   *) exec /usr/bin/stat "\$@" ;;
 esac
 EOF

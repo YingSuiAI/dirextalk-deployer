@@ -44,6 +44,10 @@ mkdir -m 0700 "$out"
 mkdir -p "$out/static-sites/public"
 printf 'stack=%s\n' "$DIREXTALK_SPLIT_STACK_NAME" >"$out/.env"
 printf 'DIREXTALK_STATIC_SITES_ROOT=%s\n' "$out/static-sites" >>"$out/.env"
+printf 'DIREXTALK_MESSAGE_SERVER_VERSION=%s\n' "$DIREXTALK_MESSAGE_SERVER_VERSION" >>"$out/.env"
+printf 'DIREXTALK_MESSAGE_SOURCE_REVISION=%s\n' "$DIREXTALK_MESSAGE_SOURCE_REVISION" >>"$out/.env"
+printf 'DIREXTALK_AGENT_VERSION=%s\n' "$DIREXTALK_AGENT_VERSION" >>"$out/.env"
+printf 'DIREXTALK_AGENT_SOURCE_REVISION=%s\n' "$DIREXTALK_AGENT_SOURCE_REVISION" >>"$out/.env"
 printf 'stack_name=%s\n' "$DIREXTALK_SPLIT_STACK_NAME" >"$out/.manifest"
 chmod 0400 "$out/.env" "$out/.manifest"
 EOF
@@ -129,7 +133,7 @@ cat >"$fakebin/stat" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   *"%u:%a"*"$DIREXTALK_BOOTSTRAP_BASE/.env"|*"%u:%a"*"$DIREXTALK_BOOTSTRAP_BASE/stable-public-ip") printf '%s\n' '0:600' ;;
-  *"%u:%a"*"$DIREXTALK_BOOTSTRAP_BASE/edge.env") printf '%s\n' '0:400' ;;
+  *"%u:%a"*"$DIREXTALK_BOOTSTRAP_BASE/edge.env"|*"%u:%a"*"$DIREXTALK_BOOTSTRAP_BASE/split/.env") printf '%s\n' '0:400' ;;
   *"%u:%g:%a"*"$DIREXTALK_BOOTSTRAP_BASE/split") printf '%s\n' '0:0:700' ;;
   *) exec /usr/bin/stat "$@" ;;
 esac
@@ -152,9 +156,9 @@ set -euo pipefail
 case " $* " in
   *' pull --platform linux/amd64 docker.io/dirextalk/'*:latest*) ;;
   *' image inspect docker.io/dirextalk/message-server:latest '*) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
-  *' image inspect docker.io/dirextalk/agent:latest '*) printf '%s\n' 'v1.0.69|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ;;
+  *' image inspect docker.io/dirextalk/agent:latest '*) printf '%s|%s\n' "${DIREXTALK_TEST_AGENT_VERSION:-v1.0.69}" "${DIREXTALK_TEST_AGENT_REVISION:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}" ;;
   *' run --rm --entrypoint /usr/bin/dirextalk-message-server '*) printf '%s\n' v1.1.32 ;;
-  *' run --rm --entrypoint /usr/local/bin/dirextalk-'*) printf '%s\n' v1.0.69 ;;
+  *' run --rm --entrypoint /usr/local/bin/dirextalk-'*) printf '%s\n' "${DIREXTALK_TEST_AGENT_VERSION:-v1.0.69}" ;;
   *' volume create '*) printf '%s\n' volume ;;
   *' compose '*' config --quiet '*) ;;
   *' compose '*' pull '*) ;;
@@ -173,6 +177,8 @@ export DIREXTALK_TEST_START_COUNT=$tmp/start-count
 export DIREXTALK_TEST_CLEANUP_CALLS=$tmp/cleanup-calls
 export DIREXTALK_TEST_PREPARATION_COUNT=$tmp/preparation-count
 export DIREXTALK_TEST_RUNNER_INTEGRATION=$tmp/runner-integration
+export DIREXTALK_TEST_AGENT_VERSION=${DIREXTALK_TEST_AGENT_VERSION:-v1.0.69}
+export DIREXTALK_TEST_AGENT_REVISION=${DIREXTALK_TEST_AGENT_REVISION:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
 
 if PATH="$fakebin:$PATH" bash "$consumer" >"$tmp/first.out" 2>"$tmp/first.err"; then
   echo 'first bootstrap unexpectedly succeeded' >&2
@@ -207,6 +213,23 @@ cmp "$tmp/expected-retry-events" "$DIREXTALK_TEST_CLEANUP_CALLS"
 [ -f "$base/.split-deploy-done" ]
 [ -f "$base/p2p/bootstrap.json" ]
 [ "$(cat "$base/.split-bootstrap-stage")" = completed ]
+
+# A formal Agent release updates the protected runtime receipt, not the
+# fresh-bootstrap input. A later tooling/Caddy reconcile must use that current
+# receipt while leaving the original bootstrap inputs unchanged.
+sed -i \
+  -e 's/^DIREXTALK_AGENT_VERSION=.*/DIREXTALK_AGENT_VERSION=v1.0.70/' \
+  -e 's/^DIREXTALK_AGENT_SOURCE_REVISION=.*/DIREXTALK_AGENT_SOURCE_REVISION=dddddddddddddddddddddddddddddddddddddddd/' \
+  "$base/split/.env"
+chmod 0400 "$base/split/.env"
+export DIREXTALK_TEST_AGENT_VERSION=v1.0.70
+export DIREXTALK_TEST_AGENT_REVISION=dddddddddddddddddddddddddddddddddddddddd
+PATH="$fakebin:$PATH" \
+  bash "$consumer" --reconcile-edge >"$tmp/reconcile-edge.out" 2>"$tmp/reconcile-edge.err"
+grep -Fqx 'AGENT_VERSION=v1.0.69' "$base/.env"
+[ "$(cat "$base/.split-bootstrap-stage")" = completed ]
+export DIREXTALK_TEST_AGENT_VERSION=v1.0.69
+export DIREXTALK_TEST_AGENT_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
 pre_control=$tmp/pre-control
 cp -a "$tmp/pristine" "$pre_control"

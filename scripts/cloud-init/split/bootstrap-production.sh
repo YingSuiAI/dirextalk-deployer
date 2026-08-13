@@ -221,13 +221,23 @@ message_image=$(read_env MESSAGE_SERVER_IMAGE)
 agent_image=$(read_env AGENT_IMAGE)
 postgres_image=$(read_env POSTGRES_IMAGE)
 caddy_image=$(read_env CADDY_IMAGE)
-message_version=$(read_env MESSAGE_VERSION)
-agent_version=$(read_env AGENT_VERSION)
-message_revision=$(read_env MESSAGE_SOURCE_REVISION)
 split_revision=$(read_env SPLIT_SOURCE_REVISION)
 runtime_split_revision=${DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION:-$split_revision}
-agent_revision=$(read_env AGENT_SOURCE_REVISION)
 release_catalog_origin=$(read_env DIREXTALK_RELEASE_CATALOG_ORIGIN)
+if [ "$operation" = --reconcile-edge ]; then
+  [ -f "$run_dir/.env" ] && [ ! -L "$run_dir/.env" ] \
+    && [ "$(stat -c '%u:%a' "$run_dir/.env")" = "0:400" ] \
+    || { echo "protected runtime release receipt is unavailable" >&2; exit 1; }
+  message_version=$(read_pair "$run_dir/.env" DIREXTALK_MESSAGE_SERVER_VERSION)
+  agent_version=$(read_pair "$run_dir/.env" DIREXTALK_AGENT_VERSION)
+  message_revision=$(read_pair "$run_dir/.env" DIREXTALK_MESSAGE_SOURCE_REVISION)
+  agent_revision=$(read_pair "$run_dir/.env" DIREXTALK_AGENT_SOURCE_REVISION)
+else
+  message_version=$(read_env MESSAGE_VERSION)
+  agent_version=$(read_env AGENT_VERSION)
+  message_revision=$(read_env MESSAGE_SOURCE_REVISION)
+  agent_revision=$(read_env AGENT_SOURCE_REVISION)
+fi
 [ "$release_catalog_origin" = https://imadmin.dirextalk.ai ] \
   || { echo "protected release catalog origin is invalid" >&2; exit 1; }
 require_latest_application_image MESSAGE_SERVER_IMAGE "$message_image" docker.io/dirextalk/message-server:latest

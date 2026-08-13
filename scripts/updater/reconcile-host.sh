@@ -191,7 +191,10 @@ if not isinstance(value, dict) or value.get("schema_version") != 9 or value.get(
     raise SystemExit(1)
 jobs = value.get("jobs", {})
 idempotency = value.get("idempotency", {})
-if not isinstance(jobs, dict) or jobs or not isinstance(idempotency, dict) or idempotency:
+if not isinstance(jobs, dict) or not isinstance(idempotency, dict):
+    raise SystemExit(1)
+terminal_statuses = {"succeeded", "failed", "rolled_back"}
+if any(not isinstance(job, dict) or job.get("status") not in terminal_statuses for job in jobs.values()):
     raise SystemExit(1)
 PY
 }

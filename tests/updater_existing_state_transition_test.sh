@@ -140,11 +140,11 @@ rewrite_target_runtime() {
     maps-empty)
       printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{}}' >"$runtime"
       ;;
-    jobs-nonempty)
-      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{"job-1":{}},"idempotency":{}}' >"$runtime"
+    terminal-history)
+      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"suppressed"},"jobs":{"job-1":{"id":"job-1","status":"succeeded","component":"agent","current_version":"v1.0.87","target_version":"v1.0.87","current_step":"complete","service_available":true}},"idempotency":{"2d4d8444-2b3d-4f8f-8503-910f58b5b1df":"job-1"}}' >"$runtime"
       ;;
-    idempotency-nonempty)
-      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{"request-1":{}}}' >"$runtime"
+    active-history)
+      printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{"job-1":{"status":"pulling"}},"idempotency":{"2d4d8444-2b3d-4f8f-8503-910f58b5b1df":"job-1"}}' >"$runtime"
       ;;
     jobs-wrong-type)
       printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":[],"idempotency":{}}' >"$runtime"
@@ -236,8 +236,13 @@ case "$url" in
     if [ "$scenario" = post-running-failure ] && [ "$desired" = running ]; then
       : >"$TEST_ROOT/handoff-running"
     fi
-    schema=$(sed -n 's/.*"schema_version":\([0-9]*\).*/\1/p' "$runtime")
-    printf '{"schema_version":%s,"desired_state":"%s","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{}}\n' "$schema" "$desired" >"$runtime"
+    python3 - "$runtime" "$desired" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+value = json.loads(path.read_text(encoding="utf-8"))
+value["desired_state"] = sys.argv[2]
+path.write_text(json.dumps(value, separators=(",", ":")) + "\n", encoding="utf-8")
+PY
     chmod 0600 "$runtime"
     printf '{"desired_state":"%s"}\n' "$desired" >"$output"
     printf '200'
@@ -275,8 +280,32 @@ for idle_maps_scenario in maps-missing maps-empty; do
   grep -Fq '"desired_state":"running"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
 done
 
+make_fixture terminal_history
+printf '%s\n' 'terminal-history' >"$TEST_SCENARIO"
+run_reconcile >/dev/null
+python3 - "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json" <<'PY'
+import json, pathlib, sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert value["desired_state"] == "running"
+assert value["jobs"] == {
+    "job-1": {
+        "id": "job-1",
+        "status": "succeeded",
+        "component": "agent",
+        "current_version": "v1.0.87",
+        "target_version": "v1.0.87",
+        "current_step": "complete",
+        "service_available": True,
+    }
+}
+assert value["idempotency"] == {
+    "2d4d8444-2b3d-4f8f-8503-910f58b5b1df": "job-1"
+}
+PY
+grep -Fqx 'bootstrap' "$TEST_CALLS"
+
 for invalid_maps_scenario in \
-  jobs-nonempty idempotency-nonempty jobs-wrong-type idempotency-wrong-type; do
+  active-history jobs-wrong-type idempotency-wrong-type; do
   make_fixture "$invalid_maps_scenario"
   printf '%s\n' "$invalid_maps_scenario" >"$TEST_SCENARIO"
   if run_reconcile >"$tmp/$invalid_maps_scenario.out" 2>"$tmp/$invalid_maps_scenario.err"; then

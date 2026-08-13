@@ -95,7 +95,6 @@ const affectedRules = [
   [/^scripts\/phases\/s1_/, ["tests/s1_lightsail_availability_fallback_test.sh", "tests/lightsail_static_ip_quota_test.sh", "tests/eip_preflight_test.sh", "tests/root_volume_size_test.sh", "tests/pricing_estimate_test.sh"]],
   [/^scripts\/phases\/s3_/, ["tests/s3_lightsail_provision_test.sh", "tests/s3_ec2_updater_upload_test.sh", "tests/s3_stable_ip_reconcile_test.sh", "tests/s3_public_ip_validation_test.sh", "tests/root_volume_size_test.sh"]],
   [/^scripts\/phases\/s4_|^scripts\/cloud-init\/|^scripts\/render\/(?!prepare-production-release\.sh$)/, ["tests/render_userdata_remote_nodes_test.sh", "tests/split_agent_bundle_test.sh", "tests/bootstrap_production_retry_test.sh", "tests/updater_bundle_test.sh", "tests/updater_bootstrap_resume_test.sh", "tests/split_source_revision_advance_test.sh", "tests/host_integration_atomic_test.sh"]],
-  [/^scripts\/cloud-init\/split\/(?:WorkerEdge\.haproxy\.cfg|worker-edge-|render-worker-edge\.sh|verify-worker-edge-image\.sh)/, ["tests/worker_edge_render_test.sh"]],
   [/^scripts\/phases\/s5_/, ["tests/s5_init_tokens_test.sh"]],
   [/^scripts\/phases\/s6_/, ["tests/s6_run_phase_failure_test.sh", "tests/s6_wire_local_test.sh", "tests/mcp_tools_runtime_check_test.sh", "tests/runtime_summary_check_test.sh", "tests/destroy_host_mcp_cleanup_test.sh"]],
   [/^scripts\/phases\/s7_/, ["tests/s7_http_mcp_acceptance_test.sh", "tests/mcp_tools_runtime_check_test.sh", "tests/runtime_summary_check_test.sh", "tests/final_delivery_runtime_gate_test.sh"]],

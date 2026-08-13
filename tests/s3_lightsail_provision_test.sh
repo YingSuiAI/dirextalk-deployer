@@ -156,16 +156,6 @@ grep -q '^ssh .*ubuntu@203\.0\.113\.144.*tar.*apply-host-integration\.sh.*203\.0
 grep -q '^ssh .*bootstrap-host\.sh.*--record-stable-ip.*203\.0\.113\.144.*apply-host-integration\.sh' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q '^ssh .*apply-host-integration\.sh.*cloud-init.*status.*--wait.*printf' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q -- '--no-same-owner' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
-for required in \
-  cloud-init/split/WorkerEdge.haproxy.cfg \
-  cloud-init/split/worker-edge-compose.yaml \
-  cloud-init/split/verify-worker-edge-image.sh; do
-  grep -Fxq "$required" "$TMPDIR/integration-upload.list" || {
-    echo "host integration upload is missing $required" >&2
-    cat "$TMPDIR/integration-upload.list" >&2
-    exit 1
-  }
-done
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)

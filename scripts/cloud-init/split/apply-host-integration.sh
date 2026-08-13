@@ -170,9 +170,7 @@ candidate_ops="$candidate/production-ops"
 install -d -o root -g root -m 0700 "$candidate_ops"
 install -o root -g root -m 0400 \
   "$stage/cloud-init/split/Caddyfile" \
-  "$stage/cloud-init/split/WorkerEdge.haproxy.cfg" \
-  "$stage/cloud-init/split/edge-compose.override.yaml" \
-  "$stage/cloud-init/split/worker-edge-compose.yaml" "$candidate_ops/"
+  "$stage/cloud-init/split/edge-compose.override.yaml" "$candidate_ops/"
 # Existing-node operations must not persist the package's fresh-deploy product
 # defaults as if they described the running node. Keep only the tooling target
 # needed by the split revision transaction.
@@ -185,8 +183,7 @@ install -o root -g root -m 0755 \
   "$stage/cloud-init/split/production-ops-common.sh" \
   "$stage/cloud-init/split/recover-production.sh" \
   "$stage/cloud-init/split/reconcile-production.sh" \
-  "$stage/cloud-init/split/reset-production.sh" \
-  "$stage/cloud-init/split/verify-worker-edge-image.sh" "$candidate_ops/"
+  "$stage/cloud-init/split/reset-production.sh" "$candidate_ops/"
 
 candidate_updater="$candidate/updater"
 install -d -o root -g root -m 0755 "$candidate_updater"
@@ -225,7 +222,6 @@ if [ -e "$base/updater" ] || [ -L "$base/updater" ]; then
 fi
 updater_swapped=true
 mv -- "$candidate_updater" "$base/updater"
-
 install -d -o root -g root -m 0755 "${recovery_service%/*}"
 if [ -e "$recovery_service" ] || [ -L "$recovery_service" ]; then
   [ -f "$recovery_service" ] && [ ! -L "$recovery_service" ] \

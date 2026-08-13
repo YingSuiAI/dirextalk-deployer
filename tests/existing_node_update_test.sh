@@ -120,9 +120,6 @@ bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null
 [ "$(grep -c '^ssh:integration$' "$CALLS")" -eq 1 ]
 transport_listing=$(tar -tzf "$TEST_TRANSPORT")
 grep -Fxq 'cloud-init/split/apply-host-integration.sh' <<<"$transport_listing"
-grep -Fxq 'cloud-init/split/WorkerEdge.haproxy.cfg' <<<"$transport_listing"
-grep -Fxq 'cloud-init/split/worker-edge-compose.yaml' <<<"$transport_listing"
-grep -Fxq 'cloud-init/split/verify-worker-edge-image.sh' <<<"$transport_listing"
 grep -Fxq 'canonical-bundle.tar.gz' <<<"$transport_listing"
 node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
   "data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"

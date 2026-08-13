@@ -63,10 +63,6 @@ for file in bootstrap-production.sh production-ops-common.sh recover-production.
 done
 printf 'fixture\n' >"$stage/cloud-init/split/Caddyfile"
 printf 'services: {}\n' >"$stage/cloud-init/split/edge-compose.override.yaml"
-printf 'fixture\n' >"$stage/cloud-init/split/WorkerEdge.haproxy.cfg"
-printf 'services: {}\n' >"$stage/cloud-init/split/worker-edge-compose.yaml"
-printf '#!/usr/bin/env bash\nexit 0\n' >"$stage/cloud-init/split/render-worker-edge.sh"
-printf '#!/usr/bin/env bash\nexit 0\n' >"$stage/cloud-init/split/verify-worker-edge-image.sh"
 printf '[Unit]\nDescription=fixture\n' >"$stage/cloud-init/split/dirextalk-split-recovery.service"
 cat >"$stage/cloud-init/split/release.env" <<EOF
 DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai

@@ -293,6 +293,7 @@ ops_commit_existing_update_release() {
   # carry different defaults for fresh nodes; an existing tooling update only
   # advances the canonical split scripts and updater pin.
   split_json=$(json_build object \
+    "release_catalog_origin=$(ops_state_get "$state" .split_release.release_catalog_origin)" \
     "message_version=$(ops_state_get "$state" .split_release.message_version)" \
     "message_image=$(ops_state_get "$state" .split_release.message_image)" \
     "message_source_revision=$(ops_state_get "$state" .split_release.message_source_revision)" \

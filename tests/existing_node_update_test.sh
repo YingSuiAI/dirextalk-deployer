@@ -142,7 +142,7 @@ transport_listing=$(tar -tzf "$TEST_TRANSPORT")
 grep -Fxq 'cloud-init/split/apply-host-integration.sh' <<<"$transport_listing"
 grep -Fxq 'canonical-bundle.tar.gz' <<<"$transport_listing"
 node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
-  "data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"
+  "data.split_release.release_catalog_origin === '$DIREXTALK_RELEASE_CATALOG_ORIGIN' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"
 
 # An expected-negative integration result remains exit 3 and leaves both local
 # release records untouched.

@@ -440,7 +440,11 @@ docker volume create --label com.dirextalk.owner="$stack" "${stack}-caddy-config
 edge_compose=(docker compose --env-file "$edge_env" -f "$split/edge-compose.yaml" -f "$script_dir/edge-compose.override.yaml")
 "${edge_compose[@]}" config --quiet
 "${edge_compose[@]}" pull
-"${edge_compose[@]}" up -d --wait
+if [ "$operation" = --reconcile-edge ]; then
+  "${edge_compose[@]}" up -d --wait --force-recreate caddy
+else
+  "${edge_compose[@]}" up -d --wait
+fi
 edge_id=$("${edge_compose[@]}" ps -q caddy)
 printf '%s\n' "$edge_id" | grep -Eq '^[0-9a-f]{64}$' || { echo "edge Caddy identity is invalid" >&2; exit 1; }
 receipt_tmp=$(mktemp "$base/.edge-bootstrap-receipt.XXXXXX")

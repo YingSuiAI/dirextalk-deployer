@@ -445,6 +445,7 @@ if grep -Fq 'export-called' "$edge_calls"; then
   exit 1
 fi
 grep -Fq 'compose' "$edge_calls"
+grep -Fq 'up -d --wait --force-recreate caddy' "$edge_calls"
 
 for relative in compose.production.yaml scripts/update-message-server-local.sh scripts/prepare-runner-cgroups.sh; do
   missing="$split/$relative"

@@ -177,6 +177,12 @@ printf '%s\n' "$pass_output" | grep -Eq "  SSH          : ssh -i .* ubuntu@203\.
 }
 json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.connect_daemon.status === 'passed' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"
 
+state_set connect_install_status skip
+state_set connect_install_policy skip
+manual_output=$(print_delivery)
+printf '%s\n' "$manual_output" | grep -q 'Deployment Complete'
+json_test_check "$state" "data.runtime_checks.summary.status === 'passed' && data.runtime_checks.connect_daemon.status === 'manual_pending' && data.runtime_checks.mcp_doctor.status === 'passed' && data.runtime_checks.mcp_tools.status === 'passed' && data.runtime_checks.mcp_smoke.status === 'passed'"
+
 report="$service_dir/operation-report.json"
 json_test_check "$report" "data.status === 'deployment_complete' && data.delivery.product_completion_status === 'deployment_complete' && !('user_confirmation' in data.gates) && !('user_confirmation_details' in data.gates)"
 

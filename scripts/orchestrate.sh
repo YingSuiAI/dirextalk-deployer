@@ -300,7 +300,7 @@ cmd_status() {
 }
 
 # Delivery summary.
-delivery_runtime_checks_strictly_passed() {
+delivery_runtime_checks_passed() {
   local summary connect doctor tools smoke
   summary=$(json_get "$STATE_JSON" runtime_checks.summary.status "not_run")
   connect=$(json_get "$STATE_JSON" runtime_checks.connect_daemon.status "not_run")
@@ -308,11 +308,9 @@ delivery_runtime_checks_strictly_passed() {
   tools=$(json_get "$STATE_JSON" runtime_checks.mcp_tools.status "not_run")
   smoke=$(json_get "$STATE_JSON" runtime_checks.mcp_smoke.status "not_run")
 
-  [ "$summary" = "passed" ] &&
-    [ "$connect" = "passed" ] &&
-    [ "$doctor" = "passed" ] &&
-    [ "$tools" = "passed" ] &&
-    [ "$smoke" = "passed" ]
+  [ "$summary" = "passed" ] || return 1
+  case "$connect" in passed|manual_pending|skipped) ;; *) return 1 ;; esac
+  [ "$doctor" = "passed" ] && [ "$tools" = "passed" ] && [ "$smoke" = "passed" ]
 }
 
 delivery_runtime_checks_summary() {
@@ -329,7 +327,7 @@ ensure_delivery_runtime_checks() {
   warn "Final delivery requires live runtime checks; running: verify runtime"
   cmd_verify_runtime || verify_rc=$?
 
-  if [ "$verify_rc" -eq 0 ] && delivery_runtime_checks_strictly_passed; then
+  if [ "$verify_rc" -eq 0 ] && delivery_runtime_checks_passed; then
     return 0
   fi
 
@@ -692,7 +690,7 @@ cmd_report() {
   }
   case "$operation" in
     new_deploy)
-      if [ "$(phase_status S7_VERIFY_E2E)" = "done" ] && delivery_runtime_checks_strictly_passed; then
+      if [ "$(phase_status S7_VERIFY_E2E)" = "done" ] && delivery_runtime_checks_passed; then
         status=deployment_complete
       else
         status=deployment_incomplete

@@ -84,6 +84,44 @@ recovery_settle_agent_containers() {
 
 recovery_load_agent_containers
 
+recovery_sync_runner_units() {
+  local runner_unit_dir=/etc/systemd/system template source target tmp
+  local -a templates=(
+    dirextalk-extension-runner@.service
+    dirextalk-core-runner@.service
+  )
+  local -a instances=(
+    "dirextalk-extension-runner@${production_stack}.service"
+    "dirextalk-core-runner@${production_stack}.service"
+  )
+
+  for template in "${templates[@]}"; do
+    source=$production_split/systemd/$template
+    target=$runner_unit_dir/$template
+    [ -f "$source" ] && [ ! -L "$source" ] \
+      || production_die "canonical runner unit is unavailable: $template"
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      [ -f "$target" ] && [ ! -L "$target" ] \
+        || production_die "installed runner unit is not a regular file: $target"
+      cmp -s -- "$source" "$target" && continue
+    fi
+    tmp=$(mktemp "$runner_unit_dir/.dirextalk-runner-unit.XXXXXX") \
+      || production_die "cannot stage runner unit: $template"
+    if install -o root -g root -m 0644 -- "$source" "$tmp" && mv -f -- "$tmp" "$target"; then
+      :
+    else
+      rm -f -- "$tmp"
+      production_die "cannot install runner unit: $template"
+    fi
+  done
+
+  systemctl daemon-reload || production_die 'cannot reload runner systemd units'
+  systemctl restart "${instances[@]}" \
+    || production_die 'cannot restart runner systemd units'
+}
+
+recovery_sync_runner_units
+
 preparation_tmp=$(mktemp "$production_base/.runner-preparation.XXXXXX") \
   || production_die 'cannot create runner preparation receipt'
 cleanup_preparation() { rm -f "$preparation_tmp"; }

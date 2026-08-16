@@ -31,8 +31,10 @@ fi
 grep -Fq 'completed split runtime is unavailable' "$tmp/actual-negative.out"
 
 fixture="$tmp/fixture"
-mkdir -p "$fixture/ops" "$fixture/split/scripts" "$fixture/base" "$fixture/bin"
-cp "$recovery" "$fixture/ops/recover-production.sh"
+mkdir -p "$fixture/ops" "$fixture/split/scripts" "$fixture/split/systemd" \
+  "$fixture/base" "$fixture/bin" "$fixture/units"
+sed "s#local runner_unit_dir=/etc/systemd/system#local runner_unit_dir=$fixture/units#" \
+  "$recovery" >"$fixture/ops/recover-production.sh"
 cat >"$fixture/ops/production-ops-common.sh" <<'EOF'
 production_die() { printf 'die:%s\n' "$*" >>"$RECOVERY_CALLS"; exit 1; }
 production_negative() { printf 'negative:%s\n' "$*" >>"$RECOVERY_CALLS"; exit 3; }
@@ -69,6 +71,8 @@ cat >"$fixture/split/scripts/restart-agent-local.sh" <<'EOF'
 printf 'restart:%s\n' "$1" >>"$RECOVERY_CALLS"
 exit "${RECOVERY_RESTART_STATUS:-0}"
 EOF
+printf 'extension unit v2\n' >"$fixture/split/systemd/dirextalk-extension-runner@.service"
+printf 'core unit v2\n' >"$fixture/split/systemd/dirextalk-core-runner@.service"
 chmod 0755 "$fixture/ops/"*.sh "$fixture/split/scripts/"*.sh
 agent_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 extension_id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -120,6 +124,23 @@ cat >"$fixture/bin/sleep" <<'EOF'
 #!/usr/bin/env bash
 printf 'sleep:%s\n' "$1" >>"$RECOVERY_CALLS"
 EOF
+cat >"$fixture/bin/install" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o|-g) shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+exec /usr/bin/install "${args[@]}"
+EOF
+cat >"$fixture/bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+printf 'systemctl:%s\n' "$*" >>"$RECOVERY_CALLS"
+exit "${RECOVERY_SYSTEMCTL_STATUS:-0}"
+EOF
 chmod 0755 "$fixture/bin/"*
 
 run_recovery() {
@@ -134,13 +155,35 @@ run_recovery() {
 }
 
 success_calls="$tmp/success.calls"
+printf 'extension unit v1\n' >"$fixture/units/dirextalk-extension-runner@.service"
+printf 'core unit v1\n' >"$fixture/units/dirextalk-core-runner@.service"
 run_recovery "$success_calls" 0 0 0 settle
 [ "$(grep -c '^bind$' "$success_calls")" -eq 2 ]
+grep -Fqx 'systemctl:daemon-reload' "$success_calls"
+grep -Fqx 'systemctl:restart dirextalk-extension-runner@d-abcdefghijklmnopqrstuvwxyz.service dirextalk-core-runner@d-abcdefghijklmnopqrstuvwxyz.service' "$success_calls"
 grep -Fqx 'prepare:d-abcdefghijklmnopqrstuvwxyz' "$success_calls"
 grep -Fqx 'sleep:1' "$success_calls"
 grep -Fqx "restart:$fixture/run" "$success_calls"
+cmp "$fixture/split/systemd/dirextalk-extension-runner@.service" \
+  "$fixture/units/dirextalk-extension-runner@.service"
+cmp "$fixture/split/systemd/dirextalk-core-runner@.service" \
+  "$fixture/units/dirextalk-core-runner@.service"
+reload_line=$(grep -n '^systemctl:daemon-reload$' "$success_calls" | cut -d: -f1)
+runner_restart_line=$(grep -n '^systemctl:restart ' "$success_calls" | cut -d: -f1)
+prepare_line=$(grep -n '^prepare:' "$success_calls" | cut -d: -f1)
+agent_restart_line=$(grep -n '^restart:' "$success_calls" | cut -d: -f1)
+[ "$reload_line" -lt "$runner_restart_line" ]
+[ "$runner_restart_line" -lt "$prepare_line" ]
+[ "$prepare_line" -lt "$agent_restart_line" ]
 grep -Fqx 'DIREXTALK_RUNNER_PREPARED=true' "$fixture/base/runner-preparation.env"
 [ "$(stat -c '%a' "$fixture/base/runner-preparation.env")" = 400 ]
+
+unchanged_calls="$tmp/unchanged.calls"
+run_recovery "$unchanged_calls"
+grep -Fqx 'systemctl:daemon-reload' "$unchanged_calls"
+grep -Fqx 'systemctl:restart dirextalk-extension-runner@d-abcdefghijklmnopqrstuvwxyz.service dirextalk-core-runner@d-abcdefghijklmnopqrstuvwxyz.service' "$unchanged_calls"
+grep -Fqx 'prepare:d-abcdefghijklmnopqrstuvwxyz' "$unchanged_calls"
+grep -Fqx "restart:$fixture/run" "$unchanged_calls"
 
 negative_calls="$tmp/negative.calls"
 if run_recovery "$negative_calls" 3; then

@@ -100,6 +100,11 @@ mkdir -p "$TEST_TMP/repository-unpacked"
 tar -xzf "$repository_bundle" -C "$TEST_TMP/repository-unpacked"
 (cd "$TEST_TMP/repository-unpacked/deploy/split-agent" && sha256sum -c --status SOURCE_FILES.sha256)
 repository_compose="$TEST_TMP/repository-unpacked/deploy/split-agent/compose.yaml"
+repository_agent_caddy="$TEST_TMP/repository-unpacked/deploy/split-agent/Caddyfile.static-sites.example"
+[ -f "$repository_agent_caddy" ]
+grep -Fq 'handle /agent/v1/*' "$repository_agent_caddy"
+grep -Fq 'reverse_proxy agent:8082' "$repository_agent_caddy"
+grep -Fq 'flush_interval -1' "$repository_agent_caddy"
 [ "$(grep -Ec '^  postgres:$' "$repository_compose")" -eq 1 ]
 [ "$(grep -Fc 'apparmor=dirextalk-runner-userns' "$repository_compose")" -eq 2 ]
 [ "$(grep -Fc 'seccomp=unconfined' "$repository_compose")" -eq 2 ]
@@ -110,6 +115,21 @@ grep -Fq 'image: ${DIREXTALK_POSTGRES_IMAGE_IMMUTABLE:?set an immutable PostgreS
 grep -Fq 'aliases: [message-postgres]' "$repository_compose"
 grep -Fq 'aliases: [agent-postgres]' "$repository_compose"
 grep -Fq 'postgres_data:/var/lib/postgresql' "$repository_compose"
+grep -Fq 'expose: ["9443", "8444", "8082"]' "$repository_compose"
+grep -Fq 'P2P_PRODUCT_CAPABILITY_LISTEN_ADDR: :50053' "$repository_compose"
+grep -Fq 'expose: ["50053"]' "$repository_compose"
+if grep -Fq '50052' "$repository_compose"; then
+  echo 'canonical split bundle retained the retired Message Server to Agent Capability gRPC port' >&2
+  exit 1
+fi
+grep -Fq 'networks: [agent_private, agent_database, agent_caller, agent_egress, message_public]' "$repository_compose"
+awk '
+  /^  message-server:$/ { in_message = 1; next }
+  in_message && /^  [a-zA-Z0-9_-]+:$/ { exit found ? 0 : 1 }
+  in_message && /^      agent:$/ { saw_agent = 1; next }
+  saw_agent && /^        condition: service_healthy$/ { found = 1; exit 0 }
+  END { if (!found) exit 1 }
+' "$repository_compose"
 if grep -Ei 'qdrant|message[_-]postgres[_-](data|volume)|agent[_-]postgres[_-](data|volume)' \
     "$repository_compose" >/dev/null; then
   echo 'canonical split bundle retained superseded Qdrant or per-application PostgreSQL resources' >&2
@@ -148,6 +168,9 @@ grep -Fq 'handle /.well-known/matrix/server' "$edge_source"
 grep -Fq 'handle /.well-known/matrix/client' "$edge_source"
 grep -Fq 'header Access-Control-Allow-Origin *' "$edge_source"
 grep -Fq 'handle /.well-known/portal/*' "$edge_source"
+grep -Fq 'handle /agent/v1/*' "$edge_source"
+grep -Fq 'reverse_proxy agent:8082' "$edge_source"
+grep -Fq 'flush_interval -1' "$edge_source"
 grep -Fq 'handle /_matrix/*' "$edge_source"
 grep -Fq 'handle /_dendrite/*' "$edge_source"
 grep -Fq 'handle /_synapse/*' "$edge_source"
@@ -155,6 +178,13 @@ grep -Fq 'handle /_p2p/*' "$edge_source"
 grep -Fq 'handle /_dirextalk/updater/v1/jobs/*' "$edge_source"
 grep -Fq 'reverse_proxy unix//run/dirextalk-updater/http.sock' "$edge_source"
 grep -Fq 'reverse_proxy message-server:8008' "$edge_source"
+agent_route_line=$(grep -nF 'handle /agent/v1/*' "$edge_source" | cut -d: -f1)
+message_fallback_line=$(grep -nF 'reverse_proxy message-server:8008' "$edge_source" | tail -n 1 | cut -d: -f1)
+[ "$agent_route_line" -lt "$message_fallback_line" ]
+if grep -Eq 'header_up[[:space:]]+-Authorization|log_append[[:space:]].*Authorization' "$edge_source"; then
+  echo "edge source strips or logs the Agent session ticket" >&2
+  exit 1
+fi
 if grep -Fq 'handle /healthz' "$edge_source" || grep -Fq 'rewrite * /_p2p/health' "$edge_source"; then
   echo "edge source restored the retired health alias" >&2
   exit 1

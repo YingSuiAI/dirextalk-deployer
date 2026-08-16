@@ -18,6 +18,16 @@ __DIREXTALK_PUBLIC_DOMAIN__ {
 		reverse_proxy unix//run/dirextalk-updater/http.sock
 	}
 
+	# Native Agent data-plane traffic stays on the public application origin.
+	# Caddy forwards the original Authorization and proxy headers by default;
+	# disabling response buffering keeps SSE events timely while the upstream
+	# request context still ends when the client disconnects.
+	handle /agent/v1/* {
+		reverse_proxy agent:8082 {
+			flush_interval -1
+		}
+	}
+
 	handle /_matrix/* {
 		reverse_proxy message-server:8008
 	}

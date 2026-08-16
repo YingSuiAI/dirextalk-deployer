@@ -22,7 +22,11 @@ binds TURN's external address to the updater-recorded stable public IPv4,
 prepares the two systemd-delegated runner cgroups, provisions one PostgreSQL
 container and volume with distinct Message Server and Agent roles/databases,
 starts the application stack, and then starts
-the separate canonical Caddy edge project.
+the separate canonical Caddy edge project. The edge exposes no Agent host port:
+same-origin `/agent/v1/*` requests are routed over the shared application
+network to the healthy `agent:8082` service, with SSE proxy buffering disabled.
+The Compose contract starts Agent before Message Server so a fresh node does
+not depend on a fixed container address or a later manual Caddy edit.
 
 `release.env` is the only production release selection. It records the
 message-server and Agent versions/revisions expected from `latest`, and fixes the single Message Server-owned release catalog origin at

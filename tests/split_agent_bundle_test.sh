@@ -105,6 +105,9 @@ repository_agent_caddy="$TEST_TMP/repository-unpacked/deploy/split-agent/Caddyfi
 grep -Fq 'handle /agent/v1/*' "$repository_agent_caddy"
 grep -Fq 'reverse_proxy agent:8082' "$repository_agent_caddy"
 grep -Fq 'flush_interval -1' "$repository_agent_caddy"
+bundle_agent_route_line=$(grep -nF 'handle /agent/v1/*' "$repository_agent_caddy" | cut -d: -f1)
+bundle_fallback_line=$(grep -nF 'reverse_proxy message-server:8008' "$repository_agent_caddy" | tail -n 1 | cut -d: -f1)
+[ "$bundle_agent_route_line" -lt "$bundle_fallback_line" ]
 [ "$(grep -Ec '^  postgres:$' "$repository_compose")" -eq 1 ]
 [ "$(grep -Fc 'apparmor=dirextalk-runner-userns' "$repository_compose")" -eq 2 ]
 [ "$(grep -Fc 'seccomp=unconfined' "$repository_compose")" -eq 2 ]
@@ -116,6 +119,10 @@ grep -Fq 'aliases: [message-postgres]' "$repository_compose"
 grep -Fq 'aliases: [agent-postgres]' "$repository_compose"
 grep -Fq 'postgres_data:/var/lib/postgresql' "$repository_compose"
 grep -Fq 'expose: ["9443", "8444", "8082"]' "$repository_compose"
+if sed -n '/^  agent:$/,/^  extension-runner:$/p' "$repository_compose" | grep -Eq '^    ports:'; then
+  echo 'canonical split bundle published the Agent HTTP data plane on a host port' >&2
+  exit 1
+fi
 grep -Fq 'P2P_PRODUCT_CAPABILITY_LISTEN_ADDR: :50053' "$repository_compose"
 grep -Fq 'expose: ["50053"]' "$repository_compose"
 if grep -Fq '50052' "$repository_compose"; then

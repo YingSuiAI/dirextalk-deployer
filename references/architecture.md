@@ -21,7 +21,7 @@ coturn         -> TURN 3478 + 49160-49200/udp
 - **Agent**: 发布准备通过独立 `latest` 通道发现当前版本，核对对应稳定 `vX.Y.Z` 标签、revision 与三个真实二进制版本；部署和更新只使用该版本标签。它与 Message Server 共用单一 PostgreSQL/pgvector 容器，但使用隔离的非超级用户角色、database 和私有数据库网络，并拥有 extension/core runners 与更新 wrapper。客户端通过同域 `/agent/v1/*` 访问 Agent 数据面，Caddy 在内部网络转发到 `agent:8082`；Agent 端口不直接发布到公网。
 - **PostgreSQL 18 + pgvector**: 单一容器和持久化卷；message-server 与 Agent 使用相互隔离的非超级用户角色、database 和私有数据库网络，只有 Agent database 启用 `vector` extension。
 - **Caddy**: 独立 edge Compose 项目的唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
-- **dirextalk-updater**: 独立 GitHub 仓库/Release 的 linux/amd64 binary；production split 主机要求 Ubuntu 24.04+、systemd >= 254。deployer 固定 version/commit/SHA-256，宿主下载校验后作为 root-owned systemd service 安装。它独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token，也不安装每日 GitHub discovery timer。
+- **dirextalk-updater**: 独立 GitHub 仓库/Release 的 linux/amd64 binary；production split 主机要求 Ubuntu 24.04+、systemd >= 254。deployer 固定 version/commit/SHA-256，宿主下载校验后作为 root-owned systemd service 安装。fresh deployment 写入 `watchdog_enabled=false`：保留 root-owned control plane 和显式 update/recovery job，但不启动常驻 Docker-event/轮询修复 watchdog。它独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token，也不安装每日 GitHub discovery timer。
 - **生产运行拓扑**: `dirextalk-deployer/scripts/cloud-init/split/runtime` 是 Compose、宿主生命周期、镜像更新与恢复 wrapper 的唯一源码；Message Server 与 Agent 仓库只发布各自正式版本镜像。
 - **coturn**: WebRTC TURN relay，Dirextalk message-server 通过 shared-secret 动态签发 TURN 凭证。
 

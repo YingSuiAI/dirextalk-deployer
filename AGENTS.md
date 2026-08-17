@@ -24,7 +24,7 @@
   wrappers under `scripts/cloud-init/split/runtime`, together with their
   operational tests and canonical bundle. Message Server and Agent repositories
   own only their application image builds and formal version-tag publication.
-- Direct-version upgrades are client initiated; do not reintroduce the retired daily updater GitHub discovery timer or service.
+- Fresh deployment installs the updater control plane with its resident watchdog disabled. Direct-version upgrades are client initiated; do not reintroduce the retired daily updater GitHub discovery timer or service.
 - Treat `SKILL.md` as the compact agent-facing entrypoint. Detailed runbooks belong in `references/`; `scripts/` are the stable implementation entrypoints.
 - `SKILL.md` is a user-facing runbook that must remain usable by less capable models. Its Freshness Gate, step-by-step onboarding, semantic confirmation policy, AWS promotional/billing reminders, and repeated safety guidance are intentional product behavior; preserve them unless the product owner explicitly changes that onboarding contract.
 - The supported local conversation bridge is `dirextalk-connect`, installed from `dirextalk-connect@latest` by default or built from `YingSuiAI/dirextalk-connect`.

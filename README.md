@@ -142,9 +142,12 @@ restart. The target host never clones either source repository. The host updater
 the supported Ubuntu 24.04+ x86_64 host with systemd >= 254 downloads the deployer-pinned updater asset and
 verifies the deployer-pinned SHA-256 before atomic installation. The local
 machine does not need Go, and S3 never copies an updater binary over SSH.
-The updater remains independently pinned and checksum-verified. New direct
-version upgrades do not install a daily GitHub discovery timer; an update is
-created only when an authorized client requests the current central target.
+The updater remains independently pinned and checksum-verified. Fresh nodes
+install its root-owned control plane with the resident watchdog disabled by
+default; authorized direct jobs and their job-owned recovery remain available.
+New direct version upgrades do not install a daily GitHub discovery timer; an
+update is created only when an authorized client requests the current central
+target.
 
 `DIREXTALK_CLOUD_PROVIDER=lightsail` is optional because Lightsail is the default. To use the retained EC2 path instead, add `DIREXTALK_CLOUD_PROVIDER=ec2`. EC2 accepts `INSTANCE_TYPE=t3.small` or a larger explicit type and still uses a 50 GiB gp3 root EBS volume by default. If Lightsail is the default and S1 finds no usable Lightsail bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2`. If no region is configured, non-interactive runs use the local-timezone recommendation; override it with `DIREXTALK_DEFAULT_REGION` or the standard AWS region settings. Let S1 auto-detect Lightsail availability unless you are debugging AWS directly; the safe manual command is `aws lightsail get-regions --include-availability-zones --output json`.
 

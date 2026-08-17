@@ -68,6 +68,15 @@ for file in updater/install.sh updater/bootstrap-host.sh updater/set-desired-sta
   updater/release.env updater/config.json updater/dirextalk-updater.service; do
   [ -f "$tmp/bundle/$file" ] || { echo "missing minimal updater bootstrap file: $file" >&2; exit 1; }
 done
+python3 - "$tmp/bundle/updater/config.json" <<'PY'
+import json
+import pathlib
+import sys
+
+config = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if config.get("watchdog_enabled") is not False:
+    raise SystemExit("fresh user-data must install the updater with its resident watchdog disabled")
+PY
 if find "$tmp/bundle" -maxdepth 1 -type f | grep -q .; then
   echo "user-data bundle must contain only the updater directory" >&2
   exit 1

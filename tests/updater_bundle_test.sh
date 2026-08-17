@@ -44,8 +44,8 @@ assert_linux_mode 600 "$tmp/root/etc/dirextalk-updater/config.json"
 assert_linux_mode 600 "$tmp/root/etc/dirextalk-updater/control-token"
 assert_linux_mode 755 "$tmp/root/usr/local/bin/dirextalk-updater"
 
-grep -Fq 'UPDATER_PIN_VERSION=v1.0.15' "$ROOT/scripts/updater/release.env"
-grep -Fq 'UPDATER_PIN_COMMIT=b0f0bca517ca551f9adc523a94bd1604198d04ee' "$ROOT/scripts/updater/release.env"
-grep -Fq 'UPDATER_PIN_SHA256=b36f4a66748ce3ba54a2a0b37d9077bb13b07544971fd029039d2bbcc57d8167' "$ROOT/scripts/updater/release.env"
+grep -Fq 'UPDATER_PIN_VERSION=v1.0.16' "$ROOT/scripts/updater/release.env"
+grep -Fq 'UPDATER_PIN_COMMIT=2c23d1bba8d29449f6952624bc39ad991dd31e02' "$ROOT/scripts/updater/release.env"
+grep -Fq 'UPDATER_PIN_SHA256=eb5fe3f84ff53cf0c7207198fd4a134b31960d0fc1d000b86e702682e4ffe3bf' "$ROOT/scripts/updater/release.env"
 
 echo "split-only updater bundle test passed"

@@ -61,7 +61,7 @@ printf '\n' >> "$CALLS"
 cat >/dev/null
 case "${!#}" in
   *'/etc/machine-id'*) printf '0123456789abcdef0123456789abcdef\tDOCKERENGINE1234\n' ;;
-  *) printf 'v1.0.15\tb0f0bca517ca551f9adc523a94bd1604198d04ee\tb36f4a66748ce3ba54a2a0b37d9077bb13b07544971fd029039d2bbcc57d8167\n' ;;
+  *) printf 'v1.0.16\t2c23d1bba8d29449f6952624bc39ad991dd31e02\teb5fe3f84ff53cf0c7207198fd4a134b31960d0fc1d000b86e702682e4ffe3bf\n' ;;
 esac
 EOF
 chmod 0700 "$tmp/bin/"*
@@ -87,7 +87,7 @@ domain_resolves_to_ip() {
 }
 
 run_phase > "$tmp/s3.out" 2>&1 || { cat "$tmp/s3.out" >&2; exit 1; }
-json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.updater_release.version === 'v1.0.15' && data.updater_release.commit === 'b0f0bca517ca551f9adc523a94bd1604198d04ee' && data.updater_release.sha256 === 'b36f4a66748ce3ba54a2a0b37d9077bb13b07544971fd029039d2bbcc57d8167' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'i-test' && data.node_identity.provider_instance_arn === 'arn:aws:ec2:us-east-1:123456789012:instance/i-test' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef'" || { cat "$STATE_JSON" >&2; exit 1; }
+json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.updater_release.version === 'v1.0.16' && data.updater_release.commit === '2c23d1bba8d29449f6952624bc39ad991dd31e02' && data.updater_release.sha256 === 'eb5fe3f84ff53cf0c7207198fd4a134b31960d0fc1d000b86e702682e4ffe3bf' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'i-test' && data.node_identity.provider_instance_arn === 'arn:aws:ec2:us-east-1:123456789012:instance/i-test' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef'" || { cat "$STATE_JSON" >&2; exit 1; }
 if grep -q '^scp-called$\|^scp ' "$CALLS"; then
   echo "S3 must not SCP updater artifacts" >&2
   cat "$CALLS" >&2

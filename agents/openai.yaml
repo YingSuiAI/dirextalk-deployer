@@ -1,6 +1,6 @@
 interface:
   display_name: "Dirextalk Deployer"
   short_description: "Deploy, update, recover, and verify Dirextalk on AWS."
-  default_prompt: "Use $dirextalk-deployer to deploy or recover a production Dirextalk node on AWS."
+  default_prompt: "Deploy, update, repair, verify, resume, reset, or destroy a production Dirextalk service or node on AWS."
 policy:
   allow_implicit_invocation: true

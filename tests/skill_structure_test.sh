@@ -104,7 +104,7 @@ grep -Fq 'asks in natural language for one of these Dirextalk lifecycle operatio
 grep -q '^interface:$' agents/openai.yaml
 grep -Fq '  display_name: "Dirextalk Deployer"' agents/openai.yaml
 grep -Fq '  short_description: "Deploy, update, recover, and verify Dirextalk on AWS."' agents/openai.yaml
-grep -Fq '  default_prompt: "Use $dirextalk-deployer' agents/openai.yaml
+grep -Fq '  default_prompt: "Deploy, update, repair, verify, resume, reset, or destroy a production Dirextalk service or node on AWS."' agents/openai.yaml
 grep -q '^  allow_implicit_invocation: true$' agents/openai.yaml
 ! grep -Eq '^(entrypoint|runtime_notes|display_name|short_description|default_prompt):' agents/openai.yaml
 grep -q 'compact agent-facing entrypoint' AGENTS.md

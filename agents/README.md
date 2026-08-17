@@ -10,10 +10,10 @@ When an agent runtime supports skill metadata, point it at `SKILL.md`. Every sup
 
 Recognition keywords:
 
-- deploy Dirextalk
-- resume Dirextalk deployment
-- verify Dirextalk message server
-- destroy Dirextalk AWS resources
+- deploy a Dirextalk service
+- update or repair a Dirextalk service
+- resume or verify a Dirextalk service
+- destroy a Dirextalk service
 - wire Dirextalk connect bridge
 - refresh Dirextalk MCP snippets
 - refresh Dirextalk agent token

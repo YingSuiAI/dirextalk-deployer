@@ -22,6 +22,16 @@ env_file=$out/.env; manifest=$out/.manifest; receipt=$out/.cleanup-receipt
 for file in "$env_file" "$manifest" "$receipt"; do [ -f "$file" ] && [ ! -L "$file" ] && [ "$(stat -c '%a:%u' "$file")" = "400:$required_owner" ] || die "invalid protected control file: $file"; done
 command -v docker >/dev/null 2>&1 || die 'docker is required'; command -v jq >/dev/null 2>&1 || die 'jq is required'; command -v flock >/dev/null 2>&1 || die 'flock is required'
 lock=$out/.agent-update.lock; umask 077; : >>"$lock"; chmod 600 "$lock"; exec 9<>"$lock"; flock -n 9 || die 'another Agent update is running'
+receipt_identity=$(stat -c '%d:%i:%u' "$receipt"); receipt_digest=$(sha256sum "$receipt" | awk '{print $1}')
+verify_receipt_unchanged() {
+  [ -f "$receipt" ] && [ ! -L "$receipt" ] && [ "$(stat -c '%a:%u' "$receipt")" = "400:$required_owner" ] || die 'cleanup receipt changed type, mode, or owner'
+  [ "$(stat -c '%d:%i:%u' "$receipt")" = "$receipt_identity" ] || die 'cleanup receipt identity changed during Agent update'
+  [ "$(sha256sum "$receipt" | awk '{print $1}')" = "$receipt_digest" ] || die 'cleanup receipt contents changed during Agent update'
+}
+refresh_receipt_identity() {
+  receipt_identity=$(stat -c '%d:%i:%u' "$receipt")
+  receipt_digest=$(sha256sum "$receipt" | awk '{print $1}')
+}
 [ "$(read_pair "$manifest" compose_mode)" = production ] || negative 'Agent updates apply only to production stacks'
 [ "$(read_pair "$receipt" state)" = complete ] || die 'cleanup receipt is incomplete'
 stack=$(read_pair "$manifest" stack_name); image=$(read_pair "$env_file" DIREXTALK_AGENT_IMAGE); message_image=$(read_pair "$env_file" DIREXTALK_MESSAGE_SERVER_IMAGE)
@@ -50,24 +60,36 @@ for ((index=0; index<container_count; index++)); do service=$(read_pair "$receip
 [ -n "$message_id" ] && [ "${#old_ids[@]}" -eq 3 ] || die 'cleanup receipt lacks application services'
 for service in message-server agent extension-runner core-runner; do [ "${receipt_projects[$service]}" = "$stack" ] || die "$service receipt project does not match the deployment stack"; done
 
-recorded_available=true
-agent_recovered_to_target=false
-docker inspect "$message_id" >/dev/null 2>&1 || recorded_available=false
-for service in agent extension-runner core-runner; do docker inspect "${old_ids[$service]}" >/dev/null 2>&1 || recorded_available=false; done
-if [ "$recorded_available" = false ]; then
-  declare -A recovered_ids=() recovered_statuses=()
-  recovered_image_id='' recovered_config_image=''
-  recovered_message_id=$("${compose[@]}" ps -q message-server 2>/dev/null) || die 'could not resolve current message-server container'
-  printf '%s\n' "$recovered_message_id" | grep -Eq '^[0-9a-f]{64}$' || die 'current message-server container identity is invalid'
-  data=$(docker inspect "$recovered_message_id" 2>/dev/null) || die 'current message-server container is unavailable'
-  jq -e --arg id "$recovered_message_id" --arg project "$stack" --arg image "$message_image" '
+message_image_id=
+verify_message_server() {
+  local data observed
+  verify_receipt_unchanged
+  [ "$(read_pair "$receipt" "container.${indexes[message-server]}.id")" = "$message_id" ] || die 'message-server receipt identity changed during Agent update'
+  data=$(docker inspect "$message_id" 2>/dev/null) || die 'exact receipt-bound message-server container is unavailable'
+  jq -e --arg id "$message_id" --arg project "$stack" --arg image "$message_image" '
     length == 1 and .[0].Id == $id and
     .[0].Config.Labels["com.docker.compose.project"] == $project and
     .[0].Config.Labels["com.docker.compose.service"] == "message-server" and
     .[0].Config.Image == $image and .[0].State.Status == "running" and
     .[0].State.Health.Status == "healthy"
-  ' <<<"$data" >/dev/null || die 'current message-server identity or health does not match the receipt-bound compose service'
-  message_id=$recovered_message_id
+  ' <<<"$data" >/dev/null || die 'receipt-bound message-server identity or health changed'
+  observed=$(jq -r '.[0].Image // empty' <<<"$data")
+  printf '%s\n' "$observed" | grep -Eq '^sha256:[0-9a-f]{64}$' || die 'message-server image identity is invalid'
+  if [ -z "$message_image_id" ]; then
+    message_image_id=$observed
+  else
+    [ "$observed" = "$message_image_id" ] || die 'message-server image identity changed during Agent update'
+  fi
+}
+
+verify_message_server
+recorded_available=true
+agent_recovered_to_target=false
+for service in agent extension-runner core-runner; do docker inspect "${old_ids[$service]}" >/dev/null 2>&1 || recorded_available=false; done
+if [ "$recorded_available" = false ]; then
+  declare -A recovered_ids=() recovered_statuses=()
+  recovered_image_id='' recovered_config_image=''
+  verify_message_server
   for service in agent extension-runner core-runner; do
     recovered_ids[$service]=$("${compose[@]}" ps -q "$service" 2>/dev/null) || die "could not resolve current $service container"
     printf '%s\n' "${recovered_ids[$service]}" | grep -Eq '^[0-9a-f]{64}$' || die "current $service container identity is invalid"
@@ -120,10 +142,9 @@ if [ "$recorded_available" = false ]; then
   chmod 400 "$repair_env"
   repair_env_identity=$(stat -c '%d:%i:%u' "$repair_env"); repair_env_sha=$(sha256sum "$repair_env" | awk '{print $1}')
   repair_receipt=$(mktemp "$out/.cleanup-receipt.XXXXXX")
-  awk -F= -v identity="$repair_env_identity" -v digest="$repair_env_sha" -v mi="${indexes[message-server]}" -v mid="$message_id" -v ai="${indexes[agent]}" -v aid="${recovered_ids[agent]}" -v ei="${indexes[extension-runner]}" -v eid="${recovered_ids[extension-runner]}" -v ci="${indexes[core-runner]}" -v cid="${recovered_ids[core-runner]}" '
+  awk -F= -v identity="$repair_env_identity" -v digest="$repair_env_sha" -v ai="${indexes[agent]}" -v aid="${recovered_ids[agent]}" -v ei="${indexes[extension-runner]}" -v eid="${recovered_ids[extension-runner]}" -v ci="${indexes[core-runner]}" -v cid="${recovered_ids[core-runner]}" '
     $1=="control.env_identity" {$0=$1 "=" identity}
     $1=="control.env_sha256" {$0=$1 "=" digest}
-    $1==("container." mi ".id") {$0=$1 "=" mid}
     $1==("container." ai ".id") {$0=$1 "=" aid}
     $1==("container." ei ".id") {$0=$1 "=" eid}
     $1==("container." ci ".id") {$0=$1 "=" cid}
@@ -141,22 +162,18 @@ if [ "$recorded_available" = false ]; then
     status=$(jq -r '.[0].State.Status // empty' <<<"$data"); health=$(jq -r '.[0].State.Health.Status // empty' <<<"$data")
     recovery_runtime_valid "$service" "$status" "$health" || die "current $service runtime state changed before receipt repair"
   done
+  verify_message_server
   mv -f "$repair_env" "$env_file"; repair_env=
   mv -f "$repair_receipt" "$receipt"; repair_receipt=
+  refresh_receipt_identity
+  verify_message_server
   trap - EXIT
   image=$recovered_image
   recorded_version=$recovered_version
   for service in agent extension-runner core-runner; do old_ids[$service]=${recovered_ids[$service]}; done
 fi
 
-message_data=$(docker inspect "$message_id" 2>/dev/null) || die 'message-server container is unavailable'
-jq -e --arg id "$message_id" --arg project "$stack" --arg image "$message_image" '
-  length == 1 and .[0].Id == $id and
-  .[0].Config.Labels["com.docker.compose.project"] == $project and
-  .[0].Config.Labels["com.docker.compose.service"] == "message-server" and
-  .[0].Config.Image == $image
-' <<<"$message_data" >/dev/null || die 'message-server identity does not match the receipt-bound compose service'
-message_image_id=$(jq -r '.[0].Image // empty' <<<"$message_data"); [ -n "$message_image_id" ] || die 'message-server image identity is missing'
+verify_message_server
 server_version=$(docker image inspect "$message_image_id" --format '{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null) || die 'message-server version inspection failed'
 canonical_version "$server_version" || die 'message-server version is invalid'
 semver_ge "$server_version" "$minimum_server_version" || negative "target requires message-server $minimum_server_version (running $server_version)"
@@ -191,30 +208,43 @@ else
 
   rollback_needed=false
   rollback_agent() {
-  local status=$? rollback_receipt rollback_message_id rollback_agent_id rollback_extension_id rollback_core_id id data attempts rollback_ready
+  local status=$? rollback_receipt rollback_agent_id rollback_extension_id rollback_core_id id data attempts rollback_ready
   [ "$rollback_needed" = true ] || return "$status"
   trap - EXIT
   printf 'split-agent update: restoring previous local image after failed apply\n' >&2
+  verify_message_server
+  if "${compose[@]}" stop agent extension-runner core-runner >/dev/null 2>&1 \
+      && verify_message_server \
+      && "$script_dir/prepare-runner-cgroups.sh" "$stack" >/dev/null \
+      && verify_message_server; then
+    :
+  else
+    printf 'split-agent update: rollback runner preparation failed\n' >&2
+    return 1
+  fi
   if DIREXTALK_AGENT_IMAGE="$image" \
-      "${compose[@]}" up -d --no-deps --force-recreate --no-build --pull never extension-runner core-runner agent message-server >/dev/null 2>&1; then
+      "${compose[@]}" up -d --no-deps --force-recreate --no-build --pull never extension-runner core-runner agent >/dev/null 2>&1; then
     attempts=${DIREXTALK_AGENT_UPDATE_HEALTH_ATTEMPTS:-60}
     while [ "$attempts" -gt 0 ]; do
-      rollback_message_id=$("${compose[@]}" ps -q message-server 2>/dev/null || true)
       rollback_agent_id=$("${compose[@]}" ps -q agent 2>/dev/null || true)
       rollback_extension_id=$("${compose[@]}" ps -q extension-runner 2>/dev/null || true)
       rollback_core_id=$("${compose[@]}" ps -q core-runner 2>/dev/null || true)
       rollback_ready=true
-      data=$(docker inspect "$rollback_message_id" 2>/dev/null || true)
-      [ "$(jq -r '.[0].Image // empty' <<<"$data")" = "$message_image_id" ] && [ "$(jq -r '.[0].State.Health.Status // empty' <<<"$data")" = healthy ] || rollback_ready=false
       for id in "$rollback_agent_id" "$rollback_extension_id" "$rollback_core_id"; do
         data=$(docker inspect "$id" 2>/dev/null || true)
         [ "$(jq -r '.[0].Image // empty' <<<"$data")" = "$old_image_id" ] && [ "$(jq -r '.[0].State.Health.Status // empty' <<<"$data")" = healthy ] || rollback_ready=false
       done
-      if [ "$rollback_ready" = true ] && [ "$(docker exec "$rollback_message_id" /usr/bin/dirextalk-message-server --version 2>/dev/null || true)" = "$server_version" ]; then
+      if [ "$rollback_ready" = true ]; then
+        verify_message_server
         rollback_receipt=$(mktemp "$out/.cleanup-receipt.XXXXXX")
-        awk -F= -v mi="${indexes[message-server]}" -v mid="$rollback_message_id" -v ai="${indexes[agent]}" -v aid="$rollback_agent_id" -v ei="${indexes[extension-runner]}" -v eid="$rollback_extension_id" -v ci="${indexes[core-runner]}" -v cid="$rollback_core_id" \
-          '$1==("container." mi ".id") {$0=$1 "=" mid} $1==("container." ai ".id") {$0=$1 "=" aid} $1==("container." ei ".id") {$0=$1 "=" eid} $1==("container." ci ".id") {$0=$1 "=" cid} {print}' "$receipt" >"$rollback_receipt" &&
-          chmod 400 "$rollback_receipt" && mv -f "$rollback_receipt" "$receipt"
+        if awk -F= -v ai="${indexes[agent]}" -v aid="$rollback_agent_id" -v ei="${indexes[extension-runner]}" -v eid="$rollback_extension_id" -v ci="${indexes[core-runner]}" -v cid="$rollback_core_id" \
+          '$1==("container." ai ".id") {$0=$1 "=" aid} $1==("container." ei ".id") {$0=$1 "=" eid} $1==("container." ci ".id") {$0=$1 "=" cid} {print}' "$receipt" >"$rollback_receipt" &&
+          chmod 400 "$rollback_receipt" && verify_message_server && mv -f "$rollback_receipt" "$receipt"; then
+          refresh_receipt_identity
+        else
+          return 1
+        fi
+        verify_message_server
         return "$status"
       fi
       attempts=$((attempts-1)); [ "$attempts" -gt 0 ] && sleep 1
@@ -225,11 +255,17 @@ else
   }
   trap rollback_agent EXIT
   if [ -n "$local_image_ref" ]; then
+    verify_message_server
     docker image tag "$target_image_id" "$target_image" >/dev/null || die 'could not bind local Agent image to the target version tag'
   fi
   rollback_needed=true
+  verify_message_server
   DIREXTALK_AGENT_IMAGE="$target_image" \
     "${compose[@]}" run --rm --no-deps --pull never -T --interactive=false agent-migrate >/dev/null || die 'Agent storage migration failed'
+  verify_message_server
+  "$script_dir/prepare-agent-start-local.sh" "$out" \
+    || die 'Agent runner cgroup preparation failed before recreate'
+  verify_message_server
   DIREXTALK_AGENT_IMAGE="$target_image" \
     "${compose[@]}" up -d --no-deps --force-recreate --no-build --pull never extension-runner core-runner agent >/dev/null || die 'Agent recreate failed'
   for service in agent extension-runner core-runner; do
@@ -240,30 +276,20 @@ else
   for pair in agent:/usr/local/bin/dirextalk-agent extension-runner:/usr/local/bin/dirextalk-extension-runner core-runner:/usr/local/bin/dirextalk-core-runner; do service=${pair%%:*}; binary=${pair#*:}; [ "$(docker exec "${new_ids[$service]}" "$binary" --version)" = "$target_version" ] || die "$service running binary version mismatch"; done
 fi
 
-DIREXTALK_AGENT_IMAGE="$target_image" \
-  "${compose[@]}" up -d --no-deps --force-recreate --no-build --pull never message-server >/dev/null || die 'message-server recreate after Agent update failed'
-attempts=${DIREXTALK_AGENT_UPDATE_HEALTH_ATTEMPTS:-60}
-while [ "$attempts" -gt 0 ]; do
-  new_message_id=$("${compose[@]}" ps -q message-server 2>/dev/null || true)
-  data=$(docker inspect "$new_message_id" 2>/dev/null || true)
-  if jq -e --arg id "$new_message_id" --arg project "$stack" --arg image "$message_image" --arg image_id "$message_image_id" '
-    length == 1 and .[0].Id == $id and .[0].Image == $image_id and
-    .[0].Config.Labels["com.docker.compose.project"] == $project and
-    .[0].Config.Labels["com.docker.compose.service"] == "message-server" and
-    .[0].Config.Image == $image and .[0].State.Status == "running" and
-    .[0].State.Health.Status == "healthy"
-  ' <<<"$data" >/dev/null 2>&1; then break; fi
-  attempts=$((attempts-1)); [ "$attempts" -gt 0 ] && sleep 1
-done
-[ "$attempts" -gt 0 ] || die 'message-server did not become healthy after Agent update'
-[ "$(docker exec "$new_message_id" /usr/bin/dirextalk-message-server --version)" = "$server_version" ] || die 'message-server version changed during Agent catalog refresh'
+if [ "$agent_recovered_to_target" = true ]; then
+  verify_message_server
+  "$script_dir/restart-agent-local.sh" "$out" \
+    || die 'recovered Agent runtime restart failed'
+  verify_message_server
+fi
 
+verify_message_server
 new_env=$(mktemp "$out/.env.XXXXXX")
 awk -F= -v image="$target_image" -v version="$target_version" -v revision="$target_revision" '$1=="DIREXTALK_AGENT_IMAGE" {$0=$1 "=" image; is=1} $1=="DIREXTALK_AGENT_VERSION" {$0=$1 "=" version; vs=1} $1=="DIREXTALK_AGENT_SOURCE_REVISION" {$0=$1 "=" revision; rs=1} {print} END {if (!is || !vs || !rs) exit 1}' "$env_file" >"$new_env" || die 'could not update expected Agent release'
 chmod 400 "$new_env"; new_env_identity=$(stat -c '%d:%i:%u' "$new_env"); new_env_sha=$(sha256sum "$new_env" | awk '{print $1}')
 new_receipt=$(mktemp "$out/.cleanup-receipt.XXXXXX")
-awk -F= -v identity="$new_env_identity" -v digest="$new_env_sha" -v mi="${indexes[message-server]}" -v mid="$new_message_id" -v ai="${indexes[agent]}" -v aid="${new_ids[agent]}" -v ei="${indexes[extension-runner]}" -v eid="${new_ids[extension-runner]}" -v ci="${indexes[core-runner]}" -v cid="${new_ids[core-runner]}" '$1=="control.env_identity" {$0=$1 "=" identity} $1=="control.env_sha256" {$0=$1 "=" digest} $1==("container." mi ".id") {$0=$1 "=" mid} $1==("container." ai ".id") {$0=$1 "=" aid} $1==("container." ei ".id") {$0=$1 "=" eid} $1==("container." ci ".id") {$0=$1 "=" cid} {print}' "$receipt" >"$new_receipt"
-chmod 400 "$new_receipt"; mv -f "$new_env" "$env_file"; mv -f "$new_receipt" "$receipt"
+awk -F= -v identity="$new_env_identity" -v digest="$new_env_sha" -v ai="${indexes[agent]}" -v aid="${new_ids[agent]}" -v ei="${indexes[extension-runner]}" -v eid="${new_ids[extension-runner]}" -v ci="${indexes[core-runner]}" -v cid="${new_ids[core-runner]}" '$1=="control.env_identity" {$0=$1 "=" identity} $1=="control.env_sha256" {$0=$1 "=" digest} $1==("container." ai ".id") {$0=$1 "=" aid} $1==("container." ei ".id") {$0=$1 "=" eid} $1==("container." ci ".id") {$0=$1 "=" cid} {print}' "$receipt" >"$new_receipt"
+chmod 400 "$new_receipt"; verify_message_server; mv -f "$new_env" "$env_file"; mv -f "$new_receipt" "$receipt"; refresh_receipt_identity; verify_message_server
 rollback_needed=false
 trap - EXIT
 if [ "$old_image_id" != "$target_image_id" ] && ! docker ps -aq --filter "ancestor=$old_image_id" | grep -q .; then docker image rm "$old_image_id" >/dev/null 2>&1 || true; fi

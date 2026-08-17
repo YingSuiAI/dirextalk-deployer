@@ -133,7 +133,11 @@ and coturn remain fixed dependencies.
 The packaged canonical runtime bundle starts message-server, the external Agent,
 one PostgreSQL/pgvector container with isolated Message Server and Agent roles
 and databases, extension/core runners, and a separate Caddy
-edge project. The target host never clones either source repository. The host updater is a separate
+edge project. It verifies Message Server first and then starts the isolated
+Agent path; Agent attention does not take healthy messaging or bootstrap export
+offline. Agent updates and recovery preserve the exact receipt-bound Message
+Server container and repair runner cgroup delegation before any Agent-only
+restart. The target host never clones either source repository. The host updater is a separate
 [`dirextalk-updater`](https://github.com/YingSuiAI/dirextalk-updater) Release:
 the supported Ubuntu 24.04+ x86_64 host with systemd >= 254 downloads the deployer-pinned updater asset and
 verifies the deployer-pinned SHA-256 before atomic installation. The local

@@ -66,6 +66,12 @@ count=0
 count=$((count + 1))
 printf '%s\n' "$count" >"$DIREXTALK_TEST_START_COUNT"
 printf 'start %s\n' "$count" >>"$DIREXTALK_TEST_CLEANUP_CALLS"
+if [ "${DIREXTALK_TEST_AGENT_ATTENTION:-false}" = true ]; then
+  : >"$DIREXTALK_TEST_RESOURCE"
+  printf '# receipt\nstate=complete\n' >"$out/.cleanup-receipt"
+  chmod 0400 "$out/.cleanup-receipt"
+  exit 3
+fi
 if [ "$count" -eq 1 ]; then
   [ "${DIREXTALK_TEST_NO_RECEIPT:-false}" != true ] || exit 42
   : >"$DIREXTALK_TEST_RESOURCE"
@@ -193,7 +199,7 @@ if PATH="$fakebin:$PATH" bash "$consumer" >"$tmp/first.out" 2>"$tmp/first.err"; 
 else
   status=$?
 fi
-[ "$status" -eq 42 ] || { cat "$tmp/first.err" >&2; exit 1; }
+[ "$status" -eq 1 ] || { cat "$tmp/first.err" >&2; exit 1; }
 grep -Fqx 'cleanup-local --purge' "$DIREXTALK_TEST_CLEANUP_CALLS"
 grep -Fq 'partial fresh stack was cleaned for retry' "$tmp/first.err"
 [ ! -e "$DIREXTALK_TEST_RESOURCE" ]
@@ -220,6 +226,35 @@ cmp "$tmp/expected-retry-events" "$DIREXTALK_TEST_CLEANUP_CALLS"
 [ -f "$base/.split-deploy-done" ]
 [ -f "$base/p2p/bootstrap.json" ]
 [ "$(cat "$base/.split-bootstrap-stage")" = completed ]
+
+# A healthy Message Server with an Agent startup failure remains available for
+# messaging and bootstrap export. The protected marker makes the next host
+# bootstrap use receipt-bound Agent recovery instead of another fresh start.
+attention=$tmp/attention
+cp -a "$tmp/pristine" "$attention"
+if PATH="$fakebin:$PATH" \
+    DIREXTALK_BOOTSTRAP_BASE="$attention" \
+    DIREXTALK_TEST_RESOURCE="$tmp/attention-resource" \
+    DIREXTALK_TEST_PROVISION_COUNT="$tmp/attention-provision-count" \
+    DIREXTALK_TEST_START_COUNT="$tmp/attention-start-count" \
+    DIREXTALK_TEST_CLEANUP_CALLS="$tmp/attention-cleanup-calls" \
+    DIREXTALK_TEST_PREPARATION_COUNT="$tmp/attention-preparation-count" \
+    DIREXTALK_TEST_RUNNER_INTEGRATION="$tmp/attention-runner-integration" \
+    DIREXTALK_TEST_AGENT_ATTENTION=true \
+    bash "$consumer" >"$tmp/attention.out" 2>"$tmp/attention.err"; then
+  echo 'Agent-attention bootstrap unexpectedly reported full health' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 3 ]
+grep -Fq 'continuing Edge and bootstrap export while Agent needs attention' "$tmp/attention.err"
+grep -Fq 'preserved healthy messaging; Agent recovery is required' "$tmp/attention.err"
+[ -f "$attention/.split-deploy-done" ]
+[ -f "$attention/edge-bootstrap-receipt" ]
+[ -f "$attention/p2p/bootstrap.json" ]
+[ -e "$tmp/attention-resource" ]
+! grep -q '^cleanup-' "$tmp/attention-cleanup-calls"
 
 # A formal Agent release updates the protected runtime receipt, not the
 # fresh-bootstrap input. A later tooling/Caddy reconcile must use that current

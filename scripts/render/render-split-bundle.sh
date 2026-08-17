@@ -52,6 +52,7 @@ if { [ "$packaged_bundle_explicit" = true ] || [ "$runtime_root_explicit" = fals
     SOURCE_REVISION
     SOURCE_FILES.sha256
     compose.production.yaml
+    scripts/prepare-agent-start-local.sh
     scripts/update-message-server-local.sh
   )
   for file in "${packaged_required[@]}"; do
@@ -78,6 +79,7 @@ required=(
   scripts/provision-local.sh
   scripts/prepare-host-dependencies.sh
   scripts/prepare-runner-cgroups.sh
+  scripts/prepare-agent-start-local.sh
   scripts/start-local.sh
   scripts/cleanup-local.sh
   scripts/cleanup-provision-failure.sh

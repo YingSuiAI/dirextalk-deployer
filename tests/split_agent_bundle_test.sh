@@ -25,6 +25,7 @@ files=(
   scripts/materialize-agent-secrets.sh
   scripts/message-server-entrypoint.sh
   scripts/prepare-runner-cgroups.sh
+  scripts/prepare-agent-start-local.sh
   scripts/manage-runner-apparmor.sh
   scripts/start-local.sh
   scripts/cleanup-local.sh
@@ -115,13 +116,23 @@ if grep -Fq '50052' "$repository_compose"; then
   exit 1
 fi
 grep -Fq 'networks: [agent_private, agent_database, agent_caller, agent_egress, message_public]' "$repository_compose"
-awk '
+if awk '
   /^  message-server:$/ { in_message = 1; next }
-  in_message && /^  [a-zA-Z0-9_-]+:$/ { exit found ? 0 : 1 }
-  in_message && /^      agent:$/ { saw_agent = 1; next }
-  saw_agent && /^        condition: service_healthy$/ { found = 1; exit 0 }
-  END { if (!found) exit 1 }
-' "$repository_compose"
+  in_message && /^  [a-zA-Z0-9_-]+:$/ { exit }
+  in_message && /^      agent:$/ { found = 1; exit }
+  END { exit(found ? 0 : 1) }
+' "$repository_compose"; then
+  echo 'canonical split bundle retained the Message Server to Agent health dependency' >&2
+  exit 1
+fi
+start_source="$ROOT/scripts/cloud-init/split/runtime/scripts/start-local.sh"
+message_start_line=$(grep -nF -- '--wait message-server' "$start_source" | cut -d: -f1)
+agent_start_line=$(grep -nF 'agent-secret-init agent-migrate extension-runner core-runner agent; then' "$start_source" | cut -d: -f1)
+[ -n "$message_start_line" ] && [ -n "$agent_start_line" ] && [ "$message_start_line" -lt "$agent_start_line" ] || {
+  echo 'fresh startup does not establish Message Server before the explicit Agent path' >&2
+  exit 1
+}
+grep -Fq 'message-server is healthy; Agent runtime needs attention' "$start_source"
 if grep -Ei 'qdrant|message[_-]postgres[_-](data|volume)|agent[_-]postgres[_-](data|volume)' \
     "$repository_compose" >/dev/null; then
   echo 'canonical split bundle retained superseded Qdrant or per-application PostgreSQL resources' >&2

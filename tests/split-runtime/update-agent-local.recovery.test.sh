@@ -127,7 +127,7 @@ case "${1:-}" in
   compose)
     shift
     while [ "$#" -gt 0 ]; do
-      case "$1" in ps|run|up) compose_command=$1; shift; break;; *) shift;; esac
+      case "$1" in ps|run|stop|up) compose_command=$1; shift; break;; *) shift;; esac
     done
     case "${compose_command:-}" in
       ps)
@@ -164,8 +164,15 @@ case "${1:-}" in
         grep -Fqx "control.env_sha256=$env_sha" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
         log 'migration saw recovered v1.0.91 baseline'
         ;;
+      stop)
+        log "compose stop:$*"
+        ;;
       up)
         log "compose up:$*"
+        if [ "$DOCKER_FIXTURE_SCENARIO" = apply_fail ] \
+            && [ "${DIREXTALK_AGENT_IMAGE:-}" = docker.io/dirextalk/agent:v1.0.92 ]; then
+          exit 17
+        fi
         case " $* " in
           *' message-server '*) printf 'message\n' >"$DOCKER_FIXTURE_STATE" ;;
           *) printf 'agent\n' >"$DOCKER_FIXTURE_STATE" ;;
@@ -179,6 +186,21 @@ case "${1:-}" in
 esac
 DOCKER
 chmod 755 "$fake_bin/docker"
+cat >"$script_dir/prepare-agent-start-local.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'prepare-agent-start:%s\n' "$1" >>"$DOCKER_FIXTURE_LOG"
+EOF
+cat >"$script_dir/prepare-runner-cgroups.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'prepare-runner:%s\n' "$1" >>"$DOCKER_FIXTURE_LOG"
+printf 'DIREXTALK_RUNNER_PREPARED=true\n'
+EOF
+cat >"$script_dir/restart-agent-local.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'restart-agent:%s\n' "$1" >>"$DOCKER_FIXTURE_LOG"
+EOF
+chmod 0755 "$script_dir/prepare-agent-start-local.sh" \
+  "$script_dir/prepare-runner-cgroups.sh" "$script_dir/restart-agent-local.sh"
 
 make_fixture() {
   local root=$1 out=$1/out env_identity env_sha
@@ -278,7 +300,7 @@ grep -Fqx 'DIREXTALK_AGENT_VERSION=v1.0.92' "$success_root/out/.env"
 grep -Fqx 'DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.92' "$success_root/out/.env"
 grep -Fqx "DIREXTALK_AGENT_SOURCE_REVISION=$revision_92" "$success_root/out/.env"
 grep -Fqx 'UNRELATED_ENV=preserve-me' "$success_root/out/.env"
-grep -Fqx "container.0.id=$new_message_id" "$success_root/out/.cleanup-receipt"
+grep -Fqx "container.0.id=$message_id" "$success_root/out/.cleanup-receipt"
 grep -Fqx "container.1.id=$new_agent_id" "$success_root/out/.cleanup-receipt"
 grep -Fqx "container.2.id=$new_extension_id" "$success_root/out/.cleanup-receipt"
 grep -Fqx "container.3.id=$new_core_id" "$success_root/out/.cleanup-receipt"
@@ -290,20 +312,34 @@ grep -Fqx "control.env_sha256=$env_sha" "$success_root/out/.cleanup-receipt"
 sed -E '/^DIREXTALK_AGENT_(IMAGE|VERSION|SOURCE_REVISION)=/d' "$success_root/original.env" >"$success_root/original.env.stable"
 sed -E '/^DIREXTALK_AGENT_(IMAGE|VERSION|SOURCE_REVISION)=/d' "$success_root/out/.env" >"$success_root/final.env.stable"
 cmp "$success_root/original.env.stable" "$success_root/final.env.stable"
-sed -E '/^control\.env_(identity|sha256)=|^container\.[0123]\.id=/d' "$success_root/original.receipt" >"$success_root/original.receipt.stable"
-sed -E '/^control\.env_(identity|sha256)=|^container\.[0123]\.id=/d' "$success_root/out/.cleanup-receipt" >"$success_root/final.receipt.stable"
+sed -E '/^control\.env_(identity|sha256)=|^container\.[123]\.id=/d' "$success_root/original.receipt" >"$success_root/original.receipt.stable"
+sed -E '/^control\.env_(identity|sha256)=|^container\.[123]\.id=/d' "$success_root/out/.cleanup-receipt" >"$success_root/final.receipt.stable"
 cmp "$success_root/original.receipt.stable" "$success_root/final.receipt.stable"
 cmp "$success_root/original.agent-config.yaml" "$success_root/out/agent-config.yaml"
 grep -Fqx 'agent_http_enabled: true' "$success_root/out/agent-config.yaml"
 grep -Fqx 'agent_http_listen: 0.0.0.0:8082' "$success_root/out/agent-config.yaml"
 grep -Fqx 'compose up:-d --no-deps --force-recreate --no-build --pull never extension-runner core-runner agent' "$success_root/docker.log"
-grep -Fqx 'compose up:-d --no-deps --force-recreate --no-build --pull never message-server' "$success_root/docker.log"
+grep -Fqx "prepare-agent-start:$success_root/out" "$success_root/docker.log"
+prepare_line=$(grep -n '^prepare-agent-start:' "$success_root/docker.log" | cut -d: -f1)
+apply_line=$(grep -n '^compose up:' "$success_root/docker.log" | head -n 1 | cut -d: -f1)
+[ "$prepare_line" -lt "$apply_line" ]
+if grep -Eq '^compose (up|ps):.*message-server' "$success_root/docker.log"; then
+  echo 'successful Agent update touched Message Server through Compose' >&2
+  exit 1
+fi
 
 message_recovery_root=$tmp/message_missing
 make_fixture "$message_recovery_root"
-run_wrapper "$message_recovery_root" message_missing >"$message_recovery_root/stdout" 2>"$message_recovery_root/stderr"
-grep -Fqx 'migration saw recovered v1.0.91 baseline' "$message_recovery_root/docker.log"
-grep -Fqx "container.0.id=$new_message_id" "$message_recovery_root/out/.cleanup-receipt"
+cp "$message_recovery_root/out/.env" "$message_recovery_root/original.env"
+cp "$message_recovery_root/out/.cleanup-receipt" "$message_recovery_root/original.receipt"
+if run_wrapper "$message_recovery_root" message_missing >"$message_recovery_root/stdout" 2>"$message_recovery_root/stderr"; then
+  echo 'Agent update adopted a replacement for a missing receipt-bound Message Server' >&2
+  exit 1
+fi
+grep -Fq 'exact receipt-bound message-server container is unavailable' "$message_recovery_root/stderr"
+cmp "$message_recovery_root/original.env" "$message_recovery_root/out/.env"
+cmp "$message_recovery_root/original.receipt" "$message_recovery_root/out/.cleanup-receipt"
+[ ! -f "$message_recovery_root/docker.log" ] || ! grep -Eq 'migration|compose up' "$message_recovery_root/docker.log"
 
 interrupted_target_root=$tmp/interrupted_target
 make_fixture "$interrupted_target_root"
@@ -316,10 +352,31 @@ if grep -Fq 'extension-runner core-runner agent' "$interrupted_target_root/docke
   echo 'interrupted target recovery repeated Agent recreate' >&2
   exit 1
 fi
-grep -Fqx 'compose up:-d --no-deps --force-recreate --no-build --pull never message-server' "$interrupted_target_root/docker.log"
-grep -Fqx "container.0.id=$new_message_id" "$interrupted_target_root/out/.cleanup-receipt"
+if grep -Eq '^compose (up|ps):.*message-server' "$interrupted_target_root/docker.log"; then
+  echo 'interrupted Agent recovery touched Message Server through Compose' >&2
+  exit 1
+fi
+grep -Fqx "restart-agent:$interrupted_target_root/out" "$interrupted_target_root/docker.log"
+grep -Fqx "container.0.id=$message_id" "$interrupted_target_root/out/.cleanup-receipt"
 grep -Fqx "container.1.id=$new_agent_id" "$interrupted_target_root/out/.cleanup-receipt"
 grep -Fqx 'DIREXTALK_AGENT_VERSION=v1.0.92' "$interrupted_target_root/out/.env"
+
+rollback_root=$tmp/apply_fail
+make_fixture "$rollback_root"
+if run_wrapper "$rollback_root" apply_fail >"$rollback_root/stdout" 2>"$rollback_root/stderr"; then
+  echo 'failed Agent apply unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -Fqx 'DIREXTALK_AGENT_VERSION=v1.0.91' "$rollback_root/out/.env"
+grep -Fqx "container.0.id=$message_id" "$rollback_root/out/.cleanup-receipt"
+grep -Fqx "container.1.id=$live_agent_id" "$rollback_root/out/.cleanup-receipt"
+[ "$(grep -Fc 'compose up:-d --no-deps --force-recreate --no-build --pull never extension-runner core-runner agent' "$rollback_root/docker.log")" -eq 2 ]
+grep -Fqx 'compose stop:agent extension-runner core-runner' "$rollback_root/docker.log"
+grep -Fqx 'prepare-runner:test-stack' "$rollback_root/docker.log"
+if grep -Eq '^compose (up|ps):.*message-server' "$rollback_root/docker.log"; then
+  echo 'Agent rollback touched Message Server through Compose' >&2
+  exit 1
+fi
 
 restarting_root=$tmp/agent_restarting
 make_fixture "$restarting_root"

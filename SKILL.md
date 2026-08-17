@@ -459,10 +459,11 @@ Use `DOMAIN=<domain> bash scripts/update.sh` to update an existing production
 split node. It stages the current helpers and runs the receipt-bound canonical
 reconcile path. On host reboot, the installed
 `dirextalk-split-recovery.service` runs after Docker and restores only the
-receipt-bound Agent runtime; do not replace it with ad hoc Compose commands.
-Treat remote operation results as three states: `0` succeeded, `3` is an
-expected negative state that requires an operator decision, and every other
-nonzero status is an infrastructure or contract failure. Read
+receipt-bound Agent runtime while preserving the exact healthy Message Server;
+do not replace it with ad hoc Compose commands. Treat remote operation results
+as three states: `0` means Message Server and Agent are healthy, `3` preserves
+healthy messaging/Edge/bootstrap while Agent needs attention, and `1` is a
+fatal Message Server, infrastructure, identity, or contract failure. Read
 `references/verification-recovery.md` before manual reconcile or reboot
 recovery, and close the operation only after its identity, cgroup, health, and
 persistence gates pass.

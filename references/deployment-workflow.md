@@ -240,8 +240,12 @@ wrapper. It preserves credentials, application volumes, local bridge state,
 and runtime evidence. The reconcile path repairs the edge, then invokes the
 same receipt-bound recovery used after reboot. Agent version changes remain
 client-initiated through the pinned updater and its canonical three-argument
-update wrapper. See `verification-recovery.md` for the three-state result and
-postcondition gates.
+update wrapper. Agent update success, rollback, and interrupted recovery all
+revalidate and preserve the exact receipt-bound Message Server container; they
+never recreate it or adopt a same-name replacement. Before starting an updated
+or recovered Agent trio, the wrapper stops the exact recorded containers and
+reruns host runner cgroup preparation. See
+`verification-recovery.md` for the three-state result and postcondition gates.
 
 ## Existing Node App Data Reset
 

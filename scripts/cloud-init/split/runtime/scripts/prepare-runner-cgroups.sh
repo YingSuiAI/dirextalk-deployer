@@ -685,7 +685,7 @@ verify_enabled "$core_unit"
 verify_unit_definition "$extension_unit" "$extension_template" "$extension_user" "$extension_parent"
 verify_unit_definition "$core_unit" "$core_template" "$core_user" "$core_parent"
 
-systemctl start "$extension_unit" >/dev/null 2>&1 || die "failed to start $extension_unit"
+systemctl restart "$extension_unit" >/dev/null 2>&1 || die "failed to restart $extension_unit"
 wait_unit_active "$extension_unit"
 verify_unit_definition "$extension_unit" "$extension_template" "$extension_user" "$extension_parent"
 extension_control_group=$(unit_control_group "$extension_unit")
@@ -697,7 +697,7 @@ extension_parent_root=${extension_parent_metadata[0]}
 extension_parent_procs=${extension_parent_metadata[1]}
 extension_root=$(prepare_root extension "$extension_uid" "$extension_gid" "$extension_unit" "$extension_parent" "$extension_control_group" "$extension_main_pid")
 
-systemctl start "$core_unit" >/dev/null 2>&1 || die "failed to start $core_unit"
+systemctl restart "$core_unit" >/dev/null 2>&1 || die "failed to restart $core_unit"
 wait_unit_active "$core_unit"
 verify_unit_definition "$core_unit" "$core_template" "$core_user" "$core_parent"
 core_control_group=$(unit_control_group "$core_unit")

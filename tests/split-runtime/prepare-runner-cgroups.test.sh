@@ -79,6 +79,8 @@ if grep -Eq 'systemctl[[:space:]]+stop|systemctl[[:space:]]+disable|rm[[:space:]
   echo "same-name unit stop/disable or host deletion is forbidden" >&2
   exit 1
 fi
+grep -Fq 'systemctl restart "$extension_unit"' "$script"
+grep -Fq 'systemctl restart "$core_unit"' "$script"
 if grep -Fq -- "[ ! -s \"\$root/cgroup.procs\" ]" "$script"; then
   echo "prepare-runner-cgroups.sh must read cgroupfs process contents instead of using stat size" >&2
   exit 1

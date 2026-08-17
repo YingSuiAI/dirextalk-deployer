@@ -28,12 +28,13 @@ coturn         -> TURN 3478 + 49160-49200/udp
 ## 启动顺序
 
 1. `postgres` healthy。
-2. `message-init` 生成 `/etc/dirextalk-message-server/message-server.yaml` 和 signing key，并写入 TURN 配置。
-3. `Agent` 完成迁移并进入 healthy；其 HTTP 数据面只监听容器网络端口 `8082`。
-4. `message-server` 在 Agent healthy 后启动，加载 Matrix + Dirextalk 控制面，读取 `P2P_PORTAL_PASSWORD` 和 `P2P_PORTAL_CREDENTIALS_FILE`。
-5. `message-server` 在受保护数据卷内原子生成包含真实 `agent_room_id` 的完整 Portal/Agent 凭据。canonical `export-portal-bootstrap.sh` 校验容器与 stack 归属后，将当前凭据密封导出到宿主 `/var/dirextalk-message-server/p2p/bootstrap.json`；Deployer 不补写凭据或房间状态。
-6. `message-server` 的 `/.well-known/portal/owner.json` handler 动态返回 owner discovery。
-7. `caddy` 对外服务 Agent 数据面、Matrix、Dirextalk API、静态站点和 well-known；`/agent/v1/*` 的 SSE 响应关闭代理缓冲，其他既有路由保持独立。
+2. `message-server-init` 生成 Message Server 配置以及 Capability CA、证书、方向 token 和 grant signing key。
+3. `message-server` 在 `postgres`、`coturn` 和初始化 job 就绪后启动并先通过健康检查；它不依赖 Agent 运行时健康。
+4. Deployer 随后显式启动 `agent-secret-init`、`agent-migrate`、extension/core runners 和 `agent`；Agent HTTP 数据面只监听容器网络端口 `8082`。
+5. 若 Agent 路径失败但同一个 receipt-bound Message Server 仍健康，fresh bootstrap 保留 IM、继续启动 Edge 并导出凭据，返回 `3`。受保护恢复会跳过已成功的 Agent job，按精确容器 ID 重跑未成功的 `agent-secret-init`、`agent-migrate`，再停止三项 Agent 长驻容器、重建 runner cgroup 委派并只启动 Agent 路径；Message Server/基础设施失败返回 `1` 并清理 fresh stack。
+6. `message-server` 在受保护数据卷内原子生成包含真实 `agent_room_id` 的完整 Portal/Agent 凭据。canonical `export-portal-bootstrap.sh` 校验容器与 stack 归属后，将当前凭据密封导出到宿主 `/var/dirextalk-message-server/p2p/bootstrap.json`；Deployer 不补写凭据或房间状态。
+7. `message-server` 的 `/.well-known/portal/owner.json` handler 动态返回 owner discovery。
+8. `caddy` 对外服务 Agent 数据面、Matrix、Dirextalk API、静态站点和 well-known；`/agent/v1/*` 的 SSE 响应关闭代理缓冲，其他既有路由保持独立。
 
 ## 凭据模型
 

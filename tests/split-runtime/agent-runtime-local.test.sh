@@ -14,7 +14,21 @@ if command -v shellcheck >/dev/null 2>&1; then
 fi
 
 tmp_dir=$(mktemp -d /tmp/dirextalk-agent-runtime-local.XXXXXX)
-trap 'rm -rf -- "$tmp_dir"' EXIT
+prepare_script=$script_dir/prepare-runner-cgroups.sh
+cp -- "$prepare_script" "$tmp_dir/prepare-runner-cgroups.real"
+cleanup() {
+  cp -- "$tmp_dir/prepare-runner-cgroups.real" "$prepare_script"
+  chmod 0755 -- "$prepare_script"
+  rm -rf -- "$tmp_dir"
+}
+trap cleanup EXIT
+cat >"$prepare_script" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'prepare-runner:%s\n' "$1" >>"$DIREXTALK_FAKE_STATE/docker.log"
+printf 'DIREXTALK_RUNNER_PREPARED=true\n'
+EOF
+chmod 0755 -- "$prepare_script"
 stack_name=d-aaaaaaaaaaaaaaaaaaaaaaaaaa
 engine_id=engine-agent-runtime-test-1
 machine_id=$(tr -d '[:space:]' </etc/machine-id)
@@ -31,7 +45,7 @@ write_fixture() {
   env_file=$fixture/.env
   manifest=$fixture/.manifest
   receipt=$fixture/.cleanup-receipt
-  printf 'DIREXTALK_SPLIT_STACK_NAME=%s\nDIREXTALK_AGENT_IMAGE=%s\n' \
+  printf 'DIREXTALK_SPLIT_STACK_NAME=%s\nDIREXTALK_AGENT_IMAGE=%s\nDIREXTALK_MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v1.1.32\n' \
     "$stack_name" "$agent_image" >"$env_file"
   chmod 400 -- "$env_file"
   printf 'stack_name=%s\ncompose_mode=production\nrunner.machine_id=%s\nrunner.docker_engine_id=%s\n' \
@@ -173,6 +187,11 @@ case "$1" in
       printf 'unexpected container action: %s\n' "$action" >&2
       exit 1
     fi
+    if [ "${DIREXTALK_FAKE_DROP_MESSAGE_AFTER_MUTATION_ROLE:-}" = "$role" ]; then
+      tmp=$(mktemp "$DIREXTALK_FAKE_STATE/containers.XXXXXX")
+      awk -F'|' '$1 != "message" { print }' "$state" >"$tmp"
+      mv -- "$tmp" "$state"
+    fi
     ;;
   *) printf 'unexpected docker command: %s\n' "$*" >&2; exit 1 ;;
 esac
@@ -200,6 +219,7 @@ export DIREXTALK_FAKE_REPLACEMENT_ROLE='' DIREXTALK_FAKE_FAIL_STOP_ROLE='' DIREX
 export DIREXTALK_FAKE_SETTLE_ROLE='' DIREXTALK_FAKE_START_MODE='transient'
 export DIREXTALK_FAKE_RESTART_POLICY_AFTER_STOP_ROLE='' DIREXTALK_FAKE_RESTART_POLICY_ROLE=''
 export DIREXTALK_FAKE_RESTART_POLICY_STATUS=running DIREXTALK_FAKE_RESTART_POLICY_HEALTH=healthy
+export DIREXTALK_FAKE_DROP_MESSAGE_AFTER_MUTATION_ROLE=''
 
 tampered_env_fixture=$tmp_dir/tampered-env
 write_fixture "$tampered_env_fixture"
@@ -368,6 +388,32 @@ EOF
 run_expect 0 "$restart_script" "$fixture"
 sequence=$(grep -E '^(container stop|container start)' "$fixture/state/docker.log" | tr '\n' ' ')
 [ "$sequence" = "container stop $agent_id container stop $extension_id container stop $core_id container start $extension_id container start $core_id container start $agent_id " ]
+prepare_line=$(grep -n "^prepare-runner:$stack_name$" "$fixture/state/docker.log" | cut -d: -f1)
+last_stop_line=$(grep -n "^container stop $core_id$" "$fixture/state/docker.log" | cut -d: -f1)
+first_start_line=$(grep -n "^container start $extension_id$" "$fixture/state/docker.log" | cut -d: -f1)
+[ "$last_stop_line" -lt "$prepare_line" ]
+[ "$prepare_line" -lt "$first_start_line" ]
+[ -f "${fixture%/*}/runner-preparation.env" ]
+[ "$(stat -c '%a' "${fixture%/*}/runner-preparation.env")" = 400 ]
+
+# If the exact protected Message Server disappears after one Agent mutation,
+# the next mutation is fenced off without a same-name lookup or recreation.
+cat >"$fixture/state/containers" <<EOF
+message|$message_id|running|healthy
+agent|$agent_id|running|healthy
+extension-runner|$extension_id|running|healthy
+core-runner|$core_id|running|healthy
+EOF
+: >"$fixture/state/docker.log"
+run_expect 1 "$restart_script" "$fixture" \
+  DIREXTALK_FAKE_DROP_MESSAGE_AFTER_MUTATION_ROLE=agent \
+  DIREXTALK_FAKE_REPLACEMENT_ROLE=message
+sequence=$(grep -E '^(container stop|container start)' "$fixture/state/docker.log" | tr '\n' ' ')
+[ "$sequence" = "container stop $agent_id " ]
+if grep -Fq "inspect $stack_name-message-server-1" "$fixture/state/docker.log"; then
+  echo 'Agent runtime adopted or looked up a same-name Message Server replacement' >&2
+  exit 1
+fi
 
 cat >"$fixture/state/containers" <<EOF
 message|$message_id|running|healthy

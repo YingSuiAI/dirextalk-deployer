@@ -537,8 +537,6 @@ services:
         condition: service_healthy
       message-server-init:
         condition: service_completed_successfully
-      agent:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-Y", "off", "-q", "-O", "-", "http://127.0.0.1:8008/_p2p/health"]
       interval: 10s

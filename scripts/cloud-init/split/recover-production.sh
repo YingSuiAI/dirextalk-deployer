@@ -7,8 +7,8 @@ script_dir=$(cd "$(dirname "$0")" && pwd -P)
 source "$script_dir/production-ops-common.sh"
 
 production_bind_completed_runtime
-[ -x "$production_split/scripts/prepare-runner-cgroups.sh" ] \
-  || production_die 'canonical runner cgroup preparation helper is unavailable'
+production_verify_message_server
+recovery_message_id=$production_message_id
 recovery_receipt_identity=$(stat -c '%d:%i:%u' "$production_receipt") \
   || production_die 'cannot record cleanup receipt identity'
 recovery_receipt_sha256=$(sha256sum "$production_receipt" | awk '{print $1}') \
@@ -20,6 +20,13 @@ recovery_verify_receipt_unchanged() {
     || production_die 'cleanup receipt identity changed during recovery'
   [ "$(sha256sum "$production_receipt" | awk '{print $1}')" = "$recovery_receipt_sha256" ] \
     || production_die 'cleanup receipt contents changed during recovery'
+}
+
+recovery_verify_message_unchanged() {
+  recovery_verify_receipt_unchanged
+  production_verify_message_server
+  [ "$production_message_id" = "$recovery_message_id" ] \
+    || production_die 'message-server receipt identity changed during recovery'
 }
 
 recovery_load_agent_containers() {
@@ -39,23 +46,73 @@ recovery_load_agent_containers() {
     [ "$project" = "$production_stack" ] \
       || production_die 'cleanup receipt container project differs from stack'
     case "$service" in
-      agent|extension-runner|core-runner)
+      agent-secret-init|agent-migrate|agent|extension-runner|core-runner)
         [ -z "${recovery_container_ids[$service]:-}" ] \
           || production_die "cleanup receipt contains duplicate $service containers"
         recovery_container_ids[$service]=$id
         ;;
     esac
   done
-  for service in agent extension-runner core-runner; do
+  for service in agent-secret-init agent-migrate agent extension-runner core-runner; do
     [ -n "${recovery_container_ids[$service]:-}" ] \
       || production_die "cleanup receipt lacks the $service container"
   done
 }
 
+recovery_inspect_agent_job() {
+  local service=$1 id=${recovery_container_ids[$1]} inspection actual_id actual_project actual_service
+  if inspection=$(docker inspect --format '{{.Id}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{.State.ExitCode}}|{{.State.StartedAt}}|{{.State.FinishedAt}}' "$id" 2>/dev/null); then
+    :
+  else
+    production_die "recorded $service container inspection failed"
+  fi
+  IFS='|' read -r actual_id actual_project actual_service recovery_job_state recovery_job_exit_code recovery_job_started_at recovery_job_finished_at <<<"$inspection"
+  [ "$actual_id" = "$id" ] || production_die "$service container ID changed"
+  [ "$actual_project" = "$production_stack" ] || production_die "$service container project changed"
+  [ "$actual_service" = "$service" ] || production_die "$service container service changed"
+  printf '%s\n' "$recovery_job_exit_code" | grep -Eq '^-?[0-9]+$' || production_die "$service exit code is invalid"
+  [ -n "$recovery_job_started_at" ] && [ -n "$recovery_job_finished_at" ] \
+    || production_die "$service execution timestamps are invalid"
+}
+
+recovery_run_agent_job() {
+  local service=$1 id=${recovery_container_ids[$1]} status prior_started_at prior_finished_at
+  recovery_verify_message_unchanged
+  recovery_inspect_agent_job "$service"
+  if [ "$recovery_job_state" = exited ] && [ "$recovery_job_exit_code" -eq 0 ]; then
+    return 0
+  fi
+  case "$recovery_job_state" in
+    created|exited)
+      prior_started_at=$recovery_job_started_at
+      prior_finished_at=$recovery_job_finished_at
+      recovery_verify_message_unchanged
+      if docker start -a "$id" >/dev/null; then
+        :
+      else
+        status=$?
+        recovery_verify_message_unchanged
+        recovery_inspect_agent_job "$service"
+        if [ "$recovery_job_state" = exited ] && [ "$recovery_job_exit_code" -ne 0 ] \
+            && { [ "$recovery_job_started_at" != "$prior_started_at" ] \
+              || [ "$recovery_job_finished_at" != "$prior_finished_at" ]; }; then
+          production_negative "$service needs attention after exit $recovery_job_exit_code"
+        fi
+        production_die "$service exact-container restart failed (status $status)"
+      fi
+      ;;
+    *) production_die "$service has an unsafe resume state: $recovery_job_state" ;;
+  esac
+  recovery_verify_message_unchanged
+  recovery_inspect_agent_job "$service"
+  [ "$recovery_job_state" = exited ] && [ "$recovery_job_exit_code" -eq 0 ] \
+    || production_negative "$service did not complete successfully during protected resume"
+}
+
 recovery_settle_agent_containers() {
   local attempts_remaining=30 service id inspection actual_id actual_project actual_service state restarting
   while :; do
-    recovery_verify_receipt_unchanged
+    recovery_verify_message_unchanged
     restarting=false
     for service in agent extension-runner core-runner; do
       id=${recovery_container_ids[$service]}
@@ -84,66 +141,11 @@ recovery_settle_agent_containers() {
 
 recovery_load_agent_containers
 
-recovery_sync_runner_units() {
-  local runner_unit_dir=/etc/systemd/system template source target tmp
-  local -a templates=(
-    dirextalk-extension-runner@.service
-    dirextalk-core-runner@.service
-  )
-  local -a instances=(
-    "dirextalk-extension-runner@${production_stack}.service"
-    "dirextalk-core-runner@${production_stack}.service"
-  )
-
-  for template in "${templates[@]}"; do
-    source=$production_split/systemd/$template
-    target=$runner_unit_dir/$template
-    [ -f "$source" ] && [ ! -L "$source" ] \
-      || production_die "canonical runner unit is unavailable: $template"
-    if [ -e "$target" ] || [ -L "$target" ]; then
-      [ -f "$target" ] && [ ! -L "$target" ] \
-        || production_die "installed runner unit is not a regular file: $target"
-      cmp -s -- "$source" "$target" && continue
-    fi
-    tmp=$(mktemp "$runner_unit_dir/.dirextalk-runner-unit.XXXXXX") \
-      || production_die "cannot stage runner unit: $template"
-    if install -o root -g root -m 0644 -- "$source" "$tmp" && mv -f -- "$tmp" "$target"; then
-      :
-    else
-      rm -f -- "$tmp"
-      production_die "cannot install runner unit: $template"
-    fi
-  done
-
-  systemctl daemon-reload || production_die 'cannot reload runner systemd units'
-  systemctl restart "${instances[@]}" \
-    || production_die 'cannot restart runner systemd units'
-}
-
-recovery_sync_runner_units
-
-preparation_tmp=$(mktemp "$production_base/.runner-preparation.XXXXXX") \
-  || production_die 'cannot create runner preparation receipt'
-cleanup_preparation() { rm -f "$preparation_tmp"; }
-trap cleanup_preparation EXIT
-if "$production_split/scripts/prepare-runner-cgroups.sh" "$production_stack" >"$preparation_tmp"; then
-  :
-else
-  status=$?
-  case "$status" in
-    3) production_negative 'runner cgroup preparation reported an expected negative state' ;;
-    *) production_die 'runner cgroup preparation failed' ;;
-  esac
-fi
-[ -s "$preparation_tmp" ] || production_die 'runner cgroup preparation produced an empty receipt'
-chmod 0400 "$preparation_tmp" || production_die 'cannot protect runner preparation receipt'
-mv -f "$preparation_tmp" "$production_base/runner-preparation.env" \
-  || production_die 'cannot commit runner preparation receipt'
-trap - EXIT
-
+recovery_run_agent_job agent-secret-init
+recovery_run_agent_job agent-migrate
 recovery_settle_agent_containers
 production_bind_completed_runtime
-recovery_verify_receipt_unchanged
+recovery_verify_message_unchanged
 if "$production_split/scripts/restart-agent-local.sh" "$production_run"; then
   :
 else
@@ -153,4 +155,5 @@ else
     *) production_die 'existing runtime restart failed' ;;
   esac
 fi
+recovery_verify_message_unchanged
 printf 'production split recovery passed: stack=%s\n' "$production_stack"

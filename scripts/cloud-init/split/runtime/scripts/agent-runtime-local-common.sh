@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Shared receipt-bound lifecycle implementation for the three Agent runtime
-# containers.  The public wrappers below deliberately do not use Compose:
-# message-server, Postgres, networks, and volumes are outside scope.
+# containers.  The public wrappers below deliberately do not use Compose and
+# never mutate message-server, Postgres, networks, or volumes. The exact
+# receipt-bound Message Server remains a health fence around every mutation.
 
 set -euo pipefail
+agent_runtime_script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 
 agent_runtime_die() {
   printf 'split-agent runtime: %s\n' "$*" >&2
@@ -90,6 +92,31 @@ agent_runtime_verify_host() {
   [ "$engine" = "$agent_runtime_engine_id" ] || agent_runtime_die "Docker Engine ID changed"
 }
 
+agent_runtime_verify_message_server() {
+  local data actual_id raw_name actual_name actual_service project image status health
+  if data=$(docker inspect "$agent_runtime_message_id" 2>/dev/null); then
+    :
+  else
+    agent_runtime_die "exact receipt-bound message-server container is unavailable"
+  fi
+  jq -e 'type == "array" and length == 1' <<<"$data" >/dev/null \
+    || agent_runtime_die "message-server container inspect returned malformed JSON"
+  actual_id=$(jq -r '.[0].Id // empty' <<<"$data")
+  raw_name=$(jq -r '.[0].Name // empty' <<<"$data")
+  actual_name=${raw_name#/}
+  actual_service=$(jq -r '.[0].Config.Labels["com.docker.compose.service"] // empty' <<<"$data")
+  project=$(jq -r '.[0].Config.Labels["com.docker.compose.project"] // empty' <<<"$data")
+  image=$(jq -r '.[0].Config.Image // empty' <<<"$data")
+  status=$(jq -r '.[0].State.Status // empty' <<<"$data")
+  health=$(jq -r '.[0].State.Health.Status // empty' <<<"$data")
+  [ "$actual_id" = "$agent_runtime_message_id" ] || agent_runtime_die "message-server container ID identity changed"
+  [ "$actual_name" = "$agent_runtime_message_name" ] || agent_runtime_die "message-server container name identity changed"
+  [ "$actual_service" = message-server ] || agent_runtime_die "message-server container service identity changed"
+  [ "$project" = "$agent_runtime_stack" ] || agent_runtime_die "message-server container project identity changed"
+  [ "$image" = "$agent_runtime_message_expected_image" ] || agent_runtime_die "message-server container Config.Image identity changed"
+  [ "$status" = running ] && [ "$health" = healthy ] || agent_runtime_die "receipt-bound message-server is not healthy"
+}
+
 agent_runtime_verify_target() {
   local role=$1 id=${agent_runtime_ids[$1]} name=${agent_runtime_names[$1]}
   local service=${agent_runtime_services[$1]} data replacement actual_id raw_name actual_name actual_service project image
@@ -136,8 +163,35 @@ agent_runtime_refresh_targets() {
 agent_runtime_before_mutation() {
   agent_runtime_verify_controls
   agent_runtime_verify_host
+  agent_runtime_verify_message_server
   agent_runtime_refresh_targets
   agent_runtime_require_known_states
+}
+
+agent_runtime_prepare_runner_host() {
+  local helper=$agent_runtime_script_dir/prepare-runner-cgroups.sh preparation_tmp preparation_file
+  [ -x "$helper" ] || agent_runtime_die "canonical runner cgroup preparation helper is unavailable"
+  preparation_file=$agent_runtime_base/runner-preparation.env
+  preparation_tmp=$(mktemp "$agent_runtime_base/.runner-preparation.XXXXXX") \
+    || agent_runtime_die "cannot create runner preparation receipt"
+  if "$helper" "$agent_runtime_stack" >"$preparation_tmp"; then
+    :
+  else
+    rm -f -- "$preparation_tmp"
+    agent_runtime_die "runner cgroup preparation failed"
+  fi
+  [ -s "$preparation_tmp" ] || {
+    rm -f -- "$preparation_tmp"
+    agent_runtime_die "runner cgroup preparation produced an empty receipt"
+  }
+  chmod 0400 "$preparation_tmp" || {
+    rm -f -- "$preparation_tmp"
+    agent_runtime_die "cannot protect runner preparation receipt"
+  }
+  agent_runtime_before_mutation
+  mv -f -- "$preparation_tmp" "$preparation_file" \
+    || agent_runtime_die "cannot commit runner preparation receipt"
+  agent_runtime_before_mutation
 }
 
 agent_runtime_is_stopped() {
@@ -186,6 +240,7 @@ agent_runtime_wait_healthy() {
   while [ "$attempts" -gt 0 ]; do
     agent_runtime_verify_controls
     agent_runtime_verify_host
+    agent_runtime_verify_message_server
     agent_runtime_refresh_targets
     agent_runtime_require_known_states
     status=${agent_runtime_target_status[$role]}
@@ -249,16 +304,28 @@ agent_runtime_restart() {
   for role in agent extension-runner core-runner; do
     agent_runtime_stop_one "$role"
   done
+  agent_runtime_prepare_runner_host
   agent_runtime_start_one extension-runner
   agent_runtime_start_one core-runner
   agent_runtime_start_one agent
   return 0
 }
 
+agent_runtime_prepare() {
+  local role
+  agent_runtime_refresh_targets
+  agent_runtime_require_known_states
+  for role in agent extension-runner core-runner; do
+    agent_runtime_stop_one "$role"
+  done
+  agent_runtime_prepare_runner_host
+}
+
 agent_runtime_main() {
   local operation=$1 out_input=$2
   local current_uid out
-  [ "$operation" = stop ] || [ "$operation" = restart ] || agent_runtime_usage "${0##*/}"
+  [ "$operation" = stop ] || [ "$operation" = restart ] || [ "$operation" = prepare ] \
+    || agent_runtime_usage "${0##*/}"
   case "$out_input" in
     /*) out=$(readlink -m -- "$out_input") ;;
     *) out=$(readlink -m -- "$(pwd -P)/$out_input") ;;
@@ -268,6 +335,7 @@ agent_runtime_main() {
   [ "$(stat -c '%a' -- "$out")" = 700 ] || agent_runtime_die "OUTPUT_DIR must be mode 0700"
   current_uid=$(id -u)
   agent_runtime_uid=$current_uid
+  agent_runtime_base=${out%/*}
   agent_runtime_env_file=$out/.env
   agent_runtime_manifest=$out/.manifest
   agent_runtime_receipt=$out/.cleanup-receipt
@@ -312,13 +380,14 @@ agent_runtime_main() {
   agent_runtime_compose_mode=$(agent_runtime_read_pair "$agent_runtime_manifest" compose_mode)
   [ "$agent_runtime_compose_mode" = production ] || agent_runtime_die "compose mode must be production"
   agent_runtime_expected_image=$(agent_runtime_read_pair "$agent_runtime_env_file" DIREXTALK_AGENT_IMAGE)
+  agent_runtime_message_expected_image=$(agent_runtime_read_pair "$agent_runtime_env_file" DIREXTALK_MESSAGE_SERVER_IMAGE)
   case "$agent_runtime_expected_image" in
     *$'\n'*) agent_runtime_die "Agent image ref contains a newline" ;;
   esac
 
   declare -A agent_runtime_ids=() agent_runtime_names=() agent_runtime_services=()
   declare -A agent_runtime_target_status=() agent_runtime_target_health=() agent_runtime_target_image_id=()
-  local container_count index id name service project role found_agent=false found_extension=false found_core=false
+  local container_count index id name service project role found_message=false found_agent=false found_extension=false found_core=false
   container_count=$(agent_runtime_read_pair "$agent_runtime_receipt" container.count)
   printf '%s\n' "$container_count" | grep -Eq '^[1-9][0-9]{0,3}$' || agent_runtime_die "cleanup receipt container count is invalid"
   for ((index = 0; index < container_count; index++)); do
@@ -331,6 +400,9 @@ agent_runtime_main() {
     printf '%s\n' "$service" | grep -Eq '^[a-z0-9][a-z0-9_-]*$' || agent_runtime_die "receipt container service is invalid"
     [ "$project" = "$agent_runtime_stack" ] || agent_runtime_die "receipt container project is outside this stack"
     case "$service" in
+      message-server)
+        [ "$found_message" = false ] || agent_runtime_die "receipt contains duplicate message-server container"
+        found_message=true; agent_runtime_message_id=$id; agent_runtime_message_name=$name ;;
       agent)
         [ "$found_agent" = false ] || agent_runtime_die "receipt contains duplicate agent container"
         found_agent=true; agent_runtime_ids["agent"]=$id; agent_runtime_names["agent"]=$name; agent_runtime_services["agent"]=$service ;;
@@ -342,6 +414,7 @@ agent_runtime_main() {
         found_core=true; agent_runtime_ids["core-runner"]=$id; agent_runtime_names["core-runner"]=$name; agent_runtime_services["core-runner"]=$service ;;
     esac
   done
+  [ "$found_message" = true ] || agent_runtime_die "receipt does not contain exactly one message-server container"
   [ "$found_agent" = true ] && [ "$found_extension" = true ] && [ "$found_core" = true ] || agent_runtime_die "receipt does not contain exactly the three Agent runtime containers"
 
   command -v docker >/dev/null 2>&1 || agent_runtime_die "docker is required"
@@ -351,8 +424,10 @@ agent_runtime_main() {
   printf '%s\n' "$agent_runtime_health_timeout_seconds" | grep -Eq '^[1-9][0-9]{0,3}$' || agent_runtime_die "health timeout must be 1..999 seconds"
   agent_runtime_verify_controls
   agent_runtime_verify_host
+  agent_runtime_verify_message_server
   case "$operation" in
     stop) agent_runtime_stop ;;
     restart) agent_runtime_restart ;;
+    prepare) agent_runtime_prepare ;;
   esac
 }

@@ -773,10 +773,6 @@ run_with_heartbeat() {
   return "$status"
 }
 
-run_with_heartbeat compose_wait 10 \
-  "${compose[@]}" up -d --no-build --pull never --wait message-server
-
-verify_control_identity
 inspect_runner_cgroup_namespace() {
   local service=$1 container=$2 mode status
   if mode=$(docker inspect -f '{{.HostConfig.CgroupnsMode}}' "$container" 2>/dev/null); then
@@ -787,20 +783,52 @@ inspect_runner_cgroup_namespace() {
   fi
   [ "$mode" = host ] || die "$service must use the host cgroup namespace"
 }
-for service in agent extension-runner core-runner message-server; do
-  container=$(docker ps -q \
+
+healthy_service_container() {
+  local service=$1 container state
+  container=$(docker ps --no-trunc -q \
     --filter "label=com.docker.compose.project=$stack_name" \
     --filter "label=com.docker.compose.service=$service")
   [ -n "$container" ] && [ "${container#*$'\n'}" = "$container" ] || die "$service does not have exactly one running container"
-  state=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}|{{ .State.Health.Status }}' "$container")
-  [ "$state" = "$stack_name|$service|healthy" ] || die "$service health ownership check failed: $state"
-  case "$service" in
-    extension-runner|core-runner) inspect_runner_cgroup_namespace "$service" "$container" ;;
-  esac
-done
+  printf '%s\n' "$container" | grep -Eq '^[0-9a-f]{64}$' || die "$service container identity is invalid"
+  state=$(docker inspect -f '{{.Id}}|{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}|{{ .State.Status }}|{{ .State.Health.Status }}' "$container")
+  [ "$state" = "$container|$stack_name|$service|running|healthy" ] || die "$service health ownership check failed: $state"
+  printf '%s' "$container"
+}
 
-verify_control_identity
-"$script_dir/verify-production-images.sh" "$env_file" --running
+verify_message_server_exact() {
+  local state
+  [ -n "${message_server_container_id:-}" ] || die "message-server identity was not recorded"
+  state=$(docker inspect -f '{{.Id}}|{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}|{{ .State.Status }}|{{ .State.Health.Status }}' "$message_server_container_id" 2>/dev/null) || \
+    die "receipt-candidate message-server container is unavailable"
+  [ "$state" = "$message_server_container_id|$stack_name|message-server|running|healthy" ] || \
+    die "receipt-candidate message-server identity or health changed: $state"
+}
+
+verify_agent_path_materialized() {
+  local service container state
+  for service in agent-secret-init agent-migrate extension-runner core-runner agent; do
+    container=$(docker ps --no-trunc -aq \
+      --filter "label=com.docker.compose.project=$stack_name" \
+      --filter "label=com.docker.compose.service=$service")
+    [ -n "$container" ] && [ "${container#*$'\n'}" = "$container" ] || die "$service was not materialized for protected Agent resume"
+    printf '%s\n' "$container" | grep -Eq '^[0-9a-f]{64}$' || die "$service container identity is invalid"
+    state=$(docker inspect -f '{{.Id}}|{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}' "$container" 2>/dev/null) || \
+      die "$service container identity inspection failed"
+    [ "$state" = "$container|$stack_name|$service" ] || die "$service ownership changed before protected resume: $state"
+  done
+}
+
+verify_full_runtime_health() {
+  local service container
+  for service in agent extension-runner core-runner; do
+    container=$(healthy_service_container "$service")
+    case "$service" in
+      extension-runner|core-runner) inspect_runner_cgroup_namespace "$service" "$container" ;;
+    esac
+  done
+  verify_message_server_exact
+}
 
 # Persist the exact objects created by this fresh start.  Cleanup consumes this
 # receipt instead of resolving mutable Compose names again.  Docker volumes do
@@ -988,10 +1016,40 @@ write_cleanup_receipt() {
   [ "$(stat -c '%a' "$receipt")" = 400 ] || die "cleanup receipt mode changed during creation"
 }
 
+run_with_heartbeat message_server_wait 10 \
+  "${compose[@]}" up -d --no-build --pull never --wait message-server
+
+verify_control_identity
+message_server_container_id=$(healthy_service_container message-server)
+verify_message_server_exact
+
+agent_start_status=0
+if run_with_heartbeat agent_runtime_wait 10 \
+    "${compose[@]}" up -d --no-build --pull never --wait \
+      agent-secret-init agent-migrate extension-runner core-runner agent; then
+  :
+else
+  agent_start_status=$?
+fi
+
+verify_control_identity
+verify_message_server_exact
+verify_agent_path_materialized
+if [ "$agent_start_status" -eq 0 ]; then
+  verify_full_runtime_health
+  "$script_dir/verify-production-images.sh" "$env_file" --running
+fi
+
 verify_control_identity
 verify_local_docker_identity
+verify_message_server_exact
 write_cleanup_receipt complete
 startup_receipt_complete=true
 trap - EXIT
+
+if [ "$agent_start_status" -ne 0 ]; then
+  printf 'split-stack start: message-server is healthy; Agent runtime needs attention (status %s)\n' "$agent_start_status" >&2
+  exit 3
+fi
 
 printf 'fresh split stack is healthy: %s\n' "$stack_name"

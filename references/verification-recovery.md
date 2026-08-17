@@ -86,11 +86,12 @@ sudo /var/dirextalk-message-server/production-ops/reconcile-production.sh
 
 Preserve its three result classes through every caller and wrapper:
 
-- `0`: operation and postconditions succeeded.
-- `3`: expected negative state, such as an absent completed runtime or an
-  incomplete receipt; stop for the matching operator decision.
-- Any other nonzero status: infrastructure, identity, or contract failure;
-  report the failing boundary and do not relabel it as a negative state.
+- `0`: Message Server and Agent are healthy and postconditions succeeded.
+- `3`: Message Server remains healthy and available, but Agent needs
+  receipt-bound recovery or operator attention. Fresh bootstrap still starts
+  Edge and exports portal credentials before returning this status.
+- `1`: Message Server, infrastructure, identity, or contract failure. A fresh
+  application start cleans its receipt-bound partial stack before returning.
 
 ## Reboot Recovery
 
@@ -103,13 +104,24 @@ and requiring `docker.service`. Its only entrypoint is:
 /var/dirextalk-message-server/production-ops/recover-production.sh
 ```
 
-Recovery rebinds the completed runtime from the protected receipt, runs the
-canonical `prepare-runner-cgroups.sh` for that exact stack, protects the new
-runner-preparation receipt, waits for the receipt-recorded `agent`,
-`extension-runner`, and `core-runner` containers to leave their short
-`restarting` state, and then calls the canonical `restart-agent-local.sh` for
-the same run. Do not start the three services independently or recreate them
-with a guessed Compose project.
+Recovery rebinds the completed runtime from the protected receipt, skips an
+already-successful `agent-secret-init` or `agent-migrate` job, and reruns an
+unfinished or failed job by its exact recorded container ID in that order. A
+fresh application exit remains expected-negative status `3`; a Docker start
+failure that did not produce a new container execution is infrastructure
+status `1`. It then waits for the receipt-recorded `agent`, `extension-runner`,
+and `core-runner` containers to leave a short `restarting` state and calls the
+canonical `restart-agent-local.sh` for the same run.
+
+The shared restart boundary stops those three exact containers before running
+`prepare-runner-cgroups.sh`. That helper restarts the two fixed delegated
+systemd units, repairs ownership lost across a host or Docker restart, writes a
+new protected runner-preparation receipt, and only then starts extension
+runner, Core runner, and Agent in order. Before every job, stop, preparation,
+start, and health-wait mutation it revalidates the exact healthy Message Server
+ID from the protected receipt. Recovery never recreates Message Server or
+adopts a same-name replacement. Do not start the three services independently
+or recreate them with a guessed Compose project.
 
 The service is enabled during provisioning, not started immediately. After a
 real reboot, inspect it with:

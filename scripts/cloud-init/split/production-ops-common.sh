@@ -58,6 +58,42 @@ production_bind_completed_runtime() {
   production_bind_runtime
 }
 
+production_verify_message_server() {
+  local container_count index id name service project found=false expected_image inspection
+  local actual_id raw_name actual_name actual_project actual_service actual_image state health
+  container_count=$(production_read_pair "$production_receipt" container.count)
+  printf '%s\n' "$container_count" | grep -Eq '^[1-9][0-9]{0,3}$' \
+    || production_die 'cleanup receipt container count is invalid'
+  for ((index = 0; index < container_count; index++)); do
+    service=$(production_read_pair "$production_receipt" "container.$index.service")
+    [ "$service" = message-server ] || continue
+    [ "$found" = false ] || production_die 'cleanup receipt contains duplicate message-server containers'
+    found=true
+    id=$(production_read_pair "$production_receipt" "container.$index.id")
+    name=$(production_read_pair "$production_receipt" "container.$index.name")
+    project=$(production_read_pair "$production_receipt" "container.$index.project")
+  done
+  [ "$found" = true ] || production_die 'cleanup receipt lacks the message-server container'
+  printf '%s\n' "$id" | grep -Eq '^[0-9a-f]{64}$' || production_die 'message-server receipt identity is invalid'
+  printf '%s\n' "$name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$' || production_die 'message-server receipt name is invalid'
+  [ "$project" = "$production_stack" ] || production_die 'message-server receipt project differs from stack'
+  expected_image=$(production_read_pair "$production_env" DIREXTALK_MESSAGE_SERVER_IMAGE)
+  if inspection=$(docker inspect --format '{{.Id}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.Config.Image}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$id" 2>/dev/null); then
+    :
+  else
+    production_die 'exact receipt-bound message-server container is unavailable'
+  fi
+  IFS='|' read -r actual_id raw_name actual_project actual_service actual_image state health <<<"$inspection"
+  actual_name=${raw_name#/}
+  [ "$actual_id" = "$id" ] || production_die 'message-server container ID changed'
+  [ "$actual_name" = "$name" ] || production_die 'message-server container name changed'
+  [ "$actual_project" = "$production_stack" ] && [ "$actual_service" = message-server ] \
+    || production_die 'message-server Compose identity changed'
+  [ "$actual_image" = "$expected_image" ] || production_die 'message-server image differs from the protected runtime'
+  [ "$state" = running ] && [ "$health" = healthy ] || production_die 'message-server is not healthy'
+  production_message_id=$id
+}
+
 production_verify_edge() {
   local identity actual_id project service image network state health
   grep -Fqx '# dirextalk-edge-bootstrap-receipt-v1' "$production_edge_receipt" || production_die 'edge receipt version is unsupported'

@@ -308,6 +308,7 @@ for turn_octet in "${turn_octets[@]}"; do
 done
 
 completed=false
+agent_attention=false
 if [ "$operation" = --reconcile-edge ]; then
   [ -f "$base/.split-deploy-done" ] && [ ! -L "$base/.split-deploy-done" ] || {
     echo "edge reconcile requires a completed split deployment" >&2
@@ -388,8 +389,13 @@ else
     :
   else
     start_status=$?
-    cleanup_failed_application_start "$start_status" || exit 1
-    exit "$start_status"
+    if [ "$start_status" -eq 3 ]; then
+      agent_attention=true
+      echo 'message-server is healthy; continuing Edge and bootstrap export while Agent needs attention' >&2
+    else
+      cleanup_failed_application_start "$start_status" || exit 1
+      exit 1
+    fi
   fi
 fi
 
@@ -498,3 +504,7 @@ else
 fi
 [ "$completed" = true ] || touch "$base/.split-deploy-done"
 write_stage completed
+if [ "$agent_attention" = true ]; then
+  echo 'fresh production bootstrap preserved healthy messaging; Agent recovery is required' >&2
+  exit 3
+fi

@@ -24,8 +24,10 @@ starts the application stack, and then starts
 the separate canonical Caddy edge project. The edge exposes no Agent host port:
 same-origin `/agent/v1/*` requests are routed over the shared application
 network to the healthy `agent:8082` service, with SSE proxy buffering disabled.
-The Compose contract starts Agent before Message Server so a fresh node does
-not depend on a fixed container address or a later manual Caddy edit.
+The Compose contract starts and verifies Message Server before it explicitly
+starts Agent initialization, migration, both runners, and Agent. An Agent-only
+failure preserves the healthy messaging service, starts Edge, exports bootstrap
+credentials, and returns status `3` for receipt-bound Agent recovery.
 
 `release.env` is the only production release selection. Release preparation
 discovers `latest` once, verifies the corresponding stable version tags, and

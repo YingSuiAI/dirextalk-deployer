@@ -48,6 +48,7 @@ old=1111111111111111111111111111111111111111
 target=2222222222222222222222222222222222222222
 message_revision=3333333333333333333333333333333333333333
 agent_revision=4444444444444444444444444444444444444444
+host_region=ap-east-1
 message_image=docker.io/dirextalk/message-server@sha256:$(printf 'a%.0s' {1..64})
 agent_image=docker.io/dirextalk/agent@sha256:$(printf 'b%.0s' {1..64})
 caddy_image=docker.io/library/caddy@sha256:$(printf 'c%.0s' {1..64})
@@ -116,10 +117,15 @@ tar -C "$bundle_root" -czf "$bundle" deploy
 write_live() {
   base=$1
   rm -rf "$base"
-  mkdir -p "$base/deploy/split-agent" "$base/production-ops" "$base/updater"
+  mkdir -p "$base/deploy/split-agent" "$base/production-ops" "$base/updater" "$base/split"
   printf 'removed-old-file\n' >"$base/deploy/split-agent/removed-file"
   printf 'old-ops\n' >"$base/production-ops/sentinel"
   printf 'old-updater\n' >"$base/updater/sentinel"
+  cat >"$base/split/agent-config.yaml" <<EOF
+instance_id: fixture
+core_cloud_worker_host_region: us-east-1
+core_cloud_worker_host_region: eu-central-1
+EOF
   cat >"$base/.env" <<EOF
 DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
 MESSAGE_SERVER_IMAGE=$message_image
@@ -132,7 +138,9 @@ AGENT_SOURCE_REVISION=$agent_revision
 EOF
   printf '203.0.113.44\n' >"$base/stable-public-ip"
   touch "$base/.split-deploy-done"
+  chmod 0700 "$base/split"
   chmod 0600 "$base/.env" "$base/stable-public-ip"
+  chmod 0400 "$base/split/agent-config.yaml"
 }
 
 write_fresh() {
@@ -149,6 +157,7 @@ COTURN_IMAGE=$coturn_image
 MESSAGE_SOURCE_REVISION=$message_revision
 SPLIT_SOURCE_REVISION=$old
 AGENT_SOURCE_REVISION=$agent_revision
+DIREXTALK_CLOUD_WORKER_HOST_REGION=$host_region
 EOF
   printf '203.0.113.44\n' >"$base/stable-public-ip"
   chmod 0600 "$base/.env" "$base/stable-public-ip"
@@ -161,7 +170,7 @@ fresh_calls="$tmp/fresh.calls"
 write_fresh "$fresh_base"
 FRESH_BASE="$fresh_base" FRESH_CALLS="$fresh_calls" EXPECTED_OLD="$old" EXPECTED_TARGET="$target" \
   PATH="$tmp/bin:$PATH" DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
-  bash "$apply" "$stage" "$bundle" "$fresh_base" "$old" 203.0.113.44 >/dev/null
+  bash "$apply" "$stage" "$bundle" "$fresh_base" "$old" 203.0.113.44 "$host_region" >/dev/null
 grep -Fxq fresh-bootstrap "$fresh_calls"
 grep -Fxq "SPLIT_SOURCE_REVISION=$target" "$fresh_base/.env"
 [ -f "$fresh_base/.split-deploy-done" ]
@@ -173,7 +182,7 @@ write_live "$base"
 before=$(tree_digest "$base")
 if RECONCILE_STATUS=17 EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" \
     DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
-    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 >/dev/null 2>&1; then
+    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 "$host_region" >/dev/null 2>&1; then
   echo 'host integration accepted reconcile failure' >&2; exit 1
 else status=$?; fi
 [ "$status" -eq 1 ]
@@ -182,17 +191,19 @@ grep -Fqx "SPLIT_SOURCE_REVISION=$old" "$base/.env"
 [ ! -e "$base/deploy/split-agent/removed-file" ]
 [ ! -e "$base/production-ops/sentinel" ]
 [ ! -e "$base/updater/sentinel" ]
+[ "$(grep -c '^core_cloud_worker_host_region:' "$base/split/agent-config.yaml")" -eq 2 ]
+grep -Fqx "DIREXTALK_CLOUD_WORKER_HOST_REGION=$host_region" "$base/split/cloud-worker-host-region"
 # Once real reconcile begins, the transaction converges forward on retry
 # because host-level updater/runtime side effects cannot be safely rolled back
 # with directory swaps alone.
 EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
-  bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 >/dev/null
+  bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 "$host_region" >/dev/null
 grep -Fqx "SPLIT_SOURCE_REVISION=$target" "$base/.env"
 
 write_live "$base"
 if RECONCILE_STATUS=3 EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" \
     DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
-    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 >/dev/null 2>&1; then
+    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 "$host_region" >/dev/null 2>&1; then
   echo 'host integration accepted expected-negative reconcile' >&2; exit 1
 else status=$?; fi
 [ "$status" -eq 3 ]
@@ -204,7 +215,7 @@ write_live "$base"
 before=$(tree_digest "$base")
 if ENABLE_STATUS=17 EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" \
     DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
-    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 >/dev/null 2>&1; then
+    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 "$host_region" >/dev/null 2>&1; then
   echo 'host integration accepted pre-reconcile systemd failure' >&2; exit 1
 else status=$?; fi
 [ "$status" -eq 1 ]
@@ -213,12 +224,23 @@ grep -Fqx "SPLIT_SOURCE_REVISION=$old" "$base/.env"
 
 write_live "$base"
 EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
-  bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 >/dev/null
+  bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 "$host_region" >/dev/null
 grep -Fqx "SPLIT_SOURCE_REVISION=$target" "$base/.env"
 [ -f "$base/deploy/split-agent/current-file" ]
 [ ! -e "$base/deploy/split-agent/removed-file" ]
 [ ! -e "$base/production-ops/sentinel" ]
 [ ! -e "$base/updater/sentinel" ]
+[ "$(grep -c '^core_cloud_worker_host_region:' "$base/split/agent-config.yaml")" -eq 2 ]
+grep -Fqx "DIREXTALK_CLOUD_WORKER_HOST_REGION=$host_region" "$base/split/cloud-worker-host-region"
+
+# Invalid region syntax fails before any live mutation.
+write_live "$base"
+before=$(tree_digest "$base")
+if EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
+    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 'ap-east-1;false' >/dev/null 2>&1; then
+  echo 'host integration accepted a malformed host region' >&2; exit 1
+fi
+[ "$before" = "$(tree_digest "$base")" ]
 
 # Bundle/release prebinding must fail before any live mutation.
 write_live "$base"
@@ -228,7 +250,7 @@ printf '%s\n' 9999999999999999999999999999999999999999 >"$split/SOURCE_REVISION"
 tar -C "$bundle_root" -czf "$bundle" deploy
 before=$(tree_digest "$base")
 if EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
-    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 >/dev/null 2>&1; then
+    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 "$host_region" >/dev/null 2>&1; then
   echo 'host integration accepted an unbound canonical bundle' >&2; exit 1
 fi
 [ "$before" = "$(tree_digest "$base")" ]

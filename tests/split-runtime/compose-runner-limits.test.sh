@@ -11,23 +11,38 @@ cleanup() {
 }
 trap cleanup EXIT
 
-DIREXTALK_MESSAGE_HTTP_BIND=18008 \
-DIREXTALK_SPLIT_COMPOSE_MODE=production \
-DIREXTALK_CORE_EXTENSION_ENABLED=true \
-DIREXTALK_CORE_WORKLOAD_ENABLED=true \
-DIREXTALK_MESSAGE_TLS_MODE=edge-terminated \
-DIREXTALK_MESSAGE_SERVER_NAME=message.example.com \
-DIREXTALK_MESSAGE_CLIENT_BASE_URL=https://message.example.com \
-DIREXTALK_TURN_EXTERNAL_IP=203.0.113.10 \
-DIREXTALK_MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v1.1.32 \
-DIREXTALK_MESSAGE_SERVER_VERSION=v1.1.32 \
-DIREXTALK_MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.69 \
-DIREXTALK_AGENT_VERSION=v1.0.69 \
-DIREXTALK_AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
-DIREXTALK_SPLIT_FIXTURE_MODE=true \
-DIREXTALK_SPLIT_TEST_MODE=true \
-  "$script_dir/provision-local.sh" "$run_dir/provision" >/dev/null 2>"$run_dir/provision.stderr"
+provision_env=(env
+  DIREXTALK_MESSAGE_HTTP_BIND=18008
+  DIREXTALK_SPLIT_COMPOSE_MODE=production
+  DIREXTALK_CORE_EXTENSION_ENABLED=true
+  DIREXTALK_CORE_WORKLOAD_ENABLED=true
+  DIREXTALK_MESSAGE_TLS_MODE=edge-terminated
+  DIREXTALK_MESSAGE_SERVER_NAME=message.example.com
+  DIREXTALK_MESSAGE_CLIENT_BASE_URL=https://message.example.com
+  DIREXTALK_TURN_EXTERNAL_IP=203.0.113.10
+  DIREXTALK_MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v1.1.32
+  DIREXTALK_MESSAGE_SERVER_VERSION=v1.1.32
+  DIREXTALK_MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.69
+  DIREXTALK_AGENT_VERSION=v1.0.69
+  DIREXTALK_AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  DIREXTALK_SPLIT_FIXTURE_MODE=true
+  DIREXTALK_SPLIT_TEST_MODE=true)
+
+if "${provision_env[@]}" "$script_dir/provision-local.sh" "$run_dir/missing-region" >/dev/null 2>&1; then
+  echo 'production provision accepted a missing Cloud Worker host region' >&2
+  exit 1
+fi
+if DIREXTALK_CLOUD_WORKER_HOST_REGION='ap-east-1;false' \
+    "${provision_env[@]}" "$script_dir/provision-local.sh" "$run_dir/invalid-region" >/dev/null 2>&1; then
+  echo 'production provision accepted a malformed Cloud Worker host region' >&2
+  exit 1
+fi
+DIREXTALK_CLOUD_WORKER_HOST_REGION=ap-east-1 \
+  "${provision_env[@]}" "$script_dir/provision-local.sh" "$run_dir/provision" >/dev/null 2>"$run_dir/provision.stderr"
+[ "$(grep -Fxc 'core_cloud_worker_host_region: ap-east-1' "$run_dir/provision/agent-config.yaml")" -eq 1 ]
+[ "$(grep -c '^core_cloud_worker_host_region:' "$run_dir/provision/agent-config.yaml")" -eq 1 ]
+grep -Fqx 'DIREXTALK_CLOUD_WORKER_HOST_REGION=ap-east-1' "$run_dir/provision/cloud-worker-host-region"
 static_sites_root=$(awk -F= '$1 == "DIREXTALK_STATIC_SITES_ROOT" {print substr($0,index($0,"=")+1)}' "$run_dir/provision/.env")
 [ -n "$static_sites_root" ]
 

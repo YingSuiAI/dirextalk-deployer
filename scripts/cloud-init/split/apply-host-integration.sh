@@ -11,13 +11,17 @@ report_failed_command() {
 }
 trap 'report_failed_command "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
-[ "$#" -eq 5 ] || die 'usage: apply-host-integration.sh STAGE SPLIT_BUNDLE DEPLOYMENT_DIR EXPECTED_OLD_REVISION EXPECTED_STABLE_IP'
+[ "$#" -eq 6 ] || die 'usage: apply-host-integration.sh STAGE SPLIT_BUNDLE DEPLOYMENT_DIR EXPECTED_OLD_REVISION EXPECTED_STABLE_IP EXPECTED_HOST_REGION'
 stage=$1
 split_bundle=$2
 base=$3
 expected_old=$4
 expected_stable_ip=$5
+expected_host_region=$6
 host_root=${DIREXTALK_HOST_INTEGRATION_ROOT:-}
+
+printf '%s\n' "$expected_host_region" | grep -Eq '^[a-z]{2}(-[a-z0-9]+)+-[1-9][0-9]*$' \
+  || die 'expected host region is invalid'
 
 [ -d "$stage" ] && [ ! -L "$stage" ] \
   && [ "$(stat -c '%u:%g:%a' -- "$stage")" = 0:0:700 ] \
@@ -84,6 +88,28 @@ fresh_host=false
 if [ ! -e "$base/.split-deploy-done" ] && [ ! -L "$base/.split-deploy-done" ]; then
   fresh_host=true
 fi
+host_region_receipt=$base/split/cloud-worker-host-region
+host_region_receipt_existed=false
+host_region_receipt_identity=
+host_region_receipt_sha=
+if [ "$fresh_host" = true ]; then
+  [ "$(read_unique "$base/.env" DIREXTALK_CLOUD_WORKER_HOST_REGION)" = "$expected_host_region" ] \
+    || die 'fresh bootstrap Cloud Worker host region differs from the verified deployment region'
+else
+  [ -d "$base/split" ] && [ ! -L "$base/split" ] \
+    && [ "$(stat -c '%u:%g:%a' -- "$base/split")" = 0:0:700 ] \
+    || die 'protected split runtime directory is unavailable'
+  if [ -e "$host_region_receipt" ] || [ -L "$host_region_receipt" ]; then
+    [ -f "$host_region_receipt" ] && [ ! -L "$host_region_receipt" ] \
+      && [ "$(stat -c '%u:%g:%a' -- "$host_region_receipt")" = 0:0:400 ] \
+      || die 'protected Cloud Worker host-region receipt must be root-owned mode 0400'
+    host_region_receipt_existed=true
+    host_region_receipt_identity=$(stat -c '%d:%i:%u:%g:%a' -- "$host_region_receipt") \
+      || die 'could not record Cloud Worker host-region receipt identity'
+    host_region_receipt_sha=$(sha256sum -- "$host_region_receipt" | awk '{print $1}') \
+      || die 'could not record Cloud Worker host-region receipt digest'
+  fi
+fi
 transaction=$(mktemp -d "$base/.host-integration.XXXXXX") || die 'could not create host integration transaction'
 chmod 0700 "$transaction"
 chown 0:0 "$transaction"
@@ -100,12 +126,20 @@ service_existed=false
 service_was_enabled=false
 forward_only=false
 committed=false
+host_region_receipt_swapped=false
 recovery_service=$host_root/etc/systemd/system/dirextalk-split-recovery.service
 
 rollback() {
   local status=$?
   trap - EXIT
   if [ "$forward_only" != true ] && [ "$committed" != true ]; then
+    if [ "$host_region_receipt_swapped" = true ]; then
+      if [ "$host_region_receipt_existed" = true ]; then
+        mv -f -- "$backup/cloud-worker-host-region" "$host_region_receipt" || status=1
+      else
+        rm -f -- "$host_region_receipt" || status=1
+      fi
+    fi
     if [ "$updater_swapped" = true ]; then
       rm -rf -- "$base/updater"
       [ ! -e "$backup/updater" ] || mv -- "$backup/updater" "$base/updater"
@@ -190,6 +224,18 @@ install -d -o root -g root -m 0755 "$candidate_updater"
 for file in bootstrap-host.sh install.sh reconcile-host.sh set-desired-state.sh; do
   install -o root -g root -m 0755 "$stage/updater/$file" "$candidate_updater/$file"
 done
+
+candidate_host_region_receipt=$transaction/cloud-worker-host-region
+if [ "$fresh_host" != true ]; then
+  if [ "$host_region_receipt_existed" = true ]; then
+    cp --preserve=mode,ownership,timestamps -- "$host_region_receipt" "$backup/cloud-worker-host-region" \
+      || die 'could not back up the Cloud Worker host-region receipt'
+  fi
+  printf 'DIREXTALK_CLOUD_WORKER_HOST_REGION=%s\n' "$expected_host_region" \
+    >"$candidate_host_region_receipt"
+  chmod 0400 "$candidate_host_region_receipt"
+  chown 0:0 "$candidate_host_region_receipt"
+fi
 for file in release.env config.json dirextalk-updater.service; do
   install -o root -g root -m 0644 "$stage/updater/$file" "$candidate_updater/$file"
 done
@@ -237,6 +283,24 @@ install -o root -g root -m 0644 \
   "$stage/cloud-init/split/dirextalk-split-recovery.service" "$recovery_service"
 systemctl daemon-reload
 systemctl enable dirextalk-split-recovery.service >/dev/null
+
+if [ "$fresh_host" != true ]; then
+  if [ "$host_region_receipt_existed" = true ]; then
+    [ -f "$host_region_receipt" ] && [ ! -L "$host_region_receipt" ] \
+      && [ "$(stat -c '%d:%i:%u:%g:%a' -- "$host_region_receipt")" = "$host_region_receipt_identity" ] \
+      && [ "$(sha256sum -- "$host_region_receipt" | awk '{print $1}')" = "$host_region_receipt_sha" ] \
+      || die 'Cloud Worker host-region receipt changed before its atomic update'
+  else
+    [ ! -e "$host_region_receipt" ] && [ ! -L "$host_region_receipt" ] \
+      || die 'Cloud Worker host-region receipt appeared before its atomic update'
+  fi
+  mv -f -- "$candidate_host_region_receipt" "$host_region_receipt"
+  host_region_receipt_swapped=true
+  [ -f "$host_region_receipt" ] && [ ! -L "$host_region_receipt" ] \
+    && [ "$(stat -c '%u:%g:%a' -- "$host_region_receipt")" = 0:0:400 ] \
+    && [ "$(read_unique "$host_region_receipt" DIREXTALK_CLOUD_WORKER_HOST_REGION)" = "$expected_host_region" ] \
+    || die 'Cloud Worker host-region receipt update did not commit exactly once'
+fi
 
 # reconcile-host installs and activates host-level updater state that cannot be
 # safely rolled back as a directory-only transaction. From this point onward,

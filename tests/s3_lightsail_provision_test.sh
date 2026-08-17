@@ -131,6 +131,7 @@ grep -q '^#!/bin/sh' "$userdata_file" || {
   sed -n '1,12p' "$userdata_file" >&2
   exit 1
 }
+grep -Fqx 'DIREXTALK_CLOUD_WORKER_HOST_REGION=us-east-1' "$userdata_file"
 key_file=$(json_get "$STATE_JSON" resources.key_file)
 grep -q -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$key_file" || {
   echo "Lightsail private key should be written as PEM text when AWS returns PEM text" >&2
@@ -155,6 +156,7 @@ if grep -q '^scp-called$\|^scp ' "$CALLS"; then echo "S3 must not SCP updater ar
 grep -q '^ssh .*ubuntu@203\.0\.113\.144.*tar.*apply-host-integration\.sh.*203\.0\.113\.144' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q '^ssh .*bootstrap-host\.sh.*--record-stable-ip.*203\.0\.113\.144.*apply-host-integration\.sh' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q '^ssh .*apply-host-integration\.sh.*cloud-init.*status.*--wait.*printf' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+grep -q '^ssh .*apply-host-integration\.sh.*203\.0\.113\.144.*us-east-1' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q -- '--no-same-owner' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
 upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)

@@ -150,19 +150,26 @@ case "${1:-}" in
         ;;
       run)
         service=${@: -1}
-        [ "$service" = agent-migrate ]
-        grep -Fqx 'DIREXTALK_AGENT_VERSION=v1.0.91' "$DOCKER_FIXTURE_OUT/.env"
-        grep -Fqx 'DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.91' "$DOCKER_FIXTURE_OUT/.env"
-        grep -Fqx "DIREXTALK_AGENT_SOURCE_REVISION=$REVISION_91" "$DOCKER_FIXTURE_OUT/.env"
-        grep -Fqx "container.0.id=$EXPECTED_RECOVERED_MESSAGE_ID" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
-        grep -Fqx "container.1.id=$LIVE_AGENT_ID" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
-        grep -Fqx "container.2.id=$LIVE_EXTENSION_ID" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
-        grep -Fqx "container.3.id=$LIVE_CORE_ID" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
-        env_identity=$(stat -c '%d:%i:%u' "$DOCKER_FIXTURE_OUT/.env")
-        env_sha=$(sha256sum "$DOCKER_FIXTURE_OUT/.env" | awk '{print $1}')
-        grep -Fqx "control.env_identity=$env_identity" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
-        grep -Fqx "control.env_sha256=$env_sha" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
-        log 'migration saw recovered v1.0.91 baseline'
+        case "$service" in
+          agent-secret-init)
+            log "agent-secret-init refreshed config material:${DIREXTALK_AGENT_IMAGE:-unset}"
+            ;;
+          agent-migrate)
+            grep -Fqx 'DIREXTALK_AGENT_VERSION=v1.0.91' "$DOCKER_FIXTURE_OUT/.env"
+            grep -Fqx 'DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.91' "$DOCKER_FIXTURE_OUT/.env"
+            grep -Fqx "DIREXTALK_AGENT_SOURCE_REVISION=$REVISION_91" "$DOCKER_FIXTURE_OUT/.env"
+            grep -Fqx "container.0.id=$EXPECTED_RECOVERED_MESSAGE_ID" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
+            grep -Fqx "container.1.id=$LIVE_AGENT_ID" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
+            grep -Fqx "container.2.id=$LIVE_EXTENSION_ID" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
+            grep -Fqx "container.3.id=$LIVE_CORE_ID" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
+            env_identity=$(stat -c '%d:%i:%u' "$DOCKER_FIXTURE_OUT/.env")
+            env_sha=$(sha256sum "$DOCKER_FIXTURE_OUT/.env" | awk '{print $1}')
+            grep -Fqx "control.env_identity=$env_identity" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
+            grep -Fqx "control.env_sha256=$env_sha" "$DOCKER_FIXTURE_OUT/.cleanup-receipt"
+            log 'migration saw recovered v1.0.91 baseline'
+            ;;
+          *) exit 1 ;;
+        esac
         ;;
       stop)
         log "compose stop:$*"
@@ -219,6 +226,7 @@ instance_id: test
 agent_http_enabled: true
 agent_http_listen: 0.0.0.0:8082
 EOF
+  printf '%s\n' 'DIREXTALK_CLOUD_WORKER_HOST_REGION=ap-east-1' >"$out/cloud-worker-host-region"
   chmod 400 "$out/.env"
   env_identity=$(stat -c '%d:%i:%u' "$out/.env")
   env_sha=$(sha256sum "$out/.env" | awk '{print $1}')
@@ -246,7 +254,32 @@ container.3.project=test-stack
 unrelated.receipt=preserve-me
 EOF
   chmod 400 "$out/.manifest" "$out/.cleanup-receipt"
-  chmod 400 "$out/agent-config.yaml"
+  chmod 400 "$out/agent-config.yaml" "$out/cloud-worker-host-region"
+}
+
+stage_interrupted_config_transaction() {
+  local root=$1 out=$1/out transaction=$1/out/.agent-config-update original_digest target_digest receipt_digest
+  mkdir "$transaction"
+  chmod 0700 "$transaction"
+  cp "$out/agent-config.yaml" "$transaction/previous.yaml"
+  awk '
+    /^core_cloud_worker_host_region:/ { next }
+    { print }
+    END { print "core_cloud_worker_host_region: ap-east-1" }
+  ' "$out/agent-config.yaml" >"$transaction/target.yaml"
+  original_digest=$(sha256sum "$transaction/previous.yaml" | awk '{print $1}')
+  target_digest=$(sha256sum "$transaction/target.yaml" | awk '{print $1}')
+  receipt_digest=$(sha256sum "$out/cloud-worker-host-region" | awk '{print $1}')
+  cat >"$transaction/state.env" <<EOF
+ORIGINAL_SHA256=$original_digest
+TARGET_SHA256=$target_digest
+HOST_REGION_RECEIPT_SHA256=$receipt_digest
+TARGET_VERSION=v1.0.92
+EOF
+  chmod 0400 "$transaction/previous.yaml" "$transaction/target.yaml" "$transaction/state.env"
+  chmod 0600 "$out/agent-config.yaml"
+  mv "$transaction/target.yaml" "$out/agent-config.yaml"
+  chmod 0400 "$out/agent-config.yaml"
 }
 
 run_wrapper() {
@@ -296,6 +329,7 @@ cp "$success_root/out/.cleanup-receipt" "$success_root/original.receipt"
 cp "$success_root/out/agent-config.yaml" "$success_root/original.agent-config.yaml"
 run_wrapper "$success_root" success >"$success_root/stdout" 2>"$success_root/stderr"
 grep -Fqx 'migration saw recovered v1.0.91 baseline' "$success_root/docker.log"
+grep -Fqx 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.92' "$success_root/docker.log"
 grep -Fqx 'DIREXTALK_AGENT_VERSION=v1.0.92' "$success_root/out/.env"
 grep -Fqx 'DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.92' "$success_root/out/.env"
 grep -Fqx "DIREXTALK_AGENT_SOURCE_REVISION=$revision_92" "$success_root/out/.env"
@@ -315,18 +349,36 @@ cmp "$success_root/original.env.stable" "$success_root/final.env.stable"
 sed -E '/^control\.env_(identity|sha256)=|^container\.[123]\.id=/d' "$success_root/original.receipt" >"$success_root/original.receipt.stable"
 sed -E '/^control\.env_(identity|sha256)=|^container\.[123]\.id=/d' "$success_root/out/.cleanup-receipt" >"$success_root/final.receipt.stable"
 cmp "$success_root/original.receipt.stable" "$success_root/final.receipt.stable"
-cmp "$success_root/original.agent-config.yaml" "$success_root/out/agent-config.yaml"
+sed '/^core_cloud_worker_host_region:/d' "$success_root/out/agent-config.yaml" >"$success_root/final.agent-config.stable"
+cmp "$success_root/original.agent-config.yaml" "$success_root/final.agent-config.stable"
 grep -Fqx 'agent_http_enabled: true' "$success_root/out/agent-config.yaml"
 grep -Fqx 'agent_http_listen: 0.0.0.0:8082' "$success_root/out/agent-config.yaml"
+grep -Fqx 'core_cloud_worker_host_region: ap-east-1' "$success_root/out/agent-config.yaml"
 grep -Fqx 'compose up:-d --no-deps --force-recreate --no-build --pull never extension-runner core-runner agent' "$success_root/docker.log"
 grep -Fqx "prepare-agent-start:$success_root/out" "$success_root/docker.log"
 prepare_line=$(grep -n '^prepare-agent-start:' "$success_root/docker.log" | cut -d: -f1)
+secret_init_line=$(grep -n '^agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.92$' "$success_root/docker.log" | cut -d: -f1)
+migrate_line=$(grep -n '^migration saw recovered v1.0.91 baseline$' "$success_root/docker.log" | cut -d: -f1)
 apply_line=$(grep -n '^compose up:' "$success_root/docker.log" | head -n 1 | cut -d: -f1)
+[ "$secret_init_line" -lt "$migrate_line" ]
+[ "$migrate_line" -lt "$prepare_line" ]
 [ "$prepare_line" -lt "$apply_line" ]
 if grep -Eq '^compose (up|ps):.*message-server' "$success_root/docker.log"; then
   echo 'successful Agent update touched Message Server through Compose' >&2
   exit 1
 fi
+
+interrupted_config_root=$tmp/interrupted_config
+make_fixture "$interrupted_config_root"
+stage_interrupted_config_transaction "$interrupted_config_root"
+run_wrapper "$interrupted_config_root" success >"$interrupted_config_root/stdout" 2>"$interrupted_config_root/stderr"
+[ ! -e "$interrupted_config_root/out/.agent-config-update" ]
+[ "$(grep -Fxc 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.91' "$interrupted_config_root/docker.log")" -eq 1 ]
+[ "$(grep -Fxc 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.92' "$interrupted_config_root/docker.log")" -eq 1 ]
+recovery_material_line=$(grep -nF 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.91' "$interrupted_config_root/docker.log" | cut -d: -f1)
+target_material_line=$(grep -nF 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.92' "$interrupted_config_root/docker.log" | cut -d: -f1)
+[ "$recovery_material_line" -lt "$target_material_line" ]
+grep -Fqx 'core_cloud_worker_host_region: ap-east-1' "$interrupted_config_root/out/agent-config.yaml"
 
 message_recovery_root=$tmp/message_missing
 make_fixture "$message_recovery_root"
@@ -343,7 +395,9 @@ cmp "$message_recovery_root/original.receipt" "$message_recovery_root/out/.clean
 
 interrupted_target_root=$tmp/interrupted_target
 make_fixture "$interrupted_target_root"
+stage_interrupted_config_transaction "$interrupted_target_root"
 run_wrapper "$interrupted_target_root" interrupted_target >"$interrupted_target_root/stdout" 2>"$interrupted_target_root/stderr"
+[ ! -e "$interrupted_target_root/out/.agent-config-update" ]
 if grep -q '^migration ' "$interrupted_target_root/docker.log"; then
   echo 'interrupted target recovery repeated Agent migration' >&2
   exit 1
@@ -363,6 +417,7 @@ grep -Fqx 'DIREXTALK_AGENT_VERSION=v1.0.92' "$interrupted_target_root/out/.env"
 
 rollback_root=$tmp/apply_fail
 make_fixture "$rollback_root"
+cp "$rollback_root/out/agent-config.yaml" "$rollback_root/original.agent-config.yaml"
 if run_wrapper "$rollback_root" apply_fail >"$rollback_root/stdout" 2>"$rollback_root/stderr"; then
   echo 'failed Agent apply unexpectedly succeeded' >&2
   exit 1
@@ -373,6 +428,14 @@ grep -Fqx "container.1.id=$live_agent_id" "$rollback_root/out/.cleanup-receipt"
 [ "$(grep -Fc 'compose up:-d --no-deps --force-recreate --no-build --pull never extension-runner core-runner agent' "$rollback_root/docker.log")" -eq 2 ]
 grep -Fqx 'compose stop:agent extension-runner core-runner' "$rollback_root/docker.log"
 grep -Fqx 'prepare-runner:test-stack' "$rollback_root/docker.log"
+cmp "$rollback_root/original.agent-config.yaml" "$rollback_root/out/agent-config.yaml"
+[ "$(grep -Fxc 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.92' "$rollback_root/docker.log")" -eq 1 ]
+[ "$(grep -Fxc 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.91' "$rollback_root/docker.log")" -eq 1 ]
+target_material_line=$(grep -nF 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.92' "$rollback_root/docker.log" | cut -d: -f1)
+rollback_material_line=$(grep -nF 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.91' "$rollback_root/docker.log" | cut -d: -f1)
+rollback_start_line=$(grep -nF 'compose up:-d --no-deps --force-recreate --no-build --pull never extension-runner core-runner agent' "$rollback_root/docker.log" | tail -n 1 | cut -d: -f1)
+[ "$target_material_line" -lt "$rollback_material_line" ]
+[ "$rollback_material_line" -lt "$rollback_start_line" ]
 if grep -Eq '^compose (up|ps):.*message-server' "$rollback_root/docker.log"; then
   echo 'Agent rollback touched Message Server through Compose' >&2
   exit 1

@@ -156,7 +156,7 @@ for expected_status in 3 1; do
   before=$(find "$remote_base" -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
   if AUTH_HELPER_STATUS=$expected_status PATH="$tmp/bin:$PATH" \
       bash "$apply_integration" "$transport" "$transport/split-bundle.tar.gz" \
-      "$remote_base" "$old" 203.0.113.44 >/dev/null 2>&1; then
+      "$remote_base" "$old" 203.0.113.44 ap-east-1 >/dev/null 2>&1; then
     echo "host integration consumer accepted authorization status $expected_status" >&2
     exit 1
   else

@@ -18,7 +18,7 @@ coturn         -> TURN 3478 + 49160-49200/udp
 ```
 
 - **message-server**: 发布准备通过 `latest` 发现当前版本，核对对应稳定 `vX.Y.Z` 标签、revision 与真实二进制版本；部署和更新只使用该版本标签。它承载 Matrix homeserver 和 ProductCore，并通过固定内部边界访问 external Agent。
-- **Agent**: 发布准备通过独立 `latest` 通道发现当前版本，核对对应稳定 `vX.Y.Z` 标签、revision 与三个真实二进制版本；部署和更新只使用该版本标签。它与 Message Server 共用单一 PostgreSQL/pgvector 容器，但使用隔离的非超级用户角色、database 和私有数据库网络，并拥有 extension/core runners 与更新 wrapper。客户端通过同域 `/agent/v1/*` 访问 Agent 数据面，Caddy 在内部网络转发到 `agent:8082`；Agent 端口不直接发布到公网。
+- **Agent**: 发布准备通过独立 `latest` 通道发现当前版本，核对对应稳定 `vX.Y.Z` 标签、revision 与三个真实二进制版本；部署和更新只使用该版本标签。Cloud Worker 的主机区域只来自已验证部署主机的不可变区域，不读取上传凭据的默认区域，也不跨区域 fallback。它与 Message Server 共用单一 PostgreSQL/pgvector 容器，但使用隔离的非超级用户角色、database 和私有数据库网络，并拥有 extension/core runners 与更新 wrapper。客户端通过同域 `/agent/v1/*` 访问 Agent 数据面，Caddy 在内部网络转发到 `agent:8082`；Agent 端口不直接发布到公网。
 - **PostgreSQL 18 + pgvector**: 单一容器和持久化卷；message-server 与 Agent 使用相互隔离的非超级用户角色、database 和私有数据库网络，只有 Agent database 启用 `vector` extension。
 - **Caddy**: 独立 edge Compose 项目的唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
 - **dirextalk-updater**: 独立 GitHub 仓库/Release 的 linux/amd64 binary；production split 主机要求 Ubuntu 24.04+、systemd >= 254。deployer 固定 version/commit/SHA-256，宿主下载校验后作为 root-owned systemd service 安装。fresh deployment 写入 `watchdog_enabled=false`：保留 root-owned control plane 和显式 update/recovery job，但不启动常驻 Docker-event/轮询修复 watchdog。它独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token，也不安装每日 GitHub discovery timer。
@@ -30,7 +30,7 @@ coturn         -> TURN 3478 + 49160-49200/udp
 1. `postgres` healthy。
 2. `message-server-init` 生成 Message Server 配置以及 Capability CA、证书、方向 token 和 grant signing key。
 3. `message-server` 在 `postgres`、`coturn` 和初始化 job 就绪后启动并先通过健康检查；它不依赖 Agent 运行时健康。
-4. Deployer 随后显式启动 `agent-secret-init`、`agent-migrate`、extension/core runners 和 `agent`；Agent HTTP 数据面只监听容器网络端口 `8082`。
+4. Deployer 随后显式启动 `agent-secret-init`、`agent-migrate`、extension/core runners 和 `agent`；`agent-secret-init` 将已绑定主机区域的受保护配置写入 `agent_config_material`，Agent HTTP 数据面只监听容器网络端口 `8082`。
 5. 若 Agent 路径失败但同一个 receipt-bound Message Server 仍健康，fresh bootstrap 保留 IM、继续启动 Edge 并导出凭据，返回 `3`。受保护恢复会跳过已成功的 Agent job，按精确容器 ID 重跑未成功的 `agent-secret-init`、`agent-migrate`，再停止三项 Agent 长驻容器、重建 runner cgroup 委派并只启动 Agent 路径；Message Server/基础设施失败返回 `1` 并清理 fresh stack。
 6. `message-server` 在受保护数据卷内原子生成包含真实 `agent_room_id` 的完整 Portal/Agent 凭据。canonical `export-portal-bootstrap.sh` 校验容器与 stack 归属后，将当前凭据密封导出到宿主 `/var/dirextalk-message-server/p2p/bootstrap.json`；Deployer 不补写凭据或房间状态。
 7. `message-server` 的 `/.well-known/portal/owner.json` handler 动态返回 owner discovery。

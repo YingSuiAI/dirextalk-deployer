@@ -75,6 +75,17 @@ the canonical exporter. It must not select a stack by mutable Compose name,
 replace an image ad hoc, or operate without the protected split and edge
 receipts.
 
+The same existing-node identity gate revalidates the immutable AWS account,
+provider instance, host identities, and `node_identity.region` before staging a
+protected Cloud Worker host-region receipt. The next Agent image update binds
+that receipt into `agent-config.yaml`, reruns `agent-secret-init --no-deps`
+before `agent-migrate`, and only then recreates the Agent trio. The update keeps
+a digest-bound configuration transaction: failure or an abrupt retry with the
+old Agent restores the exact previous YAML and rematerializes it with the old
+image; an already-running target Agent may only converge forward with the
+recorded target digest. Message Server, PostgreSQL, coturn, and Edge are never
+included in those Compose mutations.
+
 Use the installed host helper directly only while diagnosing the same verified
 node identity. Before every read, retry, or mutation, revalidate the recorded
 AWS account, region, provider, immutable instance identifier, machine-id, and

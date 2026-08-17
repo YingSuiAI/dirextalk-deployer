@@ -18,6 +18,10 @@ grep -Fq 'exact receipt-bound message-server container is unavailable' "$script"
 grep -Fq 'prepare-agent-start-local.sh' "$script"
 grep -Fq 'prepare-runner-cgroups.sh' "$script"
 grep -Fq 'restart-agent-local.sh' "$script"
+grep -Fq 'agent-secret-init' "$script"
+secret_init_line=$(grep -nF 'agent-secret-init >/dev/null' "$script" | tail -n 1 | cut -d: -f1)
+migrate_line=$(grep -nF 'agent-migrate >/dev/null' "$script" | cut -d: -f1)
+[ -n "$secret_init_line" ] && [ "$secret_init_line" -lt "$migrate_line" ]
 if grep -Eq 'compose\[@\].*(up|ps).*message-server|message-server recreate|new_message_id|recovered_message_id|rollback_message_id' "$script"; then
   echo 'Agent update can recreate or adopt Message Server' >&2
   exit 1
@@ -25,7 +29,7 @@ fi
 grep -Fq 'agent_http_enabled: true' "$script"
 grep -Fq 'agent_http_listen: 0.0.0.0:8082' "$script"
 grep -Fq 'capability_grpc_listen' "$script"
-if grep -Eq 'config_backup|config_restore|agent-secret-init|materializ' "$script"; then
+if grep -Eq 'config_restore' "$script"; then
   echo 'retired Agent config migration remains' >&2
   exit 1
 fi

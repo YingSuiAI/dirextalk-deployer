@@ -172,6 +172,7 @@ _run_phase_ec2() {
   local userdata="$DIREXTALK_WORKDIR/user-data.yaml"
   log "Rendering cloud-init (domain_mode=$domain_mode)..."
   bash "$scripts_dir/render/render-userdata.sh" \
+    --region "$region" \
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
@@ -348,6 +349,7 @@ _run_phase_lightsail() {
   log "Rendering Lightsail launch script (domain_mode=$domain_mode, provider=lightsail)..."
   bash "$scripts_dir/render/render-userdata.sh" \
     --format shell \
+    --region "$region" \
     --domain "$domain" \
     --acme "${ACME_EMAIL:-}" \
     --message-server-image "$message_server_image" \
@@ -559,7 +561,7 @@ _is_canonical_ipv4() {
 
 _resume_host_bootstrap() {
   local public_ip=$1 keyfile=$2
-  local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt result identity integration_bundle remote_command
+  local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt result identity integration_bundle remote_command deployment_region
   local split_bundle recorded_split_revision ssh_status
   local -a integration_files
   local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
@@ -576,6 +578,11 @@ _resume_host_bootstrap() {
   recorded_split_revision=$(state_get split_release.split_source_revision)
   printf '%s\n' "$recorded_split_revision" | grep -Eq '^[0-9a-f]{40}$' || {
     warn "Host bootstrap resume requires the recorded split source revision."
+    return 1
+  }
+  deployment_region=$(state_get region)
+  printf '%s\n' "$deployment_region" | grep -Eq '^[a-z]{2}(-[a-z0-9]+)+-[1-9][0-9]*$' || {
+    warn "Host bootstrap resume requires the verified deployment region."
     return 1
   }
   integration_bundle=$(mktemp "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz") || return 1
@@ -615,7 +622,7 @@ _resume_host_bootstrap() {
   identity=$(printf '%s\t%s\t%s' "$UPDATER_PIN_VERSION" "$UPDATER_PIN_COMMIT" "$UPDATER_PIN_SHA256")
   case "$ssh_user" in
     ubuntu)
-      remote_command="stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'sudo rm -rf \"\$stage\"' EXIT && sudo chmod 0700 \"\$stage\" && sudo tar --no-same-owner -xzf - -C \"\$stage\" && sudo bash \"\$stage/updater/bootstrap-host.sh\" --record-stable-ip '$public_ip' && sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server '$recorded_split_revision' '$public_ip' && { if sudo test -x /usr/bin/cloud-init; then sudo cloud-init status --wait >/dev/null 2>&1 || :; fi; } && printf '%s\\t%s\\t%s\\n' '$UPDATER_PIN_VERSION' '$UPDATER_PIN_COMMIT' '$UPDATER_PIN_SHA256'"
+      remote_command="stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX) && trap 'sudo rm -rf \"\$stage\"' EXIT && sudo chmod 0700 \"\$stage\" && sudo tar --no-same-owner -xzf - -C \"\$stage\" && sudo bash \"\$stage/updater/bootstrap-host.sh\" --record-stable-ip '$public_ip' && sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server '$recorded_split_revision' '$public_ip' '$deployment_region' && { if sudo test -x /usr/bin/cloud-init; then sudo cloud-init status --wait >/dev/null 2>&1 || :; fi; } && printf '%s\\t%s\\t%s\\n' '$UPDATER_PIN_VERSION' '$UPDATER_PIN_COMMIT' '$UPDATER_PIN_SHA256'"
       ;;
     *) rm -f "$integration_bundle" "$split_bundle"; warn "Host bootstrap requires the supported Ubuntu SSH user."; return 1 ;;
   esac

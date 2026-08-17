@@ -125,11 +125,14 @@ CONFIRM_DOMAIN_BINDING=1 \
 bash scripts/orchestrate.sh
 ```
 
-Normal deployment uses the deployer-owned production split release. Release
-preparation discovers Message Server and Agent through `latest`, verifies their
-stable `vX.Y.Z` tags, and records those version/revision identities; deployment
-and update then use only the recorded version tags. PostgreSQL/pgvector, Caddy,
-and coturn remain fixed dependencies.
+Normal deployment uses the deployer-owned production split release. Each fresh
+deployment discovers Message Server and Agent through Docker Hub `latest`,
+verifies the corresponding stable `vX.Y.Z` tag, source revision, and
+linux/amd64 manifest digest, then atomically freezes both application snapshots
+in `state.json` before infrastructure creation. Retry/resume reuses that
+snapshot, while an existing node keeps its recorded application releases.
+PostgreSQL/pgvector, Caddy, coturn, and the canonical split bundle remain fixed
+Deployer-owned inputs.
 The packaged canonical runtime bundle starts message-server, the external Agent,
 one PostgreSQL/pgvector container with isolated Message Server and Agent roles
 and databases, extension/core runners, and a separate Caddy

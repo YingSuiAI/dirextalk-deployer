@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Resolve current application latest tags once, then freeze and verify their
-# formal version tags for the production split bundle.
+# Prepare only Deployer-owned production artifacts. Application releases are
+# discovered and frozen independently for each fresh deployment.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd -P)
@@ -12,10 +12,6 @@ release_bundle_sha=${DIREXTALK_RELEASE_BUNDLE_SHA256_FILE:-$release_bundle.sha25
 die() {
   printf 'prepare production release: %s\n' "$*" >&2
   exit 1
-}
-
-is_version() {
-  printf '%s\n' "$1" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 }
 
 is_revision() {
@@ -39,92 +35,15 @@ sha256_value() {
   fi
 }
 
-resolve_latest_image() {
-  local repository=$1 entrypoint=$2 prefix=$3
-  local latest_ref version_ref identity stable_identity version revision probe binary
-
-  latest_ref="docker.io/$repository:latest"
-  docker pull --platform linux/amd64 "$latest_ref" >/dev/null \
-    || die "could not pull $latest_ref"
-
-  identity=$(docker image inspect "$latest_ref" \
-    --format '{{index .Config.Labels "org.opencontainers.image.version"}}|{{index .Config.Labels "org.opencontainers.image.revision"}}') \
-    || die "could not inspect $latest_ref"
-  IFS='|' read -r version revision <<<"$identity"
-  is_version "$version" || die "$latest_ref has an invalid version label"
-  is_revision "$revision" || die "$latest_ref has an invalid revision label"
-
-  version_ref="docker.io/$repository:$version"
-  docker pull --platform linux/amd64 "$version_ref" >/dev/null \
-    || die "could not pull stable release $version_ref"
-  stable_identity=$(docker image inspect "$version_ref" \
-    --format '{{index .Config.Labels "org.opencontainers.image.version"}}|{{index .Config.Labels "org.opencontainers.image.revision"}}') \
-    || die "could not inspect stable release $version_ref"
-  [ "$stable_identity" = "$identity" ] \
-    || die "$version_ref does not match the release currently selected by $latest_ref"
-
-  for binary in $entrypoint; do
-    probe=$(docker run --rm --entrypoint "$binary" "$version_ref" --version) \
-      || die "$version_ref binary probe failed: $binary"
-    [ "$probe" = "$version" ] \
-      || die "$latest_ref binary reports $probe instead of $version: $binary"
-  done
-
-  case "$prefix" in
-    message)
-      message_version=$version
-      message_revision=$revision
-      message_image=$version_ref
-      ;;
-    agent)
-      agent_version=$version
-      agent_revision=$revision
-      agent_image=$version_ref
-      ;;
-    *) die 'internal image prefix is invalid' ;;
-  esac
-}
-
-revalidate_resolved_image() {
-  local repository=$1 version=$2 revision=$3 entrypoint=$4
-  local latest_ref="docker.io/$repository:latest" version_ref="docker.io/$repository:$version"
-  local expected="$version|$revision" identity probe binary image
-
-  docker pull --platform linux/amd64 "$latest_ref" >/dev/null \
-    || die "could not revalidate $latest_ref"
-  docker pull --platform linux/amd64 "$version_ref" >/dev/null \
-    || die "could not revalidate stable release $version_ref"
-  for image in "$latest_ref" "$version_ref"; do
-    identity=$(docker image inspect "$image" \
-      --format '{{index .Config.Labels "org.opencontainers.image.version"}}|{{index .Config.Labels "org.opencontainers.image.revision"}}') \
-      || die "could not revalidate release identity for $image"
-    [ "$identity" = "$expected" ] \
-      || die "$image changed while the production release was being prepared"
-  done
-  for binary in $entrypoint; do
-    probe=$(docker run --rm --entrypoint "$binary" "$version_ref" --version) \
-      || die "$version_ref final binary probe failed: $binary"
-    [ "$probe" = "$version" ] \
-      || die "$version_ref final binary probe reports $probe instead of $version: $binary"
-  done
-}
-
 render_release_pin() {
   printf 'DIREXTALK_RELEASE_CATALOG_ORIGIN=%s\n' "$release_catalog_origin"
-  printf 'DIREXTALK_MESSAGE_SERVER_VERSION=%s\n' "$message_version"
-  printf 'DIREXTALK_MESSAGE_SERVER_IMAGE=%s\n' "$message_image"
-  printf 'DIREXTALK_MESSAGE_SOURCE_REVISION=%s\n' "$message_revision"
   printf 'DIREXTALK_SPLIT_SOURCE_REVISION=%s\n' "$split_revision"
-  printf 'DIREXTALK_AGENT_VERSION=%s\n' "$agent_version"
-  printf 'DIREXTALK_AGENT_IMAGE=%s\n' "$agent_image"
-  printf 'DIREXTALK_AGENT_SOURCE_REVISION=%s\n' "$agent_revision"
   printf 'DIREXTALK_POSTGRES_IMAGE_IMMUTABLE=%s\n' "$postgres_image"
   printf 'DIREXTALK_CADDY_IMAGE_IMMUTABLE=%s\n' "$caddy_image"
   printf 'DIREXTALK_COTURN_IMAGE_IMMUTABLE=%s\n' "$coturn_image"
 }
 
 command -v git >/dev/null 2>&1 || die 'git is required'
-command -v docker >/dev/null 2>&1 || die 'Docker is required'
 [ -f "$release_pin" ] && [ ! -L "$release_pin" ] \
   || die 'existing production release settings are unavailable'
 [ -d "$runtime_root" ] && [ ! -L "$runtime_root" ] \
@@ -140,15 +59,6 @@ release_catalog_origin=$(read_unique_pair "$release_pin" DIREXTALK_RELEASE_CATAL
   || die 'existing release catalog origin is invalid'
 [ "$release_catalog_origin" = https://imadmin.dirextalk.ai ] \
   || die 'production release catalog origin must be https://imadmin.dirextalk.ai'
-
-resolve_latest_image \
-  dirextalk/message-server \
-  /usr/bin/dirextalk-message-server \
-  message
-resolve_latest_image \
-  dirextalk/agent \
-  '/usr/local/bin/dirextalk-agent /usr/local/bin/dirextalk-extension-runner /usr/local/bin/dirextalk-core-runner' \
-  agent
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
@@ -166,18 +76,8 @@ render_release_pin >"$pin_candidate"
 bundle_digest=$(sha256_value "$bundle_candidate")
 printf '%s  %s\n' "$bundle_digest" "${release_bundle##*/}" >"$bundle_sha_candidate"
 
-# Revalidate the mutable discovery tags and their stable counterparts immediately
-# before replacing the release artifacts. A latest movement aborts this transaction.
-revalidate_resolved_image \
-  dirextalk/message-server "$message_version" "$message_revision" \
-  /usr/bin/dirextalk-message-server
-revalidate_resolved_image \
-  dirextalk/agent "$agent_version" "$agent_revision" \
-  '/usr/local/bin/dirextalk-agent /usr/local/bin/dirextalk-extension-runner /usr/local/bin/dirextalk-core-runner'
-
 install -m 0600 "$bundle_candidate" "$release_bundle"
 install -m 0644 "$bundle_sha_candidate" "$release_bundle_sha"
 install -m 0644 "$pin_candidate" "$release_pin"
 
-printf 'Prepared stable production release from latest: Message Server %s, Agent %s\n' \
-  "$message_version" "$agent_version"
+printf 'Prepared Deployer production split release %s\n' "$split_revision"

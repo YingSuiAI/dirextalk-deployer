@@ -86,6 +86,18 @@ image; an already-running target Agent may only converge forward with the
 recorded target digest. Message Server, PostgreSQL, coturn, and Edge are never
 included in those Compose mutations.
 
+On a fresh stack, the start wrapper waits for the exact Message Server
+container to become healthy before exporting its protected bootstrap. It
+revalidates that full container ID before and after the read, extracts only the
+non-empty single-line `agent_token`, and atomically replaces the protected
+`message-mcp-token` host file. `agent-secret-init` copies that file into the
+Agent secret volume as UID/GID 65532 mode 0400. Agent YAML contains only
+`core_message_mcp_enabled: true`, the internal
+`http://message-server:8008/mcp` endpoint, and
+`/run/secrets/message_mcp_token`; the bearer value must not appear in YAML,
+`.env`, process arguments, or logs. Missing or malformed bootstrap data fails
+the Agent phase while leaving the already verified Message Server untouched.
+
 Use the installed host helper directly only while diagnosing the same verified
 node identity. Before every read, retry, or mutation, revalidate the recorded
 AWS account, region, provider, immutable instance identifier, machine-id, and
@@ -115,9 +127,12 @@ and requiring `docker.service`. Its only entrypoint is:
 /var/dirextalk-message-server/production-ops/recover-production.sh
 ```
 
-Recovery rebinds the completed runtime from the protected receipt, skips an
-already-successful `agent-secret-init` or `agent-migrate` job, and reruns an
-unfinished or failed job by its exact recorded container ID in that order. A
+Recovery rebinds the completed runtime from the protected receipt, refreshes
+the Message MCP token from the exact receipt-bound healthy Message Server,
+skips an already-successful `agent-secret-init` or `agent-migrate` job, and
+reruns an unfinished or failed job by its exact recorded container ID in that
+order. Token refresh failure remains expected-negative status `3` without
+stopping Message Server or Edge. A
 fresh application exit remains expected-negative status `3`; a Docker start
 failure that did not produce a new container execution is infrastructure
 status `1`. It then waits for the receipt-recorded `agent`, `extension-runner`,

@@ -1022,6 +1022,34 @@ run_with_heartbeat message_server_wait 10 \
 verify_control_identity
 message_server_container_id=$(healthy_service_container message-server)
 verify_message_server_exact
+if "$script_dir/refresh-message-mcp-token.sh" "$out" "$message_server_container_id"; then
+  :
+else
+  token_refresh_status=$?
+  verify_message_server_exact
+  verify_control_identity
+  if run_with_heartbeat agent_runtime_materialize 10 \
+      "${compose[@]}" create --no-build --pull never \
+        agent-secret-init agent-migrate extension-runner core-runner agent; then
+    :
+  else
+    materialize_status=$?
+    verify_message_server_exact
+    die "Agent resume containers could not be materialized after Message MCP token refresh failed (token status $token_refresh_status, materialize status $materialize_status)"
+  fi
+  verify_control_identity
+  verify_message_server_exact
+  verify_agent_path_materialized
+  verify_local_docker_identity
+  write_cleanup_receipt complete
+  startup_receipt_complete=true
+  trap - EXIT
+  printf 'split-stack start: message-server is healthy; Agent Message MCP token needs attention (status %s)\n' \
+    "$token_refresh_status" >&2
+  exit 3
+fi
+verify_control_identity
+verify_message_server_exact
 
 agent_start_status=0
 if run_with_heartbeat agent_runtime_wait 10 \

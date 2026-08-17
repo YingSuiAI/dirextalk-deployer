@@ -26,6 +26,7 @@ files=(
   scripts/message-server-entrypoint.sh
   scripts/prepare-runner-cgroups.sh
   scripts/prepare-agent-start-local.sh
+  scripts/refresh-message-mcp-token.sh
   scripts/manage-runner-apparmor.sh
   scripts/start-local.sh
   scripts/cleanup-local.sh
@@ -55,6 +56,7 @@ tar -tzf "$bundle" deploy/split-agent/compose.production.yaml >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/prepare-runner-cgroups.sh >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/prepare-host-dependencies.sh >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/start-local.sh >/dev/null
+tar -tzf "$bundle" deploy/split-agent/scripts/refresh-message-mcp-token.sh >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/update-message-server-local.sh >/dev/null
 [ "$(tar -xOzf "$bundle" deploy/split-agent/SOURCE_REVISION)" = "$revision" ]
 tar -tzf "$bundle" deploy/split-agent/SOURCE_FILES.sha256 >/dev/null
@@ -87,6 +89,7 @@ repository_revision=$(tar -xOzf "$repository_bundle" deploy/split-agent/SOURCE_R
 printf '%s\n' "$repository_revision" | grep -Eq '^[0-9a-f]{40}$'
 [ "$repository_revision" = "$(sed -n 's/^DIREXTALK_SPLIT_SOURCE_REVISION=//p' "$ROOT/scripts/cloud-init/split/release.env")" ]
 tar -tzf "$repository_bundle" deploy/split-agent/compose.production.yaml >/dev/null
+tar -tzf "$repository_bundle" deploy/split-agent/scripts/refresh-message-mcp-token.sh >/dev/null
 tar -tzf "$repository_bundle" deploy/split-agent/scripts/update-message-server-local.sh >/dev/null
 tar -xOzf "$repository_bundle" deploy/split-agent/scripts/cleanup-local.sh \
   | grep -F 'manifest TLS mode must be edge-terminated' >/dev/null
@@ -116,6 +119,9 @@ if grep -Fq '50052' "$repository_compose"; then
   exit 1
 fi
 grep -Fq 'networks: [agent_private, agent_database, agent_caller, agent_egress, message_public]' "$repository_compose"
+grep -Fq 'source: message_mcp_token' "$repository_compose"
+grep -Fq 'target: message_mcp_token' "$repository_compose"
+grep -Fq 'file: ${DIREXTALK_MESSAGE_MCP_TOKEN_FILE:?set the protected Message MCP token file}' "$repository_compose"
 if awk '
   /^  message-server:$/ { in_message = 1; next }
   in_message && /^  [a-zA-Z0-9_-]+:$/ { exit }
@@ -127,12 +133,15 @@ if awk '
 fi
 start_source="$ROOT/scripts/cloud-init/split/runtime/scripts/start-local.sh"
 message_start_line=$(grep -nF -- '--wait message-server' "$start_source" | cut -d: -f1)
-agent_start_line=$(grep -nF 'agent-secret-init agent-migrate extension-runner core-runner agent; then' "$start_source" | cut -d: -f1)
+agent_start_line=$(grep -nF 'run_with_heartbeat agent_runtime_wait' "$start_source" | cut -d: -f1)
 [ -n "$message_start_line" ] && [ -n "$agent_start_line" ] && [ "$message_start_line" -lt "$agent_start_line" ] || {
   echo 'fresh startup does not establish Message Server before the explicit Agent path' >&2
   exit 1
 }
 grep -Fq 'message-server is healthy; Agent runtime needs attention' "$start_source"
+grep -Fq 'refresh-message-mcp-token.sh' "$start_source"
+grep -Fq 'create --no-build --pull never' "$start_source"
+grep -Fq 'Agent Message MCP token needs attention' "$start_source"
 if grep -Ei 'qdrant|message[_-]postgres[_-](data|volume)|agent[_-]postgres[_-](data|volume)' \
     "$repository_compose" >/dev/null; then
   echo 'canonical split bundle retained superseded Qdrant or per-application PostgreSQL resources' >&2
@@ -143,6 +152,7 @@ grep -Fq 'sshd_effective=$(sshd -T)' "$host_integration"
 grep -Fq "grep -Fx 'passwordauthentication no' <<<\"\$sshd_effective\"" "$host_integration"
 grep -Fq "grep -Fx 'pubkeyauthentication yes' <<<\"\$sshd_effective\"" "$host_integration"
 consumer="$ROOT/scripts/cloud-init/split/bootstrap-production.sh"
+grep -Fq 'write_stage agent_needs_attention' "$consumer"
 consumer_exec="$TEST_TMP/bootstrap-production.sh"
 sed "s#/usr/local/libexec/dirextalk/split-agent#$TEST_TMP/runner-libexec#g" \
   "$consumer" >"$consumer_exec"

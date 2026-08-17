@@ -254,6 +254,7 @@ grep -Fq 'preserved healthy messaging; Agent recovery is required' "$tmp/attenti
 [ -f "$attention/.split-deploy-done" ]
 [ -f "$attention/edge-bootstrap-receipt" ]
 [ -f "$attention/p2p/bootstrap.json" ]
+[ "$(cat "$attention/.split-bootstrap-stage")" = agent_needs_attention ]
 [ -e "$tmp/attention-resource" ]
 ! grep -q '^cleanup-' "$tmp/attention-cleanup-calls"
 

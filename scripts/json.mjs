@@ -600,6 +600,41 @@ function cmdMutate(args) {
       data.updater_release = updaterRelease;
       break;
     }
+    case "fresh-production-release-commit": {
+      const resolved = JSON.parse(required(args, 2, "resolved_release_json"));
+      const releaseCatalogOrigin = required(args, 3, "release_catalog_origin");
+      const splitSourceRevision = required(args, 4, "split_source_revision");
+      const postgresImage = required(args, 5, "postgres_image");
+      const caddyImage = required(args, 6, "caddy_image");
+      const coturnImage = required(args, 7, "coturn_image");
+      if (typeof data.server_release !== "undefined" || typeof data.split_release !== "undefined") {
+        throw new Error("fresh production release state already exists");
+      }
+      data.server_release = {
+        source: "production_split",
+        version: resolved.message.version,
+        image: resolved.message.image,
+        digest: resolved.message.manifest_digest,
+        image_ref: resolved.message.image,
+        manifest_digest: resolved.message.manifest_digest,
+      };
+      data.split_release = {
+        release_catalog_origin: releaseCatalogOrigin,
+        message_version: resolved.message.version,
+        message_image: resolved.message.image,
+        message_source_revision: resolved.message.source_revision,
+        message_manifest_digest: resolved.message.manifest_digest,
+        split_source_revision: splitSourceRevision,
+        agent_version: resolved.agent.version,
+        agent_image: resolved.agent.image,
+        agent_source_revision: resolved.agent.source_revision,
+        agent_manifest_digest: resolved.agent.manifest_digest,
+        postgres_image: postgresImage,
+        caddy_image: caddyImage,
+        coturn_image: coturnImage,
+      };
+      break;
+    }
     case "delete": {
       deletePath(data, required(args, 2, "path"));
       break;

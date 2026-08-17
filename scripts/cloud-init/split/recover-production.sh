@@ -29,6 +29,20 @@ recovery_verify_message_unchanged() {
     || production_die 'message-server receipt identity changed during recovery'
 }
 
+[ -x "$production_split/scripts/refresh-message-mcp-token.sh" ] \
+  && [ ! -L "$production_split/scripts/refresh-message-mcp-token.sh" ] \
+  || production_die 'canonical Message MCP token refresh helper is unavailable'
+recovery_verify_message_unchanged
+if "$production_split/scripts/refresh-message-mcp-token.sh" \
+    "$production_run" "$recovery_message_id"; then
+  :
+else
+  refresh_status=$?
+  recovery_verify_message_unchanged
+  production_negative "Message MCP token refresh needs attention (status $refresh_status)"
+fi
+recovery_verify_message_unchanged
+
 recovery_load_agent_containers() {
   local container_count index id service project
   container_count=$(production_read_pair "$production_receipt" container.count)

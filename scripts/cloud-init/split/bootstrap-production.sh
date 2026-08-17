@@ -509,8 +509,9 @@ else
   "$split/scripts/export-portal-bootstrap.sh" "$run_dir" "$portal_bootstrap"
 fi
 [ "$completed" = true ] || touch "$base/.split-deploy-done"
-write_stage completed
 if [ "$agent_attention" = true ]; then
+  write_stage agent_needs_attention
   echo 'fresh production bootstrap preserved healthy messaging; Agent recovery is required' >&2
   exit 3
 fi
+write_stage completed

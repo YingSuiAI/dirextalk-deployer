@@ -338,6 +338,7 @@ chmod 700 "$out"
 [ -x "$split_deploy_dir/scripts/message-server-entrypoint.sh" ] || die "message-server entrypoint helper is missing or not executable"
 [ -x "$split_deploy_dir/scripts/initialize-capability-ca.sh" ] || die "Capability CA initializer is missing or not executable"
 [ -x "$split_deploy_dir/scripts/postgres-entrypoint.sh" ] || die "PostgreSQL entrypoint helper is missing or not executable"
+[ -x "$split_deploy_dir/scripts/refresh-message-mcp-token.sh" ] || die "Message MCP token refresh helper is missing or not executable"
 
 uuid4() {
   local value
@@ -897,6 +898,7 @@ core_secret_master_key_uid=$(stat -c '%u' "$out/core-secret-master-key")
 copy_secret_or_empty "$openrouter_source" "$out/openrouter-api-key" "OpenRouter API key"
 copy_secret_or_empty "$embedding_source" "$out/embedding-api-key" "embedding API key"
 copy_secret_or_empty "$tavily_source" "$out/tavily-api-key" "Tavily API key"
+copy_secret_or_empty "" "$out/message-mcp-token" "Message MCP token" false
 
 cat >"$out/agent-config.yaml" <<EOF
 instance_id: $agent_instance_id
@@ -930,6 +932,9 @@ core_extension_staging_root: /var/lib/dirextalk-agent/extension-staging
 core_extension_workspace_root: /var/lib/dirextalk-agent/extension-workspaces
 core_extension_runner_socket: $extension_runner_socket
 core_extension_runner_uid: $extension_runner_uid
+core_message_mcp_enabled: true
+core_message_mcp_endpoint: http://message-server:8008/mcp
+core_message_mcp_token_file: /run/secrets/message_mcp_token
 core_static_sites_enabled: true
 core_static_sites_root: /var/lib/dirextalk-agent/static-sites
 core_static_sites_public_origin: $message_client_base_url
@@ -995,6 +1000,7 @@ DIREXTALK_OPENROUTER_API_KEY_FILE=$out/openrouter-api-key
 DIREXTALK_EMBEDDING_API_KEY_FILE=$out/embedding-api-key
 DIREXTALK_TAVILY_API_KEY_FILE=$out/tavily-api-key
 DIREXTALK_CORE_SECRET_MASTER_KEY_FILE=$out/core-secret-master-key
+DIREXTALK_MESSAGE_MCP_TOKEN_FILE=$out/message-mcp-token
 DIREXTALK_MESSAGE_PRIVATE_NETWORK=$stack_name-message-private
 DIREXTALK_MESSAGE_PUBLIC_NETWORK=$stack_name-message-public
 DIREXTALK_MESSAGE_DATABASE_NETWORK=$stack_name-message-db
@@ -1078,6 +1084,7 @@ compose_mode=$compose_mode
 agent_instance_id=$agent_instance_id
 message_instance_id=$message_instance_id
 account_generation=$account_generation
+message_mcp_token_path=$out/message-mcp-token
 core_secret_master_key_path=$out/core-secret-master-key
 core_secret_master_key_device=$core_secret_master_key_device
 core_secret_master_key_inode=$core_secret_master_key_inode

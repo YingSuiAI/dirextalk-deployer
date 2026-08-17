@@ -14,6 +14,12 @@ chmod 0600 "$DIREXTALK_WORKDIR/known_hosts"
 
 source "$ROOT/scripts/cloud-init/split/release.env"
 source "$ROOT/scripts/updater/release.env"
+DIREXTALK_MESSAGE_SERVER_VERSION=v1.1.62
+DIREXTALK_MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v1.1.62
+DIREXTALK_MESSAGE_SOURCE_REVISION=725933abea4d4de42a07cd937e65a4d94098c007
+DIREXTALK_AGENT_VERSION=v1.0.162
+DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.162
+DIREXTALK_AGENT_SOURCE_REVISION=6d0461c71178c1b087314ecca30ba0fa7047f06d
 old_revision=5969693b213c52a355159a697a8e759e8808ae0c
 machine_id=ec2879f4b555f3ccac4531e9fe4cc127
 docker_engine_id=ABCDEFGH12345678
@@ -36,8 +42,8 @@ write_state() {
   printf '{"run_id":"update-test","domain":"update.example.test","region":"%s","cloud_provider":"lightsail","resources":{"key_file":"%s","public_ip":"%s","lightsail_instance_name":"dirextalk-update-test"},"node_identity":%s,"server_release":{"source":"production_split","version":"%s","image":"docker.io/dirextalk/message-server:%s","digest":"%s","image_ref":"%s","manifest_digest":"%s"},"split_release":{"release_catalog_origin":"%s","message_version":"%s","message_image":"%s","message_source_revision":"%s","split_source_revision":"%s","agent_version":"%s","agent_image":"%s","agent_source_revision":"%s","postgres_image":"%s","caddy_image":"%s","coturn_image":"%s"},"updater_release":{"version":"v0.0.1"}}\n' \
     "$region" "$DIREXTALK_WORKDIR/key.pem" "$public_ip" "$node_identity" \
     "$DIREXTALK_MESSAGE_SERVER_VERSION" "$DIREXTALK_MESSAGE_SERVER_VERSION" \
-    "${DIREXTALK_MESSAGE_SERVER_IMAGE##*@}" "$DIREXTALK_MESSAGE_SERVER_IMAGE" \
-    "${DIREXTALK_MESSAGE_SERVER_IMAGE##*@}" "$DIREXTALK_RELEASE_CATALOG_ORIGIN" "$DIREXTALK_MESSAGE_SERVER_VERSION" \
+    '' "$DIREXTALK_MESSAGE_SERVER_IMAGE" \
+    '' "$DIREXTALK_RELEASE_CATALOG_ORIGIN" "$DIREXTALK_MESSAGE_SERVER_VERSION" \
     "$DIREXTALK_MESSAGE_SERVER_IMAGE" "$DIREXTALK_MESSAGE_SOURCE_REVISION" "$old_revision" \
     "$DIREXTALK_AGENT_VERSION" "$DIREXTALK_AGENT_IMAGE" "$DIREXTALK_AGENT_SOURCE_REVISION" "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" \
     "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" >"$DIREXTALK_WORKDIR/state.json"
@@ -113,30 +119,15 @@ if bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null 2>&
 fi
 [ ! -s "$CALLS" ]
 
-# The real update consumer stages the released canonical bundle. The staged
-# host integration performs the receipt-bound reconcile before returning;
-# update.sh then revalidates identity and atomically records both releases.
+# The real update consumer preserves the node's recorded application release,
+# even when it differs from the Deployer package that supplies tooling.
 write_state true
 node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" set-string \
   split_release.agent_version v1.0.86
 node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" set-string \
+  split_release.agent_image docker.io/dirextalk/agent:v1.0.86
+node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" set-string \
   split_release.agent_source_revision 300635fd615e09f9ce1f6bd4ab0f5d3ca31bac0f
-state_sha=$(sha256sum "$DIREXTALK_WORKDIR/state.json" | awk '{print $1}')
-: >"$CALLS"
-if bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null 2>&1; then
-  echo 'existing-node update staged a v1.0.87 bundle over a v1.0.86 Agent receipt' >&2
-  exit 1
-fi
-[ ! -s "$CALLS" ] || {
-  echo 'application release mismatch reached AWS or the remote updater' >&2
-  exit 1
-}
-[ "$(sha256sum "$DIREXTALK_WORKDIR/state.json" | awk '{print $1}')" = "$state_sha" ] || {
-  echo 'application release mismatch changed local release state' >&2
-  exit 1
-}
-
-write_state true
 : >"$CALLS"
 bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null
 [ "$(grep -c '^ssh:identity$' "$CALLS")" -eq 2 ]
@@ -152,7 +143,7 @@ transport_listing=$(tar -tzf "$TEST_TRANSPORT")
 grep -Fxq 'cloud-init/split/apply-host-integration.sh' <<<"$transport_listing"
 grep -Fxq 'canonical-bundle.tar.gz' <<<"$transport_listing"
 node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
-  "data.split_release.release_catalog_origin === '$DIREXTALK_RELEASE_CATALOG_ORIGIN' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"
+  "data.split_release.release_catalog_origin === '$DIREXTALK_RELEASE_CATALOG_ORIGIN' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.agent_version === 'v1.0.86' && data.split_release.agent_source_revision === '300635fd615e09f9ce1f6bd4ab0f5d3ca31bac0f' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"
 
 # An expected-negative integration result remains exit 3 and leaves both local
 # release records untouched.

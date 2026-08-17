@@ -275,6 +275,10 @@ if grep -R -n -E '(^|[^[:alnum:]_])([a-z0-9-]+\.)*dirextalk\.ai([^[:alnum:]_]|$)
 fi
 
 grep -Fqx 'DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai' scripts/cloud-init/split/release.env
+if grep -Eq '^DIREXTALK_(MESSAGE_SERVER_VERSION|MESSAGE_SERVER_IMAGE|MESSAGE_SOURCE_REVISION|AGENT_VERSION|AGENT_IMAGE|AGENT_SOURCE_REVISION)=' scripts/cloud-init/split/release.env; then
+  echo 'Deployer release metadata must not pin Message Server or Agent releases' >&2
+  exit 1
+fi
 
 grep -Fq 'https://deployer.dirextalk.ai/' README.md
 grep -Fq 'https://github.com/YingSuiAI/dirextalk-deployer' README.md

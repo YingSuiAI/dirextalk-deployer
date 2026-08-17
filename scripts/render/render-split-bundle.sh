@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
-# Render the host-side consumer bundle for the external Agent stack.
-# The message-server repository owns the Compose/runtime contract; the deployer
-# packages only the reviewed files that first boot and updater adapters use.
+# Render the deployer-owned host runtime bundle for the external Agent stack.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd -P)
-message_root_explicit=false
-if [ "${DIREXTALK_MESSAGE_SERVER_ROOT+x}" = x ]; then
-  message_root_explicit=true
+runtime_root_explicit=false
+if [ "${DIREXTALK_SPLIT_RUNTIME_ROOT+x}" = x ]; then
+  runtime_root_explicit=true
 fi
 packaged_bundle_explicit=false
 if [ "${DIREXTALK_SPLIT_BUNDLE_FILE+x}" = x ]; then
   packaged_bundle_explicit=true
 fi
-message_root=${DIREXTALK_MESSAGE_SERVER_ROOT:-$root/../dirextalk-message-server}
-split=$message_root/deploy/split-agent
+runtime_root=${DIREXTALK_SPLIT_RUNTIME_ROOT:-$root/scripts/cloud-init/split/runtime}
 output=${1:-}
 packaged_bundle=${DIREXTALK_SPLIT_BUNDLE_FILE:-$root/scripts/cloud-init/split/canonical-bundle.tar.gz}
 
@@ -35,7 +32,7 @@ case "$output" in
   *) output=$(pwd -P)/$output ;;
 esac
 
-if { [ "$packaged_bundle_explicit" = true ] || [ "$message_root_explicit" = false ]; } \
+if { [ "$packaged_bundle_explicit" = true ] || [ "$runtime_root_explicit" = false ]; } \
   && [ -f "$packaged_bundle" ]; then
   packaged_sha_file=${DIREXTALK_SPLIT_BUNDLE_SHA256_FILE:-$packaged_bundle.sha256}
   [ -f "$packaged_sha_file" ] && [ ! -L "$packaged_sha_file" ] || {
@@ -73,38 +70,45 @@ fi
 required=(
   compose.yaml
   compose.production.yaml
-  compose.direct-tls.yaml
   edge-compose.yaml
   apparmor.d/dirextalk-runner-userns
   systemd/dirextalk-extension-runner@.service
   systemd/dirextalk-core-runner@.service
   sysusers.d/dirextalk-split-agent.conf
   scripts/provision-local.sh
+  scripts/prepare-host-dependencies.sh
   scripts/prepare-runner-cgroups.sh
   scripts/start-local.sh
   scripts/cleanup-local.sh
   scripts/cleanup-provision-failure.sh
-  scripts/adopt-edge.sh
-  scripts/cutover-edge.sh
   scripts/update-agent-local.sh
   scripts/update-message-server-local.sh
 )
 
 for file in "${required[@]}"; do
-  [ -f "$split/$file" ] && [ ! -L "$split/$file" ] || {
-    echo "missing canonical split deployment asset: $split/$file" >&2
+  [ -f "$runtime_root/$file" ] && [ ! -L "$runtime_root/$file" ] || {
+    echo "missing canonical split deployment asset: $runtime_root/$file" >&2
     exit 1
   }
 done
 
-revision=$(git -C "$message_root" rev-parse HEAD)
-printf '%s\n' "$revision" | grep -Eq '^[0-9a-f]{40}$' || {
-  echo "canonical split source revision is invalid" >&2
+runtime_repo=$(git -C "$runtime_root" rev-parse --show-toplevel) || {
+  echo "deployer-owned split runtime is not in a Git repository" >&2
   exit 1
 }
-if ! git -C "$message_root" diff --quiet -- deploy/split-agent \
-  || ! git -C "$message_root" diff --cached --quiet -- deploy/split-agent; then
-  echo "canonical split deployment source has uncommitted changes; commit it before staging" >&2
+runtime_relative=${runtime_root#"$runtime_repo"/}
+[ "$runtime_relative" != "$runtime_root" ] || {
+  echo "deployer-owned split runtime is outside its Git repository" >&2
+  exit 1
+}
+revision=$(git -C "$runtime_repo" rev-parse "HEAD:$runtime_relative")
+printf '%s\n' "$revision" | grep -Eq '^[0-9a-f]{40}$' || {
+  echo "canonical split runtime tree revision is invalid" >&2
+  exit 1
+}
+if ! git -C "$runtime_repo" diff --quiet -- "$runtime_relative" \
+  || ! git -C "$runtime_repo" diff --cached --quiet -- "$runtime_relative"; then
+  echo "deployer-owned split runtime has uncommitted changes; commit it before staging" >&2
   exit 1
 fi
 
@@ -112,12 +116,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 install -d -m 0755 "$work/deploy/split-agent"
 mapfile -t runtime_files < <(
-  cd "$split"
+  cd "$runtime_root"
   find . -type f \
-    ! -name '*.test.sh' \
-    ! -name 'compose.local.yaml' \
-    ! -path './container/*' \
-    ! -path './aws/*' \
     ! -name '.gitignore' \
     -print | sed 's#^./##' | LC_ALL=C sort
 )
@@ -131,7 +131,7 @@ for file in "${runtime_files[@]}"; do
     scripts/*.sh) mode=0755 ;;
     *) mode=0644 ;;
   esac
-  install -m "$mode" "$split/$file" "$work/deploy/split-agent/$file"
+  install -m "$mode" "$runtime_root/$file" "$work/deploy/split-agent/$file"
 done
 printf '%s\n' "$revision" >"$work/deploy/split-agent/SOURCE_REVISION"
 chmod 0644 "$work/deploy/split-agent/SOURCE_REVISION"

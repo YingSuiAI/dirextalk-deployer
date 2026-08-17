@@ -161,6 +161,9 @@ if (files.some((file) => file.startsWith("scripts/connection-stack-v2/"))) {
 if (files.some((file) => file === "tests" || file.startsWith("tests/"))) {
   throw new Error("npm package must not include tests/");
 }
+if (files.some((file) => file.startsWith("scripts/cloud-init/split/runtime/"))) {
+  throw new Error("npm package must not duplicate the canonical split runtime source");
+}
 if (files.some((file) => file.endsWith(".ps1"))) {
   throw new Error("Git-Bash-only deployer package must not include PowerShell wrappers");
 }
@@ -237,7 +240,7 @@ fi
 assert_contains "$ROOT/agents/openai.yaml" '^interface:$'
 assert_contains "$ROOT/agents/openai.yaml" 'display_name: "Dirextalk Deployer"'
 assert_contains "$ROOT/agents/openai.yaml" '^policy:$'
-assert_contains "$ROOT/agents/openai.yaml" 'allow_implicit_invocation: false'
+assert_contains "$ROOT/agents/openai.yaml" 'allow_implicit_invocation: true'
 
 PI_CODING_AGENT_DIR="$tmp/pi-agent-root" "$NODE_BIN" bin/dirextalk-deployer.mjs skill install --agent pi --scope global --dry-run > "$tmp/pi-global.out"
 assert_contains "$tmp/pi-global.out" 'pi-agent-root'

@@ -182,9 +182,11 @@ require_digest() {
   }
 }
 
-require_latest_application_image() {
-  [ "$2" = "$3" ] || {
-    echo "$1 must use its latest release channel" >&2
+require_version_application_image() {
+  local name=$1 image=$2 repository=$3 version=$4 expected
+  expected="$repository:$version"
+  [ "$image" = "$expected" ] || {
+    echo "$name must use the prepared version tag $expected" >&2
     exit 1
   }
 }
@@ -199,6 +201,10 @@ require_latest_application_image() {
   echo "staged message-server update adapter is not executable" >&2
   exit 1
 }
+[ -x "$split/scripts/prepare-host-dependencies.sh" ] && [ ! -L "$split/scripts/prepare-host-dependencies.sh" ] || {
+  echo "staged host dependency preparation helper is not executable" >&2
+  exit 1
+}
 for cleanup_helper in cleanup-local.sh cleanup-provision-failure.sh; do
   [ -x "$split/scripts/$cleanup_helper" ] && [ ! -L "$split/scripts/$cleanup_helper" ] || {
     echo "staged split cleanup helper is not executable: $cleanup_helper" >&2
@@ -211,14 +217,13 @@ done
   echo "staged canonical split source differs from its manifest" >&2
   exit 1
 }
+"$split/scripts/prepare-host-dependencies.sh"
 
 domain=$(read_env DOMAIN)
 printf '%s\n' "$domain" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$' || {
   echo "protected bootstrap domain is invalid" >&2
   exit 1
 }
-message_image=$(read_env MESSAGE_SERVER_IMAGE)
-agent_image=$(read_env AGENT_IMAGE)
 postgres_image=$(read_env POSTGRES_IMAGE)
 caddy_image=$(read_env CADDY_IMAGE)
 split_revision=$(read_env SPLIT_SOURCE_REVISION)
@@ -228,11 +233,15 @@ if [ "$operation" = --reconcile-edge ]; then
   [ -f "$run_dir/.env" ] && [ ! -L "$run_dir/.env" ] \
     && [ "$(stat -c '%u:%a' "$run_dir/.env")" = "0:400" ] \
     || { echo "protected runtime release receipt is unavailable" >&2; exit 1; }
+  message_image=$(read_pair "$run_dir/.env" DIREXTALK_MESSAGE_SERVER_IMAGE)
+  agent_image=$(read_pair "$run_dir/.env" DIREXTALK_AGENT_IMAGE)
   message_version=$(read_pair "$run_dir/.env" DIREXTALK_MESSAGE_SERVER_VERSION)
   agent_version=$(read_pair "$run_dir/.env" DIREXTALK_AGENT_VERSION)
   message_revision=$(read_pair "$run_dir/.env" DIREXTALK_MESSAGE_SOURCE_REVISION)
   agent_revision=$(read_pair "$run_dir/.env" DIREXTALK_AGENT_SOURCE_REVISION)
 else
+  message_image=$(read_env MESSAGE_SERVER_IMAGE)
+  agent_image=$(read_env AGENT_IMAGE)
   message_version=$(read_env MESSAGE_VERSION)
   agent_version=$(read_env AGENT_VERSION)
   message_revision=$(read_env MESSAGE_SOURCE_REVISION)
@@ -240,8 +249,8 @@ else
 fi
 [ "$release_catalog_origin" = https://imadmin.dirextalk.ai ] \
   || { echo "protected release catalog origin is invalid" >&2; exit 1; }
-require_latest_application_image MESSAGE_SERVER_IMAGE "$message_image" docker.io/dirextalk/message-server:latest
-require_latest_application_image AGENT_IMAGE "$agent_image" docker.io/dirextalk/agent:latest
+require_version_application_image MESSAGE_SERVER_IMAGE "$message_image" docker.io/dirextalk/message-server "$message_version"
+require_version_application_image AGENT_IMAGE "$agent_image" docker.io/dirextalk/agent "$agent_version"
 require_digest POSTGRES_IMAGE "$postgres_image"
 [ "$postgres_image" = "docker.io/pgvector/pgvector:pg18@${postgres_image##*@}" ] || {
   echo "POSTGRES_IMAGE must use the pinned pgvector/pgvector:pg18 image" >&2
@@ -261,7 +270,7 @@ done
 verify_application_image() {
   local image=$1 expected_version=$2 expected_revision=$3 binary label probe
   docker pull --platform linux/amd64 "$image" >/dev/null \
-    || { echo "could not pull application release channel: $image" >&2; exit 1; }
+    || { echo "could not pull prepared application release: $image" >&2; exit 1; }
   label=$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}|{{index .Config.Labels "org.opencontainers.image.revision"}}') \
     || { echo "could not inspect application image: $image" >&2; exit 1; }
   [ "$label" = "$expected_version|$expected_revision" ] \

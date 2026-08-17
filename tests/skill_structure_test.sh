@@ -84,23 +84,28 @@ done
 
 legacy_json_cli_name=$(printf '\152\161')
 legacy_json_cli_pattern="(^|[^[:alnum:]_])${legacy_json_cli_name}([^[:alnum:]_]|$)|${legacy_json_cli_name}\\.exe"
-if git grep -n -I -E "$legacy_json_cli_pattern" -- scripts tests README.md SKILL.md references AGENTS.md agents package.json docs >/dev/null; then
-  echo "current docs/scripts/tests must use scripts/json.mjs instead of the legacy external JSON CLI" >&2
-  git grep -n -I -E "$legacy_json_cli_pattern" -- scripts tests README.md SKILL.md references AGENTS.md agents package.json docs >&2
+json_policy_paths=(
+  scripts tests README.md SKILL.md references AGENTS.md agents package.json docs
+  ':(exclude)scripts/cloud-init/split/runtime/**'
+  ':(exclude)tests/split-runtime/**'
+)
+if git grep -n -I -E "$legacy_json_cli_pattern" -- "${json_policy_paths[@]}" >/dev/null; then
+  echo "local deployer docs/scripts/tests must use scripts/json.mjs instead of the legacy external JSON CLI" >&2
+  git grep -n -I -E "$legacy_json_cli_pattern" -- "${json_policy_paths[@]}" >&2
   exit 1
 fi
 
 grep -q 'production split release' SKILL.md
-grep -q 'follow their `latest` release channels' SKILL.md
+grep -q 'records and deploys their stable `vX.Y.Z` image tags' SKILL.md
 grep -q 'dirextalk-deployer' package.json
 grep -q 'bin/dirextalk-deployer.mjs' package.json
-grep -Fq 'Use only when the user explicitly invokes `$dirextalk-deployer`' SKILL.md
-grep -Fq 'Use only when the user explicitly invokes `$dirextalk-deployer`' .openclaw/dirextalk-deployer/SKILL.md
+grep -Fq 'asks in natural language to deploy, update, repair, verify, resume, reset, or destroy a Dirextalk service or node' SKILL.md
+grep -Fq 'asks in natural language for one of these Dirextalk lifecycle operations' .openclaw/dirextalk-deployer/SKILL.md
 grep -q '^interface:$' agents/openai.yaml
 grep -Fq '  display_name: "Dirextalk Deployer"' agents/openai.yaml
 grep -Fq '  short_description: "Deploy, update, recover, and verify Dirextalk on AWS."' agents/openai.yaml
 grep -Fq '  default_prompt: "Use $dirextalk-deployer' agents/openai.yaml
-grep -q '^  allow_implicit_invocation: false$' agents/openai.yaml
+grep -q '^  allow_implicit_invocation: true$' agents/openai.yaml
 ! grep -Eq '^(entrypoint|runtime_notes|display_name|short_description|default_prompt):' agents/openai.yaml
 grep -q 'compact agent-facing entrypoint' AGENTS.md
 grep -q 'scripts/lib/local-paths.sh' AGENTS.md

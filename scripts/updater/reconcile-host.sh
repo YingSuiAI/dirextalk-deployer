@@ -45,6 +45,7 @@ quarantine=$state_dir/runtime.json.quarantine-$UPDATER_PIN_SHA256
 transition_dir=
 transition_identity=
 quarantine_identity=
+restore_running_on_failure=false
 
 path_identity() {
   local path=$1 expected_type=$2
@@ -70,12 +71,20 @@ cleanup_transition() {
   transition_identity=
 }
 transaction_exit() {
-  local status=$?
+  local status=$? cleanup_status=0
   trap - EXIT
-  if cleanup_transition; then
-    exit "$status"
+  if [ "$status" -ne 0 ] && [ "$restore_running_on_failure" = true ]; then
+    if restore_running_updater; then
+      :
+    else
+      printf 'updater host reconcile: original failure status %s; updater recovery to running/ready also failed\n' "$status" >&2
+    fi
   fi
-  exit 1
+  cleanup_transition || cleanup_status=$?
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status=1
+  fi
+  exit "$status"
 }
 trap transaction_exit EXIT
 install -d -m 0755 "$host_root/run"
@@ -269,6 +278,58 @@ wait_for_status() {
   return 1
 }
 
+restore_running_updater() {
+  local status_body="$transition_dir/restore-status.json"
+  local running_body="$transition_dir/restore-running.json"
+  local code status
+  printf 'updater host reconcile: restoring updater state after failed reconcile\n' >&2
+  systemctl daemon-reload \
+    || { printf 'updater host reconcile: recovery could not reload the updater unit\n' >&2; return 1; }
+  systemctl start dirextalk-updater.service \
+    || { printf 'updater host reconcile: recovery could not start the updater service\n' >&2; return 1; }
+  if code=$(control_request '{}' "$status_body"); then
+    :
+  else
+    printf 'updater host reconcile: recovery status request failed\n' >&2
+    return 1
+  fi
+  [ "$code" = 200 ] \
+    || { printf 'updater host reconcile: recovery status returned HTTP %s\n' "$code" >&2; return 1; }
+  if validate_status "$status_body" running true; then
+    printf 'updater host reconcile: updater restored to running/ready\n' >&2
+    return 0
+  else
+    status=$?
+    [ "$status" -ne 3 ] \
+      || { printf 'updater host reconcile: recovery found an active updater job\n' >&2; return 1; }
+  fi
+  if validate_status "$status_body" maintenance false; then
+    :
+  else
+    status=$?
+    [ "$status" -ne 3 ] \
+      || { printf 'updater host reconcile: recovery found an active updater job\n' >&2; return 1; }
+    printf 'updater host reconcile: recovery found neither running nor maintenance state\n' >&2
+    return 1
+  fi
+  if code=$(desired_request running "$running_body"); then
+    :
+  else
+    printf 'updater host reconcile: recovery running request failed\n' >&2
+    return 1
+  fi
+  [ "$code" = 200 ] \
+    || { printf 'updater host reconcile: recovery running request returned HTTP %s\n' "$code" >&2; return 1; }
+  validate_desired_response "$running_body" running \
+    || { printf 'updater host reconcile: recovery running response is invalid\n' >&2; return 1; }
+  if wait_for_status running true; then
+    printf 'updater host reconcile: updater restored to running/ready\n' >&2
+    return 0
+  fi
+  printf 'updater host reconcile: updater did not recover to running/ready\n' >&2
+  return 1
+}
+
 quiesce_current_updater() {
   local body="$transition_dir/status-before.json" desired_body="$transition_dir/maintenance.json"
   local code status needs_maintenance=0 runtime_desired
@@ -287,6 +348,7 @@ quiesce_current_updater() {
     esac
     validate_runtime_state "$runtime_desired" \
       || die 'installed updater runtime is not idle while status is unavailable'
+    [ "$runtime_desired" != running ] || restore_running_on_failure=true
     systemctl stop dirextalk-updater.service \
       || die 'could not stop unavailable updater before replacement'
     if systemctl is-active --quiet dirextalk-updater.service; then
@@ -296,6 +358,7 @@ quiesce_current_updater() {
   fi
   [ "$code" = 200 ] || die "installed updater status returned HTTP $code"
   if validate_status "$body" running true; then
+    restore_running_on_failure=true
     needs_maintenance=1
   else
     status=$?
@@ -462,4 +525,5 @@ validate_runtime_state running \
   || die 'new updater did not persist ready schema 9 state'
 
 remove_quarantine
+restore_running_on_failure=false
 printf '%s\n' "$parsed_identity"

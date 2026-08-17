@@ -1,12 +1,9 @@
 ---
 name: dirextalk-deployer
-description: Manual-only Dirextalk AWS deployment lifecycle and local agent wiring. Use only when the user explicitly invokes `$dirextalk-deployer`; never trigger from a general request to deploy, resume, verify, update, destroy, configure AWS, or install a skill.
+description: Deploy, resume, verify, update, recover, reset, or destroy production Dirextalk services and nodes on AWS, and wire local agent runtimes. Use when the user explicitly invokes `$dirextalk-deployer` or asks in natural language to deploy, update, repair, verify, resume, reset, or destroy a Dirextalk service or node.
 ---
 
 # Dirextalk Deployer
-
-Continue only when the user explicitly invoked `$dirextalk-deployer`. If this
-skill was loaded implicitly, do not run its scripts or mutate deployment state.
 
 This skill is the compact agent-facing entrypoint. Treat this repository root
 as the execution engine and read the referenced docs only when that phase needs
@@ -262,9 +259,10 @@ CONFIRM_DOMAIN_BINDING=1
 DIREXTALK_CLOUD_PROVIDER=lightsail
 ```
 
-Normal deployment consumes the deployer-owned production split release. Its
-message-server and external Agent images follow their `latest` release channels;
-startup checks their version/revision labels and real `--version` output.
+Normal deployment consumes the deployer-owned production split release. Release
+preparation discovers the current application releases through `latest`, then
+records and deploys their stable `vX.Y.Z` image tags, source revisions, and real
+`--version` output.
 PostgreSQL/pgvector, Caddy, and coturn remain fixed dependencies, and the canonical runtime bundle is packaged
 with the deployer. The target host never clones a source repository and no
 mutable image override is part of the production path. The independent

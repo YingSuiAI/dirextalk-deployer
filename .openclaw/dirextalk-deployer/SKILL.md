@@ -1,6 +1,6 @@
 ---
 name: dirextalk-deployer
-description: Manual-only Dirextalk AWS deployment lifecycle. Use only when the user explicitly invokes `$dirextalk-deployer`; never trigger from a general deployment, update, verification, teardown, AWS, or skill-installation request.
+description: Deploy, resume, verify, update, recover, reset, or destroy production Dirextalk services and nodes on AWS. Use when the user explicitly invokes `$dirextalk-deployer` or asks in natural language for one of these Dirextalk lifecycle operations.
 metadata:
   openclaw:
     requires:
@@ -17,10 +17,6 @@ metadata:
 ---
 
 # Dirextalk Deployer
-
-Continue only when the user explicitly invoked `$dirextalk-deployer`. If this
-skill was loaded implicitly, do not install packages, run lifecycle commands,
-or mutate deployment state.
 
 This is the OpenClaw distribution of `dirextalk-deployer`. It is a thin
 bootstrap skill: the executable deployment engine must always come from the

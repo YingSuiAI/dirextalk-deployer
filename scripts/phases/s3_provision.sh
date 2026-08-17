@@ -49,12 +49,12 @@ run_phase() {
 
 _split_release_validate() {
   local image revision
-  [ "$(state_get server_release.image_ref)" = docker.io/dirextalk/message-server:latest ] || {
-    warn "Split deployment requires the Message Server latest release channel."
+  [ "$(state_get server_release.image_ref)" = "docker.io/dirextalk/message-server:$DIREXTALK_MESSAGE_SERVER_VERSION" ] || {
+    warn "Split deployment requires the prepared Message Server version tag."
     return 1
   }
-  [ "$DIREXTALK_AGENT_IMAGE" = docker.io/dirextalk/agent:latest ] || {
-    warn "Split deployment requires the Agent latest release channel."
+  [ "$DIREXTALK_AGENT_IMAGE" = "docker.io/dirextalk/agent:$DIREXTALK_AGENT_VERSION" ] || {
+    warn "Split deployment requires the prepared Agent version tag."
     return 1
   }
   for image in \

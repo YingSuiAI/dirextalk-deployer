@@ -54,10 +54,10 @@ b64() { base64 | tr -d '\n'; }
 sed_replacement_escape() { printf '%s' "$1" | sed 's/[\\&#]/\\&/g'; }
 split_env=''
 split_cloud_env=''
-case "$MESSAGE_SERVER_IMAGE:$AGENT_IMAGE" in
-  docker.io/dirextalk/message-server:latest:docker.io/dirextalk/agent:latest) ;;
-  *) echo "message-server and Agent images must use their latest release channels" >&2; exit 1 ;;
-esac
+[ "$MESSAGE_SERVER_IMAGE" = "docker.io/dirextalk/message-server:$MESSAGE_VERSION" ] \
+  || { echo "message-server image must match its prepared version tag" >&2; exit 1; }
+[ "$AGENT_IMAGE" = "docker.io/dirextalk/agent:$AGENT_VERSION" ] \
+  || { echo "Agent image must match its prepared version tag" >&2; exit 1; }
 for value in "$POSTGRES_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE"; do
   printf '%s\n' "$value" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$' || {
     echo "PostgreSQL, Caddy, and coturn images must be immutable digest references" >&2

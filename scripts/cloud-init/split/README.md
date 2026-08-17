@@ -1,21 +1,20 @@
 # Split deployment sources
 
-`dirextalk-message-server/deploy/split-agent` is the canonical source for the
-split Compose topology and all message/Agent initialization helpers. This
-directory owns only the first-fresh production consumer. It uses the canonical
+`scripts/cloud-init/split/runtime` is the deployer-owned canonical source for
+the split Compose topology, host lifecycle adapters, and message/Agent
+initialization helpers. It uses the canonical
 `edge-terminated` mode and runs runner preparation, provision, and start from
 the same root-owned staged bundle path.
 
-During development, run `scripts/render/render-split-bundle.sh` from a checkout next to
-`dirextalk-message-server`, or set `DIREXTALK_MESSAGE_SERVER_ROOT` to that
-repository. S3 transfers the resulting complete runtime bundle after SSH host
-identity is fixed; it is never embedded in size-limited user-data. A packaged
-Deployer release must carry the same generated bundle plus its
-`SOURCE_REVISION` rather than requiring a sibling checkout on the operator or
-target host.
+Release preparation renders the runtime from this repository and records its
+Git tree revision in `SOURCE_REVISION`. S3 transfers the resulting complete
+runtime bundle after SSH host identity is fixed; it is never embedded in
+size-limited user-data. A packaged Deployer release carries the generated
+bundle and never requires a Message Server or Agent source checkout on the
+operator or target host.
 
 The target host never clones source. `bootstrap-production.sh` consumes the
-staged bundle, follows the message-server and Agent `latest` release channels,
+staged bundle and prepared message-server and Agent `vX.Y.Z` release tags,
 checks their version/revision labels and real binary versions, and keeps
 PostgreSQL/pgvector, Caddy, and coturn fixed,
 binds TURN's external address to the updater-recorded stable public IPv4,
@@ -28,10 +27,12 @@ network to the healthy `agent:8082` service, with SSE proxy buffering disabled.
 The Compose contract starts Agent before Message Server so a fresh node does
 not depend on a fixed container address or a later manual Caddy edit.
 
-`release.env` is the only production release selection. It records the
-message-server and Agent versions/revisions expected from `latest`, and fixes the single Message Server-owned release catalog origin at
+`release.env` is the only production release selection. Release preparation
+discovers `latest` once, verifies the corresponding stable version tags, and
+records those image/version/revision identities. It also fixes the single Message Server-owned release catalog origin at
 `https://imadmin.dirextalk.ai`, pins the independent Caddy and Alpine coturn images, and records a separate split
-deployment revision so deployment-only fixes do not misstate image provenance.
+deployer-owned runtime tree revision so deployment-only fixes do not misstate
+either application image's provenance.
 Existing node state without `split_release.release_catalog_origin` is obsolete
 and fails closed. This release does not seed, migrate, or infer that field;
 redeploy the node through the fresh-state path.

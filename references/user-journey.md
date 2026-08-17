@@ -16,7 +16,7 @@ Confirm these items before calling `scripts/orchestrate.sh`:
 4. Node.js, AWS CLI v2, `ssh`, and `curl` are available. Go is not required.
 5. AWS credentials are configured through `AWS_PROFILE` or environment variables.
 6. `AWS_DEFAULT_REGION` is explicit.
-7. Docker Hub can pull the Message Server and Agent `latest` release channels plus the fixed PostgreSQL, Caddy, and coturn dependencies.
+7. Docker Hub can pull the prepared Message Server and Agent `vX.Y.Z` release tags plus the fixed PostgreSQL, Caddy, and coturn dependencies.
 8. Existing state handling is explicit: continue, destroy, or new workdir.
 
 On native Windows, first open Git Bash and verify Git before a lifecycle

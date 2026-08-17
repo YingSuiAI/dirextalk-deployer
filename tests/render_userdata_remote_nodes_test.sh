@@ -5,8 +5,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-message='docker.io/dirextalk/message-server:latest'
-agent='docker.io/dirextalk/agent:latest'
+message='docker.io/dirextalk/message-server:v1.1.32'
+agent='docker.io/dirextalk/agent:v1.0.69'
 postgres='docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
 caddy='docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
 coturn='docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
@@ -87,7 +87,7 @@ if bash "$ROOT/scripts/render/render-userdata.sh" \
   --split-source-revision "$split_revision" \
   --agent-source-revision "$agent_revision" \
   --release-catalog-origin https://imadmin.dirextalk.ai >/dev/null 2>&1; then
-  echo "split renderer accepted a non-latest message-server image" >&2
+  echo "split renderer accepted a message-server image that differs from its version" >&2
   exit 1
 fi
 

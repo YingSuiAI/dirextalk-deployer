@@ -44,8 +44,10 @@ mkdir -m 0700 "$out"
 mkdir -p "$out/static-sites/public"
 printf 'stack=%s\n' "$DIREXTALK_SPLIT_STACK_NAME" >"$out/.env"
 printf 'DIREXTALK_STATIC_SITES_ROOT=%s\n' "$out/static-sites" >>"$out/.env"
+printf 'DIREXTALK_MESSAGE_SERVER_IMAGE=%s\n' "$DIREXTALK_MESSAGE_SERVER_IMAGE" >>"$out/.env"
 printf 'DIREXTALK_MESSAGE_SERVER_VERSION=%s\n' "$DIREXTALK_MESSAGE_SERVER_VERSION" >>"$out/.env"
 printf 'DIREXTALK_MESSAGE_SOURCE_REVISION=%s\n' "$DIREXTALK_MESSAGE_SOURCE_REVISION" >>"$out/.env"
+printf 'DIREXTALK_AGENT_IMAGE=%s\n' "$DIREXTALK_AGENT_IMAGE" >>"$out/.env"
 printf 'DIREXTALK_AGENT_VERSION=%s\n' "$DIREXTALK_AGENT_VERSION" >>"$out/.env"
 printf 'DIREXTALK_AGENT_SOURCE_REVISION=%s\n' "$DIREXTALK_AGENT_SOURCE_REVISION" >>"$out/.env"
 printf 'stack_name=%s\n' "$DIREXTALK_SPLIT_STACK_NAME" >"$out/.manifest"
@@ -92,6 +94,10 @@ cat >"$split/scripts/update-message-server-local.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
+cat >"$split/scripts/prepare-host-dependencies.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
 cat >"$split/scripts/export-portal-bootstrap.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '{"ready":true}\n' >"$2"
@@ -113,8 +119,8 @@ printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$split/SOURCE_REVISION"
 
 cat >"$base/.env" <<'EOF'
 DOMAIN=retry.example.test
-MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:latest
-AGENT_IMAGE=docker.io/dirextalk/agent:latest
+MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v1.1.32
+AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.69
 POSTGRES_IMAGE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
@@ -154,9 +160,10 @@ cat >"$fakebin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 case " $* " in
-  *' pull --platform linux/amd64 docker.io/dirextalk/'*:latest*) ;;
-  *' image inspect docker.io/dirextalk/message-server:latest '*) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
-  *' image inspect docker.io/dirextalk/agent:latest '*) printf '%s|%s\n' "${DIREXTALK_TEST_AGENT_VERSION:-v1.0.69}" "${DIREXTALK_TEST_AGENT_REVISION:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}" ;;
+  *' pull --platform linux/amd64 docker.io/dirextalk/message-server:v1.1.32 '*) ;;
+  *' pull --platform linux/amd64 docker.io/dirextalk/agent:v1.0.'*) ;;
+  *' image inspect docker.io/dirextalk/message-server:v1.1.32 '*) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
+  *' image inspect docker.io/dirextalk/agent:v1.0.'*) printf '%s|%s\n' "${DIREXTALK_TEST_AGENT_VERSION:-v1.0.69}" "${DIREXTALK_TEST_AGENT_REVISION:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}" ;;
   *' run --rm --entrypoint /usr/bin/dirextalk-message-server '*) printf '%s\n' v1.1.32 ;;
   *' run --rm --entrypoint /usr/local/bin/dirextalk-'*) printf '%s\n' "${DIREXTALK_TEST_AGENT_VERSION:-v1.0.69}" ;;
   *' volume create '*) printf '%s\n' volume ;;
@@ -218,6 +225,7 @@ cmp "$tmp/expected-retry-events" "$DIREXTALK_TEST_CLEANUP_CALLS"
 # fresh-bootstrap input. A later tooling/Caddy reconcile must use that current
 # receipt while leaving the original bootstrap inputs unchanged.
 sed -i \
+  -e 's#^DIREXTALK_AGENT_IMAGE=.*#DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.70#' \
   -e 's/^DIREXTALK_AGENT_VERSION=.*/DIREXTALK_AGENT_VERSION=v1.0.70/' \
   -e 's/^DIREXTALK_AGENT_SOURCE_REVISION=.*/DIREXTALK_AGENT_SOURCE_REVISION=dddddddddddddddddddddddddddddddddddddddd/' \
   "$base/split/.env"
@@ -227,6 +235,7 @@ export DIREXTALK_TEST_AGENT_REVISION=dddddddddddddddddddddddddddddddddddddddd
 PATH="$fakebin:$PATH" \
   bash "$consumer" --reconcile-edge >"$tmp/reconcile-edge.out" 2>"$tmp/reconcile-edge.err"
 grep -Fqx 'AGENT_VERSION=v1.0.69' "$base/.env"
+grep -Fqx 'AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.69' "$base/.env"
 [ "$(cat "$base/.split-bootstrap-stage")" = completed ]
 export DIREXTALK_TEST_AGENT_VERSION=v1.0.69
 export DIREXTALK_TEST_AGENT_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

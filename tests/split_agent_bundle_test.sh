@@ -5,20 +5,21 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 TEST_TMP=$(mktemp -d)
 trap 'rm -rf "$TEST_TMP"' EXIT
 
-fixture="$TEST_TMP/message-server"
-split="$fixture/deploy/split-agent"
+fixture="$TEST_TMP/deployer"
+split="$fixture/runtime"
 mkdir -p "$split/scripts" "$split/apparmor.d" "$split/systemd" "$split/sysusers.d"
 git -C "$fixture" init -q
 git -C "$fixture" config user.email test@example.invalid
 git -C "$fixture" config user.name Test
 
 files=(
-  compose.yaml compose.production.yaml compose.direct-tls.yaml edge-compose.yaml
+  compose.yaml compose.production.yaml edge-compose.yaml
   apparmor.d/dirextalk-runner-userns
   systemd/dirextalk-extension-runner@.service
   systemd/dirextalk-core-runner@.service
   sysusers.d/dirextalk-split-agent.conf
   scripts/provision-local.sh
+  scripts/prepare-host-dependencies.sh
   scripts/initialize-capability-ca.sh
   scripts/initialize-message-server.sh
   scripts/materialize-agent-secrets.sh
@@ -29,36 +30,30 @@ files=(
   scripts/cleanup-local.sh
   scripts/cleanup-provision-failure.sh
   scripts/verify-production-images.sh
-  scripts/verify-production-tls.sh
   scripts/agent-runtime-local-common.sh
   scripts/stop-agent-local.sh
   scripts/restart-agent-local.sh
   scripts/update-agent-local.sh
   scripts/update-message-server-local.sh
-  scripts/adopt-edge.sh
-  scripts/cutover-edge.sh
-  scripts/verify-first-fresh.sh
 )
 for file in "${files[@]}"; do
   mkdir -p "$split/$(dirname "$file")"
   printf '%s\n' "$file" >"$split/$file"
 done
-git -C "$fixture" add deploy
+git -C "$fixture" add runtime
 git -C "$fixture" commit -qm fixture
-revision=$(git -C "$fixture" rev-parse HEAD)
+revision=$(git -C "$fixture" rev-parse HEAD:runtime)
 
 bundle="$TEST_TMP/split-agent.tar.gz"
-DIREXTALK_MESSAGE_SERVER_ROOT="$fixture" \
+DIREXTALK_SPLIT_RUNTIME_ROOT="$split" \
   bash "$ROOT/scripts/render/render-split-bundle.sh" "$bundle"
 
 [ "$(stat -c '%a' "$bundle")" = 600 ]
 tar -tzf "$bundle" deploy/split-agent/compose.yaml >/dev/null
 tar -tzf "$bundle" deploy/split-agent/compose.production.yaml >/dev/null
-tar -tzf "$bundle" deploy/split-agent/compose.direct-tls.yaml >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/prepare-runner-cgroups.sh >/dev/null
+tar -tzf "$bundle" deploy/split-agent/scripts/prepare-host-dependencies.sh >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/start-local.sh >/dev/null
-tar -tzf "$bundle" deploy/split-agent/scripts/adopt-edge.sh >/dev/null
-tar -tzf "$bundle" deploy/split-agent/scripts/cutover-edge.sh >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/update-message-server-local.sh >/dev/null
 [ "$(tar -xOzf "$bundle" deploy/split-agent/SOURCE_REVISION)" = "$revision" ]
 tar -tzf "$bundle" deploy/split-agent/SOURCE_FILES.sha256 >/dev/null
@@ -73,7 +68,6 @@ fi
 sha_file="$bundle.sha256"
 sha256sum "$bundle" >"$sha_file"
 packaged="$TEST_TMP/packaged-copy.tar.gz"
-DIREXTALK_MESSAGE_SERVER_ROOT="$TEST_TMP/absent" \
 DIREXTALK_SPLIT_BUNDLE_FILE="$bundle" \
 DIREXTALK_SPLIT_BUNDLE_SHA256_FILE="$sha_file" \
   bash "$ROOT/scripts/render/render-split-bundle.sh" "$packaged"
@@ -84,7 +78,6 @@ repository_sha="$repository_bundle.sha256"
 [ -f "$repository_bundle" ] && [ -f "$repository_sha" ]
 [ "$(sha256sum "$repository_bundle" | awk '{print $1}')" = "$(awk 'NR == 1 {print $1}' "$repository_sha")" ]
 repository_copy="$TEST_TMP/repository-copy.tar.gz"
-DIREXTALK_MESSAGE_SERVER_ROOT="$TEST_TMP/absent" \
 DIREXTALK_SPLIT_BUNDLE_FILE="$repository_bundle" \
 DIREXTALK_SPLIT_BUNDLE_SHA256_FILE="$repository_sha" \
   bash "$ROOT/scripts/render/render-split-bundle.sh" "$repository_copy"
@@ -95,19 +88,11 @@ printf '%s\n' "$repository_revision" | grep -Eq '^[0-9a-f]{40}$'
 tar -tzf "$repository_bundle" deploy/split-agent/compose.production.yaml >/dev/null
 tar -tzf "$repository_bundle" deploy/split-agent/scripts/update-message-server-local.sh >/dev/null
 tar -xOzf "$repository_bundle" deploy/split-agent/scripts/cleanup-local.sh \
-  | grep -F 'external|edge-terminated)' >/dev/null
+  | grep -F 'manifest TLS mode must be edge-terminated' >/dev/null
 mkdir -p "$TEST_TMP/repository-unpacked"
 tar -xzf "$repository_bundle" -C "$TEST_TMP/repository-unpacked"
 (cd "$TEST_TMP/repository-unpacked/deploy/split-agent" && sha256sum -c --status SOURCE_FILES.sha256)
 repository_compose="$TEST_TMP/repository-unpacked/deploy/split-agent/compose.yaml"
-repository_agent_caddy="$TEST_TMP/repository-unpacked/deploy/split-agent/Caddyfile.static-sites.example"
-[ -f "$repository_agent_caddy" ]
-grep -Fq 'handle /agent/v1/*' "$repository_agent_caddy"
-grep -Fq 'reverse_proxy agent:8082' "$repository_agent_caddy"
-grep -Fq 'flush_interval -1' "$repository_agent_caddy"
-bundle_agent_route_line=$(grep -nF 'handle /agent/v1/*' "$repository_agent_caddy" | cut -d: -f1)
-bundle_fallback_line=$(grep -nF 'reverse_proxy message-server:8008' "$repository_agent_caddy" | tail -n 1 | cut -d: -f1)
-[ "$bundle_agent_route_line" -lt "$bundle_fallback_line" ]
 [ "$(grep -Ec '^  postgres:$' "$repository_compose")" -eq 1 ]
 [ "$(grep -Fc 'apparmor=dirextalk-runner-userns' "$repository_compose")" -eq 2 ]
 [ "$(grep -Fc 'seccomp=unconfined' "$repository_compose")" -eq 2 ]
@@ -158,6 +143,7 @@ grep -Fq 'DIREXTALK_MESSAGE_TLS_MODE=edge-terminated' "$consumer"
 grep -Fq 'staged production Compose override is missing' "$consumer"
 grep -Fq 'staged message-server update adapter is not executable' "$consumer"
 grep -Fq '"$runner_libexec/scripts/prepare-runner-cgroups.sh" "$stack"' "$consumer"
+grep -Fq '"$split/scripts/prepare-host-dependencies.sh"' "$consumer"
 grep -Fq '"$split/scripts/provision-local.sh" "$run_dir"' "$consumer"
 grep -Fq '"$split/scripts/start-local.sh" "$run_dir/.env"' "$consumer"
 grep -Fq 'sed "s/__DIREXTALK_PUBLIC_DOMAIN__/$domain/g" "$script_dir/Caddyfile"' "$consumer"
@@ -221,9 +207,9 @@ exit 0
 EOF
 cat >"$fresh_split/scripts/provision-local.sh" <<'EOF'
 #!/usr/bin/env bash
-printf 'message_version=%s\nmessage_revision=%s\nagent_version=%s\nagent_revision=%s\ncoturn=%s\nturn_external_ip=%s\ncatalog_origin=%s\noutput=%s\n' \
-  "$DIREXTALK_MESSAGE_SERVER_VERSION" "$DIREXTALK_MESSAGE_SOURCE_REVISION" \
-  "$DIREXTALK_AGENT_VERSION" "$DIREXTALK_AGENT_SOURCE_REVISION" \
+printf 'message_image=%s\nmessage_version=%s\nmessage_revision=%s\nagent_image=%s\nagent_version=%s\nagent_revision=%s\ncoturn=%s\nturn_external_ip=%s\ncatalog_origin=%s\noutput=%s\n' \
+  "$DIREXTALK_MESSAGE_SERVER_IMAGE" "$DIREXTALK_MESSAGE_SERVER_VERSION" "$DIREXTALK_MESSAGE_SOURCE_REVISION" \
+  "$DIREXTALK_AGENT_IMAGE" "$DIREXTALK_AGENT_VERSION" "$DIREXTALK_AGENT_SOURCE_REVISION" \
   "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" "$DIREXTALK_TURN_EXTERNAL_IP" \
   "$DIREXTALK_RELEASE_CATALOG_ORIGIN" "$1" >"$DIREXTALK_TEST_PROVISION_CAPTURE"
 exit 42
@@ -245,6 +231,10 @@ cat >"$fresh_split/scripts/update-message-server-local.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
+cat >"$fresh_split/scripts/prepare-host-dependencies.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
 chmod 0755 "$fresh_split/scripts/"*.sh
 printf '%s\n' extension >"$fresh_split/systemd/dirextalk-extension-runner@.service"
 printf '%s\n' core >"$fresh_split/systemd/dirextalk-core-runner@.service"
@@ -255,8 +245,8 @@ printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$fresh_split/SOURCE_REV
   | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
 cat >"$fresh/.env" <<'EOF'
 DOMAIN=turn.example.test
-MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:latest
-AGENT_IMAGE=docker.io/dirextalk/agent:latest
+MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v1.1.32
+AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.69
 POSTGRES_IMAGE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
@@ -296,8 +286,8 @@ case "$1" in
   pull) exit 0 ;;
   image)
     case "$3" in
-      docker.io/dirextalk/message-server:latest) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
-      docker.io/dirextalk/agent:latest) printf '%s\n' 'v1.0.69|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ;;
+      docker.io/dirextalk/message-server:v1.1.32) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
+      docker.io/dirextalk/agent:v1.0.69) printf '%s\n' 'v1.0.69|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ;;
       *) exit 2 ;;
     esac
     ;;
@@ -323,8 +313,10 @@ else
   status=$?
 fi
 [ "$status" -eq 42 ] || { cat "$TEST_TMP/first-fresh.err" >&2; exit 1; }
+grep -Fqx 'message_image=docker.io/dirextalk/message-server:v1.1.32' "$capture"
 grep -Fqx 'message_version=v1.1.32' "$capture"
 grep -Fqx 'message_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$capture"
+grep -Fqx 'agent_image=docker.io/dirextalk/agent:v1.0.69' "$capture"
 grep -Fqx 'agent_version=v1.0.69' "$capture"
 grep -Fqx 'agent_revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' "$capture"
 grep -Fqx 'coturn=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' "$capture"
@@ -383,6 +375,10 @@ cat >"$edge_split/scripts/update-message-server-local.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
+cat >"$edge_split/scripts/prepare-host-dependencies.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
 cat >"$edge_split/scripts/cleanup-local.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 99
@@ -397,8 +393,8 @@ printf '%s\n' cccccccccccccccccccccccccccccccccccccccc >"$edge_split/SOURCE_REVI
   | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
 cat >"$edge/.env" <<'EOF'
 DOMAIN=edge.example.test
-MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:latest
-AGENT_IMAGE=docker.io/dirextalk/agent:latest
+MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v1.1.32
+AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.69
 POSTGRES_IMAGE=docker.io/pgvector/pgvector:pg18@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 CADDY_IMAGE=docker.io/library/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 COTURN_IMAGE=docker.io/coturn/coturn:4.6.3-alpine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
@@ -429,8 +425,10 @@ chmod 0400 "$edge/edge.env"
 mkdir -p "$edge/split" "$edge/static-sites/public"
 cat >"$edge/split/.env" <<EOF
 DIREXTALK_STATIC_SITES_ROOT=$edge/static-sites
+DIREXTALK_MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v1.1.32
 DIREXTALK_MESSAGE_SERVER_VERSION=v1.1.32
 DIREXTALK_MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.69
 DIREXTALK_AGENT_VERSION=v1.0.69
 DIREXTALK_AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 EOF
@@ -452,8 +450,8 @@ printf 'docker' >>"$EDGE_CALLS"; printf ' %q' "$@" >>"$EDGE_CALLS"; printf '\n' 
 if [ "${1:-}" = pull ]; then exit 0; fi
 if [ "${1:-}" = image ]; then
   case "$3" in
-    docker.io/dirextalk/message-server:latest) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
-    docker.io/dirextalk/agent:latest) printf '%s\n' 'v1.0.69|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ;;
+    docker.io/dirextalk/message-server:v1.1.32) printf '%s\n' 'v1.1.32|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;
+    docker.io/dirextalk/agent:v1.0.69) printf '%s\n' 'v1.0.69|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ;;
   esac
   exit 0
 fi
@@ -487,7 +485,7 @@ grep -Fq 'up -d --wait --force-recreate caddy' "$edge_calls"
 for relative in compose.production.yaml scripts/update-message-server-local.sh scripts/prepare-runner-cgroups.sh; do
   missing="$split/$relative"
   mv "$missing" "$missing.absent"
-  if DIREXTALK_MESSAGE_SERVER_ROOT="$fixture" \
+  if DIREXTALK_SPLIT_RUNTIME_ROOT="$split" \
     bash "$ROOT/scripts/render/render-split-bundle.sh" "$TEST_TMP/invalid.tar.gz" \
       >/dev/null 2>"$TEST_TMP/missing-input.err"; then
     echo "split bundle renderer accepted a missing required input: $relative" >&2

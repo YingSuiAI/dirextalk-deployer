@@ -68,6 +68,7 @@ if [ "${1:-}" = --preflight ]; then
   exit 0
 fi
 printf 'bootstrap\n' >>"$TEST_CALLS"
+[ "$(cat "$TEST_SCENARIO")" != bootstrap-failure ] || exit 23
 [ ! -e "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ] \
   || printf 'fresh-reset\n' >>"$TEST_CALLS"
 cp "$TEST_TARGET" "$TEST_ROOT/usr/local/bin/dirextalk-updater"
@@ -356,15 +357,46 @@ grep -Fq '"desired_state":"running"' "$TEST_ROOT/var/lib/dirextalk-updater/runti
 
 make_fixture maintenance_retry
 printf 'stop-failure-once\n' >"$TEST_SCENARIO"
-if run_reconcile >/dev/null 2>&1; then echo 'old updater stop failure was accepted' >&2; exit 1; else status=$?; fi
+if run_reconcile >"$tmp/maintenance-retry.out" 2>"$tmp/maintenance-retry.err"; then echo 'old updater stop failure was accepted' >&2; exit 1; else status=$?; fi
 [ "$status" -eq 1 ]
 grep -Fq '"schema_version":7' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
-grep -Fq '"desired_state":"maintenance"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+grep -Fq '"desired_state":"running"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+grep -Fq 'updater restored to running/ready' "$tmp/maintenance-retry.err"
+[ "$(cat "$TEST_SERVICE_STATE")" = active ]
 [ ! -e "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ]
 run_reconcile >/dev/null
 grep -Fq '"schema_version":9' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
 grep -Fq '"desired_state":"running"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
 [ ! -e "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json.quarantine-$TEST_TARGET_SHA" ]
+
+make_fixture bootstrap_failure_restore
+printf 'bootstrap-failure\n' >"$TEST_SCENARIO"
+if run_reconcile >"$tmp/bootstrap-failure-restore.out" 2>"$tmp/bootstrap-failure-restore.err"; then
+  echo 'failed updater bootstrap was accepted' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 23 ]
+grep -Fq 'updater restored to running/ready' "$tmp/bootstrap-failure-restore.err"
+grep -Fq '"desired_state":"running"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+[ "$(cat "$TEST_SERVICE_STATE")" = active ]
+
+make_fixture bootstrap_failure_maintenance
+printf '%s\n' '{"schema_version":9,"desired_state":"maintenance","watchdog":{"status":"unknown"},"jobs":{},"idempotency":{}}' \
+  >"$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+chmod 0600 "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+printf 'bootstrap-failure\n' >"$TEST_SCENARIO"
+if run_reconcile >"$tmp/bootstrap-failure-maintenance.out" 2>"$tmp/bootstrap-failure-maintenance.err"; then
+  echo 'failed updater bootstrap from maintenance was accepted' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 23 ]
+grep -Fq '"desired_state":"maintenance"' "$TEST_ROOT/var/lib/dirextalk-updater/runtime.json"
+[ "$(cat "$TEST_SERVICE_STATE")" = inactive ]
+! grep -Fq 'restoring updater state' "$tmp/bootstrap-failure-maintenance.err"
 
 make_fixture same_sha_schema7
 cp "$TEST_TARGET" "$TEST_ROOT/usr/local/bin/dirextalk-updater"
@@ -400,7 +432,10 @@ for identity_scenario in identity-success identity-active identity-infra; do
   else
     status=$?
   fi
-  [ "$status" -eq 1 ]
+  case "$identity_scenario" in
+    identity-active) [ "$status" -eq 3 ] ;;
+    *) [ "$status" -eq 1 ] ;;
+  esac
   grep -Fq 'transition workspace identity changed; refusing cleanup' "$tmp/$identity_scenario.err"
 done
 

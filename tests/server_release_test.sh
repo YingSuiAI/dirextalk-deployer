@@ -19,7 +19,7 @@ source "$ROOT/scripts/lib/server-release.sh"
 
 server_release_validate_pin
 server_release_prepare_state
-json_test_check "$STATE_JSON" "data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image === 'docker.io/dirextalk/message-server:latest' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.server_release.digest === '' && data.server_release.manifest_digest === ''"
+json_test_check "$STATE_JSON" "data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.server_release.digest === '' && data.server_release.manifest_digest === ''"
 json_test_check "$STATE_JSON" "data.split_release.message_source_revision === '$DIREXTALK_MESSAGE_SOURCE_REVISION' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.agent_version === '$DIREXTALK_AGENT_VERSION' && data.split_release.agent_image === '$DIREXTALK_AGENT_IMAGE' && data.split_release.agent_source_revision === '$DIREXTALK_AGENT_SOURCE_REVISION' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.split_release.caddy_image === '$DIREXTALK_CADDY_IMAGE_IMMUTABLE' && data.split_release.coturn_image === '$DIREXTALK_COTURN_IMAGE_IMMUTABLE'"
 [ "$(state_get split_release.release_catalog_origin)" = https://imadmin.dirextalk.ai ]
 
@@ -44,12 +44,14 @@ server_release_advance_split_state "$old_split_revision"
 [ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ]
 state_set split_release.split_source_revision "$old_split_revision"
 state_set split_release.agent_version v9.9.9
+state_set split_release.agent_image docker.io/dirextalk/agent:v9.9.9
 server_release_prepare_state
 [ "$(state_get split_release.agent_version)" = v9.9.9 ] || {
   echo "existing infrastructure lost its recorded Agent release" >&2
   exit 1
 }
 state_set split_release.agent_version "$DIREXTALK_AGENT_VERSION"
+state_set split_release.agent_image "$DIREXTALK_AGENT_IMAGE"
 if server_release_advance_split_state "$old_split_revision"; then
   :
 else
@@ -58,11 +60,15 @@ else
 fi
 state_set split_release.split_source_revision "$old_split_revision"
 state_set split_release.message_version v8.8.8
+state_set split_release.message_image docker.io/dirextalk/message-server:v8.8.8
 state_set split_release.agent_version v9.9.9
+state_set split_release.agent_image docker.io/dirextalk/agent:v9.9.9
 recorded_message_image=$(state_get split_release.message_image)
 recorded_agent_image=$(state_get split_release.agent_image)
 DIREXTALK_MESSAGE_SERVER_VERSION=v7.7.7
+DIREXTALK_MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v7.7.7
 DIREXTALK_AGENT_VERSION=v6.6.6
+DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v6.6.6
 DIREXTALK_SPLIT_SOURCE_REVISION=2222222222222222222222222222222222222222
 server_release_advance_split_state "$old_split_revision"
 [ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ]
@@ -71,9 +77,9 @@ server_release_advance_split_state "$old_split_revision"
 [ "$(state_get split_release.message_image)" = "$recorded_message_image" ]
 [ "$(state_get split_release.agent_image)" = "$recorded_agent_image" ]
 state_set server_release.version v9.9.9
-state_set server_release.image docker.io/dirextalk/message-server:latest
+state_set server_release.image docker.io/dirextalk/message-server:v9.9.9
 state_set server_release.digest ''
-state_set server_release.image_ref docker.io/dirextalk/message-server:latest
+state_set server_release.image_ref docker.io/dirextalk/message-server:v9.9.9
 state_set server_release.manifest_digest ''
 server_release_prepare_state
 [ "$(state_get server_release.version)" = v9.9.9 ] || {

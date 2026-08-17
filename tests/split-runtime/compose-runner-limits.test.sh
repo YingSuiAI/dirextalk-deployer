@@ -62,6 +62,9 @@ token_refresh_line=$(grep -n 'refresh-message-mcp-token.sh' "$script_dir/start-l
 agent_start_line=$(grep -n 'run_with_heartbeat agent_runtime_wait' "$script_dir/start-local.sh" | cut -d: -f1)
 [ "$message_identity_line" -lt "$token_refresh_line" ]
 [ "$token_refresh_line" -lt "$agent_start_line" ]
+grep -Fq 'create --no-build --pull never' "$script_dir/start-local.sh"
+grep -Fq 'verify_agent_path_materialized' "$script_dir/start-local.sh"
+grep -Fq 'Agent Message MCP token needs attention' "$script_dir/start-local.sh"
 grep -Fqx 'DIREXTALK_CLOUD_WORKER_HOST_REGION=ap-east-1' "$run_dir/provision/cloud-worker-host-region"
 static_sites_root=$(awk -F= '$1 == "DIREXTALK_STATIC_SITES_ROOT" {print substr($0,index($0,"=")+1)}' "$run_dir/provision/.env")
 [ -n "$static_sites_root" ]

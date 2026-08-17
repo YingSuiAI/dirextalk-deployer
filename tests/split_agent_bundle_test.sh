@@ -133,13 +133,15 @@ if awk '
 fi
 start_source="$ROOT/scripts/cloud-init/split/runtime/scripts/start-local.sh"
 message_start_line=$(grep -nF -- '--wait message-server' "$start_source" | cut -d: -f1)
-agent_start_line=$(grep -nF 'agent-secret-init agent-migrate extension-runner core-runner agent; then' "$start_source" | cut -d: -f1)
+agent_start_line=$(grep -nF 'run_with_heartbeat agent_runtime_wait' "$start_source" | cut -d: -f1)
 [ -n "$message_start_line" ] && [ -n "$agent_start_line" ] && [ "$message_start_line" -lt "$agent_start_line" ] || {
   echo 'fresh startup does not establish Message Server before the explicit Agent path' >&2
   exit 1
 }
 grep -Fq 'message-server is healthy; Agent runtime needs attention' "$start_source"
 grep -Fq 'refresh-message-mcp-token.sh' "$start_source"
+grep -Fq 'create --no-build --pull never' "$start_source"
+grep -Fq 'Agent Message MCP token needs attention' "$start_source"
 if grep -Ei 'qdrant|message[_-]postgres[_-](data|volume)|agent[_-]postgres[_-](data|volume)' \
     "$repository_compose" >/dev/null; then
   echo 'canonical split bundle retained superseded Qdrant or per-application PostgreSQL resources' >&2
@@ -150,6 +152,7 @@ grep -Fq 'sshd_effective=$(sshd -T)' "$host_integration"
 grep -Fq "grep -Fx 'passwordauthentication no' <<<\"\$sshd_effective\"" "$host_integration"
 grep -Fq "grep -Fx 'pubkeyauthentication yes' <<<\"\$sshd_effective\"" "$host_integration"
 consumer="$ROOT/scripts/cloud-init/split/bootstrap-production.sh"
+grep -Fq 'write_stage agent_needs_attention' "$consumer"
 consumer_exec="$TEST_TMP/bootstrap-production.sh"
 sed "s#/usr/local/libexec/dirextalk/split-agent#$TEST_TMP/runner-libexec#g" \
   "$consumer" >"$consumer_exec"

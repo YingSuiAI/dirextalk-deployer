@@ -22,7 +22,10 @@ The host lifecycle is intentionally small:
   atomically published to the protected host secret source and materialized as
   Agent-owned mode-0400 `/run/secrets/message_mcp_token`; it never enters YAML,
   `.env`, argv, or logs. Startup then runs the explicit Agent
-  init/migrate/runner path. `cleanup-local.sh` and
+  init/migrate/runner path. If token extraction fails while Message Server is
+  healthy, the wrapper materializes but does not start the receipt-bound Agent
+  services and returns status `3`; Edge and messaging stay available for the
+  Agent-only resume. `cleanup-local.sh` and
   `cleanup-provision-failure.sh` clean only receipt-bound resources.
 - `update-message-server-local.sh` and `update-agent-local.sh` apply exact
   `vX.Y.Z` targets and restore the receipt-bound original image after failure.
@@ -34,9 +37,10 @@ The host lifecycle is intentionally small:
   runner cgroup preparation. A digest-bound config transaction restores and
   rematerializes the exact previous YAML with the old image on rollback or an
   interrupted retry.
-  Agent-only update and receipt-bound recovery reuse the stable protected MCP
-  token and re-run `agent-secret-init` where required; neither path reads a
-  mutable Message Server name or recreates Message Server.
+  Agent-only update reuses the stable protected MCP token. Receipt-bound
+  recovery refreshes it from the exact healthy Message Server before re-running
+  `agent-secret-init`; neither path reads a mutable Message Server name or
+  recreates Message Server.
 - `stop-agent-local.sh` and `restart-agent-local.sh` provide the updater's
   fixed Agent recovery boundary. `prepare-agent-start-local.sh` provides the
   stop-and-prepare half for update flows; restart repairs and revalidates

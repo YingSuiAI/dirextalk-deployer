@@ -127,9 +127,12 @@ and requiring `docker.service`. Its only entrypoint is:
 /var/dirextalk-message-server/production-ops/recover-production.sh
 ```
 
-Recovery rebinds the completed runtime from the protected receipt, skips an
-already-successful `agent-secret-init` or `agent-migrate` job, and reruns an
-unfinished or failed job by its exact recorded container ID in that order. A
+Recovery rebinds the completed runtime from the protected receipt, refreshes
+the Message MCP token from the exact receipt-bound healthy Message Server,
+skips an already-successful `agent-secret-init` or `agent-migrate` job, and
+reruns an unfinished or failed job by its exact recorded container ID in that
+order. Token refresh failure remains expected-negative status `3` without
+stopping Message Server or Edge. A
 fresh application exit remains expected-negative status `3`; a Docker start
 failure that did not produce a new container execution is infrastructure
 status `1`. It then waits for the receipt-recorded `agent`, `extension-runner`,

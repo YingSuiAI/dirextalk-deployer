@@ -122,6 +122,11 @@ chmod 0400 "$RECOVERY_BASE/runner-preparation.env"
 printf 'restart:%s\n' "$1" >>"$RECOVERY_CALLS"
 exit "${RECOVERY_RESTART_STATUS:-0}"
 EOF
+cat >"$fixture/split/scripts/refresh-message-mcp-token.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'refresh-token:%s:%s\n' "$1" "$2" >>"$RECOVERY_CALLS"
+exit "${RECOVERY_TOKEN_REFRESH_STATUS:-0}"
+EOF
 printf 'extension unit v2\n' >"$fixture/split/systemd/dirextalk-extension-runner@.service"
 printf 'core unit v2\n' >"$fixture/split/systemd/dirextalk-core-runner@.service"
 chmod 0755 "$fixture/ops/"*.sh "$fixture/split/scripts/"*.sh
@@ -255,6 +260,7 @@ run_recovery() {
     RECOVERY_DOCKER_MODE=${5:-running} RECOVERY_DOCKER_COUNT_DIR="$1.counts" \
     RECOVERY_MESSAGE_STATUS=${6:-0} \
     RECOVERY_JOB_MODE=${7:-complete} \
+    RECOVERY_TOKEN_REFRESH_STATUS=${8:-0} \
     PATH="$fixture/bin:$PATH" \
     bash "$fixture/ops/recover-production.sh" >/dev/null 2>&1
 }
@@ -273,6 +279,10 @@ first_message_line=$(grep -n '^verify-message$' "$success_calls" | head -n 1 | c
 [ "$first_message_line" -lt "$prepare_line" ]
 grep -Fqx 'inspect-job:agent-secret-init:exited:0' "$success_calls"
 grep -Fqx 'inspect-job:agent-migrate:exited:0' "$success_calls"
+grep -Fqx "refresh-token:$fixture/run:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" "$success_calls"
+refresh_line=$(grep -n '^refresh-token:' "$success_calls" | cut -d: -f1)
+first_job_line=$(grep -n '^inspect-job:' "$success_calls" | head -n 1 | cut -d: -f1)
+[ "$refresh_line" -lt "$first_job_line" ]
 if grep -q '^start-job:' "$success_calls"; then
   echo 'recovery reran an already successful Agent initialization job' >&2
   exit 1
@@ -302,6 +312,20 @@ grep -Fqx 'start-job:agent-secret-init' "$job_failure_calls"
 grep -Fqx 'negative:agent-secret-init needs attention after exit 17' "$job_failure_calls"
 if grep -Eq '^start-job:agent-migrate$|^restart:' "$job_failure_calls"; then
   echo 'failed Agent initialization continued into later runtime mutations' >&2
+  exit 1
+fi
+
+token_failure_calls="$tmp/token-failure.calls"
+if run_recovery "$token_failure_calls" 0 0 0 running 0 complete 17; then
+  echo 'recovery accepted a failed Message MCP token refresh' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 3 ]
+grep -Fqx 'negative:Message MCP token refresh needs attention (status 17)' "$token_failure_calls"
+if grep -Eq '^inspect-job:|^start-job:|^restart:' "$token_failure_calls"; then
+  echo 'failed Message MCP token refresh continued into Agent runtime mutations' >&2
   exit 1
 fi
 

@@ -214,6 +214,7 @@ chmod 0400 "$candidate_ops/release.env"
 chown 0:0 "$candidate_ops/release.env"
 install -o root -g root -m 0755 \
   "$stage/cloud-init/split/bootstrap-production.sh" "$advance" \
+  "$stage/cloud-init/split/migrate-message-mcp-token-binding.sh" \
   "$stage/cloud-init/split/production-ops-common.sh" \
   "$stage/cloud-init/split/recover-production.sh" \
   "$stage/cloud-init/split/reconcile-production.sh" \

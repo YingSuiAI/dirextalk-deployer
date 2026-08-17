@@ -59,7 +59,7 @@ mkdir -p "$stage/cloud-init/split" "$stage/updater"
 chmod 0700 "$stage"
 cp "$ROOT/scripts/cloud-init/split/authorize-split-source-revision.sh" "$stage/cloud-init/split/"
 cp "$ROOT/scripts/cloud-init/split/advance-split-source-revision.sh" "$stage/cloud-init/split/"
-for file in bootstrap-production.sh production-ops-common.sh recover-production.sh reconcile-production.sh reset-production.sh; do
+for file in bootstrap-production.sh migrate-message-mcp-token-binding.sh production-ops-common.sh recover-production.sh reconcile-production.sh reset-production.sh; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$stage/cloud-init/split/$file"
 done
 printf 'fixture\n' >"$stage/cloud-init/split/Caddyfile"

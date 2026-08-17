@@ -616,6 +616,7 @@ _resume_host_bootstrap() {
       cloud-init/split/authorize-split-source-revision.sh \
       cloud-init/split/advance-split-source-revision.sh \
       cloud-init/split/release.env \
+      cloud-init/split/migrate-message-mcp-token-binding.sh \
       cloud-init/split/production-ops-common.sh \
       cloud-init/split/recover-production.sh \
       cloud-init/split/reconcile-production.sh \

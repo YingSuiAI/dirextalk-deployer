@@ -11,6 +11,7 @@ trap 'rm -rf "$tmp"' EXIT
 source "$ROOT/scripts/lib/ops.sh"
 bootstrap_helper="$ROOT/scripts/cloud-init/split/bootstrap-production.sh"
 common_helper="$ROOT/scripts/cloud-init/split/production-ops-common.sh"
+migrate_helper="$ROOT/scripts/cloud-init/split/migrate-message-mcp-token-binding.sh"
 reconcile_helper="$ROOT/scripts/cloud-init/split/reconcile-production.sh"
 recover_helper="$ROOT/scripts/cloud-init/split/recover-production.sh"
 reset_helper="$ROOT/scripts/cloud-init/split/reset-production.sh"
@@ -24,6 +25,7 @@ grep -Fq 'com.docker.compose.service' "$common_helper"
 grep -Fq 'production_verify_edge' "$reconcile_helper"
 grep -Fq 'bootstrap-production.sh" --reconcile-edge' "$reconcile_helper"
 grep -Fq 'recover-production.sh"' "$reconcile_helper"
+grep -Fq 'migrate-message-mcp-token-binding.sh"' "$reconcile_helper"
 if grep -Fq 'start-local.sh' "$reconcile_helper"; then
   echo "production reconcile called the first-fresh start wrapper" >&2
   exit 1
@@ -40,7 +42,8 @@ fi
 production_helpers=$(ops_production_helpers_prelude)
 bootstrap_payload=$(base64 <"$bootstrap_helper" | tr -d '\r\n')
 grep -Fq "payload='$bootstrap_payload'" <<<"$production_helpers"
-grep -Fq 'for helper in bootstrap-production.sh production-ops-common.sh recover-production.sh reconcile-production.sh reset-production.sh' <<<"$production_helpers"
+grep -Fq 'for helper in bootstrap-production.sh migrate-message-mcp-token-binding.sh production-ops-common.sh recover-production.sh reconcile-production.sh reset-production.sh' <<<"$production_helpers"
+grep -Fq "$(base64 <"$migrate_helper" | tr -d '\r\n')" <<<"$production_helpers"
 grep -Fq 'install -o root -g root -m 0755 "$helper_tmp" "/var/dirextalk-message-server/production-ops/$helper"' <<<"$production_helpers"
 
 # Exercise the real production reconcile wrapper with its owning helpers
@@ -50,6 +53,11 @@ grep -Fq 'install -o root -g root -m 0755 "$helper_tmp" "/var/dirextalk-message-
 reconcile_fixture="$tmp/reconcile-wrapper"
 mkdir -p "$reconcile_fixture/split/scripts" "$reconcile_fixture/base/p2p"
 cp "$reconcile_helper" "$reconcile_fixture/reconcile-production.sh"
+cat >"$reconcile_fixture/migrate-message-mcp-token-binding.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'migrate-message-mcp\n' >>"$RECONCILE_CALLS"
+exit "${RECONCILE_MIGRATE_STATUS:-0}"
+EOF
 cat >"$reconcile_fixture/recover-production.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'recover\n' >>"$RECONCILE_CALLS"
@@ -117,18 +125,50 @@ run_reconcile_fixture() {
     RECONCILE_SPLIT="$reconcile_fixture/split" RECONCILE_RUN="$reconcile_fixture/run" \
     RECONCILE_EDGE_STATUS=${2:-0} RECONCILE_RESTART_STATUS=${3:-0} \
     RECONCILE_EXPORT_MODE=${4:-success} RECONCILE_BIND_FAIL_AT=${5:-0} RECONCILE_BIND_COUNT=0 \
+    RECONCILE_MIGRATE_STATUS=${6:-0} \
     bash "$reconcile_fixture/reconcile-production.sh" >/dev/null 2>&1
 }
 
 reconcile_success="$tmp/reconcile-success.calls"
 write_old_bootstrap
 run_reconcile_fixture "$reconcile_success"
+grep -Fqx 'migrate-message-mcp' "$reconcile_success"
 grep -Fqx 'edge:--reconcile-edge' "$reconcile_success"
 grep -Fqx 'recover' "$reconcile_success"
 grep -Fqx "restart:$reconcile_fixture/run" "$reconcile_success"
 grep -Eq "^export:$reconcile_fixture/run:$reconcile_fixture/base/p2p/\.bootstrap-refresh\.[^/]+/bootstrap\.json$" "$reconcile_success"
 json_test_check "$reconcile_fixture/base/p2p/bootstrap.json" "data.access_token === 'new-access' && data.owner_user_id === '@owner:example.test'"
 [ "$(stat -c '%a' "$reconcile_fixture/base/p2p/bootstrap.json")" = 400 ]
+
+reconcile_migrate_negative="$tmp/reconcile-migrate-negative.calls"
+write_old_bootstrap
+if run_reconcile_fixture "$reconcile_migrate_negative" 0 0 success 0 3; then
+  echo "production reconcile accepted an expected-negative Message MCP binding migration" >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 3 ]
+grep -Fqx 'negative:Message MCP token binding migration reported an expected negative state' "$reconcile_migrate_negative"
+if grep -Fxq 'bind' "$reconcile_migrate_negative"; then
+  echo "expected-negative Message MCP migration reached runtime bind" >&2
+  exit 1
+fi
+
+reconcile_migrate_infra="$tmp/reconcile-migrate-infrastructure.calls"
+write_old_bootstrap
+if run_reconcile_fixture "$reconcile_migrate_infra" 0 0 success 0 17; then
+  echo "production reconcile accepted an infrastructure Message MCP binding migration failure" >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 1 ]
+grep -Fqx 'die:Message MCP token binding migration failed' "$reconcile_migrate_infra"
+if grep -Fxq 'bind' "$reconcile_migrate_infra"; then
+  echo "infrastructure-failed Message MCP migration reached runtime bind" >&2
+  exit 1
+fi
 
 reconcile_negative="$tmp/reconcile-negative.calls"
 write_old_bootstrap

@@ -5,6 +5,15 @@ script_dir=$(cd "$(dirname "$0")" && pwd -P)
 # shellcheck disable=SC1091
 source "$script_dir/production-ops-common.sh"
 
+if "$script_dir/migrate-message-mcp-token-binding.sh"; then
+  :
+else
+  status=$?
+  case "$status" in
+    3) production_negative 'Message MCP token binding migration reported an expected negative state' ;;
+    *) production_die 'Message MCP token binding migration failed' ;;
+  esac
+fi
 production_bind_runtime
 production_verify_edge
 if "$script_dir/bootstrap-production.sh" --reconcile-edge; then

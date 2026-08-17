@@ -23,6 +23,7 @@ required=(
   scripts/reset-app-data.sh
   scripts/cloud-init/split/release.env
   scripts/cloud-init/split/production-ops-common.sh
+  scripts/cloud-init/split/migrate-message-mcp-token-binding.sh
   scripts/cloud-init/split/reconcile-production.sh
   scripts/cloud-init/split/reset-production.sh
   scripts/pricing-estimate.sh

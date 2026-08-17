@@ -141,6 +141,7 @@ if grep -Fq "'$AWS_DEFAULT_REGION'" "$REMOTE_COMMAND"; then
 fi
 transport_listing=$(tar -tzf "$TEST_TRANSPORT")
 grep -Fxq 'cloud-init/split/apply-host-integration.sh' <<<"$transport_listing"
+grep -Fxq 'cloud-init/split/migrate-message-mcp-token-binding.sh' <<<"$transport_listing"
 grep -Fxq 'canonical-bundle.tar.gz' <<<"$transport_listing"
 node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
   "data.split_release.release_catalog_origin === '$DIREXTALK_RELEASE_CATALOG_ORIGIN' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.agent_version === 'v1.0.86' && data.split_release.agent_source_revision === '300635fd615e09f9ce1f6bd4ab0f5d3ca31bac0f' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"

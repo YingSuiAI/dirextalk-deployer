@@ -61,6 +61,7 @@ command=${!#}
 case "$command" in
   *'apply-host-integration.sh'*)
     printf 'ssh:integration\n' >>"$CALLS"
+    printf '%s\n' "$command" >"$REMOTE_COMMAND"
     cat >"$TEST_TRANSPORT"
     [ "${INTEGRATION_STATUS:-0}" -eq 0 ] || exit "$INTEGRATION_STATUS"
     printf 'integration output\n%s\t%s\t%s\n' "$EXPECTED_MACHINE" "$EXPECTED_DOCKER" "$EXPECTED_BUNDLE_SHA"
@@ -77,6 +78,8 @@ export PATH="$tmp/bin:$PATH"
 export EXPECTED_ACCOUNT=$account EXPECTED_ARN=$provider_arn EXPECTED_SUPPORT=$support_code EXPECTED_IP=$public_ip
 export EXPECTED_MACHINE=$machine_id EXPECTED_DOCKER=$docker_engine_id EXPECTED_BUNDLE_SHA=$bundle_sha
 export TEST_TRANSPORT="$tmp/transport.tar.gz"
+export REMOTE_COMMAND="$tmp/remote-command"
+export AWS_DEFAULT_REGION=us-west-2 AWS_REGION=us-west-2
 
 # Missing immutable identity is a local contract failure and must not perform
 # any external read or mutation.
@@ -138,6 +141,13 @@ write_state true
 bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null
 [ "$(grep -c '^ssh:identity$' "$CALLS")" -eq 2 ]
 [ "$(grep -c '^ssh:integration$' "$CALLS")" -eq 1 ]
+grep -Fq "aws:--region $region lightsail get-instance" "$CALLS"
+grep -Fq "apply-host-integration.sh" "$REMOTE_COMMAND"
+grep -Fq "'$public_ip' '$region'" "$REMOTE_COMMAND"
+if grep -Fq "'$AWS_DEFAULT_REGION'" "$REMOTE_COMMAND"; then
+  echo 'existing-node update used the credential default region for Cloud Worker placement' >&2
+  exit 1
+fi
 transport_listing=$(tar -tzf "$TEST_TRANSPORT")
 grep -Fxq 'cloud-init/split/apply-host-integration.sh' <<<"$transport_listing"
 grep -Fxq 'canonical-bundle.tar.gz' <<<"$transport_listing"

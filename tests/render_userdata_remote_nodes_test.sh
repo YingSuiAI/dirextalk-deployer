@@ -14,6 +14,7 @@ message_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 split_revision=cccccccccccccccccccccccccccccccccccccccc
 agent_revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 common=(
+  --region ap-east-1
   --domain service.example.test
   --acme ops@example.test
   --message-server-image "$message"
@@ -43,6 +44,7 @@ sed -n "/^exec \/usr\/bin\/env bash <<'DIREXTALK_BOOTSTRAP_BASH'$/,/^DIREXTALK_B
   | sed '1d;$d' | bash -n
 
 for rendered in "$tmp/user-data.yaml" "$tmp/user-data.sh"; do
+  [ "$(grep -Fc 'DIREXTALK_CLOUD_WORKER_HOST_REGION=ap-east-1' "$rendered")" -eq 1 ]
   grep -Fq "MESSAGE_SERVER_IMAGE=$message" "$rendered"
   grep -Fq "AGENT_IMAGE=$agent" "$rendered"
   grep -Fq "POSTGRES_IMAGE=$postgres" "$rendered"
@@ -59,6 +61,27 @@ for rendered in "$tmp/user-data.yaml" "$tmp/user-data.sh"; do
     exit 1
   fi
 done
+
+if bash "$ROOT/scripts/render/render-userdata.sh" \
+  "${common[@]:2}" >/dev/null 2>&1; then
+  echo "split renderer accepted a missing deployment region" >&2
+  exit 1
+fi
+
+if bash "$ROOT/scripts/render/render-userdata.sh" \
+  "${common[@]}" --region 'ap-east-1;touch /tmp/invalid' >/dev/null 2>&1; then
+  echo "split renderer accepted a malformed deployment region" >&2
+  exit 1
+fi
+
+bash "$ROOT/scripts/render/render-userdata.sh" \
+  "${common[@]}" --region us-iso-east-1 >"$tmp/user-data.iso.yaml"
+[ "$(grep -Fc 'DIREXTALK_CLOUD_WORKER_HOST_REGION=us-iso-east-1' "$tmp/user-data.iso.yaml")" -eq 1 ]
+if bash "$ROOT/scripts/render/render-userdata.sh" \
+  "${common[@]}" --region us-east-01 >/dev/null 2>&1; then
+  echo "split renderer accepted a deployment region with a leading-zero suffix" >&2
+  exit 1
+fi
 
 awk '/encoding: b64/ { getline; sub(/^    content: /, ""); print; exit }' "$tmp/user-data.yaml" \
   | base64 -d >"$tmp/bundle.tar.gz"
@@ -84,6 +107,7 @@ fi
 [ "$(wc -c <"$tmp/user-data.yaml")" -lt 16384 ]
 
 if bash "$ROOT/scripts/render/render-userdata.sh" \
+  --region ap-east-1 \
   --domain service.example.test \
   --message-server-image dirextalk/message-server:v1.2.3 \
   --agent-image "$agent" \

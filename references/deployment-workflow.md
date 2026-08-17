@@ -155,6 +155,11 @@ SHA-256 pin. User-data on the verified Ubuntu 24.04+ x86_64 host with systemd
 >= 254 downloads that
 fixed Release asset, verifies the local pin, and atomically installs it; no
 local Go toolchain or updater SCP step is required.
+S3 seals its validated deployment region into the protected bootstrap input.
+Fresh provisioning writes that same value into the Cloud Worker host-region
+configuration. Existing-node tooling updates revalidate and use only
+`state.json.node_identity.region`; an AWS profile or uploaded credential default
+region cannot select a different region, and no cross-region fallback exists.
 The updater's fixed Release download and checksum contract is unchanged. Fresh
 deployment writes the updater's `watchdog_enabled=false` contract alongside the
 immutable pin: its root-owned control API and explicit update/recovery jobs are

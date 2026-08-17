@@ -322,6 +322,11 @@ elif [ -f "$base/.split-deploy-done" ]; then
   [ -s "$base/split-stack-name" ] || { echo "completed deployment lacks its split stack identity" >&2; exit 1; }
   stack=$(cat "$base/split-stack-name")
 else
+  cloud_worker_host_region=$(read_env DIREXTALK_CLOUD_WORKER_HOST_REGION)
+  printf '%s\n' "$cloud_worker_host_region" | grep -Eq '^[a-z]{2}(-[a-z0-9]+)+-[1-9][0-9]*$' || {
+    echo "protected Cloud Worker host region is invalid" >&2
+    exit 1
+  }
   write_stage runner_preparation
   install_runner_host_assets
   runner_preparation_current=false
@@ -370,6 +375,7 @@ else
       DIREXTALK_COTURN_IMAGE_IMMUTABLE="$coturn_image" \
       DIREXTALK_RELEASE_CATALOG_ORIGIN="$release_catalog_origin" \
       DIREXTALK_TURN_EXTERNAL_IP="$turn_external_ip" \
+      DIREXTALK_CLOUD_WORKER_HOST_REGION="$cloud_worker_host_region" \
         "$split/scripts/provision-local.sh" "$run_dir"; then
       :
     else

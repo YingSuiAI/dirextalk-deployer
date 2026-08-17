@@ -6,23 +6,25 @@
 # channel because it cannot fit in the AWS user-data limit.
 # Comment-only lines are stripped to keep AWS user-data below 16384 bytes.
 # Replaces __DOMAIN__ /
-# __ACME_EMAIL__ / __MESSAGE_SERVER_IMAGE__; the EC2 instance does not need to
+# __ACME_EMAIL__ / __MESSAGE_SERVER_IMAGE__ and seals the deployment region;
+# the EC2 instance does not need to
 # clone repos.
 #
 # Usage:
-#   render-userdata.sh --domain <domain> --acme <email> --message-server-image <img> --release-catalog-origin <origin> > user-data.yaml
-#   render-userdata.sh --format shell --domain <domain> --acme <email> --message-server-image <img> --release-catalog-origin <origin> > user-data.sh
+#   render-userdata.sh --region <region> --domain <domain> --acme <email> --message-server-image <img> --release-catalog-origin <origin> > user-data.yaml
+#   render-userdata.sh --format shell --region <region> --domain <domain> --acme <email> --message-server-image <img> --release-catalog-origin <origin> > user-data.sh
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 CI="$HERE/cloud-init"
 source "$HERE/lib/domain.sh"
 
-DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; AGENT_IMAGE=""; POSTGRES_IMAGE=""; CADDY_IMAGE=""; COTURN_IMAGE=""
+REGION=""; DOMAIN=""; ACME=""; MESSAGE_SERVER_IMAGE=""; AGENT_IMAGE=""; POSTGRES_IMAGE=""; CADDY_IMAGE=""; COTURN_IMAGE=""
 MESSAGE_VERSION=""; AGENT_VERSION=""; MESSAGE_SOURCE_REVISION=""; SPLIT_SOURCE_REVISION=""; AGENT_SOURCE_REVISION=""; RELEASE_CATALOG_ORIGIN=""; FORMAT="cloud-config"
 while [ $# -gt 0 ]; do
   case "$1" in
     --format) FORMAT=$2; shift 2;;
+    --region) REGION=$2; shift 2;;
     --domain) DOMAIN=$2; shift 2;;
     --acme) ACME=$2; shift 2;;
     --message-server-image) MESSAGE_SERVER_IMAGE=$2; shift 2;;
@@ -41,6 +43,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$MESSAGE_SERVER_IMAGE" ] || { echo "--message-server-image required" >&2; exit 1; }
+[ -n "$REGION" ] || { echo "--region required" >&2; exit 1; }
+printf '%s\n' "$REGION" | grep -Eq '^[a-z]{2}(-[a-z0-9]+)+-[1-9][0-9]*$' \
+  || { echo "invalid deployment region: $REGION" >&2; exit 1; }
 [ -n "$DOMAIN" ] || { echo "--domain required; production deployments require a real domain" >&2; exit 1; }
 DOMAIN=$(domain_normalize "$DOMAIN")
 [ "$DOMAIN" != "PLACEHOLDER" ] || { echo "PLACEHOLDER/sslip.io domains are not accepted in the production renderer" >&2; exit 1; }
@@ -84,8 +89,8 @@ done
   echo "--release-catalog-origin must be https://imadmin.dirextalk.ai" >&2
   exit 1
 }
-split_env=$(printf 'AGENT_IMAGE=%s\nPOSTGRES_IMAGE=%s\nCADDY_IMAGE=%s\nCOTURN_IMAGE=%s\nMESSAGE_VERSION=%s\nAGENT_VERSION=%s\nMESSAGE_SOURCE_REVISION=%s\nSPLIT_SOURCE_REVISION=%s\nAGENT_SOURCE_REVISION=%s\nDIREXTALK_RELEASE_CATALOG_ORIGIN=%s\n' \
-  "$AGENT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE" "$MESSAGE_VERSION" "$AGENT_VERSION" "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_REVISION" "$RELEASE_CATALOG_ORIGIN")
+split_env=$(printf 'AGENT_IMAGE=%s\nPOSTGRES_IMAGE=%s\nCADDY_IMAGE=%s\nCOTURN_IMAGE=%s\nMESSAGE_VERSION=%s\nAGENT_VERSION=%s\nMESSAGE_SOURCE_REVISION=%s\nSPLIT_SOURCE_REVISION=%s\nAGENT_SOURCE_REVISION=%s\nDIREXTALK_RELEASE_CATALOG_ORIGIN=%s\nDIREXTALK_CLOUD_WORKER_HOST_REGION=%s\n' \
+  "$AGENT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE" "$COTURN_IMAGE" "$MESSAGE_VERSION" "$AGENT_VERSION" "$MESSAGE_SOURCE_REVISION" "$SPLIT_SOURCE_REVISION" "$AGENT_SOURCE_REVISION" "$RELEASE_CATALOG_ORIGIN" "$REGION")
 split_cloud_env=$(printf '%s\n' "$split_env" | sed 's/^/      /')
 
 # Build a deterministic tar.gz bundle with fixed permissions and no extra attrs.

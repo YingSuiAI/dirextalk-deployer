@@ -42,6 +42,7 @@ export PATH="$tmp/bin:$PATH"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null 2>&1
+state_set region us-east-1
 # shellcheck disable=SC1091
 source "$ROOT/scripts/phases/s3_provision.sh"
 server_release_record_split_state
@@ -90,6 +91,7 @@ grep -F -q 'cloud-init status --wait' "$REMOTE_COMMAND"
 grep -F -q 'cloud-init status --wait >/dev/null 2>&1 || :' "$REMOTE_COMMAND"
 grep -F -q "/var/dirextalk-message-server '$recorded_old_split_revision'" "$REMOTE_COMMAND"
 grep -F -q "'203.0.113.44'" "$REMOTE_COMMAND"
+grep -F -q "'203.0.113.44' 'us-east-1'" "$REMOTE_COMMAND"
 case "$(cat "$REMOTE_COMMAND")" in
   *'sudo mktemp -d '*'sudo tar --no-same-owner -xzf -'*'bootstrap-host.sh" --record-stable-ip'*'apply-host-integration.sh'*'cloud-init status --wait'*'printf '*) ;;
   *) echo 'split authorization must precede every canonical runtime/install mutation' >&2; exit 1 ;;

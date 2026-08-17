@@ -96,6 +96,8 @@ fi
 grep -q '^ssh .*ubuntu@203\.0\.113\.155.*tar.*apply-host-integration\.sh.*203\.0\.113\.155' "$CALLS"
 grep -q '^ssh .*bootstrap-host\.sh.*--record-stable-ip.*203\.0\.113\.155.*apply-host-integration\.sh' "$CALLS"
 grep -q '^ssh .*apply-host-integration\.sh.*cloud-init.*status.*--wait.*printf' "$CALLS"
+grep -q '^ssh .*apply-host-integration\.sh.*203\.0\.113\.155.*us-east-1' "$CALLS"
+grep -Fq 'DIREXTALK_CLOUD_WORKER_HOST_REGION=us-east-1' "$DIREXTALK_WORKDIR/user-data.yaml"
 grep -q -- '--no-same-owner' "$CALLS"
 grep -q 'authorize-security-group-ingress .*--protocol tcp --port 3478 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'authorize-security-group-ingress .*--protocol udp --port 3478 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }

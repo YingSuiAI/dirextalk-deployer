@@ -301,6 +301,9 @@ fi
 turn_external_ip=${DIREXTALK_TURN_EXTERNAL_IP:-}
 [ -n "$turn_external_ip" ] || die "DIREXTALK_TURN_EXTERNAL_IP is required for production TURN relay"
 validate_ipv4 DIREXTALK_TURN_EXTERNAL_IP "$turn_external_ip"
+cloud_worker_host_region=${DIREXTALK_CLOUD_WORKER_HOST_REGION:-}
+[ -n "$cloud_worker_host_region" ] || die "DIREXTALK_CLOUD_WORKER_HOST_REGION is required"
+validate_safe_value DIREXTALK_CLOUD_WORKER_HOST_REGION "$cloud_worker_host_region" '^[a-z]{2}(-[a-z0-9]+)+-[1-9][0-9]*$'
 
 extension_runner_socket=${DIREXTALK_CORE_EXTENSION_RUNNER_SOCKET:-/run/dirextalk-agent/extension-runner.sock}
 workload_runner_socket=${DIREXTALK_CORE_WORKLOAD_RUNNER_SOCKET:-/run/dirextalk-core-runner/runner.sock}
@@ -933,6 +936,7 @@ core_static_sites_public_origin: $message_client_base_url
 core_workload_enabled: $core_workload_enabled
 core_workload_runner_socket: $workload_runner_socket
 core_workload_runner_uid: $workload_runner_uid
+core_cloud_worker_host_region: $cloud_worker_host_region
 core_secret_master_key_file: /run/secrets/core_secret_master_key
 core_secret_master_key_version: 1
 EOF
@@ -945,6 +949,9 @@ core_knowledge_vector_dimension: $core_knowledge_vector_dimension
 core_knowledge_sweep_interval: 1s
 EOF
 chmod 400 "$out/agent-config.yaml"
+printf 'DIREXTALK_CLOUD_WORKER_HOST_REGION=%s\n' "$cloud_worker_host_region" \
+  >"$out/cloud-worker-host-region"
+chmod 400 "$out/cloud-worker-host-region"
 
 cat >"$out/.env" <<EOF
 DIREXTALK_SPLIT_STACK_NAME=$stack_name

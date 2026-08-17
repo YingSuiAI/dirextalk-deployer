@@ -53,6 +53,72 @@ retired_config_pattern='^(core_aws_enabled|capability_enabled|capability_grpc_li
 [ "$(grep -Fxc 'agent_http_listen: 0.0.0.0:8082' "$agent_config" || true)" -eq 1 ] || die 'Agent config must contain exactly one agent_http_listen: 0.0.0.0:8082'
 [ "$(grep -Ec '^agent_http_enabled:' "$agent_config" || true)" -eq 1 ] || die 'Agent config contains an invalid agent_http_enabled setting'
 [ "$(grep -Ec '^agent_http_listen:' "$agent_config" || true)" -eq 1 ] || die 'Agent config contains an invalid agent_http_listen setting'
+agent_config_original_identity=$(stat -c '%d:%i:%u' "$agent_config")
+agent_config_original_digest=$(sha256sum "$agent_config" | awk '{print $1}')
+host_region_receipt=$out/cloud-worker-host-region
+[ -f "$host_region_receipt" ] && [ ! -L "$host_region_receipt" ] \
+  && [ "$(stat -c '%a:%u' "$host_region_receipt")" = "400:$required_owner" ] \
+  || die 'invalid protected Cloud Worker host-region receipt'
+host_region=$(read_pair "$host_region_receipt" DIREXTALK_CLOUD_WORKER_HOST_REGION)
+printf '%s\n' "$host_region" | grep -Eq '^[a-z]{2}(-[a-z0-9]+)+-[1-9][0-9]*$' \
+  || die 'protected Cloud Worker host-region receipt is invalid'
+host_region_receipt_identity=$(stat -c '%d:%i:%u' "$host_region_receipt")
+host_region_receipt_digest=$(sha256sum "$host_region_receipt" | awk '{print $1}')
+verify_host_region_receipt() {
+  [ -f "$host_region_receipt" ] && [ ! -L "$host_region_receipt" ] \
+    && [ "$(stat -c '%a:%u' "$host_region_receipt")" = "400:$required_owner" ] \
+    && [ "$(stat -c '%d:%i:%u' "$host_region_receipt")" = "$host_region_receipt_identity" ] \
+    && [ "$(sha256sum "$host_region_receipt" | awk '{print $1}')" = "$host_region_receipt_digest" ] \
+    && [ "$(read_pair "$host_region_receipt" DIREXTALK_CLOUD_WORKER_HOST_REGION)" = "$host_region" ] \
+    || die 'Cloud Worker host-region receipt changed during Agent update'
+}
+agent_config_target_identity=
+agent_config_target_digest=
+verify_target_agent_config() {
+  verify_host_region_receipt
+  [ -n "$agent_config_target_identity" ] && [ -n "$agent_config_target_digest" ] \
+    && [ -f "$agent_config" ] && [ ! -L "$agent_config" ] \
+    && [ "$(stat -c '%a:%u' "$agent_config")" = "400:$required_owner" ] \
+    && [ "$(stat -c '%d:%i:%u' "$agent_config")" = "$agent_config_target_identity" ] \
+    && [ "$(sha256sum "$agent_config" | awk '{print $1}')" = "$agent_config_target_digest" ] \
+    && [ "$(grep -Fxc "core_cloud_worker_host_region: $host_region" "$agent_config" || true)" -eq 1 ] \
+    && [ "$(grep -Ec '^core_cloud_worker_host_region:' "$agent_config" || true)" -eq 1 ] \
+    || die 'protected Agent config changed after the host-region commit'
+}
+config_transaction=$out/.agent-config-update
+config_transaction_present=false
+config_transaction_identity=
+config_original_digest=
+config_target_digest=
+config_transaction_target_version=
+if [ -e "$config_transaction" ] || [ -L "$config_transaction" ]; then
+  [ -d "$config_transaction" ] && [ ! -L "$config_transaction" ] \
+    && [ "$(stat -c '%a:%u' "$config_transaction")" = "700:$required_owner" ] \
+    || die 'invalid interrupted Agent config transaction directory'
+  for file in previous.yaml state.env; do
+    [ -f "$config_transaction/$file" ] && [ ! -L "$config_transaction/$file" ] \
+      && [ "$(stat -c '%a:%u' "$config_transaction/$file")" = "400:$required_owner" ] \
+      || die "invalid interrupted Agent config transaction file: $file"
+  done
+  config_transaction_identity=$(stat -c '%d:%i:%u' "$config_transaction")
+  config_original_digest=$(read_pair "$config_transaction/state.env" ORIGINAL_SHA256)
+  config_target_digest=$(read_pair "$config_transaction/state.env" TARGET_SHA256)
+  config_transaction_target_version=$(read_pair "$config_transaction/state.env" TARGET_VERSION)
+  [ "$(read_pair "$config_transaction/state.env" HOST_REGION_RECEIPT_SHA256)" = "$host_region_receipt_digest" ] \
+    || die 'interrupted Agent config transaction belongs to another host-region receipt'
+  printf '%s:%s\n' "$config_original_digest" "$config_target_digest" \
+    | grep -Eq '^[0-9a-f]{64}:[0-9a-f]{64}$' \
+    || die 'interrupted Agent config transaction contains an invalid digest'
+  canonical_version "$config_transaction_target_version" \
+    || die 'interrupted Agent config transaction contains an invalid target version'
+  [ "$(sha256sum "$config_transaction/previous.yaml" | awk '{print $1}')" = "$config_original_digest" ] \
+    || die 'interrupted Agent config backup differs from its receipt'
+  current_config_digest=$(sha256sum "$agent_config" | awk '{print $1}')
+  [ "$current_config_digest" = "$config_original_digest" ] \
+    || [ "$current_config_digest" = "$config_target_digest" ] \
+    || die 'protected Agent config differs from the interrupted transaction'
+  config_transaction_present=true
+fi
 
 container_count=$(read_pair "$receipt" container.count); message_id=
 declare -A old_ids=() indexes=() receipt_projects=()
@@ -186,11 +252,69 @@ for service in agent extension-runner core-runner; do
 done
 current_version=$(docker image inspect "$old_image_id" --format '{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null) || die 'running Agent version inspection failed'
 [ "$current_version" = "$recorded_version" ] || die 'running Agent version differs from its receipt'
+if [ "$config_transaction_present" = true ] \
+    && [ "$recorded_version" = "$config_transaction_target_version" ]; then
+  [ "$(sha256sum "$agent_config" | awk '{print $1}')" = "$config_target_digest" ] \
+    || die 'committed Agent release differs from its config transaction'
+  agent_config_target_identity=$(stat -c '%d:%i:%u' "$agent_config")
+  agent_config_target_digest=$config_target_digest
+  verify_target_agent_config
+  [ "$(stat -c '%d:%i:%u' "$config_transaction")" = "$config_transaction_identity" ] \
+    || die 'committed Agent config transaction identity changed before cleanup'
+  rm -rf -- "$config_transaction"
+  [ ! -e "$config_transaction" ] && [ ! -L "$config_transaction" ] \
+    || die 'committed Agent config transaction remains after cleanup'
+  config_transaction_present=false
+  agent_config_original_identity=$agent_config_target_identity
+  agent_config_original_digest=$agent_config_target_digest
+fi
+if [ "$config_transaction_present" = true ] && [ "$agent_recovered_to_target" != true ]; then
+  current_config_digest=$(sha256sum "$agent_config" | awk '{print $1}')
+  if [ "$current_config_digest" = "$config_target_digest" ]; then
+    verify_host_region_receipt
+    verify_message_server
+    [ -f "$config_transaction/previous.yaml" ] && [ ! -L "$config_transaction/previous.yaml" ] \
+      && [ "$(stat -c '%a:%u' "$config_transaction/previous.yaml")" = "400:$required_owner" ] \
+      && [ "$(sha256sum "$config_transaction/previous.yaml" | awk '{print $1}')" = "$config_original_digest" ] \
+      || die 'interrupted Agent config backup changed before restoration'
+    mv -f -- "$config_transaction/previous.yaml" "$agent_config" \
+      || die 'could not restore the interrupted pre-update Agent config'
+    [ -f "$agent_config" ] && [ ! -L "$agent_config" ] \
+      && [ "$(stat -c '%a:%u' "$agent_config")" = "400:$required_owner" ] \
+      && [ "$(sha256sum "$agent_config" | awk '{print $1}')" = "$config_original_digest" ] \
+      || die 'interrupted pre-update Agent config restoration failed'
+  else
+    [ "$current_config_digest" = "$config_original_digest" ] \
+      || die 'interrupted Agent config transaction cannot be recovered'
+  fi
+  verify_host_region_receipt
+  verify_message_server
+  DIREXTALK_AGENT_IMAGE="$image" \
+    "${compose[@]}" run --rm --no-deps --pull never -T --interactive=false agent-secret-init >/dev/null \
+    || die 'could not restore pre-update Agent config material'
+  verify_message_server
+  [ "$(stat -c '%d:%i:%u' "$config_transaction")" = "$config_transaction_identity" ] \
+    || die 'interrupted Agent config transaction identity changed before cleanup'
+  rm -rf -- "$config_transaction"
+  [ ! -e "$config_transaction" ] && [ ! -L "$config_transaction" ] \
+    || die 'interrupted Agent config transaction remains after recovery'
+  config_transaction_present=false
+  agent_config_original_identity=$(stat -c '%d:%i:%u' "$agent_config")
+  agent_config_original_digest=$(sha256sum "$agent_config" | awk '{print $1}')
+fi
 declare -A new_ids=()
 if [ "$agent_recovered_to_target" = true ]; then
+  if [ "$config_transaction_present" = true ]; then
+    [ "$config_transaction_target_version" = "$target_version" ] \
+      && [ "$(sha256sum "$agent_config" | awk '{print $1}')" = "$config_target_digest" ] \
+      || die 'running target Agent differs from the interrupted config transaction'
+  fi
   target_image_id=$old_image_id
   target_revision=$recovered_revision
   for service in agent extension-runner core-runner; do new_ids[$service]=${old_ids[$service]}; done
+  agent_config_target_identity=$agent_config_original_identity
+  agent_config_target_digest=$agent_config_original_digest
+  verify_target_agent_config
   rollback_needed=false
 else
   semver_ge "$current_version" "$target_version" && negative "Agent $target_version is not newer than running $current_version"
@@ -206,22 +330,97 @@ else
   printf '%s\n' "$target_revision" | grep -Eq '^[0-9a-f]{40}$' || die 'target revision label is invalid'
   for binary in /usr/local/bin/dirextalk-agent /usr/local/bin/dirextalk-extension-runner /usr/local/bin/dirextalk-core-runner; do [ "$(docker run --rm --entrypoint "$binary" "$target_image_id" --version)" = "$target_version" ] || die "$binary version mismatch"; done
 
+  verify_host_region_receipt
+  [ -f "$agent_config" ] && [ ! -L "$agent_config" ] \
+    && [ "$(stat -c '%d:%i:%u' "$agent_config")" = "$agent_config_original_identity" ] \
+    && [ "$(sha256sum "$agent_config" | awk '{print $1}')" = "$agent_config_original_digest" ] \
+    || die 'protected Agent config changed before host-region staging'
+  [ "$config_transaction_present" != true ] \
+    && [ ! -e "$config_transaction" ] && [ ! -L "$config_transaction" ] \
+    || die 'an Agent config transaction is already active'
+  config_stage=$(mktemp -d "$out/.agent-config-update.XXXXXX")
+  chmod 0700 "$config_stage"
+  chown "$required_owner" "$config_stage"
+  config_stage_identity=$(stat -c '%d:%i:%u' "$config_stage")
+  cleanup_config_staging() {
+    local status=$?
+    if [ -n "${config_stage:-}" ] \
+        && [ -d "$config_stage" ] && [ ! -L "$config_stage" ] \
+        && [ "$(stat -c '%d:%i:%u' "$config_stage")" = "$config_stage_identity" ]; then
+      rm -rf -- "$config_stage"
+    fi
+    exit "$status"
+  }
+  trap cleanup_config_staging EXIT
+  cp --preserve=mode,ownership,timestamps -- "$agent_config" "$config_stage/previous.yaml"
+  awk -v region="$host_region" '
+    /^core_cloud_worker_host_region:/ { next }
+    { print }
+    END { printf "core_cloud_worker_host_region: %s\n", region }
+  ' "$agent_config" >"$config_stage/target.yaml"
+  chmod 0400 "$config_stage/previous.yaml" "$config_stage/target.yaml"
+  chown "$required_owner" "$config_stage/previous.yaml" "$config_stage/target.yaml"
+  config_original_digest=$agent_config_original_digest
+  config_target_digest=$(sha256sum "$config_stage/target.yaml" | awk '{print $1}')
+  [ "$(grep -Fxc "core_cloud_worker_host_region: $host_region" "$config_stage/target.yaml" || true)" -eq 1 ] \
+    && [ "$(grep -Ec '^core_cloud_worker_host_region:' "$config_stage/target.yaml" || true)" -eq 1 ] \
+    || die 'could not stage the Cloud Worker host region exactly once'
+  cat >"$config_stage/state.env" <<EOF
+ORIGINAL_SHA256=$config_original_digest
+TARGET_SHA256=$config_target_digest
+HOST_REGION_RECEIPT_SHA256=$host_region_receipt_digest
+TARGET_VERSION=$target_version
+EOF
+  chmod 0400 "$config_stage/state.env"
+  chown "$required_owner" "$config_stage/state.env"
+  verify_host_region_receipt
+  [ "$(sha256sum "$config_stage/previous.yaml" | awk '{print $1}')" = "$config_original_digest" ] \
+    && [ "$(sha256sum "$config_stage/target.yaml" | awk '{print $1}')" = "$config_target_digest" ] \
+    || die 'Agent config transaction changed before publication'
+  mv -- "$config_stage" "$config_transaction"
+  config_stage=
+  config_transaction_present=true
+  config_transaction_identity=$(stat -c '%d:%i:%u' "$config_transaction")
+  config_transaction_target_version=$target_version
+
   rollback_needed=false
+  config_changed=false
   rollback_agent() {
   local status=$? rollback_receipt rollback_agent_id rollback_extension_id rollback_core_id id data attempts rollback_ready
   [ "$rollback_needed" = true ] || return "$status"
   trap - EXIT
   printf 'split-agent update: restoring previous local image after failed apply\n' >&2
   verify_message_server
-  if "${compose[@]}" stop agent extension-runner core-runner >/dev/null 2>&1 \
-      && verify_message_server \
-      && "$script_dir/prepare-runner-cgroups.sh" "$stack" >/dev/null \
-      && verify_message_server; then
-    :
-  else
+  if ! "${compose[@]}" stop agent extension-runner core-runner >/dev/null 2>&1; then
     printf 'split-agent update: rollback runner preparation failed\n' >&2
     return 1
   fi
+  verify_message_server
+  if [ "$config_changed" = true ]; then
+    verify_target_agent_config
+    [ -d "$config_transaction" ] && [ ! -L "$config_transaction" ] \
+      && [ "$(stat -c '%d:%i:%u' "$config_transaction")" = "$config_transaction_identity" ] \
+      && [ -f "$config_transaction/previous.yaml" ] && [ ! -L "$config_transaction/previous.yaml" ] \
+      && [ "$(stat -c '%a:%u' "$config_transaction/previous.yaml")" = "400:$required_owner" ] \
+      && [ "$(sha256sum "$config_transaction/previous.yaml" | awk '{print $1}')" = "$config_original_digest" ] \
+      || return 1
+    mv -f -- "$config_transaction/previous.yaml" "$agent_config" || return 1
+    [ -f "$agent_config" ] && [ ! -L "$agent_config" ] \
+      && [ "$(stat -c '%a:%u' "$agent_config")" = "400:$required_owner" ] \
+      && [ "$(sha256sum "$agent_config" | awk '{print $1}')" = "$agent_config_original_digest" ] \
+      || return 1
+    verify_host_region_receipt
+    verify_message_server
+    DIREXTALK_AGENT_IMAGE="$image" \
+      "${compose[@]}" run --rm --no-deps --pull never -T --interactive=false agent-secret-init >/dev/null \
+      || return 1
+    verify_message_server
+  fi
+  "$script_dir/prepare-runner-cgroups.sh" "$stack" >/dev/null || {
+    printf 'split-agent update: rollback runner preparation failed\n' >&2
+    return 1
+  }
+  verify_message_server
   if DIREXTALK_AGENT_IMAGE="$image" \
       "${compose[@]}" up -d --no-deps --force-recreate --no-build --pull never extension-runner core-runner agent >/dev/null 2>&1; then
     attempts=${DIREXTALK_AGENT_UPDATE_HEALTH_ATTEMPTS:-60}
@@ -245,6 +444,9 @@ else
           return 1
         fi
         verify_message_server
+        [ "$(stat -c '%d:%i:%u' "$config_transaction")" = "$config_transaction_identity" ] || return 1
+        rm -rf -- "$config_transaction" || return 1
+        config_transaction_present=false
         return "$status"
       fi
       attempts=$((attempts-1)); [ "$attempts" -gt 0 ] && sleep 1
@@ -260,6 +462,29 @@ else
   fi
   rollback_needed=true
   verify_message_server
+  verify_host_region_receipt
+  [ -f "$agent_config" ] && [ ! -L "$agent_config" ] \
+    && [ "$(stat -c '%d:%i:%u' "$agent_config")" = "$agent_config_original_identity" ] \
+    && [ "$(sha256sum "$agent_config" | awk '{print $1}')" = "$agent_config_original_digest" ] \
+    || die 'protected Agent config changed before the host-region commit'
+  [ -d "$config_transaction" ] && [ ! -L "$config_transaction" ] \
+    && [ "$(stat -c '%d:%i:%u' "$config_transaction")" = "$config_transaction_identity" ] \
+    && [ -f "$config_transaction/previous.yaml" ] && [ ! -L "$config_transaction/previous.yaml" ] \
+    && [ "$(stat -c '%a:%u' "$config_transaction/previous.yaml")" = "400:$required_owner" ] \
+    && [ "$(sha256sum "$config_transaction/previous.yaml" | awk '{print $1}')" = "$config_original_digest" ] \
+    && [ -f "$config_transaction/target.yaml" ] && [ ! -L "$config_transaction/target.yaml" ] \
+    && [ "$(stat -c '%a:%u' "$config_transaction/target.yaml")" = "400:$required_owner" ] \
+    && [ "$(sha256sum "$config_transaction/target.yaml" | awk '{print $1}')" = "$config_target_digest" ] \
+    || die 'Agent config transaction changed before the host-region commit'
+  mv -f -- "$config_transaction/target.yaml" "$agent_config"
+  config_changed=true
+  agent_config_target_identity=$(stat -c '%d:%i:%u' "$agent_config")
+  agent_config_target_digest=$(sha256sum "$agent_config" | awk '{print $1}')
+  verify_target_agent_config
+  verify_message_server
+  DIREXTALK_AGENT_IMAGE="$target_image" \
+    "${compose[@]}" run --rm --no-deps --pull never -T --interactive=false agent-secret-init >/dev/null || die 'Agent config material refresh failed'
+  verify_message_server
   DIREXTALK_AGENT_IMAGE="$target_image" \
     "${compose[@]}" run --rm --no-deps --pull never -T --interactive=false agent-migrate >/dev/null || die 'Agent storage migration failed'
   verify_message_server
@@ -274,6 +499,7 @@ else
     [ "$attempts" -gt 0 ] || die "$service did not become healthy"
   done
   for pair in agent:/usr/local/bin/dirextalk-agent extension-runner:/usr/local/bin/dirextalk-extension-runner core-runner:/usr/local/bin/dirextalk-core-runner; do service=${pair%%:*}; binary=${pair#*:}; [ "$(docker exec "${new_ids[$service]}" "$binary" --version)" = "$target_version" ] || die "$service running binary version mismatch"; done
+  verify_target_agent_config
 fi
 
 if [ "$agent_recovered_to_target" = true ]; then
@@ -284,12 +510,23 @@ if [ "$agent_recovered_to_target" = true ]; then
 fi
 
 verify_message_server
+verify_target_agent_config
 new_env=$(mktemp "$out/.env.XXXXXX")
 awk -F= -v image="$target_image" -v version="$target_version" -v revision="$target_revision" '$1=="DIREXTALK_AGENT_IMAGE" {$0=$1 "=" image; is=1} $1=="DIREXTALK_AGENT_VERSION" {$0=$1 "=" version; vs=1} $1=="DIREXTALK_AGENT_SOURCE_REVISION" {$0=$1 "=" revision; rs=1} {print} END {if (!is || !vs || !rs) exit 1}' "$env_file" >"$new_env" || die 'could not update expected Agent release'
 chmod 400 "$new_env"; new_env_identity=$(stat -c '%d:%i:%u' "$new_env"); new_env_sha=$(sha256sum "$new_env" | awk '{print $1}')
 new_receipt=$(mktemp "$out/.cleanup-receipt.XXXXXX")
 awk -F= -v identity="$new_env_identity" -v digest="$new_env_sha" -v ai="${indexes[agent]}" -v aid="${new_ids[agent]}" -v ei="${indexes[extension-runner]}" -v eid="${new_ids[extension-runner]}" -v ci="${indexes[core-runner]}" -v cid="${new_ids[core-runner]}" '$1=="control.env_identity" {$0=$1 "=" identity} $1=="control.env_sha256" {$0=$1 "=" digest} $1==("container." ai ".id") {$0=$1 "=" aid} $1==("container." ei ".id") {$0=$1 "=" eid} $1==("container." ci ".id") {$0=$1 "=" cid} {print}' "$receipt" >"$new_receipt"
 chmod 400 "$new_receipt"; verify_message_server; mv -f "$new_env" "$env_file"; mv -f "$new_receipt" "$receipt"; refresh_receipt_identity; verify_message_server
+verify_target_agent_config
+if [ "$config_transaction_present" = true ]; then
+  [ -d "$config_transaction" ] && [ ! -L "$config_transaction" ] \
+    && [ "$(stat -c '%d:%i:%u' "$config_transaction")" = "$config_transaction_identity" ] \
+    || die 'Agent config transaction changed before successful cleanup'
+  rm -rf -- "$config_transaction"
+  [ ! -e "$config_transaction" ] && [ ! -L "$config_transaction" ] \
+    || die 'Agent config transaction remains after successful update'
+  config_transaction_present=false
+fi
 rollback_needed=false
 trap - EXIT
 if [ "$old_image_id" != "$target_image_id" ] && ! docker ps -aq --filter "ancestor=$old_image_id" | grep -q .; then docker image rm "$old_image_id" >/dev/null 2>&1 || true; fi

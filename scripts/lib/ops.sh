@@ -173,6 +173,7 @@ ops_require_existing_node_identity() {
     *) echo "unsupported existing-node cloud provider" >&2; return 1 ;;
   esac
   if ! printf '%s\n' "$(ops_state_get "$state" .node_identity.aws_account_id)" | grep -Eq '^[0-9]{12}$' \
+    || ! printf '%s\n' "$(ops_state_get "$state" .node_identity.region)" | grep -Eq '^[a-z]{2}(-[a-z0-9]+)+-[1-9][0-9]*$' \
     || ! printf '%s\n' "$(ops_state_get "$state" .node_identity.machine_id)" | grep -Eq '^[0-9a-f]{32}$' \
     || ! printf '%s\n' "$(ops_state_get "$state" .node_identity.docker_engine_id)" | grep -Eq '^[A-Za-z0-9:+._-]{8,128}$' \
     || ! printf '%s\n' "$(ops_state_get "$state" .node_identity.public_ip)" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
@@ -235,7 +236,7 @@ ops_verify_existing_node_identity() {
 
 ops_stage_current_host_integration() (
   local state=$1 expected_old=$2 integration_bundle split_bundle split_sha_file expected_sha actual_sha result status
-  local remote_command public_ip identity
+  local remote_command public_ip host_region identity
   local -a integration_files
   split_bundle=$OPS_SPLIT_DIR/canonical-bundle.tar.gz
   split_sha_file=$split_bundle.sha256
@@ -271,9 +272,14 @@ ops_stage_current_host_integration() (
   integration_files+=( -C "${split_bundle%/*}" "${split_bundle##*/}" )
   tar "${integration_files[@]}" | gzip -n >"$integration_bundle" || return 1
   public_ip=$(ops_state_get "$state" .node_identity.public_ip)
+  host_region=$(ops_state_get "$state" .node_identity.region)
+  printf '%s\n' "$host_region" | grep -Eq '^[a-z]{2}(-[a-z0-9]+)+-[1-9][0-9]*$' || {
+    echo "immutable node identity receipt contains a malformed region" >&2
+    return 1
+  }
   expected_machine_id=$(ops_state_get "$state" .node_identity.machine_id)
   expected_docker_engine_id=$(ops_state_get "$state" .node_identity.docker_engine_id)
-  remote_command="set -eu; expected_machine_id=$(ops_sh_quote "$expected_machine_id"); expected_docker_engine_id=$(ops_sh_quote "$expected_docker_engine_id"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX); trap 'sudo rm -rf \"\$stage\"' EXIT; sudo chmod 0700 \"\$stage\"; sudo tar --no-same-owner -xzf - -C \"\$stage\"; sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server $(ops_sh_quote "$expected_old") $(ops_sh_quote "$public_ip"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; printf '%s\\t%s\\t%s\\n' \"\$expected_machine_id\" \"\$expected_docker_engine_id\" $(ops_sh_quote "$actual_sha")"
+  remote_command="set -eu; expected_machine_id=$(ops_sh_quote "$expected_machine_id"); expected_docker_engine_id=$(ops_sh_quote "$expected_docker_engine_id"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX); trap 'sudo rm -rf \"\$stage\"' EXIT; sudo chmod 0700 \"\$stage\"; sudo tar --no-same-owner -xzf - -C \"\$stage\"; sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server $(ops_sh_quote "$expected_old") $(ops_sh_quote "$public_ip") $(ops_sh_quote "$host_region"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; printf '%s\\t%s\\t%s\\n' \"\$expected_machine_id\" \"\$expected_docker_engine_id\" $(ops_sh_quote "$actual_sha")"
   if result=$(ops_ssh "$state" "$remote_command" <"$integration_bundle"); then
     :
   else

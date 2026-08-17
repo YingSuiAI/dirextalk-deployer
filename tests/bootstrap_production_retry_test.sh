@@ -135,6 +135,7 @@ AGENT_VERSION=v1.0.69
 MESSAGE_SOURCE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 SPLIT_SOURCE_REVISION=cccccccccccccccccccccccccccccccccccccccc
 AGENT_SOURCE_REVISION=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+DIREXTALK_CLOUD_WORKER_HOST_REGION=ap-east-1
 DIREXTALK_RELEASE_CATALOG_ORIGIN=https://imadmin.dirextalk.ai
 EOF
 chmod 0600 "$base/.env"

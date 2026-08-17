@@ -155,8 +155,11 @@ SHA-256 pin. User-data on the verified Ubuntu 24.04+ x86_64 host with systemd
 >= 254 downloads that
 fixed Release asset, verifies the local pin, and atomically installs it; no
 local Go toolchain or updater SCP step is required.
-The updater's fixed Release download and checksum contract is unchanged. There
-is no standard Compose, mutable-image, or host-adoption production path.
+The updater's fixed Release download and checksum contract is unchanged. Fresh
+deployment writes the updater's `watchdog_enabled=false` contract alongside the
+immutable pin: its root-owned control API and explicit update/recovery jobs are
+available, while no resident Docker-event/periodic repair watchdog starts.
+There is no standard Compose, mutable-image, or host-adoption production path.
 
 For EC2, replace `DIREXTALK_CLOUD_PROVIDER=lightsail` with `DIREXTALK_CLOUD_PROVIDER=ec2` and add `INSTANCE_TYPE=t3.small` or a larger explicit type.
 

@@ -274,9 +274,11 @@ The local deployer host does not need Go and does not SCP updater artifacts.
 The updater pin and checksum contract remains independent from the default
 split release selection.
 
-The updater does not install or run a daily GitHub release-discovery timer.
-After the direct-version migration, an authorized client/server release action
-creates the target-version job instead.
+Fresh deployment installs the updater control plane with its resident watchdog
+disabled. Authorized update/recovery jobs remain available and retain their
+own recovery behavior. The updater does not install or run a daily GitHub
+release-discovery timer. After the direct-version migration, an authorized
+client/server release action creates the target-version job instead.
 
 Leave `DOMAIN_MODE` unset for normal deployments. S2 automatically chooses
 `route53` only when the current AWS account contains a matching public hosted

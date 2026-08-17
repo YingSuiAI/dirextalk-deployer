@@ -10,12 +10,22 @@ head -c 65536 /dev/urandom >"$fake_updater"
 chmod 0755 "$fake_updater"
 
 config="$ROOT/scripts/updater/config.json"
-if grep -Eq '"(compose_project|caddy_mode|runtime_layout)"' "$config"; then
-  echo "updater config retained a removed runtime selector" >&2
-  exit 1
-fi
-grep -Fq '"schema_version": 1' "$config"
-grep -Fq '"socket_path": "/run/dirextalk-updater/http.sock"' "$config"
+python3 - "$config" <<'PY'
+import json
+import pathlib
+import sys
+
+config = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected = {
+    "schema_version": 1,
+    "state_dir": "/var/lib/dirextalk-updater",
+    "socket_path": "/run/dirextalk-updater/http.sock",
+    "control_token_file": "/etc/dirextalk-updater/control-token",
+    "watchdog_enabled": False,
+}
+if config != expected:
+    raise SystemExit(f"unexpected deployer updater config: {config!r}")
+PY
 
 bootstrap="$ROOT/scripts/updater/bootstrap-host.sh"
 grep -Fq 'bash "$base/production-ops/bootstrap-production.sh"' "$bootstrap"
@@ -43,6 +53,7 @@ assert_linux_mode() {
 assert_linux_mode 600 "$tmp/root/etc/dirextalk-updater/config.json"
 assert_linux_mode 600 "$tmp/root/etc/dirextalk-updater/control-token"
 assert_linux_mode 755 "$tmp/root/usr/local/bin/dirextalk-updater"
+cmp "$config" "$tmp/root/etc/dirextalk-updater/config.json"
 
 grep -Fq 'UPDATER_PIN_VERSION=v1.0.16' "$ROOT/scripts/updater/release.env"
 grep -Fq 'UPDATER_PIN_COMMIT=2c23d1bba8d29449f6952624bc39ad991dd31e02' "$ROOT/scripts/updater/release.env"

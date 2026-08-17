@@ -89,6 +89,7 @@ repository_revision=$(tar -xOzf "$repository_bundle" deploy/split-agent/SOURCE_R
 printf '%s\n' "$repository_revision" | grep -Eq '^[0-9a-f]{40}$'
 [ "$repository_revision" = "$(sed -n 's/^DIREXTALK_SPLIT_SOURCE_REVISION=//p' "$ROOT/scripts/cloud-init/split/release.env")" ]
 tar -tzf "$repository_bundle" deploy/split-agent/compose.production.yaml >/dev/null
+tar -tzf "$repository_bundle" deploy/split-agent/scripts/refresh-message-mcp-token.sh >/dev/null
 tar -tzf "$repository_bundle" deploy/split-agent/scripts/update-message-server-local.sh >/dev/null
 tar -xOzf "$repository_bundle" deploy/split-agent/scripts/cleanup-local.sh \
   | grep -F 'manifest TLS mode must be edge-terminated' >/dev/null
@@ -118,6 +119,9 @@ if grep -Fq '50052' "$repository_compose"; then
   exit 1
 fi
 grep -Fq 'networks: [agent_private, agent_database, agent_caller, agent_egress, message_public]' "$repository_compose"
+grep -Fq 'source: message_mcp_token' "$repository_compose"
+grep -Fq 'target: message_mcp_token' "$repository_compose"
+grep -Fq 'file: ${DIREXTALK_MESSAGE_MCP_TOKEN_FILE:?set the protected Message MCP token file}' "$repository_compose"
 if awk '
   /^  message-server:$/ { in_message = 1; next }
   in_message && /^  [a-zA-Z0-9_-]+:$/ { exit }
@@ -135,6 +139,7 @@ agent_start_line=$(grep -nF 'agent-secret-init agent-migrate extension-runner co
   exit 1
 }
 grep -Fq 'message-server is healthy; Agent runtime needs attention' "$start_source"
+grep -Fq 'refresh-message-mcp-token.sh' "$start_source"
 if grep -Ei 'qdrant|message[_-]postgres[_-](data|volume)|agent[_-]postgres[_-](data|volume)' \
     "$repository_compose" >/dev/null; then
   echo 'canonical split bundle retained superseded Qdrant or per-application PostgreSQL resources' >&2

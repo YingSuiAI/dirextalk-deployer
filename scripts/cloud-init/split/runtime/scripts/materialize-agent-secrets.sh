@@ -2,7 +2,7 @@
 set -eu
 
 install -d -m 0700 /out /out-config /out-data/knowledge-content /out-data/knowledge-mount
-for item in database_url core_secret_master_key; do
+for item in database_url core_secret_master_key message_mcp_token; do
   install -m 0400 "/run/secrets/$item" "/out/$item"
 done
 install -m 0400 /bootstrap/capability/agent-server-cert.pem /out/tls_cert

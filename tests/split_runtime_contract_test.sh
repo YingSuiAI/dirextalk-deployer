@@ -23,6 +23,7 @@ tests=(
   message-server-healthcheck.test.sh
   prepare-host-dependencies.test.sh
   prepare-runner-cgroups.test.sh
+  refresh-message-mcp-token.test.sh
   update-agent-local.recovery.test.sh
   update-agent-local.test.sh
   update-message-server-local.test.sh

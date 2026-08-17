@@ -86,6 +86,18 @@ image; an already-running target Agent may only converge forward with the
 recorded target digest. Message Server, PostgreSQL, coturn, and Edge are never
 included in those Compose mutations.
 
+On a fresh stack, the start wrapper waits for the exact Message Server
+container to become healthy before exporting its protected bootstrap. It
+revalidates that full container ID before and after the read, extracts only the
+non-empty single-line `agent_token`, and atomically replaces the protected
+`message-mcp-token` host file. `agent-secret-init` copies that file into the
+Agent secret volume as UID/GID 65532 mode 0400. Agent YAML contains only
+`core_message_mcp_enabled: true`, the internal
+`http://message-server:8008/mcp` endpoint, and
+`/run/secrets/message_mcp_token`; the bearer value must not appear in YAML,
+`.env`, process arguments, or logs. Missing or malformed bootstrap data fails
+the Agent phase while leaving the already verified Message Server untouched.
+
 Use the installed host helper directly only while diagnosing the same verified
 node identity. Before every read, retry, or mutation, revalidate the recorded
 AWS account, region, provider, immutable instance identifier, machine-id, and

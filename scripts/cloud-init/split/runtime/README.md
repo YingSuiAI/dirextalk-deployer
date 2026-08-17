@@ -16,8 +16,13 @@ The host lifecycle is intentionally small:
   writes the same value exactly once to the Cloud Worker config and its
   protected receipt. Despite the retained installed filename, it accepts only
   `DIREXTALK_SPLIT_COMPOSE_MODE=production`.
-- `start-local.sh` establishes Message Server health first, then starts the
-  explicit Agent init/migrate/runner path. `cleanup-local.sh` and
+- `start-local.sh` establishes Message Server health first, records its full
+  immutable container ID, and uses `refresh-message-mcp-token.sh` to extract
+  only the stable portal `agent_token` from that exact container. The value is
+  atomically published to the protected host secret source and materialized as
+  Agent-owned mode-0400 `/run/secrets/message_mcp_token`; it never enters YAML,
+  `.env`, argv, or logs. Startup then runs the explicit Agent
+  init/migrate/runner path. `cleanup-local.sh` and
   `cleanup-provision-failure.sh` clean only receipt-bound resources.
 - `update-message-server-local.sh` and `update-agent-local.sh` apply exact
   `vX.Y.Z` targets and restore the receipt-bound original image after failure.
@@ -29,6 +34,9 @@ The host lifecycle is intentionally small:
   runner cgroup preparation. A digest-bound config transaction restores and
   rematerializes the exact previous YAML with the old image on rollback or an
   interrupted retry.
+  Agent-only update and receipt-bound recovery reuse the stable protected MCP
+  token and re-run `agent-secret-init` where required; neither path reads a
+  mutable Message Server name or recreates Message Server.
 - `stop-agent-local.sh` and `restart-agent-local.sh` provide the updater's
   fixed Agent recovery boundary. `prepare-agent-start-local.sh` provides the
   stop-and-prepare half for update flows; restart repairs and revalidates

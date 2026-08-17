@@ -26,6 +26,7 @@ files=(
   scripts/message-server-entrypoint.sh
   scripts/prepare-runner-cgroups.sh
   scripts/prepare-agent-start-local.sh
+  scripts/refresh-message-mcp-token.sh
   scripts/manage-runner-apparmor.sh
   scripts/start-local.sh
   scripts/cleanup-local.sh
@@ -55,6 +56,7 @@ tar -tzf "$bundle" deploy/split-agent/compose.production.yaml >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/prepare-runner-cgroups.sh >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/prepare-host-dependencies.sh >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/start-local.sh >/dev/null
+tar -tzf "$bundle" deploy/split-agent/scripts/refresh-message-mcp-token.sh >/dev/null
 tar -tzf "$bundle" deploy/split-agent/scripts/update-message-server-local.sh >/dev/null
 [ "$(tar -xOzf "$bundle" deploy/split-agent/SOURCE_REVISION)" = "$revision" ]
 tar -tzf "$bundle" deploy/split-agent/SOURCE_FILES.sha256 >/dev/null

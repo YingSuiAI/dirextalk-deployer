@@ -14,7 +14,8 @@ git -C "$runtime_repo" config user.name Test
 for file in README.md compose.yaml compose.production.yaml edge-compose.yaml \
   apparmor.d/dirextalk-runner-userns systemd/dirextalk-extension-runner@.service \
   systemd/dirextalk-core-runner@.service sysusers.d/dirextalk-split-agent.conf \
-  scripts/provision-local.sh scripts/prepare-host-dependencies.sh scripts/prepare-runner-cgroups.sh scripts/start-local.sh \
+  scripts/provision-local.sh scripts/prepare-host-dependencies.sh scripts/prepare-runner-cgroups.sh \
+  scripts/prepare-agent-start-local.sh scripts/refresh-message-mcp-token.sh scripts/start-local.sh \
   scripts/cleanup-local.sh scripts/cleanup-provision-failure.sh \
   scripts/update-agent-local.sh scripts/update-message-server-local.sh \
   scripts/runtime-01.sh scripts/runtime-02.sh scripts/runtime-03.sh scripts/runtime-04.sh \

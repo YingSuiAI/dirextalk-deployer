@@ -194,6 +194,9 @@ services:
       - source: core_secret_master_key
         target: core_secret_master_key
         mode: 0400
+      - source: message_mcp_token
+        target: message_mcp_token
+        mode: 0400
     volumes:
       - type: bind
         source: ${DIREXTALK_AGENT_CONFIG_FILE:?set the Agent non-secret config path}
@@ -649,3 +652,5 @@ secrets:
     file: ${DIREXTALK_AGENT_DATABASE_URL_FILE:?set the Agent database URL file}
   core_secret_master_key:
     file: ${DIREXTALK_CORE_SECRET_MASTER_KEY_FILE:?set the Agent 32-byte at-rest master key file}
+  message_mcp_token:
+    file: ${DIREXTALK_MESSAGE_MCP_TOKEN_FILE:?set the protected Message MCP token file}

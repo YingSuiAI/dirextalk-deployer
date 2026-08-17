@@ -1022,6 +1022,15 @@ run_with_heartbeat message_server_wait 10 \
 verify_control_identity
 message_server_container_id=$(healthy_service_container message-server)
 verify_message_server_exact
+if "$script_dir/refresh-message-mcp-token.sh" "$out" "$message_server_container_id"; then
+  :
+else
+  token_refresh_status=$?
+  verify_message_server_exact
+  die "Message MCP token refresh failed while message-server remained healthy (status $token_refresh_status)"
+fi
+verify_control_identity
+verify_message_server_exact
 
 agent_start_status=0
 if run_with_heartbeat agent_runtime_wait 10 \

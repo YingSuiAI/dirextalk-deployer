@@ -295,9 +295,41 @@ agent_runtime_stop() {
 }
 
 agent_runtime_restart() {
-  local role
+  local role restart_restore_needed=false
   agent_runtime_refresh_targets
   agent_runtime_require_known_states
+
+  # A recovery restart must never turn an otherwise healthy trio into an
+  # outage merely because delegated cgroup preparation or a later start
+  # fails.  Record only the fully healthy baseline: mixed/stopped states are
+  # intentionally recovered forward and have no running trio to restore.
+  for role in agent extension-runner core-runner; do
+    [ "${agent_runtime_target_status[$role]}" = running ] && \
+      [ "${agent_runtime_target_health[$role]}" = healthy ] || break
+    [ "$role" = core-runner ] && restart_restore_needed=true
+  done
+
+  # shellcheck disable=SC2329 # invoked by the EXIT trap below
+  agent_runtime_restore_healthy_trio() {
+    local status=$?
+    trap - EXIT
+    [ "$restart_restore_needed" = true ] || return "$status"
+    printf 'split-agent runtime: restart failed; restoring the original healthy Agent trio\n' >&2
+
+    # Re-establish the delegation immediately before restoring runners.  The
+    # helper validates the live systemd/cgroup-v2 ownership and controller
+    # writes, so a successful restore cannot restart against stale cgroups.
+    for role in agent extension-runner core-runner; do
+      agent_runtime_stop_one "$role"
+    done
+    agent_runtime_prepare_runner_host
+    agent_runtime_start_one extension-runner
+    agent_runtime_start_one core-runner
+    agent_runtime_start_one agent
+    return "$status"
+  }
+  trap agent_runtime_restore_healthy_trio EXIT
+
   # Restart always crosses an exact stop boundary, including an already
   # healthy runtime.  A mixed known state is recovered through the same
   # controlled sequence, then the runners are proven healthy before Agent.
@@ -308,6 +340,8 @@ agent_runtime_restart() {
   agent_runtime_start_one extension-runner
   agent_runtime_start_one core-runner
   agent_runtime_start_one agent
+  restart_restore_needed=false
+  trap - EXIT
   return 0
 }
 

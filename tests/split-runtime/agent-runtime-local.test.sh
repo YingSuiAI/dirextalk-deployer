@@ -26,6 +26,13 @@ cat >"$prepare_script" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'prepare-runner:%s\n' "$1" >>"$DIREXTALK_FAKE_STATE/docker.log"
+[ "${DIREXTALK_FAKE_FAIL_PREPARE_ONCE:-false}" != true ] || {
+  marker=$DIREXTALK_FAKE_STATE/prepare-failed-once
+  if [ ! -e "$marker" ]; then
+    : >"$marker"
+    exit 1
+  fi
+}
 printf 'DIREXTALK_RUNNER_PREPARED=true\n'
 EOF
 chmod 0755 -- "$prepare_script"
@@ -173,6 +180,12 @@ case "$1" in
       fi
     elif [ "$action" = start ]; then
       [ "$DIREXTALK_FAKE_FAIL_START_ROLE" != "$role" ] || { printf 'injected start failure\n' >&2; exit 1; }
+      if [ "${DIREXTALK_FAKE_FAIL_START_ONCE_ROLE:-}" = "$role" ] && \
+          [ ! -e "$DIREXTALK_FAKE_STATE/start-$role-failed-once" ]; then
+        : >"$DIREXTALK_FAKE_STATE/start-$role-failed-once"
+        printf 'injected one-shot start failure\n' >&2
+        exit 1
+      fi
       if [ "$DIREXTALK_FAKE_SETTLE_ROLE" = "$role" ]; then
         case "$DIREXTALK_FAKE_START_MODE" in
           transient) update_status "$role" exited unhealthy; printf '0\n' >"$DIREXTALK_FAKE_STATE/settle-$role" ;;
@@ -220,6 +233,7 @@ export DIREXTALK_FAKE_SETTLE_ROLE='' DIREXTALK_FAKE_START_MODE='transient'
 export DIREXTALK_FAKE_RESTART_POLICY_AFTER_STOP_ROLE='' DIREXTALK_FAKE_RESTART_POLICY_ROLE=''
 export DIREXTALK_FAKE_RESTART_POLICY_STATUS=running DIREXTALK_FAKE_RESTART_POLICY_HEALTH=healthy
 export DIREXTALK_FAKE_DROP_MESSAGE_AFTER_MUTATION_ROLE=''
+export DIREXTALK_FAKE_FAIL_PREPARE_ONCE=false DIREXTALK_FAKE_FAIL_START_ONCE_ROLE=''
 
 tampered_env_fixture=$tmp_dir/tampered-env
 write_fixture "$tampered_env_fixture"
@@ -395,6 +409,44 @@ first_start_line=$(grep -n "^container start $extension_id$" "$fixture/state/doc
 [ "$prepare_line" -lt "$first_start_line" ]
 [ -f "${fixture%/*}/runner-preparation.env" ]
 [ "$(stat -c '%a' "${fixture%/*}/runner-preparation.env")" = 400 ]
+
+# Recovery must not leave a formerly healthy trio down when delegation setup
+# fails after the exact stop boundary. The wrapper reports the failed restart,
+# but retries preparation and restores the same receipt-bound containers.
+cat >"$fixture/state/containers" <<EOF
+message|$message_id|running|healthy
+agent|$agent_id|running|healthy
+extension-runner|$extension_id|running|healthy
+core-runner|$core_id|running|healthy
+EOF
+rm -f -- "$fixture/state/prepare-failed-once" "$fixture/state/start-"*-failed-once
+: >"$fixture/state/docker.log"
+run_expect 1 "$restart_script" "$fixture" DIREXTALK_FAKE_FAIL_PREPARE_ONCE=true
+sequence=$(grep -E '^(container stop|container start)' "$fixture/state/docker.log" | tr '\n' ' ')
+[ "$sequence" = "container stop $agent_id container stop $extension_id container stop $core_id container start $extension_id container start $core_id container start $agent_id " ]
+[ "$(grep -Fc "prepare-runner:$stack_name" "$fixture/state/docker.log")" -eq 2 ]
+grep -Fqx "agent|$agent_id|running|healthy" "$fixture/state/containers"
+grep -Fqx "extension-runner|$extension_id|running|healthy" "$fixture/state/containers"
+grep -Fqx "core-runner|$core_id|running|healthy" "$fixture/state/containers"
+
+# A runner start can fail after another runner has already started. The same
+# transaction must stop that partial start, rebuild/revalidate delegation, and
+# restore the original healthy trio in fixed runner-before-Agent order.
+cat >"$fixture/state/containers" <<EOF
+message|$message_id|running|healthy
+agent|$agent_id|running|healthy
+extension-runner|$extension_id|running|healthy
+core-runner|$core_id|running|healthy
+EOF
+rm -f -- "$fixture/state/prepare-failed-once" "$fixture/state/start-"*-failed-once
+: >"$fixture/state/docker.log"
+run_expect 1 "$restart_script" "$fixture" DIREXTALK_FAKE_FAIL_START_ONCE_ROLE=core-runner
+sequence=$(grep -E '^(container stop|container start)' "$fixture/state/docker.log" | tr '\n' ' ')
+[ "$sequence" = "container stop $agent_id container stop $extension_id container stop $core_id container start $extension_id container start $core_id container stop $extension_id container start $extension_id container start $core_id container start $agent_id " ]
+[ "$(grep -Fc "prepare-runner:$stack_name" "$fixture/state/docker.log")" -eq 2 ]
+grep -Fqx "agent|$agent_id|running|healthy" "$fixture/state/containers"
+grep -Fqx "extension-runner|$extension_id|running|healthy" "$fixture/state/containers"
+grep -Fqx "core-runner|$core_id|running|healthy" "$fixture/state/containers"
 
 # If the exact protected Message Server disappears after one Agent mutation,
 # the next mutation is fenced off without a same-name lookup or recreation.

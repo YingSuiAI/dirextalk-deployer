@@ -26,8 +26,10 @@ The host lifecycle is intentionally small:
   receipt-bound trio and reruns runner cgroup preparation.
 - `stop-agent-local.sh` and `restart-agent-local.sh` provide the updater's
   fixed Agent recovery boundary. `prepare-agent-start-local.sh` provides the
-  stop-and-prepare half for update flows; restart repairs delegated cgroup
-  ownership before starting extension runner, Core runner, and Agent.
+  stop-and-prepare half for update flows; restart repairs and revalidates
+  delegated cgroup ownership before starting extension runner, Core runner,
+  and Agent. If a restart of an originally healthy trio fails during cgroup
+  preparation or startup, it re-prepares and restores that exact trio.
 - The remaining helpers materialize protected configuration, prepare runner
   isolation and the small Ubuntu host dependency set, verify formal images,
   and export the portal bootstrap receipt.

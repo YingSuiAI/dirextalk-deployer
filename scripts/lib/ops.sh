@@ -32,9 +32,10 @@ EOF
 }
 
 ops_production_helpers_prelude() {
-  local bootstrap_payload common_payload recover_payload reconcile_payload reset_payload service_payload template
+  local bootstrap_payload common_payload migrate_payload recover_payload reconcile_payload reset_payload service_payload template
   bootstrap_payload=$(base64 < "$OPS_LIB_DIR/../cloud-init/split/bootstrap-production.sh" | tr -d '\r\n')
   common_payload=$(base64 < "$OPS_LIB_DIR/../cloud-init/split/production-ops-common.sh" | tr -d '\r\n')
+  migrate_payload=$(base64 < "$OPS_LIB_DIR/../cloud-init/split/migrate-message-mcp-token-binding.sh" | tr -d '\r\n')
   recover_payload=$(base64 < "$OPS_LIB_DIR/../cloud-init/split/recover-production.sh" | tr -d '\r\n')
   reconcile_payload=$(base64 < "$OPS_LIB_DIR/../cloud-init/split/reconcile-production.sh" | tr -d '\r\n')
   reset_payload=$(base64 < "$OPS_LIB_DIR/../cloud-init/split/reset-production.sh" | tr -d '\r\n')
@@ -46,10 +47,11 @@ sudo install -d -o root -g root -m 0700 /var/dirextalk-message-server/production
 helper_tmp=''
 cleanup_production_helper() { [ -z "$helper_tmp" ] || rm -f "$helper_tmp"; }
 trap cleanup_production_helper EXIT
-for helper in bootstrap-production.sh production-ops-common.sh recover-production.sh reconcile-production.sh reset-production.sh; do
+for helper in bootstrap-production.sh migrate-message-mcp-token-binding.sh production-ops-common.sh recover-production.sh reconcile-production.sh reset-production.sh; do
   helper_tmp=$(mktemp /tmp/dirextalk-production-helper.XXXXXX)
   case "$helper" in
     bootstrap-production.sh) payload='__DIREXTALK_PRODUCTION_BOOTSTRAP__' ;;
+    migrate-message-mcp-token-binding.sh) payload='__DIREXTALK_PRODUCTION_MIGRATE_MESSAGE_MCP__' ;;
     production-ops-common.sh) payload='__DIREXTALK_PRODUCTION_COMMON__' ;;
     recover-production.sh) payload='__DIREXTALK_PRODUCTION_RECOVER__' ;;
     reconcile-production.sh) payload='__DIREXTALK_PRODUCTION_RECONCILE__' ;;
@@ -70,6 +72,7 @@ sudo systemctl enable dirextalk-split-recovery.service >/dev/null
 trap - EXIT
 EOF
   template=${template/__DIREXTALK_PRODUCTION_BOOTSTRAP__/$bootstrap_payload}
+  template=${template/__DIREXTALK_PRODUCTION_MIGRATE_MESSAGE_MCP__/$migrate_payload}
   template=${template/__DIREXTALK_PRODUCTION_COMMON__/$common_payload}
   template=${template/__DIREXTALK_PRODUCTION_RECOVER__/$recover_payload}
   template=${template/__DIREXTALK_PRODUCTION_RECONCILE__/$reconcile_payload}
@@ -261,6 +264,7 @@ ops_stage_current_host_integration() (
     cloud-init/split/authorize-split-source-revision.sh \
     cloud-init/split/advance-split-source-revision.sh \
     cloud-init/split/release.env \
+    cloud-init/split/migrate-message-mcp-token-binding.sh \
     cloud-init/split/production-ops-common.sh \
     cloud-init/split/recover-production.sh \
     cloud-init/split/reconcile-production.sh \

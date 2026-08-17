@@ -17,8 +17,11 @@ dirextalk_test_prepare_split_release() {
   printf '%s\n' "$DIREXTALK_SPLIT_SOURCE_REVISION" >"$bundle_root/deploy/split-agent/SOURCE_REVISION"
   printf 'fixture\n' >"$bundle_root/deploy/split-agent/compose.yaml"
   printf 'services: {}\n' >"$bundle_root/deploy/split-agent/compose.production.yaml"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$bundle_root/deploy/split-agent/scripts/prepare-agent-start-local.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$bundle_root/deploy/split-agent/scripts/update-message-server-local.sh"
-  chmod 0755 "$bundle_root/deploy/split-agent/scripts/update-message-server-local.sh"
+  chmod 0755 \
+    "$bundle_root/deploy/split-agent/scripts/prepare-agent-start-local.sh" \
+    "$bundle_root/deploy/split-agent/scripts/update-message-server-local.sh"
   (cd "$bundle_root/deploy/split-agent" && find . -type f ! -name SOURCE_FILES.sha256 -print0 \
     | LC_ALL=C sort -z | xargs -0 sha256sum >SOURCE_FILES.sha256)
   bundle=$root/canonical-bundle.tar.gz

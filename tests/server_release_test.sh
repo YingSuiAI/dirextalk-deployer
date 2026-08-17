@@ -10,6 +10,30 @@ trap 'rm -rf "$tmp"' EXIT
 export DIREXTALK_WORKDIR="$tmp/work"
 export RUN_ID=production-split-release-test
 export AWS_DEFAULT_REGION=ap-east-1
+export TEST_RESOLVER_CALLS="$tmp/resolver-calls"
+export DIREXTALK_PRODUCTION_RELEASE_RESOLVER="$tmp/resolver.mjs"
+cat >"$DIREXTALK_PRODUCTION_RELEASE_RESOLVER" <<'EOF'
+import { appendFileSync } from "node:fs";
+appendFileSync(process.env.TEST_RESOLVER_CALLS, "resolve\n");
+const digest = (value) => `sha256:${value.repeat(64)}`;
+process.stdout.write(JSON.stringify({
+  message: {
+    version: "v1.2.3",
+    image: "docker.io/dirextalk/message-server:v1.2.3",
+    image_ref: `docker.io/dirextalk/message-server:v1.2.3@${digest("a")}`,
+    source_revision: "1".repeat(40),
+    manifest_digest: digest("a")
+  },
+  agent: {
+    version: "v2.3.4",
+    image: "docker.io/dirextalk/agent:v2.3.4",
+    image_ref: `docker.io/dirextalk/agent:v2.3.4@${digest("b")}`,
+    source_revision: "2".repeat(40),
+    manifest_digest: digest("b")
+  }
+}) + "\n");
+EOF
+
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null
@@ -18,78 +42,80 @@ warn() { printf '%s\n' "$*" >&2; }
 source "$ROOT/scripts/lib/server-release.sh"
 
 server_release_validate_pin
-server_release_prepare_state
-json_test_check "$STATE_JSON" "data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.server_release.digest === '' && data.server_release.manifest_digest === ''"
-json_test_check "$STATE_JSON" "data.split_release.message_source_revision === '$DIREXTALK_MESSAGE_SOURCE_REVISION' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.agent_version === '$DIREXTALK_AGENT_VERSION' && data.split_release.agent_image === '$DIREXTALK_AGENT_IMAGE' && data.split_release.agent_source_revision === '$DIREXTALK_AGENT_SOURCE_REVISION' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.split_release.caddy_image === '$DIREXTALK_CADDY_IMAGE_IMMUTABLE' && data.split_release.coturn_image === '$DIREXTALK_COTURN_IMAGE_IMMUTABLE'"
-[ "$(state_get split_release.release_catalog_origin)" = https://imadmin.dirextalk.ai ]
-
-[ "$DIREXTALK_AGENT_VERSION" = "$(state_get split_release.agent_version)" ]
-[ "$DIREXTALK_AGENT_IMAGE" = "$(state_get split_release.agent_image)" ]
-[ "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" = docker.io/pgvector/pgvector:pg18@sha256:691673308c99d2161ba298736f3147f1f22d79de2fb7ec93ae9b4afcab870b62 ]
-[ "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" = "$(state_get split_release.postgres_image)" ]
-[ "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" = docker.io/library/caddy@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9 ]
-[ "$DIREXTALK_COTURN_IMAGE_IMMUTABLE" = docker.io/coturn/coturn:4.6.3-alpine@sha256:e2bca2f79a4269d7240de5872ab60a9305013ad37296d2acf14f9510874346be ]
-[ "$DIREXTALK_MESSAGE_SOURCE_REVISION" = "$(state_get split_release.message_source_revision)" ]
-[ "$DIREXTALK_SPLIT_SOURCE_REVISION" = "$(state_get split_release.split_source_revision)" ]
-[ "$DIREXTALK_AGENT_SOURCE_REVISION" = "$(state_get split_release.agent_source_revision)" ]
-[ "$DIREXTALK_RELEASE_CATALOG_ORIGIN" = https://imadmin.dirextalk.ai ]
-
-res_set instance_id i-existing
-server_release_prepare_state
-old_split_revision=1111111111111111111111111111111111111111
-state_set split_release.split_source_revision "$old_split_revision"
-server_release_prepare_state
-[ "$(state_get split_release.split_source_revision)" = "$old_split_revision" ]
-server_release_advance_split_state "$old_split_revision"
-[ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ]
-state_set split_release.split_source_revision "$old_split_revision"
-state_set split_release.agent_version v9.9.9
-state_set split_release.agent_image docker.io/dirextalk/agent:v9.9.9
-server_release_prepare_state
-[ "$(state_get split_release.agent_version)" = v9.9.9 ] || {
-  echo "existing infrastructure lost its recorded Agent release" >&2
-  exit 1
-}
-state_set split_release.agent_version "$DIREXTALK_AGENT_VERSION"
-state_set split_release.agent_image "$DIREXTALK_AGENT_IMAGE"
-if server_release_advance_split_state "$old_split_revision"; then
-  :
-else
-  echo 'strict local split source advance rejected unchanged business pins' >&2
+if grep -Eq '^DIREXTALK_(MESSAGE_SERVER|MESSAGE_SOURCE|AGENT_)' "$SERVER_RELEASE_PIN"; then
+  echo 'repository release settings still contain application pins' >&2
   exit 1
 fi
+
+# First fresh pass resolves exactly once and atomically records both receipts.
+server_release_prepare_state
+[ "$(wc -l <"$TEST_RESOLVER_CALLS")" -eq 1 ]
+message_digest=sha256:$(printf 'a%.0s' {1..64})
+agent_digest=sha256:$(printf 'b%.0s' {1..64})
+json_test_check "$STATE_JSON" "data.server_release.source === 'production_split' && data.server_release.version === 'v1.2.3' && data.server_release.image === 'docker.io/dirextalk/message-server:v1.2.3' && data.server_release.image_ref === data.server_release.image && data.server_release.digest === '$message_digest' && data.server_release.manifest_digest === '$message_digest'"
+json_test_check "$STATE_JSON" "data.split_release.message_version === 'v1.2.3' && data.split_release.message_image === 'docker.io/dirextalk/message-server:v1.2.3' && data.split_release.message_source_revision === '${DIREXTALK_MESSAGE_SOURCE_REVISION}' && data.split_release.message_manifest_digest === '$message_digest' && data.split_release.agent_version === 'v2.3.4' && data.split_release.agent_image === 'docker.io/dirextalk/agent:v2.3.4' && data.split_release.agent_manifest_digest === '$agent_digest'"
+json_test_check "$STATE_JSON" "data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.split_release.caddy_image === '$DIREXTALK_CADDY_IMAGE_IMMUTABLE' && data.split_release.coturn_image === '$DIREXTALK_COTURN_IMAGE_IMMUTABLE'"
+
+# A fresh retry reuses the complete frozen snapshot without registry access.
+server_release_prepare_state
+[ "$(wc -l <"$TEST_RESOLVER_CALLS")" -eq 1 ]
+[ "$DIREXTALK_MESSAGE_SERVER_VERSION" = v1.2.3 ]
+[ "$DIREXTALK_AGENT_VERSION" = v2.3.4 ]
+
+# Existing infrastructure preserves its recorded application release while the
+# Deployer-owned split source can advance.
+res_set instance_id i-existing
+old_split_revision=1111111111111111111111111111111111111111
 state_set split_release.split_source_revision "$old_split_revision"
 state_set split_release.message_version v8.8.8
 state_set split_release.message_image docker.io/dirextalk/message-server:v8.8.8
+state_set split_release.message_source_revision 8888888888888888888888888888888888888888
+state_set split_release.message_manifest_digest "sha256:$(printf '8%.0s' {1..64})"
+state_set server_release.version v8.8.8
+state_set server_release.image docker.io/dirextalk/message-server:v8.8.8
+state_set server_release.image_ref docker.io/dirextalk/message-server:v8.8.8
+state_set server_release.digest "sha256:$(printf '8%.0s' {1..64})"
+state_set server_release.manifest_digest "sha256:$(printf '8%.0s' {1..64})"
 state_set split_release.agent_version v9.9.9
 state_set split_release.agent_image docker.io/dirextalk/agent:v9.9.9
-recorded_message_image=$(state_get split_release.message_image)
-recorded_agent_image=$(state_get split_release.agent_image)
-DIREXTALK_MESSAGE_SERVER_VERSION=v7.7.7
-DIREXTALK_MESSAGE_SERVER_IMAGE=docker.io/dirextalk/message-server:v7.7.7
-DIREXTALK_AGENT_VERSION=v6.6.6
-DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v6.6.6
-DIREXTALK_SPLIT_SOURCE_REVISION=2222222222222222222222222222222222222222
+state_set split_release.agent_source_revision 9999999999999999999999999999999999999999
+state_set split_release.agent_manifest_digest "sha256:$(printf '9%.0s' {1..64})"
+server_release_prepare_state
+[ "$(wc -l <"$TEST_RESOLVER_CALLS")" -eq 1 ]
+[ "$DIREXTALK_MESSAGE_SERVER_VERSION" = v8.8.8 ]
+[ "$DIREXTALK_AGENT_VERSION" = v9.9.9 ]
 server_release_advance_split_state "$old_split_revision"
 [ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ]
 [ "$(state_get split_release.message_version)" = v8.8.8 ]
 [ "$(state_get split_release.agent_version)" = v9.9.9 ]
-[ "$(state_get split_release.message_image)" = "$recorded_message_image" ]
-[ "$(state_get split_release.agent_image)" = "$recorded_agent_image" ]
-state_set server_release.version v9.9.9
-state_set server_release.image docker.io/dirextalk/message-server:v9.9.9
-state_set server_release.digest ''
-state_set server_release.image_ref docker.io/dirextalk/message-server:v9.9.9
-state_set server_release.manifest_digest ''
-server_release_prepare_state
-[ "$(state_get server_release.version)" = v9.9.9 ] || {
-  echo "existing infrastructure lost its recorded message-server release" >&2
+
+# Resolver failure cannot leave either half of the release snapshot behind.
+export DIREXTALK_WORKDIR="$tmp/failure"
+STATE_JSON="$DIREXTALK_WORKDIR/state.json"
+state_init >/dev/null
+cat >"$tmp/failing-resolver.mjs" <<'EOF'
+process.stderr.write("registry unavailable\n");
+process.exitCode = 1;
+EOF
+SERVER_RELEASE_RESOLVER="$tmp/failing-resolver.mjs"
+if server_release_prepare_state >/dev/null 2>&1; then
+  echo 'fresh release resolution accepted a registry failure' >&2
   exit 1
-}
+fi
+[ -z "$(state_get server_release)" ]
+[ -z "$(state_get split_release)" ]
+
+# A partial receipt is a local failure and is never repaired by another read.
+state_set_raw server_release '{}'
+SERVER_RELEASE_RESOLVER="$DIREXTALK_PRODUCTION_RELEASE_RESOLVER"
+calls_before=$(wc -l <"$TEST_RESOLVER_CALLS")
+if server_release_prepare_state >/dev/null 2>&1; then
+  echo 'fresh release accepted a partial frozen snapshot' >&2
+  exit 1
+fi
+[ "$(wc -l <"$TEST_RESOLVER_CALLS")" -eq "$calls_before" ]
 
 for variable in MESSAGE_SERVER_IMAGE DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRIDE; do
-  state_set_raw server_release '{}'
-  res_set instance_id ''
   if env "$variable=forbidden" bash -c '
     set -euo pipefail
     warn() { printf "%s\n" "$*" >&2; }
@@ -103,4 +129,4 @@ for variable in MESSAGE_SERVER_IMAGE DIREXTALK_ALLOW_MESSAGE_SERVER_IMAGE_OVERRI
   fi
 done
 
-echo "production split release pin ok"
+echo "production split dynamic release ok"

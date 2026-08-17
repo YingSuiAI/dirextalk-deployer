@@ -29,12 +29,14 @@ starts Agent initialization, migration, both runners, and Agent. An Agent-only
 failure preserves the healthy messaging service, starts Edge, exports bootstrap
 credentials, and returns status `3` for receipt-bound Agent recovery.
 
-`release.env` is the only production release selection. Release preparation
-discovers `latest` once, verifies the corresponding stable version tags, and
-records those image/version/revision identities. It also fixes the single Message Server-owned release catalog origin at
-`https://imadmin.dirextalk.ai`, pins the independent Caddy and Alpine coturn images, and records a separate split
-deployer-owned runtime tree revision so deployment-only fixes do not misstate
-either application image's provenance.
+`release.env` contains only Deployer-owned production inputs: the release
+catalog origin, canonical split runtime revision, and fixed PostgreSQL/pgvector,
+Caddy, and coturn digests. It does not pin Message Server or Agent releases.
+For each fresh deployment, S3 resolves both Docker Hub `latest` tags, validates
+their stable `vX.Y.Z` tag, source revision, and linux/amd64 manifest digest, and
+atomically records the complete application snapshot before infrastructure
+creation. Fresh retry/resume reuses that snapshot without another registry
+read; existing nodes retain their recorded application versions.
 Existing node state without `split_release.release_catalog_origin` is obsolete
 and fails closed. This release does not seed, migrate, or infer that field;
 redeploy the node through the fresh-state path.

@@ -48,7 +48,7 @@ run_phase() {
 }
 
 _split_release_validate() {
-  local image revision
+  local image revision message_digest agent_digest
   [ "$(state_get server_release.image_ref)" = "docker.io/dirextalk/message-server:$DIREXTALK_MESSAGE_SERVER_VERSION" ] || {
     warn "Split deployment requires the prepared Message Server version tag."
     return 1
@@ -57,6 +57,22 @@ _split_release_validate() {
     warn "Split deployment requires the prepared Agent version tag."
     return 1
   }
+  message_digest=$(state_get split_release.message_manifest_digest)
+  agent_digest=$(state_get split_release.agent_manifest_digest)
+  if [ -z "$message_digest" ] && [ -z "$agent_digest" ] \
+      && [ -n "$(state_get resources.instance_id)" ] \
+      && [ -z "$(state_get server_release.manifest_digest)" ] \
+      && [ -z "$(state_get server_release.digest)" ]; then
+    : # A pre-digest existing-node receipt is preserved without inference.
+  elif printf '%s\n' "$message_digest" "$agent_digest" | grep -Eq '^sha256:[0-9a-f]{64}$' \
+      && [ "$(printf '%s\n' "$message_digest" "$agent_digest" | grep -Ec '^sha256:[0-9a-f]{64}$')" -eq 2 ] \
+      && [ "$message_digest" = "$(state_get server_release.manifest_digest)" ] \
+      && [ "$message_digest" = "$(state_get server_release.digest)" ]; then
+    :
+  else
+    warn "Split deployment requires frozen Message Server and Agent linux/amd64 manifest digests."
+    return 1
+  fi
   for image in \
     "$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE" \
     "$DIREXTALK_CADDY_IMAGE_IMMUTABLE" \

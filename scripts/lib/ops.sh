@@ -303,10 +303,12 @@ ops_commit_existing_update_release() {
     "message_version=$(ops_state_get "$state" .split_release.message_version)" \
     "message_image=$(ops_state_get "$state" .split_release.message_image)" \
     "message_source_revision=$(ops_state_get "$state" .split_release.message_source_revision)" \
+    "message_manifest_digest=$(ops_state_get "$state" .split_release.message_manifest_digest)" \
     "split_source_revision=$DIREXTALK_SPLIT_SOURCE_REVISION" \
     "agent_version=$(ops_state_get "$state" .split_release.agent_version)" \
     "agent_image=$(ops_state_get "$state" .split_release.agent_image)" \
     "agent_source_revision=$(ops_state_get "$state" .split_release.agent_source_revision)" \
+    "agent_manifest_digest=$(ops_state_get "$state" .split_release.agent_manifest_digest)" \
     "postgres_image=$(ops_state_get "$state" .split_release.postgres_image)" \
     "caddy_image=$(ops_state_get "$state" .split_release.caddy_image)" \
     "coturn_image=$(ops_state_get "$state" .split_release.coturn_image)") || return 1

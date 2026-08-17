@@ -135,6 +135,7 @@ for (const required of [
   "scripts/lib/test-runner.mjs",
   "scripts/lib/git-bash.sh",
   "scripts/lib/server-release.sh",
+  "scripts/lib/production-release-resolver.mjs",
   "scripts/updater/release.env",
   "scripts/cloud-init/split/bootstrap-production.sh",
   "scripts/cloud-init/split/authorize-split-source-revision.sh",

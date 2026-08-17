@@ -17,8 +17,8 @@ message-server -> PostgreSQL 18
 coturn         -> TURN 3478 + 49160-49200/udp
 ```
 
-- **message-server**: 发布准备通过 `latest` 发现当前版本，核对对应稳定 `vX.Y.Z` 标签、revision 与真实二进制版本；部署和更新只使用该版本标签。它承载 Matrix homeserver 和 ProductCore，并通过固定内部边界访问 external Agent。
-- **Agent**: 发布准备通过独立 `latest` 通道发现当前版本，核对对应稳定 `vX.Y.Z` 标签、revision 与三个真实二进制版本；部署和更新只使用该版本标签。Cloud Worker 的主机区域只来自已验证部署主机的不可变区域，不读取上传凭据的默认区域，也不跨区域 fallback。它与 Message Server 共用单一 PostgreSQL/pgvector 容器，但使用隔离的非超级用户角色、database 和私有数据库网络，并拥有 extension/core runners 与更新 wrapper。客户端通过同域 `/agent/v1/*` 访问 Agent 数据面，Caddy 在内部网络转发到 `agent:8082`；Agent 端口不直接发布到公网。
+- **message-server**: 每个 fresh deployment 从 Docker Hub `latest` 发现当前版本，核对对应稳定 `vX.Y.Z` 标签、source revision 与 linux/amd64 manifest digest，并在创建基础设施前冻结到 `state.json`；retry/resume 不重新解析。运行时继续使用该稳定版本标签。它承载 Matrix homeserver 和 ProductCore，并通过固定内部边界访问 external Agent。
+- **Agent**: 每个 fresh deployment 通过独立 `latest` 通道完成相同的稳定标签、source revision 与 linux/amd64 manifest digest 校验，并与 Message Server snapshot 原子冻结；existing node 保留已有 receipt。Cloud Worker 的主机区域只来自已验证部署主机的不可变区域，不读取上传凭据的默认区域，也不跨区域 fallback。它与 Message Server 共用单一 PostgreSQL/pgvector 容器，但使用隔离的非超级用户角色、database 和私有数据库网络，并拥有 extension/core runners 与更新 wrapper。客户端通过同域 `/agent/v1/*` 访问 Agent 数据面，Caddy 在内部网络转发到 `agent:8082`；Agent 端口不直接发布到公网。
 - **PostgreSQL 18 + pgvector**: 单一容器和持久化卷；message-server 与 Agent 使用相互隔离的非超级用户角色、database 和私有数据库网络，只有 Agent database 启用 `vector` extension。
 - **Caddy**: 独立 edge Compose 项目的唯一 HTTP/TLS 入口，自动签发 Let's Encrypt。
 - **dirextalk-updater**: 独立 GitHub 仓库/Release 的 linux/amd64 binary；production split 主机要求 Ubuntu 24.04+、systemd >= 254。deployer 固定 version/commit/SHA-256，宿主下载校验后作为 root-owned systemd service 安装。fresh deployment 写入 `watchdog_enabled=false`：保留 root-owned control plane 和显式 update/recovery job，但不启动常驻 Docker-event/轮询修复 watchdog。它独立于 Compose；Caddy 只读挂其 socket 目录，不接触 control token，也不安装每日 GitHub discovery timer。

@@ -85,7 +85,7 @@ const affectedRules = [
   [/^scripts\/lib\/atomic-write\.sh$/, ["tests/atomic_write_test.sh", "tests/private_file_permissions_test.sh"]],
   [/^scripts\/lib\/private-files\.sh$/, ["tests/private_file_permissions_test.sh", "tests/atomic_write_test.sh"]],
   [/^scripts\/lib\/region\.sh$/, ["tests/region_recommendation_test.sh", "tests/orchestrate_region_env_test.sh", "tests/s1_lightsail_availability_fallback_test.sh"]],
-  [/^scripts\/lib\/aws\.sh$|^scripts\/aws-credentials\.sh$|^scripts\/phases\/s0_/, ["tests/aws_credentials_test.sh", "tests/eip_preflight_test.sh", "tests/lightsail_static_ip_quota_test.sh"]],
+  [/^scripts\/lib\/aws\.sh$|^scripts\/aws-credentials\.sh$|^scripts\/phases\/s0_/, ["tests/aws_credentials_test.sh", "tests/aws_proxy_environment_test.sh", "tests/eip_preflight_test.sh", "tests/lightsail_static_ip_quota_test.sh"]],
   [/^scripts\/lib\/domain\.sh$|^scripts\/phases\/s2_/, ["tests/domain_dns_mode_detection_test.sh", "tests/domain_route53_default_test.sh", "tests/domain_authoritative_dns_test.sh", "tests/route53_zone_required_test.sh"]],
   [/^scripts\/lib\/state\.sh$/, ["tests/orchestrate_status_recovery_test.sh", "tests/operation_report_test.sh", "tests/final_delivery_runtime_gate_test.sh"]],
   [/^scripts\/lib\/operation_report\.sh$|^scripts\/json\.mjs$/, ["tests/operation_report_test.sh", "tests/final_delivery_runtime_gate_test.sh"]],

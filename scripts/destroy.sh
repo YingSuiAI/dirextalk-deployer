@@ -260,8 +260,7 @@ MCP_HERMES_HOME=$(json_get "$SRC" mcp_hermes_home)
 MCP_HERMES_PROFILE=$(json_get "$SRC" mcp_hermes_profile)
 MCP_HERMES_PROFILE_OWNED=$(json_get "$SRC" mcp_hermes_profile_owned)
 
-export NO_PROXY="*"; export no_proxy="*"
-unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy 2>/dev/null || true
+STATE_JSON="$SRC" aws_env_prep
 [ -n "${REGION:-${AWS_DEFAULT_REGION:-}}" ] || {
   echo "Region is missing. Add .region to state.json or set AWS_DEFAULT_REGION, then retry."
   exit 1

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # lib/aws.sh - shared AWS setup sourced by phases.
 #
-# Some local proxy setups truncate AWS API TLS (UNEXPECTED_EOF). Bypass proxies
-# for AWS endpoints in every phase that calls aws.
+# AWS commands use the caller's system proxy configuration. Do not override it:
+# the same environment can be inherited by the local connect daemon.
 
 AWS_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck disable=SC1090
@@ -19,8 +19,6 @@ aws_env_prep() {
     region=$(aws_configured_region)
   fi
   [ -n "$region" ] && export AWS_DEFAULT_REGION="$region"
-  export NO_PROXY="*"; export no_proxy="*"
-  unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy 2>/dev/null || true
 }
 
 aws_configured_region() {

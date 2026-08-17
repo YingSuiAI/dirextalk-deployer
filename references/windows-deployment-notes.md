@@ -81,9 +81,9 @@ stdbuf -oL bash scripts/orchestrate.sh 2>&1
 curl --resolve __DOMAIN__:443:__EIP__ -fsS https://__DOMAIN__/_p2p/health
 ```
 
-## AWS Proxy Bypass
+## AWS Proxy Configuration
 
-`lib/aws.sh` sets `NO_PROXY=*` and unsets proxy variables for AWS CLI calls. If AWS still fails with proxy errors, check:
+`lib/aws.sh` preserves the local system proxy configuration for AWS CLI calls. If AWS fails with proxy errors, check:
 
 ```bash
 echo "HTTP_PROXY=$HTTP_PROXY"

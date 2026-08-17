@@ -70,5 +70,5 @@
 ## 机型/内存类(承上)
 
 ## 本机/环境类(不在仓库,属操作经验)
-- **本地代理截断 AWS/lark 的 TLS**:AWS 公共前置已 `export NO_PROXY="*"` 并 unset 代理。lark-cli 用 `LARK_CLI_NO_PROXY=1`。
+- **本地代理截断 AWS/lark 的 TLS**:当前 AWS 公共前置保留系统代理配置；请修复本机代理或其 TLS 规则，不再写入 `NO_PROXY=*`。lark-cli 用 `LARK_CLI_NO_PROXY=1`。
 - **PowerShell 生成 SSH key 时 `-N '""'`** 把字面 `"` 当密码 → 加密私钥登录失败。正确:`-N ''`(单引号空)。

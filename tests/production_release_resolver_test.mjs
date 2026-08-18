@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { resolveRepository } from "../scripts/lib/production-release-resolver.mjs";
+import {
+  resolveProductionRelease,
+  resolveRepository,
+} from "../scripts/lib/production-release-resolver.mjs";
 
 const sha = (character) => `sha256:${character.repeat(64)}`;
 const revision = (character) => character.repeat(40);
@@ -21,6 +24,7 @@ function release(version, manifestCharacter, revisionCharacter) {
 }
 
 function registryFixture({
+  repository = "dirextalk/message-server",
   latest,
   stable = latest,
   duplicateAmd64 = false,
@@ -42,7 +46,8 @@ function registryFixture({
       return jsonResponse({ token: "fixture-token-value" });
     }
 
-    const marker = "/v2/dirextalk/message-server/";
+    const marker = `/v2/${repository}/`;
+    if (!url.pathname.includes(marker)) return jsonResponse({}, { status: 404 });
     const route = url.pathname.slice(url.pathname.indexOf(marker) + marker.length);
     if (route === "manifests/latest") {
       const selected = latestSequence?.[Math.min(latestReads, latestSequence.length - 1)] || latest;
@@ -112,6 +117,46 @@ const good = release("v1.2.3", "a", "1");
     image: `docker.io/dirextalk/message-server:${good.version}`,
     image_ref: `docker.io/dirextalk/message-server:${good.version}@${good.manifestDigest}`,
   });
+}
+
+{
+  const message = release("v1.8.4", "c", "3");
+  const agent = release("v2.6.1", "d", "4");
+  const messageFixture = registryFixture({
+    repository: "dirextalk/message-server",
+    latest: message,
+  });
+  const agentFixture = registryFixture({
+    repository: "dirextalk/agent",
+    latest: agent,
+  });
+  const fetchImpl = (input, options) => {
+    const url = new URL(String(input));
+    if (url.hostname === "auth.test") {
+      return jsonResponse({ token: "fixture-token-value" });
+    }
+    if (url.pathname.includes("/v2/dirextalk/message-server/")) {
+      return messageFixture.fetchImpl(input, options);
+    }
+    if (url.pathname.includes("/v2/dirextalk/agent/")) {
+      return agentFixture.fetchImpl(input, options);
+    }
+    return jsonResponse({}, { status: 404 });
+  };
+
+  const result = await resolveProductionRelease({
+    fetchImpl,
+    authUrl: "https://auth.test/token",
+    registryUrl: "https://registry.test",
+  });
+  assert.equal(result.message.version, message.version);
+  assert.equal(result.message.source_revision, message.revision);
+  assert.equal(result.message.manifest_digest, message.manifestDigest);
+  assert.equal(result.agent.version, agent.version);
+  assert.equal(result.agent.source_revision, agent.revision);
+  assert.equal(result.agent.manifest_digest, agent.manifestDigest);
+  assert.notEqual(result.message.version, result.agent.version);
+  assert.notEqual(result.message.source_revision, result.agent.source_revision);
 }
 
 {

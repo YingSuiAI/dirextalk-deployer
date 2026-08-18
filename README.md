@@ -309,7 +309,7 @@ make build AGENTS=<dirextalk-connect-agent> PLATFORMS_INCLUDE=matrix
 ```bash
 # Default development check: changed files plus declared neighboring contracts.
 npm test
-# Normal pre-publish check: affected tests plus package/skill structure.
+# Release-candidate check: packaging, version combination, rollback, and split faults.
 npm run test:release
 # Explicit broader lanes; do not run routinely.
 npm run test:quick
@@ -323,6 +323,10 @@ The affected selector reads uncommitted files and commits ahead of
 `DIREXTALK_TEST_BASE=<ref>` or `DIREXTALK_TEST_CHANGED_FILES=<paths>`. The full
 EC2, legacy, updater, DNS, S6, and runtime matrices are retained for explicit
 manual validation, not every development stage or release.
+
+The Ubuntu release CI job requires the split fault lane and may pull only the
+repository-pinned Caddy image. For an equivalent mandatory local run on a Linux
+Docker host, use the command in `references/verification-recovery.md`.
 
 On Windows these `npm` test commands may be launched directly from PowerShell,
 Command Prompt, or Git Bash. The test launcher finds Git for Windows Bash and

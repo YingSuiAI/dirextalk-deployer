@@ -51,6 +51,13 @@ jobs:
         shell: bash
         run: npm run test:stage
 
+      - name: Run local release-candidate gates
+        shell: bash
+        env:
+          DIREXTALK_REQUIRE_SPLIT_FAULT_GATE: 'true'
+          DIREXTALK_SPLIT_FAULT_GATE_PULL: 'true'
+        run: npm run test:release
+
       - name: Run exhaustive full tests on explicit request
         if: github.event_name == 'workflow_dispatch'
         shell: bash

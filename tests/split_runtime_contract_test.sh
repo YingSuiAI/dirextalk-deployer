@@ -26,6 +26,7 @@ tests=(
   refresh-message-mcp-token.test.sh
   update-agent-local.recovery.test.sh
   update-agent-local.test.sh
+  update-message-server-local.rollback.test.sh
   update-message-server-local.test.sh
   verify-production-images.test.sh
 )

@@ -12,6 +12,10 @@ const packagingTests = [
   "tests/npm_skill_distribution_test.sh",
   "tests/skill_structure_test.sh",
 ];
+const releaseTests = [
+  ...packagingTests,
+  "tests/split_stack_fault_gate_test.sh",
+];
 
 const quickTests = [
   "tests/tracked_text_lf_test.sh",
@@ -77,6 +81,7 @@ const slowTests = [
   "tests/pricing_estimate_test.sh",
   "tests/update_reset_ops_test.sh",
   "tests/existing_node_update_test.sh",
+  "tests/split_stack_fault_gate_test.sh",
 ];
 
 const affectedRules = [
@@ -99,6 +104,7 @@ const affectedRules = [
   [/^scripts\/phases\/s1_/, ["tests/s1_lightsail_availability_fallback_test.sh", "tests/lightsail_static_ip_quota_test.sh", "tests/eip_preflight_test.sh", "tests/root_volume_size_test.sh", "tests/pricing_estimate_test.sh"]],
   [/^scripts\/phases\/s3_/, ["tests/s3_lightsail_provision_test.sh", "tests/s3_ec2_updater_upload_test.sh", "tests/s3_stable_ip_reconcile_test.sh", "tests/s3_public_ip_validation_test.sh", "tests/root_volume_size_test.sh"]],
   [/^scripts\/phases\/s4_|^scripts\/cloud-init\/|^scripts\/render\/(?!prepare-production-release\.sh$)/, ["tests/render_userdata_remote_nodes_test.sh", "tests/split_agent_bundle_test.sh", "tests/static_sites_edge_test.sh", "tests/bootstrap_production_retry_test.sh", "tests/updater_bundle_test.sh", "tests/updater_bootstrap_resume_test.sh", "tests/split_source_revision_advance_test.sh", "tests/host_integration_atomic_test.sh", "tests/message_mcp_binding_migration_test.sh"]],
+  [/^scripts\/cloud-init\/split\/(?:Caddyfile|runtime\/edge-compose\.yaml)$|^tests\/fixtures\/split-stack-fault-upstream\.mjs$/, ["tests/split_stack_fault_gate_test.sh"]],
   [/^scripts\/cloud-init\/split\/runtime\/|^tests\/split-runtime\//, ["tests/split_runtime_contract_test.sh", "tests/split_agent_bundle_test.sh", "tests/bootstrap_production_retry_test.sh"]],
   [/^scripts\/phases\/s5_/, ["tests/s5_init_tokens_test.sh"]],
   [/^scripts\/phases\/s6_/, ["tests/s6_run_phase_failure_test.sh", "tests/s6_wire_local_test.sh", "tests/mcp_tools_runtime_check_test.sh", "tests/runtime_summary_check_test.sh", "tests/destroy_host_mcp_cleanup_test.sh"]],
@@ -121,7 +127,7 @@ function normalizeChangedFile(file) {
 
 export function selectAffectedTests(changedFiles, { release = false } = {}) {
   const selected = [runnerTest];
-  if (release) selected.push(...packagingTests);
+  if (release) selected.push(...releaseTests);
 
   for (const rawFile of changedFiles || []) {
     const file = normalizeChangedFile(rawFile);
@@ -186,7 +192,9 @@ export function buildTestInvocation(mode = "affected", options = {}) {
     }
     case "release": {
       const changedFiles = options.changedFiles ?? discoverChangedFiles(options);
-      tests = changedFiles === null ? quickTests : selectAffectedTests(changedFiles, { release: true });
+      tests = changedFiles === null
+        ? orderedUnique([...quickTests, ...releaseTests])
+        : selectAffectedTests(changedFiles, { release: true });
       break;
     }
     case "quick":

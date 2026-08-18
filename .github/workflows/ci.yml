@@ -54,6 +54,9 @@ jobs:
       - name: Run exhaustive full tests on explicit request
         if: github.event_name == 'workflow_dispatch'
         shell: bash
+        env:
+          DIREXTALK_REQUIRE_SPLIT_FAULT_GATE: 'true'
+          DIREXTALK_SPLIT_FAULT_GATE_PULL: 'true'
         run: npm run test:full
 
       - name: Check Bash syntax

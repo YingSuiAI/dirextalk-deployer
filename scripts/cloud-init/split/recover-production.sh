@@ -124,32 +124,23 @@ recovery_run_agent_job() {
 }
 
 recovery_settle_agent_containers() {
-  local attempts_remaining=30 service id inspection actual_id actual_project actual_service state restarting
-  while :; do
-    recovery_verify_message_unchanged
-    restarting=false
-    for service in agent extension-runner core-runner; do
-      id=${recovery_container_ids[$service]}
-      if inspection=$(docker inspect --format '{{.Id}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}' "$id" 2>/dev/null); then
-        :
-      else
-        production_die "recorded $service container inspection failed during recovery settle"
-      fi
-      IFS='|' read -r actual_id actual_project actual_service state <<<"$inspection"
-      [ "$actual_id" = "$id" ] || production_die "$service container ID changed during recovery settle"
-      [ "$actual_project" = "$production_stack" ] || production_die "$service container project changed during recovery settle"
-      [ "$actual_service" = "$service" ] || production_die "$service container service changed during recovery settle"
-      case "$state" in
-        created|exited|running) ;;
-        restarting) restarting=true ;;
-        *) production_die "$service container entered an unknown recovery-settle state: ${state:-empty}" ;;
-      esac
-    done
-    [ "$restarting" = true ] || return 0
-    [ "$attempts_remaining" -gt 0 ] \
-      || production_die 'Agent runtime containers did not settle within 30 seconds'
-    attempts_remaining=$((attempts_remaining - 1))
-    sleep 1 || production_die 'recovery settle wait failed'
+  local service id inspection actual_id actual_project actual_service state
+  recovery_verify_message_unchanged
+  for service in agent extension-runner core-runner; do
+    id=${recovery_container_ids[$service]}
+    if inspection=$(docker inspect --format '{{.Id}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}' "$id" 2>/dev/null); then
+      :
+    else
+      production_die "recorded $service container inspection failed during recovery settle"
+    fi
+    IFS='|' read -r actual_id actual_project actual_service state <<<"$inspection"
+    [ "$actual_id" = "$id" ] || production_die "$service container ID changed during recovery settle"
+    [ "$actual_project" = "$production_stack" ] || production_die "$service container project changed during recovery settle"
+    [ "$actual_service" = "$service" ] || production_die "$service container service changed during recovery settle"
+    case "$state" in
+      created|exited|running|restarting) ;;
+      *) production_die "$service container entered an unknown recovery-settle state: ${state:-empty}" ;;
+    esac
   done
 }
 

@@ -269,7 +269,6 @@ success_calls="$tmp/success.calls"
 run_recovery "$success_calls" 0 0 0 settle
 [ "$(grep -c '^bind$' "$success_calls")" -eq 2 ]
 grep -Fqx 'prepare:d-abcdefghijklmnopqrstuvwxyz' "$success_calls"
-grep -Fqx 'sleep:1' "$success_calls"
 grep -Fqx "restart:$fixture/run" "$success_calls"
 prepare_line=$(grep -n '^prepare:' "$success_calls" | cut -d: -f1)
 agent_restart_line=$(grep -n '^restart:' "$success_calls" | cut -d: -f1)
@@ -373,18 +372,11 @@ fi
 [ "$status" -eq 3 ]
 grep -Fqx 'negative:existing runtime restart reported an expected negative state' "$restart_negative_calls"
 
-timeout_calls="$tmp/timeout.calls"
-if run_recovery "$timeout_calls" 0 0 0 restarting; then
-  echo 'recovery accepted permanently restarting containers' >&2
-  exit 1
-else
-  status=$?
-fi
-[ "$status" -eq 1 ]
-[ "$(grep -c '^sleep:1$' "$timeout_calls")" -eq 30 ]
-grep -Fqx 'die:Agent runtime containers did not settle within 30 seconds' "$timeout_calls"
-if grep -q '^restart:' "$timeout_calls"; then
-  echo 'unsettled Agent containers reached Agent restart' >&2
+restarting_calls="$tmp/restarting.calls"
+run_recovery "$restarting_calls" 0 0 0 restarting
+grep -Fqx "restart:$fixture/run" "$restarting_calls"
+if grep -q '^sleep:' "$restarting_calls"; then
+  echo 'receipt-bound restarting Agent containers were delayed before controlled restart' >&2
   exit 1
 fi
 

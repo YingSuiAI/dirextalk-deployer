@@ -152,9 +152,12 @@ order. Token refresh failure remains expected-negative status `3` without
 stopping Message Server or Edge. A
 fresh application exit remains expected-negative status `3`; a Docker start
 failure that did not produce a new container execution is infrastructure
-status `1`. It then waits for the receipt-recorded `agent`, `extension-runner`,
-and `core-runner` containers to leave a short `restarting` state and calls the
-canonical `restart-agent-local.sh` for the same run.
+status `1`. A receipt-recorded `restarting` state for `agent`,
+`extension-runner`, or `core-runner` is the condition that requires controlled
+repair, so recovery immediately calls the canonical `restart-agent-local.sh`
+for the same run. It still rejects unknown states, inspect failures, or any
+container whose immutable ID, project, or service label differs from the
+receipt.
 
 The shared restart boundary stops those three exact containers before running
 `prepare-runner-cgroups.sh`. That helper restarts the two fixed delegated

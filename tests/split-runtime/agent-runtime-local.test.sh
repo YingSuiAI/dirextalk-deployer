@@ -9,6 +9,11 @@ for script in "$stop_script" "$restart_script" "$common_script"; do
   [ -x "$script" ] || { echo "$script must be executable" >&2; exit 1; }
   bash -n "$script"
 done
+grep -Fq 'local helper=$agent_runtime_script_dir/prepare-runner-cgroups.sh' "$common_script"
+if grep -Fq '/usr/local/libexec/dirextalk/split-agent/scripts/prepare-runner-cgroups.sh' "$common_script"; then
+  echo 'existing-node runtime lifecycle must use its canonical bundled helper' >&2
+  exit 1
+fi
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck -x "$common_script" "$stop_script" "$restart_script"
 fi
@@ -392,6 +397,9 @@ if grep -Fq "container start $core_id" "$fixture/state/docker.log" || grep -Fq "
   exit 1
 fi
 
+# Existing-node update/reconcile reaches this actual receipt-bound restart
+# wrapper. Prove it runs the canonical bundled helper after stopping the exact
+# Agent trio and before starting either runner, with no fixed-libexec detour.
 cat >"$fixture/state/containers" <<EOF
 message|$message_id|running|healthy
 agent|$agent_id|running|healthy

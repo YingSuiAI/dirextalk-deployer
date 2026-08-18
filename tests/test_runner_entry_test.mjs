@@ -25,6 +25,9 @@ for (const required of [
   "tests/skill_structure_test.sh",
   "tests/git_bash_windows_contract_test.sh",
   "tests/local_paths_test.sh",
+  "tests/production_release_resolver_test.mjs",
+  "tests/server_release_test.sh",
+  "tests/release_candidate_rollback_test.sh",
   "tests/split_stack_fault_gate_test.sh",
 ]) {
   assert.ok(releaseAffected.includes(required), `release selection must include ${required}`);
@@ -61,6 +64,7 @@ assert.ok(!affectedInvocation.args.includes("tests/s6_wire_local_test.sh"));
 
 const fullInvocation = buildTestInvocation("full");
 assert.ok(fullInvocation.args.includes("tests/s6_run_phase_failure_test.sh::extended"));
+assert.ok(fullInvocation.args.includes("tests/release_candidate_rollback_test.sh"));
 assert.ok(fullInvocation.args.includes("tests/split_stack_fault_gate_test.sh"));
 const edgeAffected = selectAffectedTests(["scripts/cloud-init/split/Caddyfile"]);
 assert.ok(edgeAffected.includes("tests/split_stack_fault_gate_test.sh"));

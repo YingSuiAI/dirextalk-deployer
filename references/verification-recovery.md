@@ -62,6 +62,23 @@ if the user wants to stop billing.
 
 ## Production Split Update And Reconcile
 
+Before publishing a Deployer release candidate, run the local candidate gate:
+
+```bash
+DIREXTALK_REQUIRE_SPLIT_FAULT_GATE=true \
+DIREXTALK_SPLIT_FAULT_GATE_PULL=true \
+npm run test:release
+```
+
+This gate verifies an independently versioned Message Server and Agent release
+combination, both application rollback paths, a split application restart,
+Agent-only failure while Matrix/IM remains available, and unbuffered SSE through
+the production Caddy route. It uses local fixtures and a pinned Caddy container;
+it does not contact AWS or mutate a deployed node. The pull flag only fetches
+the repository-pinned Caddy image when it is absent locally. Run the mandatory
+fault lane on a Linux Docker host; other development hosts receive the same gate
+from the Ubuntu release CI job.
+
 Use the local lifecycle entrypoint for a normal existing-node update:
 
 ```bash

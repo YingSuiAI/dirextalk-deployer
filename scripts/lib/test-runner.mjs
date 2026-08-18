@@ -14,6 +14,9 @@ const packagingTests = [
 ];
 const releaseTests = [
   ...packagingTests,
+  "tests/production_release_resolver_test.mjs",
+  "tests/server_release_test.sh",
+  "tests/release_candidate_rollback_test.sh",
   "tests/split_stack_fault_gate_test.sh",
 ];
 
@@ -81,6 +84,7 @@ const slowTests = [
   "tests/pricing_estimate_test.sh",
   "tests/update_reset_ops_test.sh",
   "tests/existing_node_update_test.sh",
+  "tests/release_candidate_rollback_test.sh",
   "tests/split_stack_fault_gate_test.sh",
 ];
 

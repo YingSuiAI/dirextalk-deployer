@@ -12,11 +12,11 @@ export UPDATER_PIN_VERSION=attacker UPDATER_PIN_COMMIT=attacker UPDATER_PIN_SHA2
 source "$lib"
 updater_release_validate_pin
 
-[ "$UPDATER_PIN_VERSION" = v1.0.17 ]
-[ "$UPDATER_PIN_COMMIT" = d10bcae89522c172f9d32ed7d7bbf7c85ffbf77b ]
-[ "$UPDATER_PIN_URL" = https://github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.17/dirextalk-updater-linux-amd64 ]
+[ "$UPDATER_PIN_VERSION" = v1.0.18 ]
+[ "$UPDATER_PIN_COMMIT" = 58ad8631e4680c266fd0619ff9cab5605b6b73d8 ]
+[ "$UPDATER_PIN_URL" = https://github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.18/dirextalk-updater-linux-amd64 ]
 [ "$UPDATER_PIN_ASSET" = dirextalk-updater-linux-amd64 ]
-[ "$UPDATER_PIN_SHA256" = 029c09b4b2f50090ad88076fbbedf95f0d912a64f9ce888f138ebad4face20ec ]
+[ "$UPDATER_PIN_SHA256" = 5ac9070d603d687e87913acfa0b232c95da9395a536ed287a6e1defc869ada8f ]
 [ "$UPDATER_PIN_OS" = linux ]
 [ "$UPDATER_PIN_ARCH" = amd64 ]
 [ "$UPDATER_PIN_UBUNTU_VERSION" = 24.04 ]
@@ -33,8 +33,8 @@ mkdir -p "$DIREXTALK_WORKDIR"
 source "$ROOT/scripts/lib/state.sh"
 state_init >/dev/null 2>&1
 updater_release_record_state
-[ "$(json_get "$STATE_JSON" updater_release.version)" = v1.0.17 ]
-[ "$(json_get "$STATE_JSON" updater_release.commit)" = d10bcae89522c172f9d32ed7d7bbf7c85ffbf77b ]
-[ "$(json_get "$STATE_JSON" updater_release.sha256)" = 029c09b4b2f50090ad88076fbbedf95f0d912a64f9ce888f138ebad4face20ec ]
+[ "$(json_get "$STATE_JSON" updater_release.version)" = v1.0.18 ]
+[ "$(json_get "$STATE_JSON" updater_release.commit)" = 58ad8631e4680c266fd0619ff9cab5605b6b73d8 ]
+[ "$(json_get "$STATE_JSON" updater_release.sha256)" = 5ac9070d603d687e87913acfa0b232c95da9395a536ed287a6e1defc869ada8f ]
 
 echo "updater release pin ok"

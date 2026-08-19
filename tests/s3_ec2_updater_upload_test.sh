@@ -64,7 +64,7 @@ case "${!#}" in
   *python3*) cat >/dev/null; [ "${REMOTE_SSH_STATUS:-0}" -eq 0 ] || exit "$REMOTE_SSH_STATUS"; printf 'dns_status=%s machine_id_sha=%064d\n' "${REMOTE_DNS_STATUS:-0}" 1; exit 0 ;;
   *machine_id_sha*) printf 'machine_id_sha=%064d\n' "${REMOTE_IDENTITY_MACHINE_ID:-1}"; exit 0 ;;
   *'/etc/machine-id'*) printf '0123456789abcdef0123456789abcdef\tDOCKERENGINE1234\n' ;;
-  *) printf 'v1.0.18\t58ad8631e4680c266fd0619ff9cab5605b6b73d8\t5ac9070d603d687e87913acfa0b232c95da9395a536ed287a6e1defc869ada8f\n' ;;
+  *) printf 'v1.0.19\t1e71b9d53c599e8fb9227050b8c9643ce723acc5\t882f5131697a3f232c5975420e866ab165e1bc7f92e865f33114ed20b79a14b3\n' ;;
 esac
 EOF
 chmod 0700 "$tmp/bin/"*
@@ -90,7 +90,7 @@ domain_resolves_to_ip() {
 }
 
 run_phase > "$tmp/s3.out" 2>&1 || { cat "$tmp/s3.out" >&2; exit 1; }
-json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.server_release.manifest_digest === '$DIREXTALK_MESSAGE_SERVER_MANIFEST_DIGEST' && data.split_release.agent_manifest_digest === '$DIREXTALK_AGENT_MANIFEST_DIGEST' && data.updater_release.version === 'v1.0.18' && data.updater_release.commit === '58ad8631e4680c266fd0619ff9cab5605b6b73d8' && data.updater_release.sha256 === '5ac9070d603d687e87913acfa0b232c95da9395a536ed287a6e1defc869ada8f' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'i-test' && data.node_identity.provider_instance_arn === 'arn:aws:ec2:us-east-1:123456789012:instance/i-test' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef'" || { cat "$STATE_JSON" >&2; exit 1; }
+json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'ec2' && data.phases.S3_PROVISION.status === 'done' && data.resources.eip_id === 'eipalloc-test' && data.resources.public_ip === '203.0.113.155' && data.resources.root_volume_id === 'vol-root-test' && data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.server_release.manifest_digest === '$DIREXTALK_MESSAGE_SERVER_MANIFEST_DIGEST' && data.split_release.agent_manifest_digest === '$DIREXTALK_AGENT_MANIFEST_DIGEST' && data.updater_release.version === 'v1.0.19' && data.updater_release.commit === '1e71b9d53c599e8fb9227050b8c9643ce723acc5' && data.updater_release.sha256 === '882f5131697a3f232c5975420e866ab165e1bc7f92e865f33114ed20b79a14b3' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'i-test' && data.node_identity.provider_instance_arn === 'arn:aws:ec2:us-east-1:123456789012:instance/i-test' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef'" || { cat "$STATE_JSON" >&2; exit 1; }
 if grep -q '^scp-called$\|^scp ' "$CALLS"; then
   echo "S3 must not SCP updater artifacts" >&2
   cat "$CALLS" >&2

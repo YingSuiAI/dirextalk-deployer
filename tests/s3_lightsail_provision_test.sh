@@ -83,7 +83,7 @@ case "${!#}" in
     if [ -f "$TMPDIR/updater-identity" ]; then
       cat "$TMPDIR/updater-identity"
     else
-      printf 'v1.0.18\t58ad8631e4680c266fd0619ff9cab5605b6b73d8\t5ac9070d603d687e87913acfa0b232c95da9395a536ed287a6e1defc869ada8f\n'
+      printf 'v1.0.19\t1e71b9d53c599e8fb9227050b8c9643ce723acc5\t882f5131697a3f232c5975420e866ab165e1bc7f92e865f33114ed20b79a14b3\n'
     fi
     ;;
   *'/etc/machine-id'*) cat >/dev/null; printf '0123456789abcdef0123456789abcdef\tDOCKERENGINE1234\n' ;;
@@ -92,7 +92,7 @@ case "${!#}" in
     if [ -f "$TMPDIR/updater-identity" ]; then
       cat "$TMPDIR/updater-identity"
     else
-      printf 'v1.0.18\t58ad8631e4680c266fd0619ff9cab5605b6b73d8\t5ac9070d603d687e87913acfa0b232c95da9395a536ed287a6e1defc869ada8f\n'
+      printf 'v1.0.19\t1e71b9d53c599e8fb9227050b8c9643ce723acc5\t882f5131697a3f232c5975420e866ab165e1bc7f92e865f33114ed20b79a14b3\n'
     fi
     ;;
 esac
@@ -127,7 +127,7 @@ if ! run_phase > "$tmp/s3.out" 2>&1; then
   exit 1
 fi
 
-json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.server_release.manifest_digest === '$DIREXTALK_MESSAGE_SERVER_MANIFEST_DIGEST' && data.split_release.message_manifest_digest === '$DIREXTALK_MESSAGE_SERVER_MANIFEST_DIGEST' && data.split_release.agent_manifest_digest === '$DIREXTALK_AGENT_MANIFEST_DIGEST' && data.updater_release.version === 'v1.0.18' && data.updater_release.sha256 === '5ac9070d603d687e87913acfa0b232c95da9395a536ed287a6e1defc869ada8f' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef' && data.node_identity.docker_engine_id === 'DOCKERENGINE1234'" || { cat "$STATE_JSON" >&2; exit 1; }
+json_test_check "$STATE_JSON" "data.deployment_layout === 'split-agent' && data.cloud_provider === 'lightsail' && data.phases.S3_PROVISION.status === 'done' && data.resources.lightsail_bundle_id === 'medium_3_0' && data.resources.lightsail_availability_zone === 'us-east-1b' && data.resources.lightsail_availability_status === 'available' && data.resources.lightsail_instance_name === 'dirextalk-lightsail-example-test' && data.resources.lightsail_static_ip_name === 'dirextalk-ip-lightsail-example-test' && data.resources.lightsail_ports_configured === 'true' && data.resources.public_ip === '203.0.113.144' && data.cost_estimate.provider === 'lightsail' && data.cost_estimate.total_monthly_usd === 12 && data.server_release.source === 'production_split' && data.server_release.version === '$DIREXTALK_MESSAGE_SERVER_VERSION' && data.server_release.image_ref === '$DIREXTALK_MESSAGE_SERVER_IMAGE' && data.server_release.manifest_digest === '$DIREXTALK_MESSAGE_SERVER_MANIFEST_DIGEST' && data.split_release.message_manifest_digest === '$DIREXTALK_MESSAGE_SERVER_MANIFEST_DIGEST' && data.split_release.agent_manifest_digest === '$DIREXTALK_AGENT_MANIFEST_DIGEST' && data.updater_release.version === 'v1.0.19' && data.updater_release.sha256 === '882f5131697a3f232c5975420e866ab165e1bc7f92e865f33114ed20b79a14b3' && data.node_identity.aws_account_id === '123456789012' && data.node_identity.provider_instance_id === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' && data.node_identity.machine_id === '0123456789abcdef0123456789abcdef' && data.node_identity.docker_engine_id === 'DOCKERENGINE1234'" || { cat "$STATE_JSON" >&2; exit 1; }
 userdata_file=$(json_get "$STATE_JSON" resources.user_data)
 grep -q '^#!/bin/sh' "$userdata_file" || {
   echo "Lightsail launch script must be shell user-data, not cloud-config" >&2
@@ -252,10 +252,10 @@ DIREXTALK_AGENT_SOURCE_REVISION=2222222222222222222222222222222222222222
 DIREXTALK_CADDY_IMAGE_IMMUTABLE=docker.io/library/caddy@sha256:$(printf '3%.0s' {1..64})
 DIREXTALK_COTURN_IMAGE_IMMUTABLE=docker.io/coturn/coturn:4.6.3-alpine@sha256:$(printf '4%.0s' {1..64})
 DIREXTALK_SPLIT_SOURCE_REVISION=3333333333333333333333333333333333333333
-UPDATER_PIN_VERSION=v1.0.18
+UPDATER_PIN_VERSION=v1.0.19
 UPDATER_PIN_COMMIT=4444444444444444444444444444444444444444
 UPDATER_PIN_SHA256=$(printf '5%.0s' {1..64})
-UPDATER_PIN_URL=https://github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.18/dirextalk-updater-linux-amd64
+UPDATER_PIN_URL=https://github.com/YingSuiAI/dirextalk-updater/releases/download/v1.0.19/dirextalk-updater-linux-amd64
 printf '%s\t%s\t%s\n' "$UPDATER_PIN_VERSION" "$UPDATER_PIN_COMMIT" "$UPDATER_PIN_SHA256" >"$TMPDIR/updater-identity"
 _resume_host_bootstrap 203.0.113.144 "$(res_get key_file)"
 [ "$(state_get split_release.split_source_revision)" = "$DIREXTALK_SPLIT_SOURCE_REVISION" ]
@@ -263,7 +263,7 @@ _resume_host_bootstrap 203.0.113.144 "$(res_get key_file)"
 [ "$(state_get split_release.message_image)" = "$recorded_message_image" ]
 [ "$(state_get split_release.agent_version)" = "$recorded_agent_version" ]
 [ "$(state_get split_release.agent_image)" = "$recorded_agent_image" ]
-[ "$(state_get updater_release.version)" = v1.0.18 ]
+[ "$(state_get updater_release.version)" = v1.0.19 ]
 [ "$recorded_split_revision" != "$(state_get split_release.split_source_revision)" ]
 grep -q 'fromPort=49160\\,toPort=49200\\,protocol=udp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'fromPort=3478\\,toPort=3478\\,protocol=tcp' "$CALLS" || { cat "$CALLS" >&2; exit 1; }

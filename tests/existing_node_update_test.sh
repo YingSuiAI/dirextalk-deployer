@@ -195,6 +195,11 @@ grep -Fq "aws:--region $region lightsail get-instance" "$CALLS"
 grep -Fq "apply-host-integration.sh" "$REMOTE_COMMAND"
 grep -Fq 'update-message-server-local.sh' "$REMOTE_COMMAND"
 grep -Fq 'docker.io/dirextalk/message-server:v1.1.63@sha256:' "$REMOTE_COMMAND"
+grep -Fq 'sudo flock -n "$release_lock" sh -c' "$REMOTE_COMMAND"
+if grep -Fq 'exec 7>"$release_lock"' "$REMOTE_COMMAND"; then
+  echo 'direct update opened the root-owned release lock from the SSH user' >&2
+  exit 1
+fi
 if grep -Eqi 'owner.?token|access_token|release\.v2' "$REMOTE_COMMAND"; then
   echo 'direct update unexpectedly depends on an owner API token' >&2
   exit 1

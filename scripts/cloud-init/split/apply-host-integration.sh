@@ -318,15 +318,21 @@ if [ "$fresh_host" = true ]; then
     status=$?
     case "$status" in 3) exit 3 ;; *) exit 1 ;; esac
   fi
-elif systemctl start dirextalk-updater.service \
-    && systemctl is-active --quiet dirextalk-updater.service \
-    && DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION="$target_revision" \
-       DIREXTALK_BOOTSTRAP_LOCK_FD=8 \
-       bash "$base/updater/reconcile-host.sh" "$stage/updater" "$base" "$expected_stable_ip"; then
-  :
 else
-  status=$?
-  case "$status" in 3) exit 3 ;; *) exit 1 ;; esac
+  if ! systemctl start dirextalk-updater.service; then
+    exit 1
+  fi
+  if ! systemctl is-active --quiet dirextalk-updater.service; then
+    exit 1
+  fi
+  if DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION="$target_revision" \
+      DIREXTALK_BOOTSTRAP_LOCK_FD=8 \
+      bash "$base/updater/reconcile-host.sh" "$stage/updater" "$base" "$expected_stable_ip"; then
+    :
+  else
+    status=$?
+    case "$status" in 3) exit 3 ;; *) exit 1 ;; esac
+  fi
 fi
 
 # This is the only revision mutation and the final fallible commit step.

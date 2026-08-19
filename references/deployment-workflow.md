@@ -303,7 +303,6 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
    Once the endpoint returns 200, re-run orchestrate.sh to complete:
    ```bash
    DIREXTALK_EXISTING_STATE_ACTION=continue \
-   DNS_READY=1 \
    AWS_PROFILE=dirextalk-deployer \
    AWS_DEFAULT_REGION=us-east-1 \
    DOMAIN=<DOMAIN> \
@@ -385,11 +384,12 @@ public IP, ask the user to set:
 
 For Cloudflare, use DNS-only, not proxied. For Alibaba/HiChina, edit the A record in Alibaba Cloud DNS.
 
-After authoritative DNS returns the new IP, S3 performs the same remote-host
-proof; a local resolver result or `DNS_READY=1` cannot bypass that gate:
+After authoritative DNS returns the new IP, rerun the deployer. S3 performs
+the proof on the exact deployed host over fixed-IP SSH; local resolver output
+and `DNS_READY=1`/`CONFIRM_DNS_READY=1` are diagnostic only and cannot bypass
+that gate:
 
 ```bash
-DNS_READY=1 \
 AWS_PROFILE=dirextalk-deployer \
 AWS_DEFAULT_REGION=us-east-1 \
 DOMAIN=__DOMAIN__ \

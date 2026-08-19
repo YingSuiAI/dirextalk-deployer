@@ -26,7 +26,7 @@ printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 
 case "${1:-} ${2:-}" in
-  "sts get-caller-identity") printf '123456789012\n' ;;
+  "sts get-caller-identity") printf '%s\n' "${AWS_ACCOUNT:-123456789012}" ;;
   "lightsail get-bundles")
     printf '{"bundles":[{"bundleId":"medium_3_0","price":12,"ramSizeInGb":2,"diskSizeInGb":60,"transferPerMonthInGb":3072,"cpuCount":2,"supportedPlatforms":["LINUX_UNIX"]}]}\n'
     ;;
@@ -75,7 +75,8 @@ printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 case "${!#}" in
-  *python3*) cat >/dev/null; [ "${REMOTE_SSH_STATUS:-0}" -eq 0 ] || exit "$REMOTE_SSH_STATUS"; printf 'dns_status=%s machine_id_sha=%064d\n' "${REMOTE_DNS_STATUS:-0}" "${REMOTE_MACHINE_ID:-1}"; exit 0 ;;
+  *python3*) cat >/dev/null; [ "${REMOTE_SSH_STATUS:-0}" -eq 0 ] || exit "$REMOTE_SSH_STATUS"; [ "${REMOTE_ROTATE_HOST:-0}" -eq 0 ] || printf 'rotated-host-key\n' >>"$KNOWN_HOSTS"; printf 'dns_status=%s machine_id_sha=%064d\n' "${REMOTE_DNS_STATUS:-0}" "${REMOTE_MACHINE_ID:-1}"; exit 0 ;;
+  *machine_id_sha*) printf 'machine_id_sha=%064d\n' "${REMOTE_IDENTITY_MACHINE_ID:-1}"; exit 0 ;;
   *'apply-host-integration.sh'*)
     cat > "$TMPDIR/integration-upload.tar.gz"
     tar -tzf "$TMPDIR/integration-upload.tar.gz" > "$TMPDIR/integration-upload.list"
@@ -100,6 +101,7 @@ chmod 700 "$fakebin/ssh"
 export PATH="$fakebin:$PATH"
 export CALLS="$tmp/aws.calls"
 export TMPDIR="$tmp"
+export KNOWN_HOSTS="$DIREXTALK_WORKDIR/known_hosts"
 export AWS_DEFAULT_REGION=us-east-1
 export DIREXTALK_CLOUD_PROVIDER=lightsail
 export MSYS_NO_PATHCONV=1
@@ -159,14 +161,48 @@ grep -q '^ssh .*bootstrap-host\.sh.*--record-stable-ip.*203\.0\.113\.144.*apply-
 grep -q '^ssh .*apply-host-integration\.sh.*cloud-init.*status.*--wait.*printf' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q '^ssh .*apply-host-integration\.sh.*203\.0\.113\.144.*us-east-1' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q -- '--no-same-owner' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
+identity_line=$(grep -n '^ssh .*StrictHostKeyChecking=accept-new.*machine_id_sha' "$CALLS" | head -n1 | cut -d: -f1)
+strict_dns_line=$(grep -n '^ssh .*StrictHostKeyChecking=yes.*python3' "$CALLS" | head -n1 | cut -d: -f1)
+[ -n "$identity_line" ] && [ -n "$strict_dns_line" ] && [ "$identity_line" -lt "$strict_dns_line" ] || { cat "$CALLS" >&2; exit 1; }
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
-upload_line=$(grep -n '^ssh ' "$CALLS" | grep -v python3 | cut -d: -f1 | head -n1)
+upload_line=$(grep -n '^ssh .*tar.*apply-host-integration' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^ssh .*python3' "$CALLS" | cut -d: -f1 | head -n1)
 [ "$static_ip_line" -lt "$dns_line" ] && [ "$dns_line" -lt "$upload_line" ] || {
   echo "Lightsail DNS must be authoritative before the host integration can trigger ACME" >&2
   cat "$CALLS" >&2
   exit 1
 }
+if grep -q '^dns-check ' "$CALLS"; then
+  echo 'a successful local resolver must never be used as the S3 DNS gate' >&2
+  exit 1
+fi
+if AWS_ACCOUNT=999999999999 run_phase >/dev/null 2>&1; then
+  echo 'S3 accepted a changed AWS account while resuming recorded resources' >&2
+  exit 1
+fi
+[ "$(state_get aws_account_id)" = 123456789012 ]
+for dns_case in not_propagated infrastructure_unavailable; do
+  before_host_calls=$(grep -c 'apply-host-integration' "$CALLS" || true)
+  if [ "$dns_case" = not_propagated ]; then
+    expected_phase_rc=2
+  else
+    expected_phase_rc=1
+  fi
+  if [ "$dns_case" = not_propagated ]; then
+    if AWS_ACCOUNT=123456789012 REMOTE_DNS_STATUS=1 _run_phase_lightsail >/dev/null 2>&1; then phase_attempt_rc=0; else phase_attempt_rc=$?; fi
+  else
+    if AWS_ACCOUNT=123456789012 REMOTE_DNS_STATUS=2 _run_phase_lightsail >/dev/null 2>&1; then phase_attempt_rc=0; else phase_attempt_rc=$?; fi
+  fi
+  if [ "$phase_attempt_rc" -eq 0 ]; then
+    echo "S3 accepted remote DNS $dns_case" >&2
+    exit 1
+  else
+    phase_rc=$phase_attempt_rc
+  fi
+  [ "$phase_rc" -eq "$expected_phase_rc" ]
+  after_host_calls=$(grep -c 'apply-host-integration' "$CALLS" || true)
+  [ "$after_host_calls" -eq "$before_host_calls" ]
+done
 set +e
 REMOTE_DNS_STATUS=1 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null 2>&1
 remote_not_ready_rc=$?
@@ -174,16 +210,28 @@ REMOTE_DNS_STATUS=2 _require_user_dns_ready user lightsail.example.test 203.0.11
 remote_infra_rc=$?
 set -e
 [ "$remote_not_ready_rc" -eq 2 ]
-[ "$remote_infra_rc" -eq 2 ]
+[ "$remote_infra_rc" -eq 1 ]
 [ "$(state_get dns_check_status)" = infrastructure_unavailable ]
 if REMOTE_SSH_STATUS=255 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null 2>&1; then
   echo 'SSH shell failure must not be classified as remote DNS propagation' >&2
+  exit 1
+else
+  remote_ssh_rc=$?
+fi
+[ "$remote_ssh_rc" -eq 1 ]
+if DNS_READY=1 REMOTE_DNS_STATUS=1 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null 2>&1; then
+  echo 'DNS_READY must not bypass a remote not-propagated result' >&2
   exit 1
 fi
 if REMOTE_DNS_STATUS=0 REMOTE_MACHINE_ID=2 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null 2>&1; then
   echo 'remote DNS gate accepted a changed deployed-host identity' >&2
   exit 1
 fi
+if REMOTE_DNS_STATUS=0 REMOTE_ROTATE_HOST=1 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null 2>&1; then
+  echo 'remote DNS gate accepted a changed SSH host identity' >&2
+  exit 1
+fi
+printf 'fixture-host-key\n' >"$KNOWN_HOSTS"
 REMOTE_DNS_STATUS=0 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null
 before=$(grep -c '^ssh ' "$CALLS")
 _resume_host_bootstrap 203.0.113.144 "$(res_get key_file)"

@@ -6,15 +6,17 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 run_case() {
-  local phase_status_code=$1 expected=$2 out="$tmp/out-$1" marker="$tmp/done-$1"
-  if ROOT="$ROOT" CASE_MARKER="$marker" CASE_STATUS="$phase_status_code" \
+  local phase_status_code=$1 expected=$2 out="$tmp/out-$1" marker="$tmp/done-$1" order="$tmp/order-$1"
+  : >"$order"
+  if ROOT="$ROOT" CASE_MARKER="$marker" CASE_STATUS="$phase_status_code" CASE_ORDER="$order" \
       DIREXTALK_ORCHESTRATE_LIB_ONLY=1 bash -c '
         set -uo pipefail
         source "$ROOT/scripts/orchestrate.sh"
         precheck_new_deploy_domain_env() { return 0; }
         check_deps() { return 0; }
         guard_existing_state() { return 0; }
-        state_ensure() { return 0; }
+        state_ensure() { printf state >>"$CASE_ORDER"; return 0; }
+        acquire_orchestrate_lock() { printf lock >>"$CASE_ORDER"; return 0; }
         ensure_production_domain_selected() { return 0; }
         ensure_region_selected() { return 0; }
         ensure_cost_estimate() { return 0; }
@@ -35,6 +37,7 @@ run_case() {
     actual=$?
   fi
   [ "$actual" -eq "$expected" ] || { cat "$out" >&2; exit 1; }
+  [ "$(cat "$order")" = lockstate ] || { echo "state mutation must acquire its owner lock first" >&2; exit 1; }
 }
 
 run_case 0 0

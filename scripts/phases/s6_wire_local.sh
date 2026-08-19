@@ -947,8 +947,12 @@ _maybe_auto_install_connect() {
           state_set connect_install_status "install_failed" 2>/dev/null || true
           return 1
         fi
-        package_manifest=$(_connect_package_manifest "$package_dir" 2>/dev/null || true)
-        if [ -n "$package_manifest" ] && ! _connect_verify_package_binary "$service_dir"; then
+        if ! package_manifest=$(_connect_package_manifest "$package_dir" 2>/dev/null); then
+          state_set connect_install_status "install_failed" 2>/dev/null || true
+          warn "dirextalk-connect npm package installed without a valid package manifest."
+          return 1
+        fi
+        if ! _connect_verify_package_binary "$service_dir"; then
           state_set connect_install_status "install_failed" 2>/dev/null || true
           warn "dirextalk-connect npm package was installed but its package binary could not be verified."
           return 1

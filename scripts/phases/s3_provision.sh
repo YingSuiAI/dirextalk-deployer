@@ -33,7 +33,7 @@ run_phase() {
     return 1
   fi
   aws_env_prep
-  local cloud_provider aws_account
+  local cloud_provider aws_account recorded_account
   aws_account=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || {
     phase_set S3_PROVISION failed "AWS account identity unavailable"
     return 1
@@ -42,7 +42,13 @@ run_phase() {
     phase_set S3_PROVISION failed "AWS account identity invalid"
     return 1
   }
-  state_set aws_account_id "$aws_account"
+  recorded_account=$(state_get aws_account_id)
+  if [ -n "$recorded_account" ] && [ "$recorded_account" != "$aws_account" ]; then
+    phase_set S3_PROVISION failed "AWS account identity changed"
+    warn "The AWS account changed since this deployment was prepared; refusing to reuse its recorded resources."
+    return 1
+  fi
+  [ -n "$recorded_account" ] || state_set aws_account_id "$aws_account" || return 1
   cloud_provider=$(_resolve_cloud_provider)
   state_set cloud_provider "$cloud_provider"
   case "$cloud_provider" in
@@ -283,7 +289,9 @@ _run_phase_ec2() {
   fi
 
   if [ "$domain_mode" = "user" ] || [ "$domain_mode" = "route53" ]; then
-    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "$instance_type" || return 2
+    local dns_rc=0
+    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "$instance_type" || dns_rc=$?
+    [ "$dns_rc" -eq 0 ] || return "$dns_rc"
   fi
 
   # Do not apply the production host integration (which starts Caddy and can
@@ -457,7 +465,9 @@ _run_phase_lightsail() {
   fi
 
   if [ "$domain_mode" = "user" ] || [ "$domain_mode" = "route53" ]; then
-    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "DIREXTALK_CLOUD_PROVIDER=lightsail" || return 2
+    local dns_rc=0
+    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "DIREXTALK_CLOUD_PROVIDER=lightsail" || dns_rc=$?
+    [ "$dns_rc" -eq 0 ] || return "$dns_rc"
   fi
 
   local resume_status=0
@@ -605,7 +615,7 @@ _cleanup_known_transport_templates() {
 _resume_host_bootstrap() {
   local public_ip=$1 keyfile=$2
   local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt result identity integration_bundle remote_command deployment_region
-  local split_bundle recorded_split_revision ssh_status
+  local split_bundle= recorded_split_revision ssh_status
   local -a integration_files
   local ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
   local attempts=${DIREXTALK_BOOTSTRAP_SSH_ATTEMPTS:-60}
@@ -632,14 +642,18 @@ _resume_host_bootstrap() {
     warn "Could not remove a previous host bootstrap transport template; refusing to create or upload a new bundle."
     return 1
   }
-  integration_bundle=$(mktemp "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz") || return 1
+  integration_bundle=
+  if ! integration_bundle=$(mktemp "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz"); then
+    rm -f -- "$integration_bundle" "$split_bundle"
+    return 1
+  fi
   if ! split_bundle=$(mktemp "$DIREXTALK_WORKDIR/.split-agent-runtime.XXXXXX.tar.gz"); then
-    rm -f -- "$integration_bundle"
+    rm -f -- "$integration_bundle" "$split_bundle"
     warn "Could not create the split Agent transport bundle workspace. No updater payload was uploaded."
     return 1
   fi
   if ! bash "$S3_PHASE_DIR/render/render-split-bundle.sh" "$split_bundle"; then
-    rm -f "$split_bundle"
+    rm -f -- "$integration_bundle" "$split_bundle"
     warn "Failed to render the canonical split Agent runtime bundle."
     return 1
   fi
@@ -1076,22 +1090,22 @@ _require_user_dns_ready() {
     warn "DNS_READY is set, but $domain does not resolve to ${pubip} yet. Waiting to avoid Caddy/Let's Encrypt racing DNS."
   fi
 
+  dns_status=$(state_get dns_check_status)
+  if [ "$dns_status" = infrastructure_unavailable ]; then
+    phase_set S3_PROVISION failed "remote DNS proof infrastructure unavailable"
+    warn "The deployed-host DNS proof could not run or returned an invalid receipt; refusing to trigger production ACME."
+    return 1
+  fi
   if [ "$domain_mode" = "route53" ]; then
-    dns_status=$(state_get dns_check_status)
-    if [ "$dns_status" = infrastructure_unavailable ]; then
-      warn "Authoritative/public DNS checks are unavailable for $domain; refusing to trigger production ACME until they can be verified."
-    else
-      warn "Route53 A record was submitted, but authoritative/public DNS does not resolve $domain to ${pubip} yet."
-    fi
+    warn "Route53 A record was submitted, but authoritative/public DNS does not resolve $domain to ${pubip} yet."
     warn "This is usually DNS propagation delay; rerun later to continue."
   else
     warn "Update DNS so $domain has an A record pointing to this public IP:"
     warn "  $domain  A  $pubip"
     warn "Use a subdomain such as __DOMAIN__. If DNS is on Cloudflare, set it to DNS only; do not enable proxying."
   fi
-  warn "Use this command to confirm DNS now points at the new IP:"
-  warn "  dig +short $domain"
-  warn "Continue to S4 only after DNS is active, otherwise Caddy cannot issue the Let's Encrypt certificate."
+  warn "Local DNS tools and DNS_READY/CONFIRM_DNS_READY flags are diagnostic only; they cannot release S3."
+  warn "Rerun the deployer after propagation so it can execute the authoritative/public proof on the deployed host over fixed-IP SSH."
 
   if [ "$domain_mode" = "user" ] && [ -t 0 ]; then
     printf "Have you updated the DNS A record and waited for propagation? [y/N] " >&2
@@ -1151,36 +1165,72 @@ _revalidate_bootstrap_target() {
 }
 
 _remote_dns_ready_probe() {
-  local domain=$1 pubip=$2 known_hosts="$DIREXTALK_WORKDIR/known_hosts" ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu} rc remote_result machine_id host_digest recorded_digest remote_command
-  _revalidate_bootstrap_target "$pubip" || return $?
+  local domain=$1 pubip=$2 known_hosts="$DIREXTALK_WORKDIR/known_hosts" ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu}
+  local rc remote_result machine_id host_digest recorded_digest remote_command identity_result identity_command first_machine_id first_host_digest target_rc
   if [ ! -e "$known_hosts" ] && [ ! -L "$known_hosts" ]; then
     (umask 077; set -C; : >"$known_hosts") 2>/dev/null || true
     [ -e "$known_hosts" ] || return 2
   fi
   [ -f "$known_hosts" ] && [ ! -L "$known_hosts" ] || return 2
   chmod 0600 "$known_hosts" || return 2
-  remote_command="python3 - '$domain' '$pubip'; probe_rc=\$?; if [ -f /etc/machine-id ]; then machine_id_sha=\$(sha256sum /etc/machine-id | cut -d' ' -f1); else machine_id_sha=missing; fi; case \"\$probe_rc\" in 0|1|2) dns_status=\$probe_rc ;; *) dns_status=2 ;; esac; printf 'dns_status=%s machine_id_sha=%s\\n' \"\$dns_status\" \"\$machine_id_sha\"; exit 0"
-  if remote_result=$(ssh -T -i "$(res_get key_file)" -o BatchMode=yes -o ConnectTimeout=10 \
+
+  # Learn the host key with a harmless identity-only command. The DNS proof is
+  # deliberately a second SSH connection with strict host-key checking, so a
+  # first-use known_hosts write cannot authorize the proof it is meant to bind.
+  identity_command='if [ -f /etc/machine-id ] && [ ! -L /etc/machine-id ]; then printf "machine_id_sha=%s\\n" "$(sha256sum /etc/machine-id | cut -d" " -f1)"; else exit 1; fi'
+  if identity_result=$(ssh -T -i "$(res_get key_file)" -o BatchMode=yes -o ConnectTimeout=10 \
       -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$known_hosts" \
-      "$ssh_user@$pubip" "$remote_command" <"$S3_PHASE_DIR/phases/remote_dns_probe.py"); then
-    rc=0
+      "$ssh_user@$pubip" "$identity_command"); then
+    :
   else
     return 2
   fi
+  [ "$(printf '%s\n' "$identity_result" | wc -l)" -eq 1 ] || return 2
+  printf '%s\n' "$identity_result" | grep -Eq '^machine_id_sha=[0-9a-f]{64}$' || return 2
+  first_machine_id=${identity_result#machine_id_sha=}
+  first_host_digest=$(sha256sum "$known_hosts" 2>/dev/null | awk '{print $1}') || return 2
+  printf '%s\n' "$first_host_digest" | grep -Eq '^[0-9a-f]{64}$' || return 2
+  recorded_digest=$(state_get dns_ssh_host_identity)
+  if [ -n "$recorded_digest" ] && [ "$recorded_digest" != "$first_host_digest" ]; then
+    return 2
+  fi
+  recorded_digest=$(state_get dns_remote_machine_identity)
+  if [ -n "$recorded_digest" ] && [ "$recorded_digest" != "$first_machine_id" ]; then
+    return 2
+  fi
+
+  target_rc=0
+  _revalidate_bootstrap_target "$pubip" || target_rc=$?
+  # A changed owner/IP is a protected infrastructure boundary here, not DNS
+  # propagation. Preserve _revalidate_bootstrap_target's tri-state contract,
+  # but never classify its negative result as a DNS-negative result.
+  [ "$target_rc" -eq 0 ] || return 2
+
+  remote_command="python3 - '$domain' '$pubip'; probe_rc=\$?; if [ -f /etc/machine-id ]; then machine_id_sha=\$(sha256sum /etc/machine-id | cut -d' ' -f1); else machine_id_sha=missing; fi; case \"\$probe_rc\" in 0|1|2) dns_status=\$probe_rc ;; *) dns_status=2 ;; esac; printf 'dns_status=%s machine_id_sha=%s\\n' \"\$dns_status\" \"\$machine_id_sha\"; exit 0"
+  if remote_result=$(ssh -T -i "$(res_get key_file)" -o BatchMode=yes -o ConnectTimeout=10 \
+      -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts" \
+      "$ssh_user@$pubip" "$remote_command" <"$S3_PHASE_DIR/phases/remote_dns_probe.py"); then
+    :
+  else
+    return 2
+  fi
+  [ "$(printf '%s\n' "$remote_result" | wc -l)" -eq 1 ] || return 2
+  printf '%s\n' "$remote_result" | grep -Eq '^dns_status=[012] machine_id_sha=[0-9a-f]{64}$' || return 2
+  machine_id=${remote_result#*machine_id_sha=}
+  rc=${remote_result#dns_status=}; rc=${rc%% *}
+  [ "$machine_id" = "$first_machine_id" ] || return 2
   host_digest=$(sha256sum "$known_hosts" 2>/dev/null | awk '{print $1}') || return 2
+  [ "$host_digest" = "$first_host_digest" ] || return 2
   recorded_digest=$(state_get dns_ssh_host_identity)
   if [ -n "$recorded_digest" ] && [ "$recorded_digest" != "$host_digest" ]; then
     return 2
   fi
-  state_set dns_ssh_host_identity "$host_digest" 2>/dev/null || true
-  machine_id=$(printf '%s\n' "$remote_result" | sed -n 's/^dns_status=[012] machine_id_sha=//p' | tail -n1)
-  rc=$(printf '%s\n' "$remote_result" | sed -n 's/^dns_status=\([012]\) machine_id_sha=.*/\1/p' | tail -n1)
-  printf '%s\n' "$remote_result" | grep -Eq '^dns_status=[012] machine_id_sha=[0-9a-f]{64}$' || return 2
   recorded_digest=$(state_get dns_remote_machine_identity)
   if [ -n "$recorded_digest" ] && [ "$recorded_digest" != "$machine_id" ]; then
     return 2
   fi
-  state_set dns_remote_machine_identity "$machine_id" 2>/dev/null || true
+  state_set dns_ssh_host_identity "$host_digest" 2>/dev/null || return 2
+  state_set dns_remote_machine_identity "$machine_id" 2>/dev/null || return 2
   return "$rc"
 }
 

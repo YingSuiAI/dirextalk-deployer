@@ -53,4 +53,21 @@ DIREXTALK_ORCHESTRATE_LIB_ONLY=1 DIREXTALK_WORKDIR="$work" HOME="$tmp/home" \
   bash -c 'source "$1/scripts/orchestrate.sh"; acquire_orchestrate_lock; grep -q "^pid=$$" "$DIREXTALK_WORKDIR/.orchestrate.lock/owner/receipt"; _orchestrate_lock_cleanup' bash "$ROOT"
 [ ! -e "$work/.orchestrate.lock/owner/receipt" ]
 
+# Verify every state-mutating entrypoint takes the same owner lock while
+# status remains read-only.
+entry_order="$tmp/entry-order"
+: >"$entry_order"
+DIREXTALK_ORCHESTRATE_LIB_ONLY=1 DIREXTALK_WORKDIR="$work" HOME="$tmp/home" \
+  ENTRY_ORDER="$entry_order" bash -c '
+    source "$1/scripts/orchestrate.sh"
+    acquire_orchestrate_lock() { printf lock >>"$ENTRY_ORDER"; }
+    cmd_verify mcp_doctor >/dev/null 2>&1 || :
+    [ "$(cat "$ENTRY_ORDER")" = lock ]
+    : >"$STATE_JSON"
+    cmd_reset >/dev/null 2>&1
+    [ "$(cat "$ENTRY_ORDER")" = locklock ]
+    cmd_status >/dev/null 2>&1 || :
+    [ "$(cat "$ENTRY_ORDER")" = locklock ]
+  ' bash "$ROOT"
+
 echo 'orchestrate universal owner lock ok'

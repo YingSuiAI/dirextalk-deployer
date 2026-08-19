@@ -62,6 +62,7 @@ printf '\n' >> "$CALLS"
 cat >/dev/null
 case "${!#}" in
   *python3*) cat >/dev/null; [ "${REMOTE_SSH_STATUS:-0}" -eq 0 ] || exit "$REMOTE_SSH_STATUS"; printf 'dns_status=%s machine_id_sha=%064d\n' "${REMOTE_DNS_STATUS:-0}" 1; exit 0 ;;
+  *machine_id_sha*) printf 'machine_id_sha=%064d\n' "${REMOTE_IDENTITY_MACHINE_ID:-1}"; exit 0 ;;
   *'/etc/machine-id'*) printf '0123456789abcdef0123456789abcdef\tDOCKERENGINE1234\n' ;;
   *) printf 'v1.0.17\td10bcae89522c172f9d32ed7d7bbf7c85ffbf77b\t029c09b4b2f50090ad88076fbbedf95f0d912a64f9ce888f138ebad4face20ec\n' ;;
 esac
@@ -101,11 +102,14 @@ grep -q '^ssh .*apply-host-integration\.sh.*cloud-init.*status.*--wait.*printf' 
 grep -q '^ssh .*apply-host-integration\.sh.*203\.0\.113\.155.*us-east-1' "$CALLS"
 grep -Fq 'DIREXTALK_CLOUD_WORKER_HOST_REGION=us-east-1' "$DIREXTALK_WORKDIR/user-data.yaml"
 grep -q -- '--no-same-owner' "$CALLS"
+identity_line=$(grep -n '^ssh .*StrictHostKeyChecking=accept-new.*machine_id_sha' "$CALLS" | head -n1 | cut -d: -f1)
+strict_dns_line=$(grep -n '^ssh .*StrictHostKeyChecking=yes.*python3' "$CALLS" | head -n1 | cut -d: -f1)
+[ -n "$identity_line" ] && [ -n "$strict_dns_line" ] && [ "$identity_line" -lt "$strict_dns_line" ] || { cat "$CALLS" >&2; exit 1; }
 grep -q 'authorize-security-group-ingress .*--protocol tcp --port 3478 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'authorize-security-group-ingress .*--protocol udp --port 3478 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'authorize-security-group-ingress .*--protocol udp --port 49160-49200 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 address_line=$(grep -n '^aws ec2 describe-addresses' "$CALLS" | cut -d: -f1 | head -n1)
-upload_line=$(grep -n '^ssh ' "$CALLS" | grep -v python3 | cut -d: -f1 | head -n1)
+upload_line=$(grep -n '^ssh .*tar.*apply-host-integration' "$CALLS" | cut -d: -f1 | head -n1)
 dns_line=$(grep -n '^ssh .*python3' "$CALLS" | cut -d: -f1 | head -n1)
 [ "$address_line" -lt "$dns_line" ] && [ "$dns_line" -lt "$upload_line" ] || {
   echo "EC2 DNS must be authoritative before the host integration can trigger ACME" >&2

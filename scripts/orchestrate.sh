@@ -107,7 +107,7 @@ _orchestrate_lock_owner_alive() {
 }
 
 acquire_orchestrate_lock() {
-  local lock_parent owner_file owner_pid owner_dir owner_starttime
+  local lock_parent owner_file owner_pid owner_dir owner_starttime run_id
   lock_parent=${ORCHESTRATE_LOCK_DIR%/*}
   [ -n "$lock_parent" ] && mkdir -p -- "$lock_parent" || return 1
   mkdir -p -- "$ORCHESTRATE_LOCK_DIR" || return 1
@@ -144,7 +144,12 @@ acquire_orchestrate_lock() {
     fi
   fi
   owner_starttime=$(_orchestrate_process_start_identity "$$")
-  if ! printf 'pid=%s\nstarttime=%s\nrun_id=%s\nstate=%s\n' "$$" "$owner_starttime" "$(state_get run_id)" "$STATE_JSON" >"$owner_file"; then
+  run_id=${RUN_ID:-}
+  if [ -f "$STATE_JSON" ]; then
+    run_id=$(state_get run_id 2>/dev/null || true)
+  fi
+  run_id=${run_id:-pending}
+  if ! printf 'pid=%s\nstarttime=%s\nrun_id=%s\nstate=%s\n' "$$" "$owner_starttime" "$run_id" "$STATE_JSON" >"$owner_file"; then
     rm -f -- "$owner_file" 2>/dev/null || true
     rmdir -- "$owner_dir" 2>/dev/null || true
     return 1
@@ -170,6 +175,16 @@ acquire_orchestrate_lock() {
   trap _orchestrate_lock_cleanup EXIT
   trap '_orchestrate_lock_cleanup; exit 130' INT TERM
   return 0
+}
+
+_acquire_orchestrate_mutation_lock() {
+  local lock_rc=0
+  acquire_orchestrate_lock || lock_rc=$?
+  case "$lock_rc" in
+    0) return 0 ;;
+    2) return 2 ;;
+    *) warn "Could not acquire the orchestrate owner lock for $STATE_JSON"; return 1 ;;
+  esac
 }
 
 # Phase -> script mapping. Use case instead of declare -A for macOS bash 3.2.
@@ -782,14 +797,8 @@ guard_existing_state() {
 cmd_run() {
   precheck_new_deploy_domain_env || return $?
   check_deps
-  state_ensure
-  local lock_rc=0
-  acquire_orchestrate_lock || lock_rc=$?
-  case "$lock_rc" in
-    0) ;;
-    2) return 2 ;;
-    *) warn "Could not acquire the orchestrate owner lock for $STATE_JSON"; return 1 ;;
-  esac
+  _acquire_orchestrate_mutation_lock || return $?
+  state_ensure || return 1
   guard_existing_state || return $?
   ensure_production_domain_selected || return $?
   ensure_region_selected || return $?
@@ -1201,6 +1210,7 @@ cmd_verify_runtime() {
 }
 
 cmd_verify() {
+  _acquire_orchestrate_mutation_lock || return $?
   case "${1:-}" in
     connect_daemon) cmd_verify_connect_daemon ;;
     mcp_doctor) cmd_verify_mcp_doctor ;;
@@ -1212,6 +1222,15 @@ cmd_verify() {
       return 1
       ;;
   esac
+}
+
+cmd_reset() {
+  _acquire_orchestrate_mutation_lock || return $?
+  if [ -f "$STATE_JSON" ]; then
+    mv "$STATE_JSON" "$STATE_JSON.reset-$(date -u +%Y%m%d%H%M%S)" || return 1
+    warn "Archived old state.json."
+  fi
+  warn "Warning: after reset, destroy no longer has state data. Any remaining AWS resources must be removed manually."
 }
 
 if [ "${DIREXTALK_ORCHESTRATE_LIB_ONLY:-0}" = "1" ]; then
@@ -1226,8 +1245,6 @@ case "${1:-run}" in
   status) cmd_status ;;
   report) shift; cmd_report "${1:-new_deploy}" ;;
   verify) shift; cmd_verify "${1:-}" ;;
-  reset)
-    [ -f "$STATE_JSON" ] && { mv "$STATE_JSON" "$STATE_JSON.reset-$(date -u +%Y%m%d%H%M%S)"; warn "Archived old state.json."; }
-    warn "Warning: after reset, destroy no longer has state data. Any remaining AWS resources must be removed manually." ;;
+  reset) cmd_reset ;;
   *) echo "Usage: $0 [run|status|report|verify|reset]"; exit 1 ;;
 esac

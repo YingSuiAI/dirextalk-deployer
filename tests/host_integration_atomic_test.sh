@@ -241,6 +241,15 @@ else status=$?; fi
 grep -Fqx "SPLIT_SOURCE_REVISION=$old" "$base/.env"
 
 write_live "$base"
+if START_STATUS=3 EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" \
+    DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
+    bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 "$host_region" >/dev/null 2>&1; then
+  echo 'host integration classified updater activation failure as protected-negative' >&2; exit 1
+else status=$?; fi
+[ "$status" -eq 1 ]
+[ "$(grep -c '^reconcile$' "$RECONCILE_CALLS")" -eq 0 ]
+
+write_live "$base"
 EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
   bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 "$host_region" >/dev/null
 grep -Fqx "SPLIT_SOURCE_REVISION=$target" "$base/.env"

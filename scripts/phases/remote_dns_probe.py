@@ -8,9 +8,10 @@ import sys
 class DNSInfrastructure(Exception):
     pass
 
-def name(data, offset):
+def name(data, offset, seen=None):
+    if seen is None:
+        seen = set()
     labels = []
-    seen = set()
     while True:
         if offset >= len(data):
             raise DNSInfrastructure()
@@ -21,10 +22,10 @@ def name(data, offset):
             if offset + 1 >= len(data):
                 raise DNSInfrastructure()
             pointer = ((length & 0x3F) << 8) | data[offset + 1]
-            if pointer in seen:
+            if pointer >= len(data) or pointer in seen:
                 raise DNSInfrastructure()
             seen.add(pointer)
-            pointed, _ = name(data, pointer)
+            pointed, _ = name(data, pointer, seen)
             labels.append(pointed)
             return ".".join(labels), offset + 2
         if length > 63 or offset + 1 + length > len(data):
@@ -32,7 +33,7 @@ def name(data, offset):
         labels.append(data[offset + 1:offset + 1 + length].decode("ascii", "ignore"))
         offset += 1 + length
 
-def query(server, qname, qtype):
+def query(server, qname, qtype, port=53):
     ident = random.randrange(1, 65535)
     labels = qname.rstrip(".").split(".")
     question = b"".join(bytes([len(label)]) + label.encode("idna") for label in labels) + b"\0"
@@ -40,7 +41,7 @@ def query(server, qname, qtype):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(3)
-        sock.sendto(packet, (server, 53))
+        sock.sendto(packet, (server, port))
         data, _ = sock.recvfrom(4096)
     except (OSError, socket.timeout) as exc:
         raise DNSInfrastructure() from exc
@@ -52,6 +53,8 @@ def query(server, qname, qtype):
     if len(data) < 12 or struct.unpack("!H", data[:2])[0] != ident:
         raise DNSInfrastructure()
     flags = struct.unpack("!H", data[2:4])[0]
+    if not flags & 0x8000 or flags & 0x0200:
+        raise DNSInfrastructure()
     rcode = flags & 15
     if rcode == 3:
         return []
@@ -61,6 +64,8 @@ def query(server, qname, qtype):
     offset = 12
     for _ in range(qd):
         _, offset = name(data, offset)
+        if offset + 4 > len(data):
+            raise DNSInfrastructure()
         offset += 4
     records = []
     for _ in range(an + ns + ar):
@@ -69,9 +74,13 @@ def query(server, qname, qtype):
             raise DNSInfrastructure()
         rtype, _, _, rdlen = struct.unpack("!HHI H", data[offset:offset + 10])
         offset += 10
+        if offset + rdlen > len(data):
+            raise DNSInfrastructure()
         rdata = data[offset:offset + rdlen]
         offset += rdlen
-        if rtype == 1 and rdlen == 4:
+        if rtype == 1:
+            if rdlen != 4:
+                raise DNSInfrastructure()
             records.append((owner, socket.inet_ntoa(rdata)))
         elif rtype == 2:
             target, _ = name(data, offset - rdlen)
@@ -107,7 +116,8 @@ def main(domain, wanted):
                 return 1
     return 0
 
-try:
-    sys.exit(main(sys.argv[1], sys.argv[2]))
-except (DNSInfrastructure, IndexError, ValueError):
-    sys.exit(2)
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1], sys.argv[2]))
+    except (DNSInfrastructure, IndexError, ValueError):
+        sys.exit(2)

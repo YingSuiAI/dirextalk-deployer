@@ -803,14 +803,28 @@ fakebin="$tmp/fakebin"
 mkdir -p "$fakebin"
 cat > "$fakebin/npm" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
 [ -z "${NPM_CALLS:-}" ] || printf '%s\n' "$*" >> "$NPM_CALLS"
 [ "${NPM_FAIL:-0}" != "1" ] || exit 1
+prefix=
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --prefix ]; then prefix=$2; shift 2; else shift; fi
+done
+if [ "${NPM_NO_MANIFEST:-0}" != "1" ] && [ -n "$prefix" ]; then
+  mkdir -p "$prefix/node_modules/dirextalk-connect" "$prefix/node_modules/.bin"
+  printf '{"name":"dirextalk-connect"}\n' >"$prefix/node_modules/dirextalk-connect/package.json"
+  ln -sf "${FAKE_CONNECT_BINARY:?}" "$prefix/node_modules/.bin/dirextalk-connect"
+fi
 exit 0
 EOF
 cat > "$fakebin/dirextalk-connect" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 [ -z "${CONNECT_CALLS:-}" ] || printf '%s\n' "$*" >> "$CONNECT_CALLS"
+if [ "${1:-}" = --version ]; then
+  printf 'dirextalk-connect test version\n'
+  exit 0
+fi
 if [ "${1:-}" = "daemon" ] && [ "${2:-}" = "install" ]; then
   [ "${5:-}" = "--service-name" ]
   [ "${6:-}" = "service.example.test" ]
@@ -837,8 +851,20 @@ fi
 exit 1
 EOF
 chmod 700 "$fakebin/npm" "$fakebin/dirextalk-connect"
+export FAKE_CONNECT_BINARY="$fakebin/dirextalk-connect"
 STATE_CALLS="$tmp/state.calls"
 : > "$STATE_CALLS"
+CONNECT_CALLS="$tmp/connect.calls"
+: > "$CONNECT_CALLS"
+set +e
+PATH="$fakebin:$PATH" CONNECT_CALLS="$CONNECT_CALLS" NPM_NO_MANIFEST=1 CONNECT_STATUS=Running CONNECT_LOG_OUTPUT='time=2026-07-01T16:59:00 level=INFO msg="dirextalk-connect is running" projects=1' \
+  DIREXTALK_CONNECT_BIN="$fakebin/dirextalk-connect" \
+  _maybe_auto_install_connect auto codex codex "$tmp/missing-manifest" "$tmp/missing-manifest/config.toml" ignored-binary missing-manifest
+missing_manifest_rc=$?
+set -e
+[ "$missing_manifest_rc" -ne 0 ]
+[ ! -s "$CONNECT_CALLS" ]
+
 set +e
 PATH="$fakebin:$PATH" _maybe_auto_install_connect auto codex codex "$tmp/service" "$tmp/service/dirextalk-connect/config.toml" dirextalk-connect service.example.test
 connect_stopped_rc=$?

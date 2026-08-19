@@ -245,13 +245,15 @@ or deleting data:
 DOMAIN=__DOMAIN__ bash scripts/update.sh
 ```
 
-`update.sh` stages the current production operation helpers, resolves the
-Message Server target on the deployer to an immutable linux/amd64 digest, and
-invokes the canonical receipt-bound split wrapper through the verified SSH
+`update.sh` stages the current production operation helpers, reads the remote
+root-owned split receipt as the current application-version authority, resolves
+the requested Server and/or Agent target to an immutable linux/amd64 digest,
+and invokes the canonical receipt-bound split wrapper through the verified SSH
 host. It does not use an owner access token or invoke the server release API.
-The remote runtime receipt and local `server_release`/`split_release` records
-advance atomically only after the remote health checks pass. It preserves
-credentials, application volumes, local bridge state, and runtime evidence.
+This permits an App-initiated upgrade to be ahead of local state. After the
+remote health checks pass, local `server_release`/`split_release` records are
+atomically converged to the verified remote result. It preserves credentials,
+application volumes, local bridge state, and runtime evidence.
 The reconcile path repairs the edge, then invokes the same receipt-bound
 recovery used after reboot. An Agent version change requires explicit
 `DIREXTALK_AGENT_VERSION` plus its

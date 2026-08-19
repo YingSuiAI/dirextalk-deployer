@@ -459,11 +459,13 @@ or disable temporary credentials and rotate/remove root access keys if used.
 
 ## Update, Reset, And Destroy
 
-`update.sh` resolves a controlled Message Server release on the deployer,
-binds its linux/amd64 digest and source revision, and invokes the receipt-bound
-canonical split wrapper directly over the verified SSH host. It does not use an
-owner access token or the server release API. By default it advances only the
-Message Server; an Agent update additionally requires
+`update.sh` reads the remote root-owned split receipt as the current
+application-version authority, then binds controlled linux/amd64 release
+identities and invokes the receipt-bound canonical split wrapper directly over
+the verified SSH host. Thus an App-initiated upgrade may be ahead of local
+state without blocking a later direct update. It does not use an owner access
+token or the server release API. Message Server and Agent can be advanced
+together or independently; an Agent update additionally requires
 `DIREXTALK_AGENT_VERSION` and `DIREXTALK_AGENT_MINIMUM_SERVER_VERSION`.
 Arbitrary image overrides remain unsupported.
 

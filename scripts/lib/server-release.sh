@@ -110,6 +110,25 @@ server_release_split_state_can_advance() {
   fi
 }
 
+# Existing-node application versions are owned by the remote root-owned split
+# receipt.  The local state still authorizes the deployment coordinates and
+# canonical infrastructure bundle, but an App-initiated upgrade may leave its
+# application snapshot behind.  Keep that stale snapshot out of the update
+# admission decision.
+server_release_split_tooling_state_can_advance() {
+  local recorded postgres_image caddy_image coturn_image
+  recorded=$(state_get split_release.split_source_revision)
+  postgres_image=$(state_get split_release.postgres_image)
+  caddy_image=$(state_get split_release.caddy_image)
+  coturn_image=$(state_get split_release.coturn_image)
+  [ "$(state_get split_release.release_catalog_origin)" = "$DIREXTALK_RELEASE_CATALOG_ORIGIN" ] \
+    && server_release_is_revision "$recorded" \
+    && [ "$postgres_image" = "docker.io/pgvector/pgvector:pg18@${postgres_image##*@}" ] \
+    && server_release_is_immutable_image "$postgres_image" \
+    && server_release_is_immutable_image "$caddy_image" \
+    && server_release_is_immutable_image "$coturn_image"
+}
+
 server_release_application_receipts_match() {
   local server_version server_image server_digest server_ref
   server_version=$(state_get server_release.version)
@@ -204,6 +223,48 @@ server_release_validate_resolved_component() {
     && [ "$ref" = "$image@$digest" ]
 }
 
+server_release_resolve_remote_receipt() {
+  local resolved_json
+  server_release_is_version "${DIREXTALK_REMOTE_MESSAGE_VERSION:-}" \
+    && server_release_is_version "${DIREXTALK_REMOTE_AGENT_VERSION:-}" \
+    && server_release_is_revision "${DIREXTALK_REMOTE_MESSAGE_REVISION:-}" \
+    && server_release_is_revision "${DIREXTALK_REMOTE_AGENT_REVISION:-}" \
+    && [ "$DIREXTALK_REMOTE_MESSAGE_IMAGE" = "docker.io/dirextalk/message-server:$DIREXTALK_REMOTE_MESSAGE_VERSION" ] \
+    && [ "$DIREXTALK_REMOTE_AGENT_IMAGE" = "docker.io/dirextalk/agent:$DIREXTALK_REMOTE_AGENT_VERSION" ] || {
+      warn "The remote split application release receipt is malformed."
+      return 1
+    }
+  [ -f "$SERVER_RELEASE_RESOLVER" ] && [ ! -L "$SERVER_RELEASE_RESOLVER" ] || return 1
+  resolved_json=$(DIREXTALK_PRODUCTION_RELEASE_MESSAGE_VERSION="$DIREXTALK_REMOTE_MESSAGE_VERSION" \
+    DIREXTALK_PRODUCTION_RELEASE_AGENT_VERSION="$DIREXTALK_REMOTE_AGENT_VERSION" \
+    DIREXTALK_PRODUCTION_RELEASE_RETAIN_MESSAGE=false \
+    DIREXTALK_PRODUCTION_RELEASE_RETAIN_AGENT=false \
+    NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}" node "$SERVER_RELEASE_RESOLVER") || {
+      warn "The remote split application release cannot be resolved from the controlled catalog."
+      return 1
+    }
+  server_release_validate_resolved_component message "$resolved_json" \
+    && server_release_validate_resolved_component agent "$resolved_json" || {
+      warn "The remote split application release resolved to an invalid identity."
+      return 1
+    }
+  [ "$(server_release_json_field "$resolved_json" message.version)" = "$DIREXTALK_REMOTE_MESSAGE_VERSION" ] \
+    && [ "$(server_release_json_field "$resolved_json" message.image)" = "$DIREXTALK_REMOTE_MESSAGE_IMAGE" ] \
+    && [ "$(server_release_json_field "$resolved_json" message.source_revision)" = "$DIREXTALK_REMOTE_MESSAGE_REVISION" ] \
+    && [ "$(server_release_json_field "$resolved_json" agent.version)" = "$DIREXTALK_REMOTE_AGENT_VERSION" ] \
+    && [ "$(server_release_json_field "$resolved_json" agent.image)" = "$DIREXTALK_REMOTE_AGENT_IMAGE" ] \
+    && [ "$(server_release_json_field "$resolved_json" agent.source_revision)" = "$DIREXTALK_REMOTE_AGENT_REVISION" ] || {
+      warn "The remote split application receipt does not match its controlled release identity."
+      return 1
+    }
+  DIREXTALK_REMOTE_MESSAGE_DIGEST=$(server_release_json_field "$resolved_json" message.manifest_digest)
+  DIREXTALK_REMOTE_AGENT_DIGEST=$(server_release_json_field "$resolved_json" agent.manifest_digest)
+  DIREXTALK_REMOTE_MESSAGE_IMAGE_REF=$(server_release_json_field "$resolved_json" message.image_ref)
+  DIREXTALK_REMOTE_AGENT_IMAGE_REF=$(server_release_json_field "$resolved_json" agent.image_ref)
+  export DIREXTALK_REMOTE_MESSAGE_DIGEST DIREXTALK_REMOTE_AGENT_DIGEST
+  export DIREXTALK_REMOTE_MESSAGE_IMAGE_REF DIREXTALK_REMOTE_AGENT_IMAGE_REF
+}
+
 server_release_is_newer_version() {
   local candidate=${1#v} current=${2#v} c1 c2 c3 r1 r2 r3
   IFS=. read -r c1 c2 c3 <<<"$candidate"
@@ -217,15 +278,9 @@ server_release_is_newer_version() {
   }
 }
 
-server_release_resolve_update_target() {
+server_release_validate_update_request() {
   local message_requested=${DIREXTALK_MESSAGE_SERVER_VERSION:-}
   local agent_requested=${DIREXTALK_AGENT_VERSION:-}
-  local message_resolve agent_resolve message_env= agent_env= resolve_message=true resolve_agent=false resolved_json
-  server_release_validate_override || return 1
-  server_release_split_state_can_advance && server_release_application_receipts_match || {
-    warn "Existing infrastructure has inconsistent application release receipts; refusing direct release update."
-    return 1
-  }
   server_release_is_version "${message_requested:-v0.0.0}" || [ -z "$message_requested" ] || {
     warn "DIREXTALK_MESSAGE_SERVER_VERSION must be a canonical vX.Y.Z version."
     return 1
@@ -243,18 +298,31 @@ server_release_resolve_update_target() {
     warn "DIREXTALK_AGENT_MINIMUM_SERVER_VERSION requires DIREXTALK_AGENT_VERSION."
     return 1
   fi
+}
+
+server_release_resolve_update_target() {
+  local message_requested=${DIREXTALK_MESSAGE_SERVER_VERSION:-}
+  local agent_requested=${DIREXTALK_AGENT_VERSION:-}
+  local message_resolve agent_resolve message_env= agent_env= resolve_message=true resolve_agent=false resolved_json
+  server_release_validate_override || return 1
+  server_release_split_tooling_state_can_advance || {
+    warn "Existing infrastructure has an invalid split tooling receipt; refusing direct release update."
+    return 1
+  }
+  server_release_resolve_remote_receipt || return 1
+  server_release_validate_update_request || return 1
   # An explicit component selector leaves the other component receipt-bound.
   # With no selector, update the Message Server to the verified stable release
   # and retain the Agent until its explicit compatibility floor is supplied.
   if [ -n "$message_requested" ]; then
     message_resolve=$message_requested
   elif [ -n "$agent_requested" ]; then
-    message_resolve=$(state_get split_release.message_version)
+    message_resolve=$DIREXTALK_REMOTE_MESSAGE_VERSION
     resolve_message=false
   else
     message_resolve=latest
   fi
-  agent_resolve=${agent_requested:-$(state_get split_release.agent_version)}
+  agent_resolve=${agent_requested:-$DIREXTALK_REMOTE_AGENT_VERSION}
   [ -z "$agent_requested" ] || resolve_agent=true
   if [ "$resolve_message" = true ]; then
     message_env=${message_resolve/latest/}
@@ -296,11 +364,11 @@ server_release_resolve_update_target() {
     DIREXTALK_UPDATE_MESSAGE_REVISION=$(server_release_json_field "$resolved_json" message.source_revision)
     DIREXTALK_UPDATE_MESSAGE_DIGEST=$(server_release_json_field "$resolved_json" message.manifest_digest)
   else
-    DIREXTALK_UPDATE_MESSAGE_VERSION=$(state_get split_release.message_version)
-    DIREXTALK_UPDATE_MESSAGE_IMAGE=$(state_get split_release.message_image)
-    DIREXTALK_UPDATE_MESSAGE_IMAGE_REF="$DIREXTALK_UPDATE_MESSAGE_IMAGE@$(state_get split_release.message_manifest_digest)"
-    DIREXTALK_UPDATE_MESSAGE_REVISION=$(state_get split_release.message_source_revision)
-    DIREXTALK_UPDATE_MESSAGE_DIGEST=$(state_get split_release.message_manifest_digest)
+    DIREXTALK_UPDATE_MESSAGE_VERSION=$DIREXTALK_REMOTE_MESSAGE_VERSION
+    DIREXTALK_UPDATE_MESSAGE_IMAGE=$DIREXTALK_REMOTE_MESSAGE_IMAGE
+    DIREXTALK_UPDATE_MESSAGE_IMAGE_REF=$DIREXTALK_REMOTE_MESSAGE_IMAGE_REF
+    DIREXTALK_UPDATE_MESSAGE_REVISION=$DIREXTALK_REMOTE_MESSAGE_REVISION
+    DIREXTALK_UPDATE_MESSAGE_DIGEST=$DIREXTALK_REMOTE_MESSAGE_DIGEST
   fi
   if [ "$resolve_agent" = true ]; then
     DIREXTALK_UPDATE_AGENT_VERSION=$(server_release_json_field "$resolved_json" agent.version)
@@ -309,40 +377,29 @@ server_release_resolve_update_target() {
     DIREXTALK_UPDATE_AGENT_REVISION=$(server_release_json_field "$resolved_json" agent.source_revision)
     DIREXTALK_UPDATE_AGENT_DIGEST=$(server_release_json_field "$resolved_json" agent.manifest_digest)
   else
-    DIREXTALK_UPDATE_AGENT_VERSION=$(state_get split_release.agent_version)
-    DIREXTALK_UPDATE_AGENT_IMAGE=$(state_get split_release.agent_image)
-    DIREXTALK_UPDATE_AGENT_IMAGE_REF="$DIREXTALK_UPDATE_AGENT_IMAGE@$(state_get split_release.agent_manifest_digest)"
-    DIREXTALK_UPDATE_AGENT_REVISION=$(state_get split_release.agent_source_revision)
-    DIREXTALK_UPDATE_AGENT_DIGEST=$(state_get split_release.agent_manifest_digest)
+    DIREXTALK_UPDATE_AGENT_VERSION=$DIREXTALK_REMOTE_AGENT_VERSION
+    DIREXTALK_UPDATE_AGENT_IMAGE=$DIREXTALK_REMOTE_AGENT_IMAGE
+    DIREXTALK_UPDATE_AGENT_IMAGE_REF=$DIREXTALK_REMOTE_AGENT_IMAGE_REF
+    DIREXTALK_UPDATE_AGENT_REVISION=$DIREXTALK_REMOTE_AGENT_REVISION
+    DIREXTALK_UPDATE_AGENT_DIGEST=$DIREXTALK_REMOTE_AGENT_DIGEST
   fi
-  if [ "$resolve_message" = true ] && [ "$DIREXTALK_UPDATE_MESSAGE_VERSION" = "$(state_get split_release.message_version)" ]; then
-    [ "$DIREXTALK_UPDATE_MESSAGE_IMAGE" = "$(state_get split_release.message_image)" ] \
-      && [ "$DIREXTALK_UPDATE_MESSAGE_REVISION" = "$(state_get split_release.message_source_revision)" ] \
-      && [ "$DIREXTALK_UPDATE_MESSAGE_DIGEST" = "$(state_get split_release.message_manifest_digest)" ] || {
-        warn "The resolved Message Server tag differs from the recorded immutable receipt."
-        return 1
-      }
-  fi
-  if [ "$resolve_agent" = true ] && [ "$DIREXTALK_UPDATE_AGENT_VERSION" = "$(state_get split_release.agent_version)" ]; then
-    [ "$DIREXTALK_UPDATE_AGENT_IMAGE" = "$(state_get split_release.agent_image)" ] \
-      && [ "$DIREXTALK_UPDATE_AGENT_REVISION" = "$(state_get split_release.agent_source_revision)" ] \
-      && [ "$DIREXTALK_UPDATE_AGENT_DIGEST" = "$(state_get split_release.agent_manifest_digest)" ] || {
-        warn "The resolved Agent tag differs from the recorded immutable receipt."
-        return 1
-      }
+  if [ -n "$agent_requested" ] \
+    && server_release_is_newer_version "${DIREXTALK_AGENT_MINIMUM_SERVER_VERSION:-}" "$DIREXTALK_UPDATE_MESSAGE_VERSION"; then
+    warn "The remote Message Server is below the requested Agent compatibility floor."
+    return 1
   fi
   DIREXTALK_UPDATE_AGENT_MINIMUM_SERVER_VERSION=${DIREXTALK_AGENT_MINIMUM_SERVER_VERSION:-}
   DIREXTALK_UPDATE_MESSAGE_APPLY=false
   DIREXTALK_UPDATE_AGENT_APPLY=false
-  if [ "$DIREXTALK_UPDATE_MESSAGE_VERSION" != "$(state_get split_release.message_version)" ]; then
-    server_release_is_newer_version "$DIREXTALK_UPDATE_MESSAGE_VERSION" "$(state_get split_release.message_version)" || {
+  if [ "$DIREXTALK_UPDATE_MESSAGE_VERSION" != "$DIREXTALK_REMOTE_MESSAGE_VERSION" ]; then
+    server_release_is_newer_version "$DIREXTALK_UPDATE_MESSAGE_VERSION" "$DIREXTALK_REMOTE_MESSAGE_VERSION" || {
       warn "Direct Message Server updates cannot downgrade the recorded version."
       return 1
     }
     DIREXTALK_UPDATE_MESSAGE_APPLY=true
   fi
-  if [ -n "$agent_requested" ] && [ "$DIREXTALK_UPDATE_AGENT_VERSION" != "$(state_get split_release.agent_version)" ]; then
-    server_release_is_newer_version "$DIREXTALK_UPDATE_AGENT_VERSION" "$(state_get split_release.agent_version)" || {
+  if [ -n "$agent_requested" ] && [ "$DIREXTALK_UPDATE_AGENT_VERSION" != "$DIREXTALK_REMOTE_AGENT_VERSION" ]; then
+    server_release_is_newer_version "$DIREXTALK_UPDATE_AGENT_VERSION" "$DIREXTALK_REMOTE_AGENT_VERSION" || {
       warn "Direct Agent updates cannot downgrade the recorded version."
       return 1
     }

@@ -34,6 +34,12 @@ bundle_sha=$(awk 'NF == 2 && $2 == "canonical-bundle.tar.gz" {print $1}' \
 resolved_message_digest=sha256:$(printf 'a%.0s' {1..64})
 resolved_message_revision=$(printf 'a%.0s' {1..40})
 resolved_agent_digest=sha256:$(printf 'b%.0s' {1..64})
+export REMOTE_MESSAGE_VERSION=$DIREXTALK_MESSAGE_SERVER_VERSION
+export REMOTE_MESSAGE_IMAGE=$DIREXTALK_MESSAGE_SERVER_IMAGE
+export REMOTE_MESSAGE_REVISION=$resolved_message_revision
+export REMOTE_AGENT_VERSION=$DIREXTALK_AGENT_VERSION
+export REMOTE_AGENT_IMAGE=$DIREXTALK_AGENT_IMAGE
+export REMOTE_AGENT_REVISION=$(printf 'b%.0s' {1..40})
 
 write_state() {
   local include_identity=${1:-true}
@@ -73,7 +79,32 @@ case "$command" in
     printf '%s\n' "$command" >"$REMOTE_COMMAND"
     cat >"$TEST_TRANSPORT"
     [ "${INTEGRATION_STATUS:-0}" -eq 0 ] || exit "$INTEGRATION_STATUS"
+    if [ -n "${REMOTE_RECEIPT_FILE:-}" ]; then
+      message_version=$(cut -f1 "$REMOTE_RECEIPT_FILE")
+      message_image=$(cut -f2 "$REMOTE_RECEIPT_FILE")
+      message_revision=$(cut -f3 "$REMOTE_RECEIPT_FILE")
+      agent_version=$(cut -f4 "$REMOTE_RECEIPT_FILE")
+      agent_image=$(cut -f5 "$REMOTE_RECEIPT_FILE")
+      agent_revision=$(cut -f6 "$REMOTE_RECEIPT_FILE")
+      if [[ "$command" == *update-message-server-local.sh* ]]; then
+        message_version=$DIREXTALK_UPDATE_MESSAGE_VERSION
+        message_image=$DIREXTALK_UPDATE_MESSAGE_IMAGE
+        message_revision=$DIREXTALK_UPDATE_MESSAGE_REVISION
+      fi
+      if [[ "$command" == *update-agent-local.sh* ]]; then
+        agent_version=$DIREXTALK_UPDATE_AGENT_VERSION
+        agent_image=$DIREXTALK_UPDATE_AGENT_IMAGE
+        agent_revision=$DIREXTALK_UPDATE_AGENT_REVISION
+      fi
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$message_version" "$message_image" "$message_revision" \
+        "$agent_version" "$agent_image" "$agent_revision" >"$REMOTE_RECEIPT_FILE"
+    fi
     printf 'integration output\n%s\t%s\t%s\n' "$EXPECTED_MACHINE" "$EXPECTED_DOCKER" "$EXPECTED_BUNDLE_SHA"
+    ;;
+  *'file=/var/dirextalk-message-server/split/.env'*|*'receipt=/var/dirextalk-message-server/split/.env'*)
+    printf '%s\t%s\t%s\n' "$(cat "$REMOTE_RECEIPT_FILE")" \
+      0:12345:0:0:400 "$(sha256sum "$REMOTE_RECEIPT_FILE" | awk '{print $1}')"
     ;;
   *'/etc/machine-id'*)
     printf 'ssh:identity\n' >>"$CALLS"
@@ -88,6 +119,7 @@ export EXPECTED_ACCOUNT=$account EXPECTED_ARN=$provider_arn EXPECTED_SUPPORT=$su
 export EXPECTED_MACHINE=$machine_id EXPECTED_DOCKER=$docker_engine_id EXPECTED_BUNDLE_SHA=$bundle_sha
 export TEST_TRANSPORT="$tmp/transport.tar.gz"
 export REMOTE_COMMAND="$tmp/remote-command"
+export REMOTE_RECEIPT_FILE="$tmp/remote-receipt"
 export AWS_DEFAULT_REGION=us-west-2 AWS_REGION=us-west-2
 export DIREXTALK_PRODUCTION_RELEASE_RESOLVER="$tmp/resolver.mjs"
 cat >"$DIREXTALK_PRODUCTION_RELEASE_RESOLVER" <<'EOF'
@@ -107,6 +139,9 @@ process.stdout.write(JSON.stringify({
   }
 }) + "\n");
 EOF
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+  "$REMOTE_MESSAGE_VERSION" "$REMOTE_MESSAGE_IMAGE" "$REMOTE_MESSAGE_REVISION" \
+  "$REMOTE_AGENT_VERSION" "$REMOTE_AGENT_IMAGE" "$REMOTE_AGENT_REVISION" >"$REMOTE_RECEIPT_FILE"
 
 # Missing immutable identity is a local contract failure and must not perform
 # any external read or mutation.
@@ -145,6 +180,8 @@ fi
 # only after the remote operation succeeds. It never calls a server API.
 write_state true
 node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" set-string \
+  split_release.message_image docker.io/dirextalk/message-server:v0.0.1
+node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" set-string \
   split_release.agent_version v1.0.86
 node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" set-string \
   split_release.agent_image docker.io/dirextalk/agent:v1.0.86
@@ -172,7 +209,42 @@ grep -Fxq 'cloud-init/split/apply-host-integration.sh' <<<"$transport_listing"
 grep -Fxq 'cloud-init/split/migrate-message-mcp-token-binding.sh' <<<"$transport_listing"
 grep -Fxq 'canonical-bundle.tar.gz' <<<"$transport_listing"
 node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
-  "data.server_release.version === 'v1.1.63' && data.server_release.manifest_digest === '$resolved_message_digest' && data.split_release.release_catalog_origin === '$DIREXTALK_RELEASE_CATALOG_ORIGIN' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.message_version === 'v1.1.63' && data.split_release.message_source_revision === '$resolved_message_revision' && data.split_release.agent_version === 'v1.0.86' && data.split_release.agent_source_revision === '300635fd615e09f9ce1f6bd4ab0f5d3ca31bac0f' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"
+  "data.server_release.version === 'v1.1.63' && data.server_release.manifest_digest === '$resolved_message_digest' && data.split_release.release_catalog_origin === '$DIREXTALK_RELEASE_CATALOG_ORIGIN' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.message_version === 'v1.1.63' && data.split_release.message_source_revision === '$resolved_message_revision' && data.split_release.agent_version === 'v1.0.162' && data.split_release.agent_source_revision === '$REMOTE_AGENT_REVISION' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"
+
+# A prior App-initiated Server upgrade is authoritative even when local state
+# is stale. The controlled target matches the protected remote receipt, so the
+# direct update must skip the redundant Server wrapper and repair local state.
+write_state true
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+  v1.1.63 docker.io/dirextalk/message-server:v1.1.63 "$resolved_message_revision" \
+  v1.0.162 docker.io/dirextalk/agent:v1.0.162 "$REMOTE_AGENT_REVISION" >"$REMOTE_RECEIPT_FILE"
+: >"$CALLS"
+bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null
+if grep -Fq 'update-message-server-local.sh' "$REMOTE_COMMAND"; then
+  echo 'direct update redundantly selected an already-applied remote Message Server release' >&2
+  exit 1
+fi
+node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
+  "data.server_release.version === 'v1.1.63' && data.split_release.message_version === 'v1.1.63' && data.split_release.agent_version === 'v1.0.162'"
+
+# A protected receipt with an unknown immutable identity fails closed before
+# the host integration transaction can mutate the node.
+write_state true
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+  v1.1.63 docker.io/dirextalk/message-server:v1.1.63 "$(printf 'c%.0s' {1..40})" \
+  v1.0.162 docker.io/dirextalk/agent:v1.0.162 "$REMOTE_AGENT_REVISION" >"$REMOTE_RECEIPT_FILE"
+: >"$CALLS"
+if bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null 2>&1; then
+  echo 'direct update accepted an unresolvable remote application receipt' >&2
+  exit 1
+fi
+if grep -Fq '^ssh:integration$' "$CALLS"; then
+  echo 'unresolvable remote receipt reached host integration mutation' >&2
+  exit 1
+fi
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+  v1.1.63 docker.io/dirextalk/message-server:v1.1.63 "$resolved_message_revision" \
+  v1.0.162 docker.io/dirextalk/agent:v1.0.162 "$REMOTE_AGENT_REVISION" >"$REMOTE_RECEIPT_FILE"
 
 # Explicit Agent updates require a compatibility floor and use only the
 # deployer-resolved immutable image reference. The post-success receipt is the
@@ -191,6 +263,9 @@ node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
 # Selecting only Agent must retain the Message Server receipt. A missing
 # compatibility floor is rejected before identity checks or remote mutation.
 write_state true
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+  v1.1.63 docker.io/dirextalk/message-server:v1.1.63 "$resolved_message_revision" \
+  v1.0.162 docker.io/dirextalk/agent:v1.0.162 "$REMOTE_AGENT_REVISION" >"$REMOTE_RECEIPT_FILE"
 : >"$CALLS"
 if DIREXTALK_AGENT_VERSION=v1.0.163 bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null 2>&1; then
   echo 'Agent update accepted without a minimum Message Server version' >&2
@@ -207,7 +282,7 @@ if grep -Fq 'update-message-server-local.sh' "$REMOTE_COMMAND"; then
   exit 1
 fi
 node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
-  "data.server_release.version === 'v1.1.62' && data.split_release.message_version === 'v1.1.62' && data.split_release.agent_version === 'v1.0.163'"
+  "data.server_release.version === 'v1.1.63' && data.split_release.message_version === 'v1.1.63' && data.split_release.agent_version === 'v1.0.163'"
 
 # An expected-negative integration result remains exit 3 and leaves both local
 # release records untouched.

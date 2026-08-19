@@ -234,12 +234,65 @@ ops_verify_existing_node_identity() {
     && [ "$docker_engine_id" = "$(ops_state_get "$state" .node_identity.docker_engine_id)" ] || {
       echo "SSH host identity differs from the existing-node receipt" >&2
       return 1
+  }
+}
+
+ops_read_remote_split_release() {
+  local state=$1 expected_machine expected_docker remote_command remote_release
+  expected_machine=$(ops_state_get "$state" .node_identity.machine_id)
+  expected_docker=$(ops_state_get "$state" .node_identity.docker_engine_id)
+  remote_command=$(cat <<EOF
+set -eu
+expected_machine=$(ops_sh_quote "$expected_machine")
+expected_docker=$(ops_sh_quote "$expected_docker")
+[ "\$(cat /etc/machine-id)" = "\$expected_machine" ]
+[ "\$(sudo docker info --format '{{.ID}}')" = "\$expected_docker" ]
+file=/var/dirextalk-message-server/split/.env
+[ -f "\$file" ] && [ ! -L "\$file" ]
+[ "\$(sudo stat -c '%u:%g:%a' "\$file")" = 0:0:400 ]
+receipt_identity=\$(sudo stat -c '%d:%i:%u:%g:%a' "\$file")
+receipt_sha=\$(sudo sha256sum "\$file" | awk '{print \$1}')
+read_unique() {
+  count=\$(sudo awk -F= -v wanted="\$1" '\$1 == wanted {n++} END {print n+0}' "\$file")
+  [ "\$count" -eq 1 ]
+  sudo awk -F= -v wanted="\$1" '\$1 == wanted {print substr(\$0,length(wanted)+2); exit}' "\$file"
+}
+message_version=\$(read_unique DIREXTALK_MESSAGE_SERVER_VERSION)
+message_image=\$(read_unique DIREXTALK_MESSAGE_SERVER_IMAGE)
+message_revision=\$(read_unique DIREXTALK_MESSAGE_SOURCE_REVISION)
+agent_version=\$(read_unique DIREXTALK_AGENT_VERSION)
+agent_image=\$(read_unique DIREXTALK_AGENT_IMAGE)
+agent_revision=\$(read_unique DIREXTALK_AGENT_SOURCE_REVISION)
+printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \\
+  "\$message_version" "\$message_image" "\$message_revision" "\$agent_version" "\$agent_image" "\$agent_revision" \\
+  "\$receipt_identity" "\$receipt_sha"
+EOF
+  )
+  remote_release=$(ops_ssh "$state" "$remote_command") || return 1
+  IFS=$'\t' read -r \
+    DIREXTALK_REMOTE_MESSAGE_VERSION DIREXTALK_REMOTE_MESSAGE_IMAGE DIREXTALK_REMOTE_MESSAGE_REVISION \
+    DIREXTALK_REMOTE_AGENT_VERSION DIREXTALK_REMOTE_AGENT_IMAGE DIREXTALK_REMOTE_AGENT_REVISION \
+    DIREXTALK_REMOTE_SPLIT_RECEIPT_IDENTITY DIREXTALK_REMOTE_SPLIT_RECEIPT_SHA \
+    <<<"$remote_release"
+  [ -n "$DIREXTALK_REMOTE_MESSAGE_VERSION" ] \
+    && [ -n "$DIREXTALK_REMOTE_MESSAGE_IMAGE" ] \
+    && [ -n "$DIREXTALK_REMOTE_MESSAGE_REVISION" ] \
+    && [ -n "$DIREXTALK_REMOTE_AGENT_VERSION" ] \
+    && [ -n "$DIREXTALK_REMOTE_AGENT_IMAGE" ] \
+    && [ -n "$DIREXTALK_REMOTE_AGENT_REVISION" ] \
+    && printf '%s\n' "$DIREXTALK_REMOTE_SPLIT_RECEIPT_IDENTITY" | grep -Eq '^[0-9]+:[0-9]+:0:0:400$' \
+    && printf '%s\n' "$DIREXTALK_REMOTE_SPLIT_RECEIPT_SHA" | grep -Eq '^[0-9a-f]{64}$' || {
+      echo "remote split release receipt is incomplete" >&2
+      return 1
     }
+  export DIREXTALK_REMOTE_MESSAGE_VERSION DIREXTALK_REMOTE_MESSAGE_IMAGE DIREXTALK_REMOTE_MESSAGE_REVISION
+  export DIREXTALK_REMOTE_AGENT_VERSION DIREXTALK_REMOTE_AGENT_IMAGE DIREXTALK_REMOTE_AGENT_REVISION
+  export DIREXTALK_REMOTE_SPLIT_RECEIPT_IDENTITY DIREXTALK_REMOTE_SPLIT_RECEIPT_SHA
 }
 
 ops_stage_current_host_integration() (
   local state=$1 expected_old=$2 integration_bundle split_bundle split_sha_file expected_sha actual_sha result status
-  local remote_command remote_release_command public_ip host_region identity
+  local remote_command remote_release_command remote_receipt_check public_ip host_region identity
   local -a integration_files
   split_bundle=$OPS_SPLIT_DIR/canonical-bundle.tar.gz
   split_sha_file=$split_bundle.sha256
@@ -283,6 +336,7 @@ ops_stage_current_host_integration() (
   }
   expected_machine_id=$(ops_state_get "$state" .node_identity.machine_id)
   expected_docker_engine_id=$(ops_state_get "$state" .node_identity.docker_engine_id)
+  remote_receipt_check="receipt=/var/dirextalk-message-server/split/.env; [ -f \"\$receipt\" ] && [ ! -L \"\$receipt\" ] && [ \"\$(sudo stat -c '%u:%g:%a' \"\$receipt\")\" = 0:0:400 ]; [ \"\$(sudo stat -c '%d:%i:%u:%g:%a' \"\$receipt\")\" = $(ops_sh_quote "$DIREXTALK_REMOTE_SPLIT_RECEIPT_IDENTITY") ]; [ \"\$(sudo sha256sum \"\$receipt\" | awk '{print \$1}')\" = $(ops_sh_quote "$DIREXTALK_REMOTE_SPLIT_RECEIPT_SHA") ]; [ \"\$(sudo grep -Fxc -- $(ops_sh_quote "DIREXTALK_MESSAGE_SERVER_VERSION=$DIREXTALK_REMOTE_MESSAGE_VERSION") \"\$receipt\")\" = 1 ]; [ \"\$(sudo grep -Fxc -- $(ops_sh_quote "DIREXTALK_MESSAGE_SERVER_IMAGE=$DIREXTALK_REMOTE_MESSAGE_IMAGE") \"\$receipt\")\" = 1 ]; [ \"\$(sudo grep -Fxc -- $(ops_sh_quote "DIREXTALK_MESSAGE_SOURCE_REVISION=$DIREXTALK_REMOTE_MESSAGE_REVISION") \"\$receipt\")\" = 1 ]; [ \"\$(sudo grep -Fxc -- $(ops_sh_quote "DIREXTALK_AGENT_VERSION=$DIREXTALK_REMOTE_AGENT_VERSION") \"\$receipt\")\" = 1 ]; [ \"\$(sudo grep -Fxc -- $(ops_sh_quote "DIREXTALK_AGENT_IMAGE=$DIREXTALK_REMOTE_AGENT_IMAGE") \"\$receipt\")\" = 1 ]; [ \"\$(sudo grep -Fxc -- $(ops_sh_quote "DIREXTALK_AGENT_SOURCE_REVISION=$DIREXTALK_REMOTE_AGENT_REVISION") \"\$receipt\")\" = 1 ];"
   remote_release_command=''
   if [ "${DIREXTALK_UPDATE_MESSAGE_APPLY:-false}" = true ]; then
     remote_release_command+="sudo docker pull $(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_IMAGE_REF") >/dev/null; message_identity=\$(sudo docker image inspect $(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_IMAGE_REF") --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}'); [ \"\$message_identity\" = $(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_VERSION|$DIREXTALK_UPDATE_MESSAGE_REVISION") ]; sudo env DIREXTALK_MESSAGE_SERVER_LOCAL_IMAGE_REF=$(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_IMAGE_REF") /var/dirextalk-message-server/deploy/split-agent/scripts/update-message-server-local.sh /var/dirextalk-message-server/split $(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_VERSION"); "
@@ -293,7 +347,7 @@ ops_stage_current_host_integration() (
   if [ -n "$remote_release_command" ]; then
     remote_release_command="release_lock=/var/dirextalk-message-server/.direct-release-update.lock; sudo install -o root -g root -m 0600 /dev/null \"\$release_lock\"; exec 7>\"\$release_lock\"; flock -n 7; $remote_release_command sudo /var/dirextalk-message-server/production-ops/reconcile-production.sh; "
   fi
-  remote_command="set -eu; expected_machine_id=$(ops_sh_quote "$expected_machine_id"); expected_docker_engine_id=$(ops_sh_quote "$expected_docker_engine_id"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX); trap 'sudo rm -rf \"\$stage\"' EXIT; sudo chmod 0700 \"\$stage\"; sudo tar --no-same-owner -xzf - -C \"\$stage\"; sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server $(ops_sh_quote "$expected_old") $(ops_sh_quote "$public_ip") $(ops_sh_quote "$host_region"); $remote_release_command [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; printf '%s\\t%s\\t%s\\n' \"\$expected_machine_id\" \"\$expected_docker_engine_id\" $(ops_sh_quote "$actual_sha")"
+  remote_command="set -eu; expected_machine_id=$(ops_sh_quote "$expected_machine_id"); expected_docker_engine_id=$(ops_sh_quote "$expected_docker_engine_id"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; $remote_receipt_check stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX); trap 'sudo rm -rf \"\$stage\"' EXIT; sudo chmod 0700 \"\$stage\"; sudo tar --no-same-owner -xzf - -C \"\$stage\"; sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server $(ops_sh_quote "$expected_old") $(ops_sh_quote "$public_ip") $(ops_sh_quote "$host_region"); $remote_release_command [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; printf '%s\\t%s\\t%s\\n' \"\$expected_machine_id\" \"\$expected_docker_engine_id\" $(ops_sh_quote "$actual_sha")"
   if result=$(ops_ssh "$state" "$remote_command" <"$integration_bundle"); then
     :
   else

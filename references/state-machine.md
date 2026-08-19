@@ -38,7 +38,7 @@ S7 自动验收通过后应交付:
 
 ## 常见阻断
 
-- DNS 未指向固定 public IP: S3 返回 waiting。Route53 模式下先检查 hosted zone/NS 委托；manual DNS fallback 下用户或 DNS provider automation 设置 A 记录后用 `DNS_READY=1` 续跑。
+- DNS 未指向固定 public IP: S3 返回 waiting。S3 在目标主机通过 SSH 重新执行权威 NS 和独立公共递归 DNS proof；本机解析结果或 `DNS_READY=1` 不能绕过 gate，Caddy 只在远端 proof 成功后启动。
 - `/_p2p/health` 不通: 看 `/var/log/cloud-init-output.log`；应用栈用受保护的 `split/.env` + canonical `deploy/split-agent/compose.yaml` 查 `ps`/`logs message-server`，edge 栈用 `edge.env` + canonical `edge-compose.yaml` + root-owned override 查 `logs caddy`。
 - bootstrap 缺字段或 `agent_room_id` 不是真实 Matrix room: 视为当前 message-server/bootstrap contract 失败，保留日志与导出件元数据并停止；不得手工拼凭据或创建 fallback 房间。修复服务端后走正常 fresh reset 或 receipt-bound reconcile。
 - TURN 为空: 检查 split 栈的 `coturn` 健康状态、受保护的 `turnserver.conf`/`turn-shared-secret`、stable public IP receipt，以及安全组 3478 tcp+udp 和 49160-49200/udp。

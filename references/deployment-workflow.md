@@ -330,8 +330,11 @@ If rate-limited, the log shows `retry after <timestamp> UTC`.
 
 With automatically detected or explicitly selected `DOMAIN_MODE=route53`, S3
 requires and reuses a matching public hosted zone, records the zone id in
-`state.json`, upserts the A record, and waits for DNS to resolve. It does not
-create a hosted zone or change registrar NS delegation.
+`state.json`, upserts the A record, and waits for DNS to resolve. The final
+propagation proof runs over SSH on the exact deployed host (all discovered
+authoritative nameservers plus independent public recursive resolvers) before
+host integration can start Caddy. It does not create a hosted zone or change
+registrar NS delegation.
 
 If the current Route53 A record already points to a different IP, S3 stops
 before changing DNS and records `route53_existing_a_value` plus
@@ -382,7 +385,8 @@ public IP, ask the user to set:
 
 For Cloudflare, use DNS-only, not proxied. For Alibaba/HiChina, edit the A record in Alibaba Cloud DNS.
 
-After authoritative DNS returns the new IP:
+After authoritative DNS returns the new IP, S3 performs the same remote-host
+proof; a local resolver result or `DNS_READY=1` cannot bypass that gate:
 
 ```bash
 DNS_READY=1 \

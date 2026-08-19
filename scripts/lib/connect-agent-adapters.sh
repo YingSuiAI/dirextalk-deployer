@@ -49,6 +49,16 @@ _connect_agent_command() {
     _openclaw_command
     return $?
   fi
+  if [ "$agent" = "cursor" ]; then
+    if [ "$(dirextalk_local_path_style)" = "windows" ]; then
+      _cursor_agent_windows_command && return 0
+    else
+      _resolve_installed_command \
+        "${DIREXTALK_CURSOR_AGENT_COMMAND:-${DIREXTALK_CURSOR_COMMAND:-}}" \
+        agent
+      return $?
+    fi
+  fi
   for raw_key in $(_connect_runtime_command_aliases "$runtime") "$agent" $(_connect_agent_command_aliases "$agent"); do
     var="DIREXTALK_$(printf '%s' "$raw_key" | tr '[:lower:]-' '[:upper:]_')_COMMAND"
     value=$(printenv "$var" 2>/dev/null || true)
@@ -57,9 +67,6 @@ _connect_agent_command() {
       return 0
     fi
   done
-  if [ "$agent" = "cursor" ] && [ "$(dirextalk_local_path_style)" = "windows" ]; then
-    _cursor_agent_windows_command && return 0
-  fi
   case "$runtime" in
     openclaw|hermes) printf '%s\n' "$runtime" ;;
   esac

@@ -204,7 +204,6 @@ _mcp_config_conflict_paths() {
   fi
   printf '%s\n' \
     '~/.codex/config.toml' \
-    '~/.cursor/mcp.json' \
     '~/.hermes/mcp.json' \
     '~/.config/hermes/mcp.json'
 }

@@ -289,6 +289,12 @@ an explicit semantic user confirmation that identifies the domain and the
 replacement target. Then set `DIREXTALK_CONFIRM_DNS_OVERWRITE=1` internally.
 If Route53 delegation is needed, wait for authoritative DNS before continuing.
 
+After the stable public IP exists, S3 revalidates the exact cloud instance, IP,
+AWS account, and SSH host, then runs authoritative and independent public-
+recursive DNS proof over SSH on that deployed host. Local `dig` output and
+`DNS_READY=1` are diagnostic only and cannot bypass this gate; Caddy/ACME host
+integration starts only after the remote proof succeeds.
+
 Default cloud provider is Lightsail. If no AWS region is configured in state, `AWS_DEFAULT_REGION`/`AWS_REGION`, or the AWS profile, the deployer recommends a default region from the local timezone and uses it in non-interactive runs; `DIREXTALK_DEFAULT_REGION` is the explicit deployer override. S1 queries Lightsail bundle availability and Lightsail availability zones before provisioning, but it does not query AWS Free Tier or credit usage. For manual Lightsail zone checks, use `aws lightsail get-regions --include-availability-zones --output json`; plain `aws lightsail get-regions` can omit availability-zone details. The default Lightsail zone is `<region>a`; if it is unavailable, S1/S3 select another available Lightsail zone in the same region. If Lightsail has no usable bundle or availability zone in the selected region, S1 records an EC2 cost estimate but does not automatically switch to EC2; ask the operator to choose another Lightsail-capable region/zone or explicitly rerun with `DIREXTALK_CLOUD_PROVIDER=ec2` after reviewing the estimate. EC2 remains supported explicitly with `DIREXTALK_CLOUD_PROVIDER=ec2`; then S1 checks default VPC, EC2 vCPU quota, EC2-VPC Elastic IP quota, AMI availability, and S3 uses a 50 GiB gp3 root EBS volume.
 
 ## Local Runtime Wiring

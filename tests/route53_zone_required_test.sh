@@ -22,6 +22,7 @@ printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 
 case "${1:-} ${2:-}" in
+  "sts get-caller-identity") printf '123456789012\n' ;;
   "route53 list-hosted-zones")
     case "${ROUTE53_TEST_SCENARIO:-missing}" in
       missing) printf '{"HostedZones":[]}\n' ;;

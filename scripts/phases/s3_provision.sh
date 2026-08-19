@@ -33,7 +33,16 @@ run_phase() {
     return 1
   fi
   aws_env_prep
-  local cloud_provider
+  local cloud_provider aws_account
+  aws_account=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || {
+    phase_set S3_PROVISION failed "AWS account identity unavailable"
+    return 1
+  }
+  printf '%s\n' "$aws_account" | grep -Eq '^[0-9]{12}$' || {
+    phase_set S3_PROVISION failed "AWS account identity invalid"
+    return 1
+  }
+  state_set aws_account_id "$aws_account"
   cloud_provider=$(_resolve_cloud_provider)
   state_set cloud_provider "$cloud_provider"
   case "$cloud_provider" in
@@ -265,6 +274,22 @@ _run_phase_ec2() {
       return 1
     }
   fi
+  log "Public IP = $pubip; domain = $(state_get domain)"
+
+  if [ "$domain_mode" = "route53" ]; then
+    local route53_rc=0
+    _upsert_route53_record "$domain" "$pubip" || route53_rc=$?
+    [ "$route53_rc" -eq 0 ] || return "$route53_rc"
+  fi
+
+  if [ "$domain_mode" = "user" ] || [ "$domain_mode" = "route53" ]; then
+    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "$instance_type" || return 2
+  fi
+
+  # Do not apply the production host integration (which starts Caddy and can
+  # immediately ask Let's Encrypt for a certificate) until authoritative DNS
+  # has proved the fixed public address. The host-side updater/bootstrap work
+  # is idempotent, so a DNS wait leaves the node safe to resume.
   local resume_status=0
   _resume_host_bootstrap "$pubip" "$keyfile" || resume_status=$?
   case "$resume_status" in
@@ -282,17 +307,6 @@ _run_phase_ec2() {
     phase_set S3_PROVISION failed "failed to record immutable EC2 node identity"
     return 1
   }
-  log "Public IP = $pubip; domain = $(state_get domain)"
-
-  if [ "$domain_mode" = "route53" ]; then
-    local route53_rc=0
-    _upsert_route53_record "$domain" "$pubip" || route53_rc=$?
-    [ "$route53_rc" -eq 0 ] || return "$route53_rc"
-  fi
-
-  if [ "$domain_mode" = "user" ] || [ "$domain_mode" = "route53" ]; then
-    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "$instance_type" || return 2
-  fi
 
   phase_set S3_PROVISION done "instance=$iid ip=$pubip domain=$(state_get domain)"
   return 0
@@ -434,6 +448,18 @@ _run_phase_lightsail() {
       return 1
     }
   fi
+  log "Public IP = $pubip; domain = $(state_get domain)"
+
+  if [ "$domain_mode" = "route53" ]; then
+    local route53_rc=0
+    _upsert_route53_record "$domain" "$pubip" || route53_rc=$?
+    [ "$route53_rc" -eq 0 ] || return "$route53_rc"
+  fi
+
+  if [ "$domain_mode" = "user" ] || [ "$domain_mode" = "route53" ]; then
+    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "DIREXTALK_CLOUD_PROVIDER=lightsail" || return 2
+  fi
+
   local resume_status=0
   _resume_host_bootstrap "$pubip" "$keyfile" || resume_status=$?
   case "$resume_status" in
@@ -451,17 +477,6 @@ _run_phase_lightsail() {
     phase_set S3_PROVISION failed "failed to record immutable Lightsail node identity"
     return 1
   }
-  log "Public IP = $pubip; domain = $(state_get domain)"
-
-  if [ "$domain_mode" = "route53" ]; then
-    local route53_rc=0
-    _upsert_route53_record "$domain" "$pubip" || route53_rc=$?
-    [ "$route53_rc" -eq 0 ] || return "$route53_rc"
-  fi
-
-  if [ "$domain_mode" = "user" ] || [ "$domain_mode" = "route53" ]; then
-    _require_user_dns_ready "$domain_mode" "$domain" "$pubip" "DIREXTALK_CLOUD_PROVIDER=lightsail" || return 2
-  fi
 
   _record_lightsail_cost_estimate "$bundle"
   phase_set S3_PROVISION done "lightsail_instance=$instance_name ip=$pubip domain=$(state_get domain)"
@@ -575,6 +590,18 @@ _is_canonical_ipv4() {
   done
 }
 
+_cleanup_known_transport_templates() {
+  local path
+  for path in \
+    "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz" \
+    "$DIREXTALK_WORKDIR/.split-agent-runtime.XXXXXX.tar.gz"
+  do
+    if [ -f "$path" ] && [ ! -L "$path" ]; then
+      rm -f -- "$path" || return 1
+    fi
+  done
+}
+
 _resume_host_bootstrap() {
   local public_ip=$1 keyfile=$2
   local known_hosts="$DIREXTALK_WORKDIR/known_hosts" attempt result identity integration_bundle remote_command deployment_region
@@ -601,8 +628,16 @@ _resume_host_bootstrap() {
     warn "Host bootstrap resume requires the verified deployment region."
     return 1
   }
+  _cleanup_known_transport_templates || {
+    warn "Could not remove a previous host bootstrap transport template; refusing to create or upload a new bundle."
+    return 1
+  }
   integration_bundle=$(mktemp "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz") || return 1
-  split_bundle=$(mktemp "$DIREXTALK_WORKDIR/.split-agent-runtime.XXXXXX.tar.gz") || return 1
+  if ! split_bundle=$(mktemp "$DIREXTALK_WORKDIR/.split-agent-runtime.XXXXXX.tar.gz"); then
+    rm -f -- "$integration_bundle"
+    warn "Could not create the split Agent transport bundle workspace. No updater payload was uploaded."
+    return 1
+  fi
   if ! bash "$S3_PHASE_DIR/render/render-split-bundle.sh" "$split_bundle"; then
     rm -f "$split_bundle"
     warn "Failed to render the canonical split Agent runtime bundle."
@@ -643,7 +678,7 @@ _resume_host_bootstrap() {
       ;;
     *) rm -f "$integration_bundle" "$split_bundle"; warn "Host bootstrap requires the supported Ubuntu SSH user."; return 1 ;;
   esac
-  log "Synchronizing the pinned updater integration and resuming bootstrap through the stable public IP before DNS gating..."
+  log "Synchronizing the pinned updater integration and resuming bootstrap through the stable public IP after DNS gating..."
   attempt=1
   while [ "$attempt" -le "$attempts" ]; do
     if result=$(ssh -T -i "$keyfile" \
@@ -880,6 +915,21 @@ _record_root_volume_id() {
   res_set root_volume_id "$volume_id"
 }
 
+_revalidate_route53_owner() {
+  local domain=$1 zone_id=$2 zone_name=$3 expected_account actual_account current_zone current_id current_name
+  expected_account=$(state_get aws_account_id)
+  actual_account=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || return 1
+  printf '%s\n' "$actual_account" | grep -Eq '^[0-9]{12}$' || return 1
+  if [ -n "$expected_account" ] && [ "$expected_account" != "$actual_account" ]; then
+    return 1
+  fi
+  [ -n "$expected_account" ] || state_set aws_account_id "$actual_account" || return 1
+  current_zone=$(_find_required_route53_zone "$domain") || return 1
+  current_id=${current_zone%%$'\t'*}
+  current_name=${current_zone#*$'\t'}
+  [ "$current_id" = "$zone_id" ] && [ "$current_name" = "$zone_name" ]
+}
+
 _upsert_route53_record() {
   local domain=$1 pubip=$2 zone zone_id zone_name change_file change_id
   zone=$(_find_required_route53_zone "$domain") || {
@@ -894,6 +944,11 @@ _upsert_route53_record() {
     warn "DOMAIN_MODE=route53 requires the parent domain of $domain to exist in a Route53 hosted zone."
     return 1
   fi
+  _revalidate_route53_owner "$domain" "$zone_id" "$zone_name" || {
+    phase_set S3_PROVISION failed "Route53 hosted-zone owner identity changed"
+    warn "Route53 ownership or hosted-zone identity changed since this deployment was prepared; refusing to mutate DNS."
+    return 1
+  }
   _guard_route53_a_overwrite "$zone_id" "$domain" "$pubip" || return $?
 
   log "Route53 upsert: $domain A $pubip (zone=$zone_name)"
@@ -1002,19 +1057,19 @@ _find_required_route53_zone() {
 }
 
 _require_user_dns_ready() {
-  local domain_mode=$1 domain=$2 pubip=$3 instance_type=$4
+  local domain_mode=$1 domain=$2 pubip=$3 instance_type=$4 dns_status
   if [ "$(state_get dns_ready)" = "true" ]; then
-    domain_resolves_to_ip "$domain" "$pubip" && return 0
+    _dns_ready_probe "$domain" "$pubip" && return 0
     warn "state has dns_ready=true, but current DNS does not point to $pubip. Continuing to wait to avoid early certificate issuance."
     state_set_raw dns_ready 'false'
   fi
-  if domain_resolves_to_ip "$domain" "$pubip"; then
+  if _dns_ready_probe "$domain" "$pubip"; then
     ok "DNS resolves to $pubip: $domain"
     state_set_raw dns_ready 'true'
     return 0
   fi
   if [ "${DNS_READY:-0}" = "1" ] || [ "${CONFIRM_DNS_READY:-0}" = "1" ]; then
-    if domain_resolves_to_ip "$domain" "$pubip"; then
+    if _dns_ready_probe "$domain" "$pubip"; then
       state_set_raw dns_ready 'true'
       return 0
     fi
@@ -1022,7 +1077,12 @@ _require_user_dns_ready() {
   fi
 
   if [ "$domain_mode" = "route53" ]; then
-    warn "Route53 A record was submitted, but $domain does not resolve to ${pubip} yet."
+    dns_status=$(state_get dns_check_status)
+    if [ "$dns_status" = infrastructure_unavailable ]; then
+      warn "Authoritative/public DNS checks are unavailable for $domain; refusing to trigger production ACME until they can be verified."
+    else
+      warn "Route53 A record was submitted, but authoritative/public DNS does not resolve $domain to ${pubip} yet."
+    fi
     warn "This is usually DNS propagation delay; rerun later to continue."
   else
     warn "Update DNS so $domain has an A record pointing to this public IP:"
@@ -1038,7 +1098,7 @@ _require_user_dns_ready() {
     local ans
     read -r ans
     if is_yes "$ans"; then
-      if domain_resolves_to_ip "$domain" "$pubip"; then
+      if _dns_ready_probe "$domain" "$pubip"; then
         state_set_raw dns_ready 'true'
         return 0
       fi
@@ -1054,4 +1114,85 @@ _require_user_dns_ready() {
     warn "  DOMAIN=$domain DOMAIN_MODE=$domain_mode CONFIRM_DOMAIN_BINDING=1 DIREXTALK_CLOUD_PROVIDER=ec2 INSTANCE_TYPE=$instance_type bash scripts/orchestrate.sh"
   fi
   return 2
+}
+
+_revalidate_bootstrap_target() {
+  local expected_ip=$1 provider instance_id instance_name attached current state expected_account actual_account
+  provider=$(state_get cloud_provider)
+  expected_account=$(state_get aws_account_id)
+  actual_account=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || return 2
+  printf '%s\n' "$actual_account" | grep -Eq '^[0-9]{12}$' || return 2
+  [ -n "$expected_account" ] || return 2
+  [ "$expected_account" = "$actual_account" ] || return 1
+  case "$provider" in
+    ec2)
+      instance_id=$(res_get instance_id)
+      [ -n "$instance_id" ] || return 2
+      current=$(aws ec2 describe-instances --instance-ids "$instance_id" \
+        --query 'Reservations[0].Instances[0].[State.Name,PublicIpAddress]' --output text 2>/dev/null) || return 2
+      state=${current%%$'\t'*}; current=${current#*$'\t'}
+      [ "$state" = running ] && [ "$current" = "$expected_ip" ] || return 1
+      ;;
+    lightsail)
+      instance_name=$(res_get lightsail_instance_name)
+      attached=$(res_get lightsail_static_ip_name)
+      [ -n "$instance_name" ] && [ -n "$attached" ] || return 2
+      state=$(aws lightsail get-instance --instance-name "$instance_name" \
+        --query 'instance.state.name' --output text 2>/dev/null) || return 2
+      current=$(aws lightsail get-static-ip --static-ip-name "$attached" \
+        --query 'staticIp.ipAddress' --output text 2>/dev/null) || return 2
+      [ "$state" = running ] && [ "$current" = "$expected_ip" ] || return 1
+      current=$(aws lightsail get-static-ip --static-ip-name "$attached" \
+        --query 'staticIp.attachedTo' --output text 2>/dev/null) || return 2
+      [ "$current" = "$instance_name" ] || return 1
+      ;;
+    *) return 2 ;;
+  esac
+}
+
+_remote_dns_ready_probe() {
+  local domain=$1 pubip=$2 known_hosts="$DIREXTALK_WORKDIR/known_hosts" ssh_user=${DIREXTALK_BOOTSTRAP_SSH_USER:-ubuntu} rc remote_result machine_id host_digest recorded_digest remote_command
+  _revalidate_bootstrap_target "$pubip" || return $?
+  if [ ! -e "$known_hosts" ] && [ ! -L "$known_hosts" ]; then
+    (umask 077; set -C; : >"$known_hosts") 2>/dev/null || true
+    [ -e "$known_hosts" ] || return 2
+  fi
+  [ -f "$known_hosts" ] && [ ! -L "$known_hosts" ] || return 2
+  chmod 0600 "$known_hosts" || return 2
+  remote_command="python3 - '$domain' '$pubip'; probe_rc=\$?; if [ -f /etc/machine-id ]; then machine_id_sha=\$(sha256sum /etc/machine-id | cut -d' ' -f1); else machine_id_sha=missing; fi; case \"\$probe_rc\" in 0|1|2) dns_status=\$probe_rc ;; *) dns_status=2 ;; esac; printf 'dns_status=%s machine_id_sha=%s\\n' \"\$dns_status\" \"\$machine_id_sha\"; exit 0"
+  if remote_result=$(ssh -T -i "$(res_get key_file)" -o BatchMode=yes -o ConnectTimeout=10 \
+      -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$known_hosts" \
+      "$ssh_user@$pubip" "$remote_command" <"$S3_PHASE_DIR/phases/remote_dns_probe.py"); then
+    rc=0
+  else
+    return 2
+  fi
+  host_digest=$(sha256sum "$known_hosts" 2>/dev/null | awk '{print $1}') || return 2
+  recorded_digest=$(state_get dns_ssh_host_identity)
+  if [ -n "$recorded_digest" ] && [ "$recorded_digest" != "$host_digest" ]; then
+    return 2
+  fi
+  state_set dns_ssh_host_identity "$host_digest" 2>/dev/null || true
+  machine_id=$(printf '%s\n' "$remote_result" | sed -n 's/^dns_status=[012] machine_id_sha=//p' | tail -n1)
+  rc=$(printf '%s\n' "$remote_result" | sed -n 's/^dns_status=\([012]\) machine_id_sha=.*/\1/p' | tail -n1)
+  printf '%s\n' "$remote_result" | grep -Eq '^dns_status=[012] machine_id_sha=[0-9a-f]{64}$' || return 2
+  recorded_digest=$(state_get dns_remote_machine_identity)
+  if [ -n "$recorded_digest" ] && [ "$recorded_digest" != "$machine_id" ]; then
+    return 2
+  fi
+  state_set dns_remote_machine_identity "$machine_id" 2>/dev/null || true
+  return "$rc"
+}
+
+_dns_ready_probe() {
+  local domain=$1 pubip=$2 rc
+  _remote_dns_ready_probe "$domain" "$pubip" || rc=$?
+  rc=${rc:-0}
+  case "$rc" in
+    0) state_set dns_check_status authoritative_and_public_verified 2>/dev/null || true ;;
+    1) state_set dns_check_status not_propagated 2>/dev/null || true ;;
+    2) state_set dns_check_status infrastructure_unavailable 2>/dev/null || true ;;
+    *) state_set dns_check_status infrastructure_unavailable 2>/dev/null || true; rc=2 ;;
+  esac
+  return "$rc"
 }

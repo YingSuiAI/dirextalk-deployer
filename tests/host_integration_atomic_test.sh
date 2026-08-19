@@ -34,10 +34,17 @@ printf 'passwordauthentication no\npubkeyauthentication yes\n'
 EOF
 cat >"$tmp/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
+printf 'systemctl:%s\n' "$*" >>"$SYSTEMCTL_CALLS"
 case "${1:-}" in
   daemon-reload) exit "${DAEMON_RELOAD_STATUS:-0}" ;;
   enable) exit "${ENABLE_STATUS:-0}" ;;
   is-enabled) exit 1 ;;
+  start)
+    [ "${2:-}" = dirextalk-updater.service ] && : >"$SYSTEMCTL_ACTIVE"
+    exit "${START_STATUS:-0}" ;;
+  is-active)
+    [ "${2:-}" = --quiet ] && [ "${3:-}" = dirextalk-updater.service ] && [ -f "$SYSTEMCTL_ACTIVE" ]
+    exit $? ;;
   disable) exit 0 ;;
   *) exit 0 ;;
 esac
@@ -95,6 +102,7 @@ set -euo pipefail
 base=$2
 [ "$(cat "$base/deploy/split-agent/SOURCE_REVISION")" = "$DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION" ]
 grep -Fqx "SPLIT_SOURCE_REVISION=$EXPECTED_OLD" "$base/.env"
+printf 'reconcile\n' >>"$RECONCILE_CALLS"
 exit "${RECONCILE_STATUS:-0}"
 EOF
 printf 'fixture\n' >"$stage/updater/release.env"
@@ -116,6 +124,9 @@ tar -C "$bundle_root" -czf "$bundle" deploy
 
 write_live() {
   base=$1
+  rm -f "$SYSTEMCTL_ACTIVE"
+  : >"$SYSTEMCTL_CALLS"
+  : >"$RECONCILE_CALLS"
   rm -rf "$base"
   mkdir -p "$base/deploy/split-agent" "$base/production-ops" "$base/updater" "$base/split"
   printf 'removed-old-file\n' >"$base/deploy/split-agent/removed-file"
@@ -163,6 +174,9 @@ EOF
   chmod 0600 "$base/.env" "$base/stable-public-ip"
 }
 
+export SYSTEMCTL_CALLS="$tmp/systemctl.calls" SYSTEMCTL_ACTIVE="$tmp/updater.active" RECONCILE_CALLS="$tmp/reconcile.calls"
+: >"$SYSTEMCTL_CALLS"
+: >"$RECONCILE_CALLS"
 tree_digest() { find "$1" -type f ! -name .split-source-revision.lock -print0 | LC_ALL=C sort -z | xargs -0 sha256sum; }
 fresh_base="$tmp/fresh"
 fresh_calls="$tmp/fresh.calls"
@@ -199,6 +213,10 @@ grep -Fqx "DIREXTALK_CLOUD_WORKER_HOST_REGION=$host_region" "$base/split/cloud-w
 EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" DIREXTALK_HOST_INTEGRATION_ROOT="$tmp/host" \
   bash "$apply" "$stage" "$bundle" "$base" "$old" 203.0.113.44 "$host_region" >/dev/null
 grep -Fqx "SPLIT_SOURCE_REVISION=$target" "$base/.env"
+start_line=$(grep -nF 'systemctl:start dirextalk-updater.service' "$SYSTEMCTL_CALLS" | tail -n1 | cut -d: -f1)
+active_line=$(grep -nF 'systemctl:is-active --quiet dirextalk-updater.service' "$SYSTEMCTL_CALLS" | tail -n1 | cut -d: -f1)
+[ -n "$start_line" ] && [ -n "$active_line" ] && [ "$start_line" -lt "$active_line" ]
+[ "$(grep -c '^reconcile$' "$RECONCILE_CALLS")" -ge 1 ]
 
 write_live "$base"
 if RECONCILE_STATUS=3 EXPECTED_OLD="$old" PATH="$tmp/bin:$PATH" \

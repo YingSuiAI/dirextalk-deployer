@@ -120,4 +120,39 @@ fi
 [ "$status" -eq 1 ]
 [ "$(grep -c '^ssh$' "$CALLS")" -eq 1 ]
 
+# A failed second staging allocation must clean the first bundle and never
+# reach the uploader. Cleanup is deliberately limited to the two exact
+# literal leftovers; unrelated files and symlinks remain untouched.
+known_integration="$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz"
+known_split="$DIREXTALK_WORKDIR/.split-agent-runtime.XXXXXX.tar.gz"
+printf 'stale integration\n' >"$known_integration"
+printf 'stale split\n' >"$known_split"
+printf 'unrelated\n' >"$DIREXTALK_WORKDIR/.split-agent-runtime.other.tar.gz"
+ln -s unrelated "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz.link"
+cat >"$tmp/bin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *'.split-agent-runtime.XXXXXX.tar.gz') exit 77 ;;
+  *) exec /usr/bin/mktemp "$@" ;;
+esac
+EOF
+chmod 700 "$tmp/bin/mktemp"
+: >"$CALLS"
+if _resume_host_bootstrap 203.0.113.44 "$tmp/key.pem" >/dev/null 2>&1; then
+  echo 'host bootstrap accepted a failed second transport allocation' >&2
+  exit 1
+else
+  status=$?
+fi
+[ "$status" -eq 1 ]
+[ ! -e "$known_integration" ]
+[ ! -e "$known_split" ]
+[ -f "$DIREXTALK_WORKDIR/.split-agent-runtime.other.tar.gz" ]
+[ -L "$DIREXTALK_WORKDIR/.updater-integration.XXXXXX.tar.gz.link" ]
+[ ! -s "$CALLS" ]
+find "$DIREXTALK_WORKDIR" -maxdepth 1 -type f -name '.updater-integration.*.tar.gz' -print -quit | grep -q . && {
+  echo 'failed second allocation leaked the first transport bundle' >&2
+  exit 1
+} || :
+
 echo "s3 public IP validation ok"

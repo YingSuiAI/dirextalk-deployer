@@ -452,16 +452,28 @@ require_pair "$edge_env" DIREXTALK_CADDY_DATA_VOLUME "${stack}-caddy-data"
 require_pair "$edge_env" DIREXTALK_CADDY_CONFIG_VOLUME "${stack}-caddy-config"
 require_pair "$edge_env" DIREXTALK_CADDYFILE "$caddyfile"
 require_pair "$edge_env" DIREXTALK_STATIC_SITES_ROOT "$(read_pair "$run_dir/.env" DIREXTALK_STATIC_SITES_ROOT)"
-caddy_tmp=$(mktemp "$base/.Caddyfile.XXXXXX")
-sed "s/__DIREXTALK_PUBLIC_DOMAIN__/$domain/g" "$script_dir/Caddyfile" >"$caddy_tmp"
+if ! caddy_tmp=$(mktemp "$base/.Caddyfile.XXXXXX"); then
+  echo 'could not create the Caddyfile staging file; refusing to render a literal template' >&2
+  exit 1
+fi
+cleanup_caddy_tmp() { rm -f -- "$caddy_tmp"; }
+trap cleanup_caddy_tmp EXIT
+sed "s/__DIREXTALK_PUBLIC_DOMAIN__/$domain/g" "$script_dir/Caddyfile" >"$caddy_tmp" || exit 1
 chmod 0400 "$caddy_tmp"
-mv -f "$caddy_tmp" "$caddyfile"
+if [ -f "$caddyfile" ] && [ ! -L "$caddyfile" ] && cmp -s "$caddy_tmp" "$caddyfile"; then
+  caddy_changed=false
+  rm -f -- "$caddy_tmp"
+else
+  caddy_changed=true
+  mv -f -- "$caddy_tmp" "$caddyfile"
+fi
+trap - EXIT
 docker volume create --label com.dirextalk.owner="$stack" "${stack}-caddy-data" >/dev/null
 docker volume create --label com.dirextalk.owner="$stack" "${stack}-caddy-config" >/dev/null
 edge_compose=(docker compose --env-file "$edge_env" -f "$split/edge-compose.yaml" -f "$script_dir/edge-compose.override.yaml")
 "${edge_compose[@]}" config --quiet
 "${edge_compose[@]}" pull
-if [ "$operation" = --reconcile-edge ]; then
+if [ "$operation" = --reconcile-edge ] && [ "$caddy_changed" = true ]; then
   "${edge_compose[@]}" up -d --wait --force-recreate caddy
 else
   "${edge_compose[@]}" up -d --wait

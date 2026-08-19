@@ -318,9 +318,11 @@ if [ "$fresh_host" = true ]; then
     status=$?
     case "$status" in 3) exit 3 ;; *) exit 1 ;; esac
   fi
-elif DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION="$target_revision" \
-    DIREXTALK_BOOTSTRAP_LOCK_FD=8 \
-    bash "$base/updater/reconcile-host.sh" "$stage/updater" "$base" "$expected_stable_ip"; then
+elif systemctl start dirextalk-updater.service \
+    && systemctl is-active --quiet dirextalk-updater.service \
+    && DIREXTALK_AUTHORIZED_SPLIT_SOURCE_REVISION="$target_revision" \
+       DIREXTALK_BOOTSTRAP_LOCK_FD=8 \
+       bash "$base/updater/reconcile-host.sh" "$stage/updater" "$base" "$expected_stable_ip"; then
   :
 else
   status=$?

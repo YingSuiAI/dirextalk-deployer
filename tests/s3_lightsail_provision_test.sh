@@ -75,6 +75,7 @@ printf '%s' "$(basename "$0")" >> "$CALLS"
 printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 case "${!#}" in
+  *python3*) cat >/dev/null; [ "${REMOTE_SSH_STATUS:-0}" -eq 0 ] || exit "$REMOTE_SSH_STATUS"; printf 'dns_status=%s machine_id_sha=%064d\n' "${REMOTE_DNS_STATUS:-0}" "${REMOTE_MACHINE_ID:-1}"; exit 0 ;;
   *'apply-host-integration.sh'*)
     cat > "$TMPDIR/integration-upload.tar.gz"
     tar -tzf "$TMPDIR/integration-upload.tar.gz" > "$TMPDIR/integration-upload.list"
@@ -159,13 +160,31 @@ grep -q '^ssh .*apply-host-integration\.sh.*cloud-init.*status.*--wait.*printf' 
 grep -q '^ssh .*apply-host-integration\.sh.*203\.0\.113\.144.*us-east-1' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q -- '--no-same-owner' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 static_ip_line=$(grep -n '^aws lightsail get-static-ip .*--query staticIp.ipAddress' "$CALLS" | cut -d: -f1 | head -n1)
-upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
-dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)
-[ "$static_ip_line" -lt "$upload_line" ] && [ "$upload_line" -lt "$dns_line" ] || {
-  echo "Lightsail updater upload must use the static IP and complete before DNS gating" >&2
+upload_line=$(grep -n '^ssh ' "$CALLS" | grep -v python3 | cut -d: -f1 | head -n1)
+dns_line=$(grep -n '^ssh .*python3' "$CALLS" | cut -d: -f1 | head -n1)
+[ "$static_ip_line" -lt "$dns_line" ] && [ "$dns_line" -lt "$upload_line" ] || {
+  echo "Lightsail DNS must be authoritative before the host integration can trigger ACME" >&2
   cat "$CALLS" >&2
   exit 1
 }
+set +e
+REMOTE_DNS_STATUS=1 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null 2>&1
+remote_not_ready_rc=$?
+REMOTE_DNS_STATUS=2 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null 2>&1
+remote_infra_rc=$?
+set -e
+[ "$remote_not_ready_rc" -eq 2 ]
+[ "$remote_infra_rc" -eq 2 ]
+[ "$(state_get dns_check_status)" = infrastructure_unavailable ]
+if REMOTE_SSH_STATUS=255 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null 2>&1; then
+  echo 'SSH shell failure must not be classified as remote DNS propagation' >&2
+  exit 1
+fi
+if REMOTE_DNS_STATUS=0 REMOTE_MACHINE_ID=2 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null 2>&1; then
+  echo 'remote DNS gate accepted a changed deployed-host identity' >&2
+  exit 1
+fi
+REMOTE_DNS_STATUS=0 _require_user_dns_ready user lightsail.example.test 203.0.113.144 'DIREXTALK_CLOUD_PROVIDER=lightsail' >/dev/null
 before=$(grep -c '^ssh ' "$CALLS")
 _resume_host_bootstrap 203.0.113.144 "$(res_get key_file)"
 after=$(grep -c '^ssh ' "$CALLS")

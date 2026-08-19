@@ -44,6 +44,134 @@ source "$HERE/lib/region.sh"
 source "$HERE/lib/http-secrets.sh"
 source "$HERE/lib/server-release.sh"
 
+# One state directory must have one active orchestration owner. Every platform
+# acquires the atomic owner directory first; Linux flock is an additional
+# kernel lock after that primary gate. The receipt records process identity
+# where the host exposes it.
+ORCHESTRATE_LOCK_DIR="${DIREXTALK_WORKDIR:-$(dirextalk_default_workdir)}/.orchestrate.lock"
+ORCHESTRATE_LOCK_FILE="$ORCHESTRATE_LOCK_DIR/lock"
+ORCHESTRATE_LOCK_MODE=
+
+_orchestrate_lock_cleanup() {
+  local owner_pid owner_file owner_starttime self_starttime
+  [ -n "${ORCHESTRATE_LOCK_MODE:-}" ] || return 0
+  if [ "$ORCHESTRATE_LOCK_MODE" = flock ]; then
+    flock -u 9 2>/dev/null || true
+    exec 9>&- 2>/dev/null || true
+  fi
+  owner_file="$ORCHESTRATE_LOCK_DIR/owner/receipt"
+  owner_pid=$(sed -n 's/^pid=//p' "$owner_file" 2>/dev/null || true)
+  owner_starttime=$(sed -n 's/^starttime=//p' "$owner_file" 2>/dev/null || true)
+  self_starttime=$(_orchestrate_process_start_identity "$$")
+  if [ "$owner_pid" = "$$" ] && [ -f "$owner_file" ] && [ ! -L "$owner_file" ] \
+      && { [ -z "$owner_starttime" ] || [ "$owner_starttime" = unknown ] || [ "$owner_starttime" = "$self_starttime" ]; }; then
+    rm -f -- "$owner_file" 2>/dev/null || true
+    rmdir -- "${owner_file%/*}" 2>/dev/null || true
+  fi
+  ORCHESTRATE_LOCK_MODE=
+}
+
+_orchestrate_process_start_identity() {
+  local pid=$1 stat_line starttime
+  case "$pid" in ''|*[!0-9]*) printf 'unknown\n'; return 0 ;; esac
+  if [ -r "/proc/$pid/stat" ]; then
+    stat_line=$(cat "/proc/$pid/stat" 2>/dev/null || true)
+    # The comm field may contain spaces; remove everything through its final
+    # closing parenthesis, then starttime is field 20 in the remaining text
+    # (field 22 in /proc/<pid>/stat).
+    starttime=$(printf '%s\n' "$stat_line" | sed 's/.*) //' | awk '{print $20}')
+    case "$starttime" in
+      ''|*[!0-9]*) ;;
+      *) printf '%s\n' "$starttime"; return 0 ;;
+    esac
+  fi
+  printf 'unknown\n'
+}
+
+_orchestrate_lock_owner_alive() {
+  local pid=$1 expected_starttime=${2:-} current_starttime
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$pid" -gt 0 ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+
+  # A live PID is only reclaimable when Linux can prove that its process
+  # identity differs from the receipt. Missing identity data fails closed.
+  if [ -r "/proc/$pid/stat" ]; then
+    current_starttime=$(_orchestrate_process_start_identity "$pid")
+    case "$expected_starttime" in ''|unknown|*[!0-9]*) return 0 ;; esac
+    case "$current_starttime" in ''|unknown|*[!0-9]*) return 0 ;; esac
+    [ "$expected_starttime" = "$current_starttime" ] && return 0
+    return 1
+  fi
+  return 0
+}
+
+acquire_orchestrate_lock() {
+  local lock_parent owner_file owner_pid owner_dir owner_starttime
+  lock_parent=${ORCHESTRATE_LOCK_DIR%/*}
+  [ -n "$lock_parent" ] && mkdir -p -- "$lock_parent" || return 1
+  mkdir -p -- "$ORCHESTRATE_LOCK_DIR" || return 1
+  owner_dir="$ORCHESTRATE_LOCK_DIR/owner"
+  owner_file="$owner_dir/receipt"
+
+  if [ -e "$owner_file" ] || [ -L "$owner_file" ]; then
+    owner_pid=$(sed -n 's/^pid=//p' "$owner_file" 2>/dev/null || true)
+    owner_starttime=$(sed -n 's/^starttime=//p' "$owner_file" 2>/dev/null || true)
+    if [ -f "$owner_file" ] && [ ! -L "$owner_file" ] && ! _orchestrate_lock_owner_alive "$owner_pid" "$owner_starttime"; then
+      rm -f -- "$owner_file" 2>/dev/null || return 2
+      rmdir -- "$owner_dir" 2>/dev/null || return 2
+    else
+      warn "Another orchestrate run owns this service state: $STATE_JSON"
+      return 2
+    fi
+  fi
+
+  # mkdir is the portable primary owner gate. A stale owner is recoverable,
+  # but only after validating the literal receipt and process identity.
+  if ! mkdir -- "$owner_dir" 2>/dev/null; then
+    owner_pid=$(sed -n 's/^pid=//p' "$owner_file" 2>/dev/null || true)
+    owner_starttime=$(sed -n 's/^starttime=//p' "$owner_file" 2>/dev/null || true)
+    if [ -f "$owner_file" ] && [ ! -L "$owner_file" ] && ! _orchestrate_lock_owner_alive "$owner_pid" "$owner_starttime"; then
+      rm -f -- "$owner_file" 2>/dev/null || return 2
+      rmdir -- "$owner_dir" 2>/dev/null || return 2
+      mkdir -- "$owner_dir" 2>/dev/null || {
+        warn "Another orchestrate run owns this service state: $STATE_JSON"
+        return 2
+      }
+    else
+      warn "Another orchestrate run owns this service state: $STATE_JSON"
+      return 2
+    fi
+  fi
+  owner_starttime=$(_orchestrate_process_start_identity "$$")
+  if ! printf 'pid=%s\nstarttime=%s\nrun_id=%s\nstate=%s\n' "$$" "$owner_starttime" "$(state_get run_id)" "$STATE_JSON" >"$owner_file"; then
+    rm -f -- "$owner_file" 2>/dev/null || true
+    rmdir -- "$owner_dir" 2>/dev/null || true
+    return 1
+  fi
+
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$ORCHESTRATE_LOCK_FILE" || {
+      rm -f -- "$owner_file" 2>/dev/null || true
+      rmdir -- "$owner_dir" 2>/dev/null || true
+      return 1
+    }
+    if ! flock -n 9; then
+      warn "Another orchestrate run owns this service state: $STATE_JSON"
+      exec 9>&- 2>/dev/null || true
+      rm -f -- "$owner_file" 2>/dev/null || true
+      rmdir -- "$owner_dir" 2>/dev/null || true
+      return 2
+    fi
+    ORCHESTRATE_LOCK_MODE=flock
+  else
+    ORCHESTRATE_LOCK_MODE=mkdir
+  fi
+  trap _orchestrate_lock_cleanup EXIT
+  trap '_orchestrate_lock_cleanup; exit 130' INT TERM
+  return 0
+}
+
 # Phase -> script mapping. Use case instead of declare -A for macOS bash 3.2.
 phase_file() {
   case "$1" in
@@ -654,8 +782,15 @@ guard_existing_state() {
 cmd_run() {
   precheck_new_deploy_domain_env || return $?
   check_deps
-  guard_existing_state || return $?
   state_ensure
+  local lock_rc=0
+  acquire_orchestrate_lock || lock_rc=$?
+  case "$lock_rc" in
+    0) ;;
+    2) return 2 ;;
+    *) warn "Could not acquire the orchestrate owner lock for $STATE_JSON"; return 1 ;;
+  esac
+  guard_existing_state || return $?
   ensure_production_domain_selected || return $?
   ensure_region_selected || return $?
   ensure_cost_estimate

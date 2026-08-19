@@ -35,6 +35,7 @@ case "${1:-} ${2:-}" in
   "ec2 run-instances") printf 'i-test\n' ;;
   "ec2 describe-instances")
     case "$*" in
+      *State.Name*) printf 'running\t203.0.113.155\n' ;;
       *Reservations*OwnerId*) printf '123456789012\ti-test\t203.0.113.155\n' ;;
       *) printf 'vol-root-test\n' ;;
     esac ;;
@@ -60,6 +61,7 @@ printf ' %q' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
 cat >/dev/null
 case "${!#}" in
+  *python3*) cat >/dev/null; [ "${REMOTE_SSH_STATUS:-0}" -eq 0 ] || exit "$REMOTE_SSH_STATUS"; printf 'dns_status=%s machine_id_sha=%064d\n' "${REMOTE_DNS_STATUS:-0}" 1; exit 0 ;;
   *'/etc/machine-id'*) printf '0123456789abcdef0123456789abcdef\tDOCKERENGINE1234\n' ;;
   *) printf 'v1.0.17\td10bcae89522c172f9d32ed7d7bbf7c85ffbf77b\t029c09b4b2f50090ad88076fbbedf95f0d912a64f9ce888f138ebad4face20ec\n' ;;
 esac
@@ -103,10 +105,10 @@ grep -q 'authorize-security-group-ingress .*--protocol tcp --port 3478 --cidr 0.
 grep -q 'authorize-security-group-ingress .*--protocol udp --port 3478 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 grep -q 'authorize-security-group-ingress .*--protocol udp --port 49160-49200 --cidr 0.0.0.0/0' "$CALLS" || { cat "$CALLS" >&2; exit 1; }
 address_line=$(grep -n '^aws ec2 describe-addresses' "$CALLS" | cut -d: -f1 | head -n1)
-upload_line=$(grep -n '^ssh ' "$CALLS" | cut -d: -f1 | head -n1)
-dns_line=$(grep -n '^dns-check ' "$CALLS" | cut -d: -f1 | head -n1)
-[ "$address_line" -lt "$upload_line" ] && [ "$upload_line" -lt "$dns_line" ] || {
-  echo "EC2 bootstrap resume must use the EIP and complete before DNS gating" >&2
+upload_line=$(grep -n '^ssh ' "$CALLS" | grep -v python3 | cut -d: -f1 | head -n1)
+dns_line=$(grep -n '^ssh .*python3' "$CALLS" | cut -d: -f1 | head -n1)
+[ "$address_line" -lt "$dns_line" ] && [ "$dns_line" -lt "$upload_line" ] || {
+  echo "EC2 DNS must be authoritative before the host integration can trigger ACME" >&2
   cat "$CALLS" >&2
   exit 1
 }

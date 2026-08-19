@@ -168,7 +168,7 @@ grep -Fq '"$split/scripts/prepare-host-dependencies.sh"' "$consumer"
 grep -Fq '"$split/scripts/provision-local.sh" "$run_dir"' "$consumer"
 grep -Fq '"$split/scripts/start-local.sh" "$run_dir/.env"' "$consumer"
 grep -Fq 'sed "s/__DIREXTALK_PUBLIC_DOMAIN__/$domain/g" "$script_dir/Caddyfile"' "$consumer"
-grep -Fq 'mv -f "$caddy_tmp" "$caddyfile"' "$consumer"
+grep -Fq 'mv -f -- "$caddy_tmp" "$caddyfile"' "$consumer"
 grep -Fq 'require_pair "$edge_env" DIREXTALK_CADDYFILE "$caddyfile"' "$consumer"
 grep -Fq 'cloud-init/split/Caddyfile' "$ROOT/scripts/phases/s3_provision.sh"
 grep -Fq 'cloud-init/split/edge-compose.override.yaml' "$ROOT/scripts/phases/s3_provision.sh"
@@ -504,6 +504,18 @@ if grep -Fq 'export-called' "$edge_calls"; then
 fi
 grep -Fq 'compose' "$edge_calls"
 grep -Fq 'up -d --wait --force-recreate caddy' "$edge_calls"
+force_recreate_before=$(grep -Fc -- '--force-recreate caddy' "$edge_calls")
+PATH="$edge_fakebin:$PATH" EDGE_CALLS="$edge_calls" DIREXTALK_BOOTSTRAP_BASE="$edge" \
+  bash "$consumer_exec" --reconcile-edge
+force_recreate_after=$(grep -Fc -- '--force-recreate caddy' "$edge_calls")
+[ "$force_recreate_after" -eq "$force_recreate_before" ] || {
+  echo 'unchanged Caddyfile reconcile must not force-recreate Caddy' >&2
+  exit 1
+}
+grep -Eq 'up -d --wait$' "$edge_calls" || {
+  echo 'unchanged Caddyfile reconcile must use a normal Compose convergence' >&2
+  exit 1
+}
 
 for relative in compose.production.yaml scripts/update-message-server-local.sh scripts/prepare-runner-cgroups.sh; do
   missing="$split/$relative"

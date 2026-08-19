@@ -844,6 +844,44 @@ _connect_binary_available() {
   [ -x "$1" ] || command -v "$1" >/dev/null 2>&1
 }
 
+_connect_binary_version_works() {
+  local binary=$1 version_output
+  case "$binary" in
+    */*|[A-Za-z]:/*|[A-Za-z]:\\*) [ -f "$binary" ] || return 1 ;;
+    *) command -v "$binary" >/dev/null 2>&1 || return 1 ;;
+  esac
+  version_output=$("$binary" --version 2>/dev/null) || return 1
+  [ -n "$(printf '%s' "$version_output" | tr -d '[:space:]')" ]
+}
+
+_connect_package_manifest() {
+  local package_dir=$1 manifest="$package_dir/node_modules/dirextalk-connect/package.json"
+  [ -f "$manifest" ] && [ ! -L "$manifest" ] || return 1
+  [ "$(json_get "$manifest" name 2>/dev/null || true)" = dirextalk-connect ] || return 1
+  printf '%s\n' "$manifest"
+}
+
+_connect_run_official_install() {
+  local package_dir=$1 manifest install_script
+  manifest=$(_connect_package_manifest "$package_dir") || return 1
+  install_script=${manifest%/*}/install.js
+  [ -f "$install_script" ] && [ ! -L "$install_script" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  node "$install_script"
+}
+
+_connect_verify_package_binary() {
+  local service_dir=$1 package_bin package_dir
+  package_dir=$(_connect_package_dir "$service_dir")
+  _connect_package_manifest "$package_dir" >/dev/null || return 2
+  package_bin=$(_connect_package_bin_path "$service_dir")
+  if ! _connect_binary_version_works "$package_bin"; then
+    warn "dirextalk-connect package binary is missing or --version failed; running only its official package install.js."
+    _connect_run_official_install "$package_dir" || return 1
+  fi
+  _connect_binary_version_works "$package_bin"
+}
+
 _connect_daemon_is_running() {
   local binary=$1 service_name=$2 status
   [ -n "$service_name" ] || service_name=dirextalk-connect
@@ -890,7 +928,7 @@ _connect_daemon_wait_until_ready() {
 
 _maybe_auto_install_connect() {
   local policy=$1 runtime=$2 cc_agent=$3 service_dir=$4 config_path=$5 binary=$6 service_name=$7
-  local repo ref src commit config_arg ready_evidence package_dir
+  local repo ref src commit config_arg ready_evidence package_dir package_manifest
   [ -n "$service_name" ] || service_name=$(basename "$service_dir")
   if [ "$policy" != "auto" ]; then
     state_set connect_install_status "$policy" 2>/dev/null || true
@@ -907,6 +945,12 @@ _maybe_auto_install_connect() {
       if npm install --prefix "$package_dir" "$(_connect_npm_package)"; then
         if ! _ensure_connect_wrapper "$service_dir"; then
           state_set connect_install_status "install_failed" 2>/dev/null || true
+          return 1
+        fi
+        package_manifest=$(_connect_package_manifest "$package_dir" 2>/dev/null || true)
+        if [ -n "$package_manifest" ] && ! _connect_verify_package_binary "$service_dir"; then
+          state_set connect_install_status "install_failed" 2>/dev/null || true
+          warn "dirextalk-connect npm package was installed but its package binary could not be verified."
           return 1
         fi
         ok "dirextalk-connect package refreshed for this service."

@@ -266,6 +266,30 @@ posix_install_command=$(DIREXTALK_LOCAL_PATH_STYLE=posix _connect_install_comman
 [[ "$posix_install_command" != *"daemon stop"* ]]
 [[ "$posix_install_command" != *"Test-Path -LiteralPath"* ]]
 
+# A package whose npm postinstall was skipped must be repaired only through
+# its own official install.js, and the resulting package binary must answer
+# --version before S6 can accept the install.
+package_service_dir="$tmp/package-install-service"
+package_dir="$package_service_dir/dirextalk-connect"
+mkdir -p "$package_dir/node_modules/dirextalk-connect" "$package_dir/node_modules/.bin"
+printf '{"name":"dirextalk-connect"}\n' >"$package_dir/node_modules/dirextalk-connect/package.json"
+cat >"$package_dir/node_modules/dirextalk-connect/install.js" <<'EOF'
+const fs = require("node:fs");
+const path = require("node:path");
+const bin = path.resolve(__dirname, "..", ".bin", "dirextalk-connect");
+fs.writeFileSync(bin, "#!/usr/bin/env bash\nprintf 'dirextalk-connect test version\\n'\n", { mode: 0o700 });
+fs.appendFileSync(process.env.CONNECT_INSTALL_LOG, "official-install\n");
+EOF
+cat >"$package_dir/node_modules/.bin/dirextalk-connect" <<'EOF'
+#!/usr/bin/env bash
+exit 19
+EOF
+chmod 700 "$package_dir/node_modules/dirextalk-connect/install.js" "$package_dir/node_modules/.bin/dirextalk-connect"
+export CONNECT_INSTALL_LOG="$tmp/connect-install.log"
+_connect_verify_package_binary "$package_service_dir"
+grep -Fxq 'official-install' "$CONNECT_INSTALL_LOG"
+"$package_dir/node_modules/.bin/dirextalk-connect" --version | grep -Fxq 'dirextalk-connect test version'
+
 windows_mcp_doctor_command=$(DIREXTALK_LOCAL_PATH_STYLE=windows _mcp_doctor_command "https://service.example.test" "C:/Users/alice/.dirextalk/nodes/im/credentials.json" node-id "C:/Users/alice/.dirextalk/nodes/im")
 [[ "$windows_mcp_doctor_command" == *"DOMAIN=service.example.test bash scripts/orchestrate.sh verify mcp_doctor"* ]]
 [[ "$windows_mcp_doctor_command" != *"orchestrate.ps1"* ]]
@@ -288,6 +312,9 @@ done
 mkdir -p "$mcp_service_dir"
 : > "$mcp_credentials"
 mkdir -p "$mcp_service_dir/mcp"
+mkdir -p "$HOME/.cursor"
+: > "$HOME/.cursor/mcp.json"
+printf 'global cursor sentinel\n' > "$HOME/.cursor/mcp.json"
 : > "$mcp_service_dir/mcp/openclaw.mcp.json"
 expected_mcp_credentials="$mcp_credentials"
 if command -v cygpath >/dev/null 2>&1; then
@@ -304,6 +331,7 @@ _write_mcp_config_artifacts "service.example.test" "$mcp_service_dir" "https://s
 [ ! -e "$mcp_service_dir/mcp/hermes.mcp.json" ]
 [ ! -e "$mcp_service_dir/mcp/mcp-servers.json" ]
 [ ! -e "$mcp_service_dir/mcp/env" ]
+[ "$(cat "$HOME/.cursor/mcp.json")" = 'global cursor sentinel' ]
 [ -s "$mcp_service_dir/mcp/README.md" ]
 grep -q 'Selected MCP type: none' "$mcp_service_dir/mcp/README.md"
 grep -q 'same MCP server name' "$mcp_service_dir/mcp/README.md"
@@ -701,6 +729,21 @@ grep -q 'model = "whisper-test"' "$speech_config_path"
 [ "$(DIREXTALK_QODERCLI_COMMAND=/opt/qoder/qodercli _connect_agent_command qoder)" = "/opt/qoder/qodercli" ]
 [ "$(DIREXTALK_OPENCODE_AI_COMMAND=/opt/opencode-ai/bin/opencode _connect_agent_command opencode)" = "/opt/opencode-ai/bin/opencode" ]
 [ "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/agent _connect_agent_command codex)" = "/custom/agent" ]
+mkdir -p "$tmp/bin"
+cursor_posix_agent="$tmp/bin/agent"
+cat >"$cursor_posix_agent" <<'EOF'
+#!/usr/bin/env bash
+[ "${1:-}" = login ] && printf 'login\n' >>"$CURSOR_LOGIN_LOG"
+EOF
+chmod 700 "$cursor_posix_agent"
+(
+  export DIREXTALK_LOCAL_PATH_STYLE=posix CURSOR_LOGIN_LOG="$tmp/cursor-login.log"
+  export DIREXTALK_CURSOR_AGENT_COMMAND= DIREXTALK_CURSOR_COMMAND=
+  PATH="$tmp/bin:/usr/bin:/bin"; export PATH
+  [ "$(_connect_agent_command cursor)" = "$cursor_posix_agent" ]
+  "$(_connect_agent_command cursor)" login
+)
+grep -Fxq login "$tmp/cursor-login.log"
 [ -z "$(_connect_agent_command acp hermes 2>/dev/null || true)" ]
 [ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp openclaw 2>/dev/null || true)" ]
 [ -z "$(DIREXTALK_CONNECT_AGENT_CMD=/custom/child _connect_agent_command acp hermes 2>/dev/null || true)" ]

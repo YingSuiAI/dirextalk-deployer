@@ -113,6 +113,7 @@ if sed -n '/^  agent:$/,/^  extension-runner:$/p' "$repository_compose" | grep -
   exit 1
 fi
 grep -Fq 'P2P_PRODUCT_CAPABILITY_LISTEN_ADDR: :50053' "$repository_compose"
+grep -Fq 'P2P_AGENT_VERSION_URL: http://agent:8082/agent/v1/health' "$repository_compose"
 grep -Fq 'expose: ["50053"]' "$repository_compose"
 if grep -Fq '50052' "$repository_compose"; then
   echo 'canonical split bundle retained the retired Message Server to Agent Capability gRPC port' >&2

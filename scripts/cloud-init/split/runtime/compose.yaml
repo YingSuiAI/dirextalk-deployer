@@ -102,6 +102,7 @@ x-runner-storage-init: &runner-storage-init
 x-message-capability-environment: &message-capability-environment
   P2P_PLUGIN_DOCKER_ENABLED: "false"
   P2P_PLUGIN_BACKEND_BASE_URL: http://message-server:8008
+  P2P_AGENT_VERSION_URL: http://agent:8082/agent/v1/health
   P2P_AGENT_VOICE_CALLBACK_URL: ${DIREXTALK_AGENT_VOICE_CALLBACK_URL:-https://agent:8444}
   P2P_AGENT_VOICE_CALLBACK_AUTH_TOKEN_FILE: /run/capability/agent-voice-relay.token
   P2P_AGENT_VOICE_CALLBACK_CA_FILE: /run/capability/ca-cert.pem

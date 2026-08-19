@@ -261,7 +261,8 @@ DIREXTALK_MESSAGE_SERVER_VERSION=v1.1.63 \
   DIREXTALK_AGENT_MINIMUM_SERVER_VERSION=v1.1.63 \
   bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null
 grep -Fq 'update-agent-local.sh' "$REMOTE_COMMAND"
-grep -Fq "'v1.0.163' 'v1.1.63'" "$REMOTE_COMMAND"
+grep -Fq 'v1.0.163' "$REMOTE_COMMAND"
+grep -Fq 'v1.1.63' "$REMOTE_COMMAND"
 node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
   "data.server_release.version === 'v1.1.63' && data.split_release.message_version === 'v1.1.63' && data.split_release.agent_version === 'v1.0.163' && data.split_release.agent_manifest_digest === '$resolved_agent_digest'"
 

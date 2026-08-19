@@ -199,9 +199,18 @@ Destroy stops and uninstalls the local `dirextalk-connect` daemon only when its 
 matches the current service's `~/.dirextalk/nodes/<service_id>/dirextalk-connect`
 directory, then removes that service directory.
 
-Production Agent upgrades are client-initiated through the pinned updater and
-its canonical split update wrapper. Arbitrary mutable image overrides are not a
-supported production operation.
+`update.sh` resolves a controlled Message Server release locally, pins the
+linux/amd64 digest before the remote mutation, and runs the canonical split
+wrapper over SSH. It does not require an owner access token or call the server
+release API. To update the Agent as well, provide its explicit compatibility
+floor; arbitrary image references remain unsupported:
+
+```bash
+DOMAIN=<domain> bash scripts/update.sh
+DIREXTALK_AGENT_VERSION=vX.Y.Z \
+  DIREXTALK_AGENT_MINIMUM_SERVER_VERSION=vX.Y.Z \
+  DOMAIN=<domain> bash scripts/update.sh
+```
 
 Reset application data while preserving EC2, DNS, fixed IP, and Caddy TLS:
 

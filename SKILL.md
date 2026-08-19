@@ -459,9 +459,13 @@ or disable temporary credentials and rotate/remove root access keys if used.
 
 ## Update, Reset, And Destroy
 
-Production Agent upgrades are authorized through the server release API and
-executed by the pinned updater's canonical split wrapper. Do not mutate the
-split Compose environment with an arbitrary image override.
+`update.sh` resolves a controlled Message Server release on the deployer,
+binds its linux/amd64 digest and source revision, and invokes the receipt-bound
+canonical split wrapper directly over the verified SSH host. It does not use an
+owner access token or the server release API. By default it advances only the
+Message Server; an Agent update additionally requires
+`DIREXTALK_AGENT_VERSION` and `DIREXTALK_AGENT_MINIMUM_SERVER_VERSION`.
+Arbitrary image overrides remain unsupported.
 
 Use `DOMAIN=<domain> bash scripts/update.sh` to update an existing production
 split node. It stages the current helpers and runs the receipt-bound canonical

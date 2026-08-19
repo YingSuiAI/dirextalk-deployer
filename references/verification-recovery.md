@@ -79,7 +79,9 @@ the repository-pinned Caddy image when it is absent locally. Run the mandatory
 fault lane on a Linux Docker host; other development hosts receive the same gate
 from the Ubuntu release CI job.
 
-Use the local lifecycle entrypoint for a normal existing-node update:
+Use the local lifecycle entrypoint for a normal existing-node update. It
+resolves and applies a digest-bound Message Server target directly through the
+verified SSH host; no owner bearer or server release API is involved:
 
 ```bash
 DOMAIN=<DOMAIN> bash scripts/update.sh
@@ -128,7 +130,7 @@ Preserve its three result classes through every caller and wrapper:
 
 - `0`: Message Server and Agent are healthy and postconditions succeeded.
 - `3`: Message Server remains healthy and available, but Agent needs
-  receipt-bound recovery or operator attention. Fresh bootstrap still starts
+receipt-bound recovery or operator attention. Fresh bootstrap still starts
   Edge and exports portal credentials before returning this status.
 - `1`: Message Server, infrastructure, identity, or contract failure. A fresh
   application start cleans its receipt-bound partial stack before returning.

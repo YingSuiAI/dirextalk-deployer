@@ -28,6 +28,7 @@ server_release_application_receipts_match || {
   echo "existing node server and split application receipts are inconsistent" >&2
   exit 1
 }
+server_release_resolve_update_target
 recorded_split_revision=$(state_get split_release.split_source_revision)
 recorded_split_release=$(state_get split_release)
 recorded_updater_release=$(state_get updater_release)
@@ -49,6 +50,6 @@ ops_verify_existing_node_identity "$STATE_JSON" || exit 1
 ops_commit_existing_update_release "$STATE_JSON" "$recorded_split_release" "$recorded_updater_release"
 report=$(ops_write_report update update_remote_restart_complete "$STATE_JSON")
 
-echo "Update remote restart complete."
+echo "Update remote release and restart complete."
 echo "Local credentials, dirextalk-connect daemon state, MCP artifacts, confirmations, and runtime checks were left unchanged."
 echo "operation report: $report"

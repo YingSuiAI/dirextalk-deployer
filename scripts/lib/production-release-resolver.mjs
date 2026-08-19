@@ -159,6 +159,27 @@ async function resolveRepositoryOnce(repository, options) {
   };
 }
 
+async function resolveRepositoryVersionOnce(repository, version, options) {
+  const token = await registryToken(repository, options.fetchImpl, options.authUrl);
+  const first = await resolveTag(repository, version, token, options);
+  const second = await resolveTag(repository, version, token, options);
+  if (!sameIdentity(first, second)) {
+    throw new MovingTagError(`${repository}:${version} moved while it was being resolved`);
+  }
+  if (first.version !== version) {
+    throw new Error(`${repository}:${version} image version label does not match its tag`);
+  }
+  const image = `docker.io/${repository}:${version}`;
+  return {
+    repository: `docker.io/${repository}`,
+    version,
+    source_revision: first.sourceRevision,
+    manifest_digest: first.manifestDigest,
+    image,
+    image_ref: `${image}@${first.manifestDigest}`,
+  };
+}
+
 export async function resolveRepository(repository, options = {}) {
   const allowed = new Set(["dirextalk/message-server", "dirextalk/agent"]);
   if (!allowed.has(repository)) throw new Error(`unsupported production repository: ${repository}`);
@@ -181,6 +202,31 @@ export async function resolveRepository(repository, options = {}) {
   throw lastError;
 }
 
+export async function resolveRepositoryVersion(repository, version, options = {}) {
+  const allowed = new Set(["dirextalk/message-server", "dirextalk/agent"]);
+  if (!allowed.has(repository)) throw new Error(`unsupported production repository: ${repository}`);
+  if (!versionPattern.test(String(version || ""))) {
+    throw new Error(`invalid production version for ${repository}: ${version}`);
+  }
+  const settings = {
+    fetchImpl: options.fetchImpl || globalThis.fetch,
+    authUrl: options.authUrl || dockerAuthUrl,
+    registryUrl: options.registryUrl || dockerRegistryUrl,
+    attempts: options.attempts || 3,
+  };
+  if (typeof settings.fetchImpl !== "function") throw new Error("Node.js fetch is unavailable");
+  let lastError;
+  for (let attempt = 1; attempt <= settings.attempts; attempt += 1) {
+    try {
+      return await resolveRepositoryVersionOnce(repository, version, settings);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof MovingTagError) || attempt === settings.attempts) throw error;
+    }
+  }
+  throw lastError;
+}
+
 export async function resolveProductionRelease(options = {}) {
   const [message, agent] = await Promise.all([
     resolveRepository("dirextalk/message-server", options),
@@ -190,7 +236,17 @@ export async function resolveProductionRelease(options = {}) {
 }
 
 async function main() {
-  const release = await resolveProductionRelease();
+  const messageVersion = process.env.DIREXTALK_PRODUCTION_RELEASE_MESSAGE_VERSION || "";
+  const agentVersion = process.env.DIREXTALK_PRODUCTION_RELEASE_AGENT_VERSION || "";
+  const retainMessage = process.env.DIREXTALK_PRODUCTION_RELEASE_RETAIN_MESSAGE === "true";
+  const retainAgent = process.env.DIREXTALK_PRODUCTION_RELEASE_RETAIN_AGENT === "true";
+  if (retainMessage && messageVersion) throw new Error("retained Message Server cannot select a version");
+  if (retainAgent && agentVersion) throw new Error("retained Agent cannot select a version");
+  const [message, agent] = await Promise.all([
+    retainMessage ? Promise.resolve(null) : (messageVersion ? resolveRepositoryVersion("dirextalk/message-server", messageVersion) : resolveRepository("dirextalk/message-server")),
+    retainAgent ? Promise.resolve(null) : (agentVersion ? resolveRepositoryVersion("dirextalk/agent", agentVersion) : resolveRepository("dirextalk/agent")),
+  ]);
+  const release = { message, agent };
   process.stdout.write(`${JSON.stringify(release)}\n`);
 }
 

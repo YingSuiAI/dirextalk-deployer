@@ -245,13 +245,17 @@ or deleting data:
 DOMAIN=__DOMAIN__ bash scripts/update.sh
 ```
 
-`update.sh` stages the current production operation helpers, enters updater
-maintenance mode, and invokes the canonical receipt-bound split reconcile
-wrapper. It preserves credentials, application volumes, local bridge state,
-and runtime evidence. The reconcile path repairs the edge, then invokes the
-same receipt-bound recovery used after reboot. Agent version changes remain
-client-initiated through the pinned updater and its canonical three-argument
-update wrapper. Agent update success, rollback, and interrupted recovery all
+`update.sh` stages the current production operation helpers, resolves the
+Message Server target on the deployer to an immutable linux/amd64 digest, and
+invokes the canonical receipt-bound split wrapper through the verified SSH
+host. It does not use an owner access token or invoke the server release API.
+The remote runtime receipt and local `server_release`/`split_release` records
+advance atomically only after the remote health checks pass. It preserves
+credentials, application volumes, local bridge state, and runtime evidence.
+The reconcile path repairs the edge, then invokes the same receipt-bound
+recovery used after reboot. An Agent version change requires explicit
+`DIREXTALK_AGENT_VERSION` plus its
+`DIREXTALK_AGENT_MINIMUM_SERVER_VERSION`; Agent update success, rollback, and interrupted recovery all
 revalidate and preserve the exact receipt-bound Message Server container; they
 never recreate it or adopt a same-name replacement. Before starting an updated
 or recovered Agent trio, the wrapper stops the exact recorded containers and

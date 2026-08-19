@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   resolveProductionRelease,
   resolveRepository,
+  resolveRepositoryVersion,
 } from "../scripts/lib/production-release-resolver.mjs";
 
 const sha = (character) => `sha256:${character.repeat(64)}`;
@@ -102,6 +103,19 @@ function registryFixture({
 }
 
 const good = release("v1.2.3", "a", "1");
+{
+  const fixture = registryFixture({ latest: good });
+  const result = await resolveRepositoryVersion("dirextalk/message-server", good.version, {
+    fetchImpl: fixture.fetchImpl,
+    authUrl: "https://auth.test/token",
+    registryUrl: "https://registry.test",
+  });
+  assert.equal(result.version, good.version);
+  assert.equal(result.manifest_digest, good.manifestDigest);
+}
+
+await assert.rejects(() => resolveRepositoryVersion("dirextalk/message-server", "latest"), /invalid production version/);
+
 {
   const fixture = registryFixture({ latest: good });
   const result = await resolveRepository("dirextalk/message-server", {

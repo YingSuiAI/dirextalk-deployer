@@ -239,7 +239,7 @@ ops_verify_existing_node_identity() {
 
 ops_stage_current_host_integration() (
   local state=$1 expected_old=$2 integration_bundle split_bundle split_sha_file expected_sha actual_sha result status
-  local remote_command public_ip host_region identity
+  local remote_command remote_release_command public_ip host_region identity
   local -a integration_files
   split_bundle=$OPS_SPLIT_DIR/canonical-bundle.tar.gz
   split_sha_file=$split_bundle.sha256
@@ -283,7 +283,17 @@ ops_stage_current_host_integration() (
   }
   expected_machine_id=$(ops_state_get "$state" .node_identity.machine_id)
   expected_docker_engine_id=$(ops_state_get "$state" .node_identity.docker_engine_id)
-  remote_command="set -eu; expected_machine_id=$(ops_sh_quote "$expected_machine_id"); expected_docker_engine_id=$(ops_sh_quote "$expected_docker_engine_id"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX); trap 'sudo rm -rf \"\$stage\"' EXIT; sudo chmod 0700 \"\$stage\"; sudo tar --no-same-owner -xzf - -C \"\$stage\"; sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server $(ops_sh_quote "$expected_old") $(ops_sh_quote "$public_ip") $(ops_sh_quote "$host_region"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; printf '%s\\t%s\\t%s\\n' \"\$expected_machine_id\" \"\$expected_docker_engine_id\" $(ops_sh_quote "$actual_sha")"
+  remote_release_command=''
+  if [ "${DIREXTALK_UPDATE_MESSAGE_APPLY:-false}" = true ]; then
+    remote_release_command+="sudo docker pull $(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_IMAGE_REF") >/dev/null; message_identity=\$(sudo docker image inspect $(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_IMAGE_REF") --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}'); [ \"\$message_identity\" = $(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_VERSION|$DIREXTALK_UPDATE_MESSAGE_REVISION") ]; sudo env DIREXTALK_MESSAGE_SERVER_LOCAL_IMAGE_REF=$(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_IMAGE_REF") /var/dirextalk-message-server/deploy/split-agent/scripts/update-message-server-local.sh /var/dirextalk-message-server/split $(ops_sh_quote "$DIREXTALK_UPDATE_MESSAGE_VERSION"); "
+  fi
+  if [ "${DIREXTALK_UPDATE_AGENT_APPLY:-false}" = true ]; then
+    remote_release_command+="sudo docker pull $(ops_sh_quote "$DIREXTALK_UPDATE_AGENT_IMAGE_REF") >/dev/null; agent_identity=\$(sudo docker image inspect $(ops_sh_quote "$DIREXTALK_UPDATE_AGENT_IMAGE_REF") --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}'); [ \"\$agent_identity\" = $(ops_sh_quote "$DIREXTALK_UPDATE_AGENT_VERSION|$DIREXTALK_UPDATE_AGENT_REVISION") ]; sudo env DIREXTALK_AGENT_LOCAL_IMAGE_REF=$(ops_sh_quote "$DIREXTALK_UPDATE_AGENT_IMAGE_REF") /var/dirextalk-message-server/deploy/split-agent/scripts/update-agent-local.sh /var/dirextalk-message-server/split $(ops_sh_quote "$DIREXTALK_UPDATE_AGENT_VERSION") $(ops_sh_quote "$DIREXTALK_UPDATE_AGENT_MINIMUM_SERVER_VERSION"); "
+  fi
+  if [ -n "$remote_release_command" ]; then
+    remote_release_command="release_lock=/var/dirextalk-message-server/.direct-release-update.lock; sudo install -o root -g root -m 0600 /dev/null \"\$release_lock\"; exec 7>\"\$release_lock\"; flock -n 7; $remote_release_command sudo /var/dirextalk-message-server/production-ops/reconcile-production.sh; "
+  fi
+  remote_command="set -eu; expected_machine_id=$(ops_sh_quote "$expected_machine_id"); expected_docker_engine_id=$(ops_sh_quote "$expected_docker_engine_id"); [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; stage=\$(sudo mktemp -d /tmp/dirextalk-updater-integration.XXXXXX); trap 'sudo rm -rf \"\$stage\"' EXIT; sudo chmod 0700 \"\$stage\"; sudo tar --no-same-owner -xzf - -C \"\$stage\"; sudo bash \"\$stage/cloud-init/split/apply-host-integration.sh\" \"\$stage\" \"\$stage/${split_bundle##*/}\" /var/dirextalk-message-server $(ops_sh_quote "$expected_old") $(ops_sh_quote "$public_ip") $(ops_sh_quote "$host_region"); $remote_release_command [ \"\$(cat /etc/machine-id)\" = \"\$expected_machine_id\" ] && [ \"\$(sudo docker info --format '{{.ID}}')\" = \"\$expected_docker_engine_id\" ]; printf '%s\\t%s\\t%s\\n' \"\$expected_machine_id\" \"\$expected_docker_engine_id\" $(ops_sh_quote "$actual_sha")"
   if result=$(ops_ssh "$state" "$remote_command" <"$integration_bundle"); then
     :
   else
@@ -298,29 +308,30 @@ ops_stage_current_host_integration() (
 )
 
 ops_commit_existing_update_release() {
-  local state=$1 expected_split_json=$2 expected_updater_json=$3 split_json updater_json
-  # Preserve the node's recorded product release. A newer deployer package may
-  # carry different defaults for fresh nodes; an existing tooling update only
-  # advances the canonical split scripts and updater pin.
+  local state=$1 expected_split_json=$2 expected_updater_json=$3 split_json updater_json server_json
   split_json=$(json_build object \
     "release_catalog_origin=$(ops_state_get "$state" .split_release.release_catalog_origin)" \
-    "message_version=$(ops_state_get "$state" .split_release.message_version)" \
-    "message_image=$(ops_state_get "$state" .split_release.message_image)" \
-    "message_source_revision=$(ops_state_get "$state" .split_release.message_source_revision)" \
-    "message_manifest_digest=$(ops_state_get "$state" .split_release.message_manifest_digest)" \
+    "message_version=$DIREXTALK_UPDATE_MESSAGE_VERSION" \
+    "message_image=$DIREXTALK_UPDATE_MESSAGE_IMAGE" \
+    "message_source_revision=$DIREXTALK_UPDATE_MESSAGE_REVISION" \
+    "message_manifest_digest=$DIREXTALK_UPDATE_MESSAGE_DIGEST" \
     "split_source_revision=$DIREXTALK_SPLIT_SOURCE_REVISION" \
-    "agent_version=$(ops_state_get "$state" .split_release.agent_version)" \
-    "agent_image=$(ops_state_get "$state" .split_release.agent_image)" \
-    "agent_source_revision=$(ops_state_get "$state" .split_release.agent_source_revision)" \
-    "agent_manifest_digest=$(ops_state_get "$state" .split_release.agent_manifest_digest)" \
+    "agent_version=$DIREXTALK_UPDATE_AGENT_VERSION" \
+    "agent_image=$DIREXTALK_UPDATE_AGENT_IMAGE" \
+    "agent_source_revision=$DIREXTALK_UPDATE_AGENT_REVISION" \
+    "agent_manifest_digest=$DIREXTALK_UPDATE_AGENT_DIGEST" \
     "postgres_image=$(ops_state_get "$state" .split_release.postgres_image)" \
     "caddy_image=$(ops_state_get "$state" .split_release.caddy_image)" \
     "coturn_image=$(ops_state_get "$state" .split_release.coturn_image)") || return 1
+  server_json=$(json_build object \
+    'source=production_split' "version=$DIREXTALK_UPDATE_MESSAGE_VERSION" \
+    "image=$DIREXTALK_UPDATE_MESSAGE_IMAGE" "digest=$DIREXTALK_UPDATE_MESSAGE_DIGEST" \
+    "image_ref=$DIREXTALK_UPDATE_MESSAGE_IMAGE" "manifest_digest=$DIREXTALK_UPDATE_MESSAGE_DIGEST") || return 1
   updater_json=$(json_build object \
     "version=$UPDATER_PIN_VERSION" "commit=$UPDATER_PIN_COMMIT" "url=$UPDATER_PIN_URL" \
     "asset=$UPDATER_PIN_ASSET" "sha256=$UPDATER_PIN_SHA256" "os=$UPDATER_PIN_OS" \
     "arch=$UPDATER_PIN_ARCH" "ubuntu_version=$UPDATER_PIN_UBUNTU_VERSION") || return 1
-  json_mutate "$state" existing-update-release-commit "$expected_split_json" "$expected_updater_json" "$split_json" "$updater_json"
+  json_mutate "$state" existing-update-release-commit "$expected_split_json" "$expected_updater_json" "$split_json" "$updater_json" "$server_json"
 }
 
 ops_connect_service_name() {

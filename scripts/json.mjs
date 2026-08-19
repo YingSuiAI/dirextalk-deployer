@@ -592,12 +592,14 @@ function cmdMutate(args) {
       const expectedUpdaterRelease = JSON.parse(required(args, 3, "expected_updater_release_json"));
       const splitRelease = JSON.parse(required(args, 4, "split_release_json"));
       const updaterRelease = JSON.parse(required(args, 5, "updater_release_json"));
+      const serverRelease = JSON.parse(required(args, 6, "server_release_json"));
       if (JSON.stringify(data.split_release) !== JSON.stringify(expectedSplitRelease)
           || JSON.stringify(data.updater_release) !== JSON.stringify(expectedUpdaterRelease)) {
         throw new Error("local release state changed during existing-node update");
       }
       data.split_release = splitRelease;
       data.updater_release = updaterRelease;
+      data.server_release = serverRelease;
       break;
     }
     case "fresh-production-release-commit": {

@@ -31,6 +31,9 @@ provider_arn="arn:aws:lightsail:$region:$account:Instance/$provider_id"
 support_code=989571800832/i-0d222799a0431b5ed
 bundle_sha=$(awk 'NF == 2 && $2 == "canonical-bundle.tar.gz" {print $1}' \
   "$ROOT/scripts/cloud-init/split/canonical-bundle.tar.gz.sha256")
+resolved_message_digest=sha256:$(printf 'a%.0s' {1..64})
+resolved_message_revision=$(printf 'a%.0s' {1..40})
+resolved_agent_digest=sha256:$(printf 'b%.0s' {1..64})
 
 write_state() {
   local include_identity=${1:-true}
@@ -86,6 +89,24 @@ export EXPECTED_MACHINE=$machine_id EXPECTED_DOCKER=$docker_engine_id EXPECTED_B
 export TEST_TRANSPORT="$tmp/transport.tar.gz"
 export REMOTE_COMMAND="$tmp/remote-command"
 export AWS_DEFAULT_REGION=us-west-2 AWS_REGION=us-west-2
+export DIREXTALK_PRODUCTION_RELEASE_RESOLVER="$tmp/resolver.mjs"
+cat >"$DIREXTALK_PRODUCTION_RELEASE_RESOLVER" <<'EOF'
+const digest = (character) => `sha256:${character.repeat(64)}`;
+const messageVersion = process.env.DIREXTALK_PRODUCTION_RELEASE_MESSAGE_VERSION || "v1.1.63";
+const agentVersion = process.env.DIREXTALK_PRODUCTION_RELEASE_AGENT_VERSION || "v1.0.162";
+process.stdout.write(JSON.stringify({
+  message: {
+    version: messageVersion, image: `docker.io/dirextalk/message-server:${messageVersion}`,
+    image_ref: `docker.io/dirextalk/message-server:${messageVersion}@${digest("a")}`,
+    source_revision: "a".repeat(40), manifest_digest: digest("a")
+  },
+  agent: {
+    version: agentVersion, image: `docker.io/dirextalk/agent:${agentVersion}`,
+    image_ref: `docker.io/dirextalk/agent:${agentVersion}@${digest("b")}`,
+    source_revision: "b".repeat(40), manifest_digest: digest("b")
+  }
+}) + "\n");
+EOF
 
 # Missing immutable identity is a local contract failure and must not perform
 # any external read or mutation.
@@ -119,8 +140,9 @@ if bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null 2>&
 fi
 [ ! -s "$CALLS" ]
 
-# The real update consumer preserves the node's recorded application release,
-# even when it differs from the Deployer package that supplies tooling.
+# A normal update resolves a controlled Message Server target locally, applies
+# it through the receipt-bound host wrapper, and commits both local receipts
+# only after the remote operation succeeds. It never calls a server API.
 write_state true
 node "$ROOT/scripts/json.mjs" mutate "$DIREXTALK_WORKDIR/state.json" set-string \
   split_release.agent_version v1.0.86
@@ -134,6 +156,12 @@ bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null
 [ "$(grep -c '^ssh:integration$' "$CALLS")" -eq 1 ]
 grep -Fq "aws:--region $region lightsail get-instance" "$CALLS"
 grep -Fq "apply-host-integration.sh" "$REMOTE_COMMAND"
+grep -Fq 'update-message-server-local.sh' "$REMOTE_COMMAND"
+grep -Fq 'docker.io/dirextalk/message-server:v1.1.63@sha256:' "$REMOTE_COMMAND"
+if grep -Eqi 'owner.?token|access_token|release\.v2' "$REMOTE_COMMAND"; then
+  echo 'direct update unexpectedly depends on an owner API token' >&2
+  exit 1
+fi
 grep -Fq "'$public_ip' '$region'" "$REMOTE_COMMAND"
 if grep -Fq "'$AWS_DEFAULT_REGION'" "$REMOTE_COMMAND"; then
   echo 'existing-node update used the credential default region for Cloud Worker placement' >&2
@@ -144,7 +172,42 @@ grep -Fxq 'cloud-init/split/apply-host-integration.sh' <<<"$transport_listing"
 grep -Fxq 'cloud-init/split/migrate-message-mcp-token-binding.sh' <<<"$transport_listing"
 grep -Fxq 'canonical-bundle.tar.gz' <<<"$transport_listing"
 node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
-  "data.split_release.release_catalog_origin === '$DIREXTALK_RELEASE_CATALOG_ORIGIN' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.agent_version === 'v1.0.86' && data.split_release.agent_source_revision === '300635fd615e09f9ce1f6bd4ab0f5d3ca31bac0f' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"
+  "data.server_release.version === 'v1.1.63' && data.server_release.manifest_digest === '$resolved_message_digest' && data.split_release.release_catalog_origin === '$DIREXTALK_RELEASE_CATALOG_ORIGIN' && data.split_release.split_source_revision === '$DIREXTALK_SPLIT_SOURCE_REVISION' && data.split_release.message_version === 'v1.1.63' && data.split_release.message_source_revision === '$resolved_message_revision' && data.split_release.agent_version === 'v1.0.86' && data.split_release.agent_source_revision === '300635fd615e09f9ce1f6bd4ab0f5d3ca31bac0f' && data.split_release.postgres_image === '$DIREXTALK_POSTGRES_IMAGE_IMMUTABLE' && data.updater_release.version === '$UPDATER_PIN_VERSION' && data.updater_release.commit === '$UPDATER_PIN_COMMIT' && data.updater_release.sha256 === '$UPDATER_PIN_SHA256'"
+
+# Explicit Agent updates require a compatibility floor and use only the
+# deployer-resolved immutable image reference. The post-success receipt is the
+# baseline for the next application-initiated update.
+write_state true
+: >"$CALLS"
+DIREXTALK_MESSAGE_SERVER_VERSION=v1.1.63 \
+  DIREXTALK_AGENT_VERSION=v1.0.163 \
+  DIREXTALK_AGENT_MINIMUM_SERVER_VERSION=v1.1.63 \
+  bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null
+grep -Fq 'update-agent-local.sh' "$REMOTE_COMMAND"
+grep -Fq "'v1.0.163' 'v1.1.63'" "$REMOTE_COMMAND"
+node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
+  "data.server_release.version === 'v1.1.63' && data.split_release.message_version === 'v1.1.63' && data.split_release.agent_version === 'v1.0.163' && data.split_release.agent_manifest_digest === '$resolved_agent_digest'"
+
+# Selecting only Agent must retain the Message Server receipt. A missing
+# compatibility floor is rejected before identity checks or remote mutation.
+write_state true
+: >"$CALLS"
+if DIREXTALK_AGENT_VERSION=v1.0.163 bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null 2>&1; then
+  echo 'Agent update accepted without a minimum Message Server version' >&2
+  exit 1
+fi
+[ ! -s "$CALLS" ]
+: >"$CALLS"
+DIREXTALK_AGENT_VERSION=v1.0.163 \
+  DIREXTALK_AGENT_MINIMUM_SERVER_VERSION=v1.1.62 \
+  bash "$ROOT/scripts/update.sh" "$DIREXTALK_WORKDIR/state.json" >/dev/null
+grep -Fq 'update-agent-local.sh' "$REMOTE_COMMAND"
+if grep -Fq 'update-message-server-local.sh' "$REMOTE_COMMAND"; then
+  echo 'Agent-only update unexpectedly selected the Message Server' >&2
+  exit 1
+fi
+node "$ROOT/scripts/json.mjs" check "$DIREXTALK_WORKDIR/state.json" \
+  "data.server_release.version === 'v1.1.62' && data.split_release.message_version === 'v1.1.62' && data.split_release.agent_version === 'v1.0.163'"
 
 # An expected-negative integration result remains exit 3 and leaves both local
 # release records untouched.

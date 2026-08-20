@@ -88,19 +88,22 @@ verify_target_agent_config() {
 config_transaction=$out/.agent-config-update
 config_transaction_present=false
 config_transaction_identity=
+config_transaction_state_identity=
+config_transaction_state_digest=
 config_original_digest=
 config_target_digest=
 config_transaction_target_version=
+config_previous_already_restored=false
 if [ -e "$config_transaction" ] || [ -L "$config_transaction" ]; then
   [ -d "$config_transaction" ] && [ ! -L "$config_transaction" ] \
     && [ "$(stat -c '%a:%u' "$config_transaction")" = "700:$required_owner" ] \
     || die 'invalid interrupted Agent config transaction directory'
-  for file in previous.yaml state.env; do
-    [ -f "$config_transaction/$file" ] && [ ! -L "$config_transaction/$file" ] \
-      && [ "$(stat -c '%a:%u' "$config_transaction/$file")" = "400:$required_owner" ] \
-      || die "invalid interrupted Agent config transaction file: $file"
-  done
+  [ -f "$config_transaction/state.env" ] && [ ! -L "$config_transaction/state.env" ] \
+    && [ "$(stat -c '%a:%u' "$config_transaction/state.env")" = "400:$required_owner" ] \
+    || die 'invalid interrupted Agent config transaction file: state.env'
   config_transaction_identity=$(stat -c '%d:%i:%u' "$config_transaction")
+  config_transaction_state_identity=$(stat -c '%d:%i:%u' "$config_transaction/state.env")
+  config_transaction_state_digest=$(sha256sum "$config_transaction/state.env" | awk '{print $1}')
   config_original_digest=$(read_pair "$config_transaction/state.env" ORIGINAL_SHA256)
   config_target_digest=$(read_pair "$config_transaction/state.env" TARGET_SHA256)
   config_transaction_target_version=$(read_pair "$config_transaction/state.env" TARGET_VERSION)
@@ -111,14 +114,42 @@ if [ -e "$config_transaction" ] || [ -L "$config_transaction" ]; then
     || die 'interrupted Agent config transaction contains an invalid digest'
   canonical_version "$config_transaction_target_version" \
     || die 'interrupted Agent config transaction contains an invalid target version'
-  [ "$(sha256sum "$config_transaction/previous.yaml" | awk '{print $1}')" = "$config_original_digest" ] \
-    || die 'interrupted Agent config backup differs from its receipt'
   current_config_digest=$(sha256sum "$agent_config" | awk '{print $1}')
-  [ "$current_config_digest" = "$config_original_digest" ] \
-    || [ "$current_config_digest" = "$config_target_digest" ] \
-    || die 'protected Agent config differs from the interrupted transaction'
+  if [ -e "$config_transaction/previous.yaml" ] || [ -L "$config_transaction/previous.yaml" ]; then
+    [ -f "$config_transaction/previous.yaml" ] && [ ! -L "$config_transaction/previous.yaml" ] \
+      && [ "$(stat -c '%a:%u' "$config_transaction/previous.yaml")" = "400:$required_owner" ] \
+      || die 'invalid interrupted Agent config transaction file: previous.yaml'
+    [ "$(sha256sum "$config_transaction/previous.yaml" | awk '{print $1}')" = "$config_original_digest" ] \
+      || die 'interrupted Agent config backup differs from its receipt'
+    [ "$current_config_digest" = "$config_original_digest" ] \
+      || [ "$current_config_digest" = "$config_target_digest" ] \
+      || die 'protected Agent config differs from the interrupted transaction'
+  else
+    [ ! -e "$config_transaction/target.yaml" ] && [ ! -L "$config_transaction/target.yaml" ] \
+      || die 'interrupted Agent target config remains after backup restoration'
+    [ "$current_config_digest" = "$config_original_digest" ] \
+      || die 'interrupted Agent config backup is missing before restoration'
+    config_previous_already_restored=true
+  fi
   config_transaction_present=true
 fi
+
+verify_previous_config_already_restored() {
+  [ "$config_previous_already_restored" = true ] || return 0
+  verify_host_region_receipt
+  [ -d "$config_transaction" ] && [ ! -L "$config_transaction" ] \
+    && [ "$(stat -c '%d:%i:%u' "$config_transaction")" = "$config_transaction_identity" ] \
+    && [ -f "$config_transaction/state.env" ] && [ ! -L "$config_transaction/state.env" ] \
+    && [ "$(stat -c '%a:%u' "$config_transaction/state.env")" = "400:$required_owner" ] \
+    && [ "$(stat -c '%d:%i:%u' "$config_transaction/state.env")" = "$config_transaction_state_identity" ] \
+    && [ "$(sha256sum "$config_transaction/state.env" | awk '{print $1}')" = "$config_transaction_state_digest" ] \
+    && [ ! -e "$config_transaction/previous.yaml" ] && [ ! -L "$config_transaction/previous.yaml" ] \
+    && [ ! -e "$config_transaction/target.yaml" ] && [ ! -L "$config_transaction/target.yaml" ] \
+    && [ -f "$agent_config" ] && [ ! -L "$agent_config" ] \
+    && [ "$(stat -c '%d:%i:%u' "$agent_config")" = "$agent_config_original_identity" ] \
+    && [ "$(sha256sum "$agent_config" | awk '{print $1}')" = "$config_original_digest" ] \
+    || die 'already-restored Agent config transaction changed before recovery'
+}
 
 container_count=$(read_pair "$receipt" container.count); message_id=
 declare -A old_ids=() indexes=() receipt_projects=()
@@ -183,7 +214,9 @@ if [ "$recorded_available" = false ]; then
   printf '%s\n' "$recovered_revision" | grep -Eq '^[0-9a-f]{40}$' || die 'current Agent revision is invalid'
   recovered_image="docker.io/dirextalk/agent:$recovered_version"
   [ "$recovered_config_image" = "$recovered_image" ] || die 'current Agent image reference does not match its version label'
-  [ "$recovered_version" != "$target_version" ] || agent_recovered_to_target=true
+  recovery_target_version=$target_version
+  [ "$config_transaction_present" != true ] || recovery_target_version=$config_transaction_target_version
+  [ "$recovered_version" != "$recovery_target_version" ] || agent_recovered_to_target=true
   for pair in agent:/usr/local/bin/dirextalk-agent extension-runner:/usr/local/bin/dirextalk-extension-runner core-runner:/usr/local/bin/dirextalk-core-runner; do
     service=${pair%%:*}; binary=${pair#*:}
     if [ "$service" = agent ] && [ "${recovered_statuses[$service]}" = restarting ]; then
@@ -193,6 +226,11 @@ if [ "$recorded_available" = false ]; then
     fi
     [ "$binary_version" = "$recovered_version" ] || die "current $service binary version does not match its image"
   done
+  if [ "$config_previous_already_restored" = true ]; then
+    [ "$agent_recovered_to_target" != true ] \
+      || die 'target Agent runtime cannot use an already-restored config transaction'
+    verify_previous_config_already_restored
+  fi
 
   repair_env='' repair_receipt=''
   cleanup_repair() { local status=$?; [ -z "$repair_env" ] || rm -f -- "$repair_env"; [ -z "$repair_receipt" ] || rm -f -- "$repair_receipt"; return "$status"; }
@@ -228,6 +266,7 @@ if [ "$recorded_available" = false ]; then
     status=$(jq -r '.[0].State.Status // empty' <<<"$data"); health=$(jq -r '.[0].State.Health.Status // empty' <<<"$data")
     recovery_runtime_valid "$service" "$status" "$health" || die "current $service runtime state changed before receipt repair"
   done
+  verify_previous_config_already_restored
   verify_message_server
   mv -f "$repair_env" "$env_file"; repair_env=
   mv -f "$repair_receipt" "$receipt"; repair_receipt=
@@ -270,7 +309,11 @@ if [ "$config_transaction_present" = true ] \
 fi
 if [ "$config_transaction_present" = true ] && [ "$agent_recovered_to_target" != true ]; then
   current_config_digest=$(sha256sum "$agent_config" | awk '{print $1}')
-  if [ "$current_config_digest" = "$config_target_digest" ]; then
+  if [ "$config_previous_already_restored" = true ]; then
+    verify_previous_config_already_restored
+    [ "$current_config_digest" = "$config_original_digest" ] \
+      || die 'already-restored Agent config differs before material refresh'
+  elif [ "$current_config_digest" = "$config_target_digest" ]; then
     verify_host_region_receipt
     verify_message_server
     [ -f "$config_transaction/previous.yaml" ] && [ ! -L "$config_transaction/previous.yaml" ] \
@@ -299,6 +342,7 @@ if [ "$config_transaction_present" = true ] && [ "$agent_recovered_to_target" !=
   [ ! -e "$config_transaction" ] && [ ! -L "$config_transaction" ] \
     || die 'interrupted Agent config transaction remains after recovery'
   config_transaction_present=false
+  config_previous_already_restored=false
   agent_config_original_identity=$(stat -c '%d:%i:%u' "$agent_config")
   agent_config_original_digest=$(sha256sum "$agent_config" | awk '{print $1}')
 fi

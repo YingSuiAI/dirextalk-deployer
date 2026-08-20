@@ -193,6 +193,18 @@ case "${1:-}" in
 esac
 DOCKER
 chmod 755 "$fake_bin/docker"
+cat >"$fake_bin/stat" <<'STAT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${DOCKER_FIXTURE_SCENARIO:-}" = bad_transaction_owner ] \
+    && [ "${1:-}" = -c ] && [ "${2:-}" = '%a:%u' ] \
+    && [ "${3:-}" = "$DOCKER_FIXTURE_OUT/.agent-config-update/state.env" ]; then
+  printf '400:999999\n'
+  exit 0
+fi
+exec /usr/bin/stat "$@"
+STAT
+chmod 755 "$fake_bin/stat"
 cat >"$script_dir/prepare-agent-start-local.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'prepare-agent-start:%s\n' "$1" >>"$DOCKER_FIXTURE_LOG"
@@ -282,8 +294,24 @@ EOF
   chmod 0400 "$out/agent-config.yaml"
 }
 
+stage_post_rollback_config_transaction() {
+  local root=$1 out=$1/out transaction=$1/out/.agent-config-update
+  chmod 0600 "$out/agent-config.yaml"
+  printf '%s\n' 'core_cloud_worker_host_region: ap-east-1' >>"$out/agent-config.yaml"
+  chmod 0400 "$out/agent-config.yaml"
+  stage_interrupted_config_transaction "$root"
+  mv -f "$transaction/previous.yaml" "$out/agent-config.yaml"
+  [ ! -e "$transaction/previous.yaml" ]
+  [ ! -e "$transaction/target.yaml" ]
+  [ -f "$transaction/state.env" ]
+  original_digest=$(awk -F= '$1 == "ORIGINAL_SHA256" {print $2}' "$transaction/state.env")
+  target_digest=$(awk -F= '$1 == "TARGET_SHA256" {print $2}' "$transaction/state.env")
+  [ "$original_digest" = "$target_digest" ]
+  [ "$(sha256sum "$out/agent-config.yaml" | awk '{print $1}')" = "$original_digest" ]
+}
+
 run_wrapper() {
-  local root=$1 scenario=$2 recovered_message_id=$message_id
+  local root=$1 scenario=$2 target_version=${3:-v1.0.92} recovered_message_id=$message_id
   [ "$scenario" != message_missing ] || recovered_message_id=$live_message_id
   PATH="$fake_bin:$PATH" \
     DIREXTALK_AGENT_UPDATE_TEST_FIXTURE=true \
@@ -299,7 +327,7 @@ run_wrapper() {
     NEW_AGENT_ID="$new_agent_id" NEW_EXTENSION_ID="$new_extension_id" NEW_CORE_ID="$new_core_id" \
     MESSAGE_IMAGE_ID="$message_image_id" LIVE_IMAGE_ID="$live_image_id" OTHER_IMAGE_ID="$other_image_id" TARGET_IMAGE_ID="$target_image_id" \
     REVISION_91="$revision_91" REVISION_92="$revision_92" \
-    "$script" "$root/out" v1.0.92 v1.1.39
+    "$script" "$root/out" "$target_version" v1.1.39
 }
 
 for invalid_config in retired missing wrong duplicate; do
@@ -379,6 +407,90 @@ recovery_material_line=$(grep -nF 'agent-secret-init refreshed config material:d
 target_material_line=$(grep -nF 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.92' "$interrupted_config_root/docker.log" | cut -d: -f1)
 [ "$recovery_material_line" -lt "$target_material_line" ]
 grep -Fqx 'core_cloud_worker_host_region: ap-east-1' "$interrupted_config_root/out/agent-config.yaml"
+
+post_rollback_root=$tmp/post_rollback_config
+make_fixture "$post_rollback_root"
+stage_post_rollback_config_transaction "$post_rollback_root"
+cp "$post_rollback_root/out/.env" "$post_rollback_root/original.env"
+cp "$post_rollback_root/out/.cleanup-receipt" "$post_rollback_root/original.receipt"
+set +e
+run_wrapper "$post_rollback_root" success v1.0.91 >"$post_rollback_root/stdout" 2>"$post_rollback_root/stderr"
+post_rollback_status=$?
+set -e
+[ "$post_rollback_status" -eq 3 ]
+grep -Fqx 'split-agent update: Agent v1.0.91 is not newer than running v1.0.91' "$post_rollback_root/stderr"
+[ ! -e "$post_rollback_root/out/.agent-config-update" ]
+grep -Fqx 'DIREXTALK_AGENT_VERSION=v1.0.91' "$post_rollback_root/out/.env"
+grep -Fqx 'DIREXTALK_AGENT_IMAGE=docker.io/dirextalk/agent:v1.0.91' "$post_rollback_root/out/.env"
+grep -Fqx "DIREXTALK_AGENT_SOURCE_REVISION=$revision_91" "$post_rollback_root/out/.env"
+grep -Fqx "container.0.id=$message_id" "$post_rollback_root/out/.cleanup-receipt"
+grep -Fqx "container.1.id=$live_agent_id" "$post_rollback_root/out/.cleanup-receipt"
+grep -Fqx "container.2.id=$live_extension_id" "$post_rollback_root/out/.cleanup-receipt"
+grep -Fqx "container.3.id=$live_core_id" "$post_rollback_root/out/.cleanup-receipt"
+[ "$(grep -Fxc 'agent-secret-init refreshed config material:docker.io/dirextalk/agent:v1.0.91' "$post_rollback_root/docker.log")" -eq 1 ]
+if grep -Eq 'migration|compose (up|stop)' "$post_rollback_root/docker.log"; then
+  echo 'post-rollback transaction recovery repeated migration or container mutation' >&2
+  exit 1
+fi
+
+for invalid_transaction in current_not_original target_file bad_transaction_mode bad_transaction_owner bad_transaction_digest bad_host_region_digest; do
+  root=$tmp/post_rollback_$invalid_transaction
+  make_fixture "$root"
+  stage_post_rollback_config_transaction "$root"
+  cp "$root/out/.env" "$root/original.env"
+  cp "$root/out/.cleanup-receipt" "$root/original.receipt"
+  case "$invalid_transaction" in
+    current_not_original)
+      chmod 0600 "$root/out/agent-config.yaml"
+      printf '%s\n' 'invalid: changed' >>"$root/out/agent-config.yaml"
+      chmod 0400 "$root/out/agent-config.yaml"
+      ;;
+    target_file)
+      cp "$root/out/agent-config.yaml" "$root/out/.agent-config-update/target.yaml"
+      chmod 0400 "$root/out/.agent-config-update/target.yaml"
+      ;;
+    bad_transaction_mode) chmod 0600 "$root/out/.agent-config-update/state.env" ;;
+    bad_transaction_owner) ;;
+    bad_transaction_digest)
+      chmod 0600 "$root/out/.agent-config-update/state.env"
+      sed -i 's/^ORIGINAL_SHA256=.*/ORIGINAL_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/' "$root/out/.agent-config-update/state.env"
+      chmod 0400 "$root/out/.agent-config-update/state.env"
+      ;;
+    bad_host_region_digest)
+      chmod 0600 "$root/out/.agent-config-update/state.env"
+      sed -i 's/^HOST_REGION_RECEIPT_SHA256=.*/HOST_REGION_RECEIPT_SHA256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' "$root/out/.agent-config-update/state.env"
+      chmod 0400 "$root/out/.agent-config-update/state.env"
+      ;;
+  esac
+  if run_wrapper "$root" "$invalid_transaction" v1.0.91 >"$root/stdout" 2>"$root/stderr"; then
+    echo "$invalid_transaction post-rollback transaction unexpectedly passed" >&2
+    exit 1
+  fi
+  cmp "$root/original.env" "$root/out/.env"
+  cmp "$root/original.receipt" "$root/out/.cleanup-receipt"
+  if [ -f "$root/docker.log" ] && grep -Eq 'migration|compose (up|stop)' "$root/docker.log"; then
+    echo "$invalid_transaction post-rollback transaction reached mutation" >&2
+    exit 1
+  fi
+done
+
+for invalid_runtime in interrupted_target bad_image_id; do
+  root=$tmp/post_rollback_$invalid_runtime
+  make_fixture "$root"
+  stage_post_rollback_config_transaction "$root"
+  cp "$root/out/.env" "$root/original.env"
+  cp "$root/out/.cleanup-receipt" "$root/original.receipt"
+  if run_wrapper "$root" "$invalid_runtime" v1.0.91 >"$root/stdout" 2>"$root/stderr"; then
+    echo "$invalid_runtime post-rollback runtime unexpectedly passed" >&2
+    exit 1
+  fi
+  cmp "$root/original.env" "$root/out/.env"
+  cmp "$root/original.receipt" "$root/out/.cleanup-receipt"
+  if [ -f "$root/docker.log" ] && grep -Eq 'migration|compose (up|stop)' "$root/docker.log"; then
+    echo "$invalid_runtime post-rollback runtime reached mutation" >&2
+    exit 1
+  fi
+done
 
 message_recovery_root=$tmp/message_missing
 make_fixture "$message_recovery_root"
